@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse
@@ -8,6 +9,7 @@ from app.config import load_settings
 from app.db import Database
 from app.repositories import discover_repositories
 from app.services.git_workspace import GitWorkspaceService, GitSafetyError, GitCommandError, slugify
+from app.services.project_contract import ContractError, load_contract
 from app.services.test_runner import TestRunner
 from app.services.terminal_launcher import TerminalLauncherService, LauncherError
 from app.services.cleanup_worker import CleanupWorker
@@ -58,10 +60,56 @@ def create_app(settings=None):
         row=db.one("SELECT s.*,r.repo_name FROM sandboxes s LEFT JOIN repositories r ON r.id=s.repository_id WHERE s.id=?",(sid,))
         if not row: raise HTTPException(404,"Sandbox not found")
         return row
-    def task_workspaces(tid): return db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id WHERE w.task_id=? ORDER BY w.created_at",(tid,))
+    def task_workspaces(tid): return db.all("SELECT w.*,r.repo_name,r.repo_path FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id WHERE w.task_id=? ORDER BY w.created_at",(tid,))
     def task_sandboxes(tid): return db.all("SELECT * FROM sandboxes WHERE task_id=? ORDER BY id",(tid,))
     def task_integration_row(task_id):
         return db.one("SELECT * FROM task_integrations WHERE task_id=? ORDER BY id DESC LIMIT 1",(task_id,))
+    def format_countdown(iso):
+        """Single place that turns a cleanup_eligible_at timestamp into a
+        human countdown -- reused by /sandboxes, /sandboxes/{id} and
+        /tasks/{id} so the three views can never drift on the wording."""
+        if not iso: return None
+        try:
+            secs=int((datetime.fromisoformat(iso)-datetime.now(timezone.utc)).total_seconds())
+        except Exception: return None
+        return "due" if secs<=0 else f"{secs//3600}h {secs%3600//60}m"
+    def sandbox_view(sb):
+        """The one place that turns a `sandboxes` row into everything a
+        template needs to render it (outputs/ports/countdown/open URLs) --
+        called by /sandboxes, /sandboxes/{id} and /tasks/{id} so all three
+        views read the exact same Sandbox/SandboxPort/output state."""
+        outputs=sandboxes.outputs(sb["id"]); ports_=ports.ports_for(sb["id"])
+        primary=db.one("SELECT s.*,r.repo_name FROM sandbox_sources s JOIN repositories r ON r.id=s.repository_id WHERE s.sandbox_id=? ORDER BY s.id LIMIT 1",(sb["id"],))
+        return {"row":sb,"outputs":outputs,"ports":ports_,"primary_source":primary,
+                "cleanup_countdown":format_countdown(sb["cleanup_eligible_at"]),
+                "backend_url":outputs.get("backend_url"),"frontend_url":outputs.get("frontend_url"),
+                "hardware_api_url":outputs.get("hardware_api_url") or outputs.get("lan_url")}
+    def sandbox_current_commits(sandbox_id):
+        cur={}
+        for s in db.all("SELECT * FROM sandbox_sources WHERE sandbox_id=?",(sandbox_id,)):
+            try: cur[s["repository_id"]]=git.head(s["worktree_path"])
+            except Exception: pass
+        return cur
+    def integration_readiness(iid):
+        """The single readiness computation for one repo's Integration
+        Workspace -- backs BOTH the POST ready-for-main gate and the
+        Task Detail readiness checklist, so the template never derives a
+        second, independently-calculated status."""
+        i=integration_row(iid); head=git.head(i["worktree_path"])
+        clean=not git.status(i["worktree_path"]).strip(); no_conflicts=not git.conflict_files(i["worktree_path"])
+        sources_current=True
+        for s in db.all("SELECT s.*,w.branch FROM integration_sources s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.integration_id=?",(iid,)):
+            current=git.head(i["repo_path"],s["branch"])
+            if current!=s["merged_commit"] or not git.is_ancestor(i["worktree_path"],current): sources_current=False
+        try: required=len(load_contract(Path(i["worktree_path"])))
+        except ContractError: required=0
+        latest={}
+        for x in db.all("SELECT stage,status FROM test_runs WHERE workspace_type='integration' AND workspace_id=? AND tested_commit=? ORDER BY id DESC",(iid,head)):
+            latest.setdefault(x["stage"],x["status"])
+        tests_pass=required>0 and len(latest)>=required and all(v=="PASS" for v in latest.values())
+        return {"integration":i,"head":head,"clean":clean,"no_conflicts":no_conflicts,"sources_current":sources_current,
+                "tests_pass":tests_pass,"tests_passed":sum(1 for v in latest.values() if v=="PASS"),"tests_required":required,
+                "ready":clean and no_conflicts and sources_current and tests_pass}
 
     @app.exception_handler(GitSafetyError)
     @app.exception_handler(GitCommandError)
@@ -194,18 +242,12 @@ def create_app(settings=None):
         invalidate(iid); runner.start("integration",iid,Path(i["worktree_path"])); return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/ready-for-main")
     def ready_main(iid:int):
-        i=integration_row(iid); head=git.head(i["worktree_path"])
-        if git.status(i["worktree_path"]).strip(): raise GitSafetyError("Integration worktree must be clean")
-        if git.conflict_files(i["worktree_path"]): raise GitSafetyError("Merge conflict exists")
-        for s in db.all("SELECT s.*,w.branch FROM integration_sources s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.integration_id=?",(iid,)):
-            current=git.head(i["repo_path"],s["branch"])
-            if current!=s["merged_commit"] or not git.is_ancestor(i["worktree_path"],current): raise GitSafetyError(f"Source not current: {s['branch']}")
-        required=len(__import__('app.services.project_contract',fromlist=['load_contract']).load_contract(Path(i["worktree_path"])))
-        passed=db.all("SELECT stage,tested_commit,status FROM test_runs WHERE workspace_type='integration' AND workspace_id=? AND tested_commit=? ORDER BY id DESC",(iid,head))
-        latest={}
-        for x in passed: latest.setdefault(x["stage"],x["status"])
-        if len(latest)<required or any(x!="PASS" for x in latest.values()): raise GitSafetyError("All required tests must PASS at current HEAD")
-        db.execute("UPDATE integration_workspaces SET status='READY_FOR_MAIN',ready_for_main=1,verified_commit=?,verified_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,iid)); db.event("integration",iid,"READY_FOR_MAIN",head); return RedirectResponse(f"/integrations/{iid}",303)
+        r=integration_readiness(iid)
+        if not r["clean"]: raise GitSafetyError("Integration worktree must be clean")
+        if not r["no_conflicts"]: raise GitSafetyError("Merge conflict exists")
+        if not r["sources_current"]: raise GitSafetyError("Source not current")
+        if not r["tests_pass"]: raise GitSafetyError("All required tests must PASS at current HEAD")
+        db.execute("UPDATE integration_workspaces SET status='READY_FOR_MAIN',ready_for_main=1,verified_commit=?,verified_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(r["head"],iid)); db.event("integration",iid,"READY_FOR_MAIN",r["head"]); return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/close")
     def close_integration(iid:int): i=integration_row(iid); git.close(i["repo_path"],i["worktree_path"]); db.execute("UPDATE integration_workspaces SET status='CLOSED',ready_for_main=0,closed_at=CURRENT_TIMESTAMP WHERE id=?",(iid,)); db.event("integration",iid,"WORKSPACE_CLOSED"); return RedirectResponse("/integrations",303)
 
@@ -266,7 +308,49 @@ def create_app(settings=None):
         t=task_row(tid); workspaces=task_workspaces(tid); sbxs=task_sandboxes(tid); ti=task_integration_row(tid)
         ti_repos=db.all("SELECT i.*,r.repo_name FROM integration_workspaces i JOIN repositories r ON r.id=i.repository_id WHERE i.task_integration_id=?",(ti["id"],)) if ti else []
         all_ready=bool(workspaces) and all(w["status"]=="READY" for w in workspaces)
-        return render(request,"task_detail.html",t=t,workspaces=workspaces,sandboxes=sbxs,task_integration=ti,ti_repos=ti_repos,all_ready=all_ready,repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=settings.agents)
+
+        # Nest each Agent Workspace's own sandbox (Sandbox remains the
+        # source of truth -- this only joins by owner_id, it stores no
+        # sandbox field on agent_workspaces itself) and, for a workspace
+        # with none, tell "not yet created" apart from "repo has no
+        # sandbox: contract" so the empty state never lies.
+        by_owner={(sb["owner_type"],sb["owner_id"]):sb for sb in sbxs}
+        for w in workspaces:
+            sb=by_owner.get(("AGENT_WORKSPACE",w["id"]))
+            if sb:
+                w["sandbox"]=sandbox_view(sb); w["sandbox"]["stale"]=sandboxes.is_stale(sb["id"],sandbox_current_commits(sb["id"]))
+            else:
+                w["sandbox"]=None
+                try: w["sandbox_configured"]=load_sandbox_contract(Path(w["repo_path"])) is not None
+                except SandboxContractError: w["sandbox_configured"]=True
+
+        integration_sandboxes=[]
+        for sb in sbxs:
+            if sb["owner_type"]!="TASK_INTEGRATION": continue
+            v=sandbox_view(sb); v["stale"]=sandboxes.is_stale(sb["id"],sandbox_current_commits(sb["id"]))
+            v["sources"]=db.all("SELECT s.*,r.repo_name FROM sandbox_sources s JOIN repositories r ON r.id=s.repository_id WHERE s.sandbox_id=?",(sb["id"],))
+            v["hardware"]=db.one("SELECT * FROM hardware_test_results WHERE sandbox_id=? ORDER BY id DESC LIMIT 1",(sb["id"],))
+            integration_sandboxes.append(v)
+
+        # Integration Readiness: one real check per participating repo's
+        # Integration Workspace, reusing the exact gate /ready-for-main
+        # enforces -- never a second, template-only status calculation.
+        readiness=[{"repo":r,**integration_readiness(r["id"])} for r in ti_repos]
+        tests_passed=sum(r["tests_passed"] for r in readiness); tests_required=sum(r["tests_required"] for r in readiness)
+        ready_for_main=bool(ti_repos) and all(r["ready"] for r in readiness)
+        hw=[v["hardware"] for v in integration_sandboxes if v["hardware"]]
+        hardware_status=hw[0]["result"] if hw else ("PENDING" if any(v["row"]["profile"]=="HARDWARE" for v in integration_sandboxes) else None)
+        summary={
+            "agents_ready":sum(1 for w in workspaces if w["status"]=="READY"),"agents_total":len(workspaces),
+            "sandboxes_running":sum(1 for sb in sbxs if sb["status"]=="RUNNING"),"sandboxes_total":len(sbxs),
+            "integration_health":integration_sandboxes[0]["row"]["health_status"] if integration_sandboxes else None,
+            "tests_passed":tests_passed,"tests_required":tests_required,"hardware_status":hardware_status,"ready_for_main":ready_for_main,
+        }
+        earliest_cleanup=min((sb["cleanup_eligible_at"] for sb in sbxs if sb["cleanup_eligible_at"]),default=None)
+        return render(request,"task_detail.html",t=t,workspaces=workspaces,sandboxes=sbxs,task_integration=ti,ti_repos=ti_repos,
+                      integration_sandboxes=integration_sandboxes,readiness=readiness,summary=summary,all_ready=all_ready,
+                      task_cleanup_countdown=format_countdown(earliest_cleanup),
+                      repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=settings.agents)
     @app.get("/api/tasks/{tid}")
     def api_task(tid:int):
         t=task_row(tid); return {**t,"workspaces":task_workspaces(tid),"sandboxes":task_sandboxes(tid),"task_integration":task_integration_row(tid)}
@@ -360,11 +444,43 @@ def create_app(settings=None):
     def cancel_task(tid:int):
         task_row(tid); db.execute("UPDATE tasks SET status='CANCELLED',closed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,)); db.event("task",tid,"TASK_CANCELLED")
         return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/workspaces/{wid}/create-sandbox")
+    def create_workspace_sandbox(tid:int,wid:int,profile:str=Form("")):
+        t=task_row(tid); w=agent_row(wid)
+        if w["task_id"]!=tid: raise HTTPException(404,"Workspace does not belong to this task")
+        sid=auto_create_sandbox(tid,w["repository_id"],w["repo_path"],"AGENT_WORKSPACE",wid,w["role"] or w["agent"],w["branch"],w["last_commit"],w["worktree_path"],profile.strip().upper() or None,t.get("default_sandbox_profile"))
+        if sid: db.execute("UPDATE agent_workspaces SET sandbox_profile=(SELECT profile FROM sandboxes WHERE id=?) WHERE id=?",(sid,wid))
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/extend-retention")
+    def extend_task_retention(tid:int,hours:int=Form(24)):
+        task_row(tid)
+        for sb in task_sandboxes(tid):
+            if sb["status"]!="CLOSED": sandboxes.mark_cleanup_eligible(sb["id"],hours)
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/cleanup-now")
+    def cleanup_task_now(tid:int):
+        task_row(tid)
+        for sb in task_sandboxes(tid):
+            if sb["status"]!="CLOSED": sandboxes.cleanup(sb["id"],force=True)
+        return RedirectResponse(f"/tasks/{tid}",303)
 
     # ------------------------------------------------------------ Sandboxes
     @app.get("/sandboxes",response_class=HTMLResponse)
-    def sandboxes_page(request:Request):
-        return render(request,"sandboxes.html",sandboxes=db.all("SELECT s.*,r.repo_name,t.title task_title FROM sandboxes s LEFT JOIN repositories r ON r.id=s.repository_id LEFT JOIN tasks t ON t.id=s.task_id ORDER BY s.updated_at DESC"),running=sandboxes.running_count(),max_running=settings.max_running_sandboxes)
+    def sandboxes_page(request:Request,status:str="",task_id:str="",repository_id:str="",owner_type:str="",profile:str=""):
+        clauses=[]; params=[]
+        if status=="running": clauses.append("s.status='RUNNING'")
+        elif status=="unhealthy": clauses.append("s.status='RUNNING' AND s.health_status!='HEALTHY'")
+        elif status=="stopped": clauses.append("s.status='STOPPED'")
+        elif status=="cleanup_pending": clauses.append("s.status='CLEANUP_ELIGIBLE'")
+        if task_id: clauses.append("s.task_id=?"); params.append(int(task_id))
+        if repository_id: clauses.append("s.repository_id=?"); params.append(int(repository_id))
+        if owner_type: clauses.append("s.owner_type=?"); params.append(owner_type)
+        if profile: clauses.append("s.profile=?"); params.append(profile)
+        where=(" WHERE "+" AND ".join(clauses)) if clauses else ""
+        rows=db.all(f"SELECT s.*,r.repo_name,t.title task_title FROM sandboxes s LEFT JOIN repositories r ON r.id=s.repository_id LEFT JOIN tasks t ON t.id=s.task_id{where} ORDER BY s.updated_at DESC",tuple(params))
+        return render(request,"sandboxes.html",sandboxes=[sandbox_view(r) for r in rows],running=sandboxes.running_count(),max_running=settings.max_running_sandboxes,
+                      filters={"status":status,"task_id":task_id,"repository_id":repository_id,"owner_type":owner_type,"profile":profile},
+                      tasks=db.all("SELECT id,title FROM tasks ORDER BY title"),repositories=db.all("SELECT * FROM repositories WHERE enabled=1"))
     @app.get("/api/sandboxes")
     def api_sandboxes(): return db.all("SELECT * FROM sandboxes ORDER BY id DESC")
     @app.get("/sandboxes/{sid}",response_class=HTMLResponse)
@@ -372,7 +488,10 @@ def create_app(settings=None):
         sb=sandbox_row(sid); sources=db.all("SELECT s.*,r.repo_name FROM sandbox_sources s JOIN repositories r ON r.id=s.repository_id WHERE s.sandbox_id=?",(sid,))
         ports_=ports.ports_for(sid); ops=db.all("SELECT * FROM sandbox_operations WHERE sandbox_id=? ORDER BY id DESC LIMIT 20",(sid,)); hw=db.all("SELECT * FROM hardware_test_results WHERE sandbox_id=? ORDER BY id DESC",(sid,))
         outputs_=sandboxes.outputs(sid); lan_ip=sandbox_runtime.local_ip() if sb["profile"]=="HARDWARE" else None
-        return render(request,"sandbox_detail.html",sb=sb,sources=sources,ports=ports_,ops=ops,hw=hw,outputs=outputs_,lan_ip=lan_ip)
+        task=db.one("SELECT id,title FROM tasks WHERE id=?",(sb["task_id"],)) if sb["task_id"] else None
+        stale=sandboxes.is_stale(sid,sandbox_current_commits(sid))
+        return render(request,"sandbox_detail.html",sb=sb,sources=sources,ports=ports_,ops=ops,hw=hw,outputs=outputs_,lan_ip=lan_ip,
+                      task=task,stale=stale,view=sandbox_view(sb))
     @app.get("/api/sandboxes/{sid}")
     def api_sandbox(sid:int): return sandbox_row(sid)
     @app.post("/api/sandboxes/{sid}/start")
