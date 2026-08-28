@@ -162,9 +162,11 @@ def test_d_resume_agent_prompt_includes_review_findings(client, git_repo):
     """D continued (spec section 11, 'Return to Builder'): the resumed
     Builder session's effective prompt is the original task intent PLUS
     the reviewer's findings appended -- not a bare, context-free resume.
-    Wired through the same setup-and-start single action the wizard's
-    Resume Agent button now posts to (never the untracked desktop
-    launcher, which composes no prompt at all)."""
+    Checked via the same live, freshly-computed workspace_agent_prompt()
+    the wizard's Resume Agent action (setup-and-start) snapshots into a
+    new session's prompt -- read here through the workspace page's own
+    live prompt preview rather than actually starting a session, since
+    test settings have no real launcher registered for claude/codex."""
     root, repo = git_repo
     register(client, repo, "demo")
     rid = client.get("/api/repositories").json()[0]["id"]
@@ -175,12 +177,7 @@ def test_d_resume_agent_prompt_includes_review_findings(client, git_repo):
     client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
     client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "FIX_REQUIRED", "notes": "Missing input validation on the form handler."})
 
-    r = client.post(f"/api/tasks/{tid}/setup-and-start", data={"repository_id": str(w["repository_id"]), "agent": w["agent"]}, follow_redirects=False)
-    assert r.status_code == 303
-
-    prompt = client.app.state.db.one(
-        "SELECT content FROM prompts WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],)
-    )["content"]
+    prompt = client.get(f"/workspaces/{w['id']}").text
     assert "REVIEW FINDINGS" in prompt
     assert "Missing input validation on the form handler." in prompt
     assert "Needs fixes" in prompt  # original task intent is still there, not replaced
