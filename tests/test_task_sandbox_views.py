@@ -144,6 +144,8 @@ def test_integration_sandbox_shows_multiple_source_repos_in_task_detail(client, 
 
     for w in (backend_ws, client_ws):
         assert client.post(f"/api/workspaces/{w['id']}/ready", follow_redirects=False).status_code == 303
+        client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+        assert client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"}, follow_redirects=False).status_code == 303
 
     # unrelated Task B, must stay untouched by anything below
     tid_b, rid_b, _, ws_b, sb_b = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-b2", "Task B unrelated", (21560, 21579))
@@ -209,7 +211,14 @@ def test_stopped_and_cleanup_countdown_state_consistent_everywhere(client, git_r
     assert "cleanup" in global_page.lower()
     assert sb["cleanup_eligible_at"] or "2099-01-01T00:00:00+00:00" in detail_page or "h" in detail_page
 
-    client.app.state.db.execute("UPDATE tasks SET status='MERGED' WHERE id=?", (tid,))
+    # Drive the Task to computed DONE the real way (Review PASS + all
+    # required repos MERGED), not by writing an invalid raw status value.
+    client.post(f"/api/tasks/{tid}/brief", data={"goal": "g", "acceptance_criteria": "a", "risk_profile": "LOW"})
+    client.post(f"/api/workspaces/{ws['id']}/verification-report", data={"work_status": "READY"})
+    client.post(f"/api/workspaces/{ws['id']}/start-review", data={"reviewer_agent": "claude"})
+    client.post(f"/api/workspaces/{ws['id']}/submit-review", data={"result": "PASS"})
+    client.post(f"/api/tasks/{tid}/mark-merged")
+    assert client.get(f"/api/tasks/{tid}/decision").json()["status"] == "DONE"
     task_page = client.get(f"/tasks/{tid}").text
     assert "Cleanup in" in task_page
 

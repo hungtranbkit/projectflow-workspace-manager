@@ -15,14 +15,14 @@
 {% if cards %}<div class="table-scroll"><table><thead><tr><th>Task</th><th>Status</th><th>Repos</th><th>Agents</th><th>Sandbox</th><th>Tests</th><th>Integration</th><th>Updated</th><th>Next Action</th></tr></thead><tbody>
 {% for c in cards %}<tr>
 <td><a href="/tasks/{{c.task.id}}"><strong>{{c.task.title}}</strong></a><br><small>{{c.task.slug}}</small></td>
-<td><span class="badge {{c.column|lower}}">{{c.column.replace('_',' ')}}</span></td>
+<td><span class="badge {{c.column_class}}">{{c.column}}</span></td>
 <td>{{c.repos|join(', ') or '—'}}</td>
 <td>{{c.agents.ready}} / {{c.agents.total}} READY{% if c.agents.failed %} · {{c.agents.failed}} FAIL{% endif %}</td>
 <td>{% if c.sandbox.total %}{{c.sandbox.running}} running{% if c.sandbox.unhealthy %} · {{c.sandbox.unhealthy}} unhealthy{% endif %}{% else %}—{% endif %}</td>
 <td>{{c.tests.passed}} / {{c.tests.total}} PASS</td>
 <td>{{c.integration.replace('_',' ')}}</td>
 <td><small>{{c.task.updated_at}}</small></td>
-<td><small>{{c.next_action.text}}</small></td>
+<td><small>{{c.next_action.reason or c.next_action.label or '—'}}</small></td>
 </tr>{% endfor %}
 </tbody></table></div>
 {% else %}<div class="empty-state"><h4>Chưa có Task</h4><p>Một Task có thể trải nhiều repo (backend, frontend, ESP...), mỗi repo vẫn một branch/worktree riêng.</p><a href="/help#tasks">Xem hướng dẫn</a></div>{% endif %}

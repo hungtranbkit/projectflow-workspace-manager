@@ -23,6 +23,7 @@ from app.services.sandbox_contract import (
 from app.services.sandbox_manager import SandboxError, SandboxManager, SourceSpec
 from app.services.sandbox_runtime import SandboxRuntimeService
 from app.services.agent_session_manager import AgentSessionManager, SessionError
+from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -31,12 +32,14 @@ def create_app(settings=None):
     sandboxes = SandboxManager(db, sandbox_runtime, ports, settings.state_dir, settings.max_running_sandboxes, settings.sandbox_retention_hours)
     cleanup_worker = CleanupWorker(db, sandboxes, settings.cleanup_poll_seconds)
     agent_sessions = AgentSessionManager(db)
+    decision = TaskDecisionService(db, git)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
     app.state.settings, app.state.db, app.state.git, app.state.runner, app.state.launcher = settings, db, git, runner, launcher
     app.state.sandboxes, app.state.ports, app.state.sandbox_runtime, app.state.cleanup_worker = sandboxes, ports, sandbox_runtime, cleanup_worker
     app.state.agent_sessions = agent_sessions
+    app.state.decision = decision
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -224,54 +227,8 @@ def create_app(settings=None):
     RISK_PROFILES=("LOW","NORMAL","HIGH")
     RISK_GATES={"LOW":("REVIEW",),"NORMAL":("REVIEW","INTEGRATION"),"HIGH":("REVIEW","QA","INTEGRATION")}
     def requires_qa(risk_profile): return "QA" in RISK_GATES.get(risk_profile,RISK_GATES["NORMAL"])
-    LEGACY_TASK_STATUS={"OPEN":"BACKLOG","IN_PROGRESS":"DEVELOPMENT","READY_FOR_INTEGRATION":"DEVELOPMENT","INTEGRATING":"INTEGRATION","TESTING":"INTEGRATION"}
-    def normalize_task_status(status):
-        """Display-only mapping for Task rows created before this control
-        plane existed (OPEN/IN_PROGRESS/...) -- their stored string is
-        never rewritten, only how it is shown/columned is normalized."""
-        return LEGACY_TASK_STATUS.get(status,status)
     def latest_session_for_workspace(wid):
         return db.one("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 1",(wid,))
-    def workspace_builder_status(w,session,report):
-        """Section 5's Agent states, derived -- never a stored column that
-        could drift from the AgentSession that's actually live or the
-        report the builder actually submitted."""
-        if w["review_status"]=="REVIEW_PASS": return "DONE"
-        if report and report["work_status"]=="FIX_REQUIRED": return "FIX_REQUIRED"
-        if session and session["status"]=="RUNNING": return "RUNNING"
-        if session and session["status"]=="WAITING_FOR_INPUT": return "WAITING_FOR_INPUT"
-        if session and session["status"]=="STARTING": return "RUNNING"
-        if w["status"]=="READY": return "READY_FOR_REVIEW"
-        if report or (session and session["status"] in ("EXITED","FAILED")): return "TESTING"
-        return "NOT_STARTED"
-    def workspace_pipeline_stage(w,builder,risk_profile):
-        """One workspace's own position in BACKLOG..READY_FOR_MAIN -- the
-        Task's overall stage is the earliest (weakest-link) stage among
-        its workspaces, exactly like the previous phase's blocking-
-        workspace logic, now extended with Review/QA."""
-        if w["review_status"]=="FIX_REQUIRED" or w["qa_status"] in ("QA_FAIL","BLOCKED"): return "DEVELOPMENT"
-        if w["review_status"]=="BLOCKED": return "REVIEW"
-        if requires_qa(risk_profile) and w["review_status"]=="REVIEW_PASS" and w["qa_status"]!="QA_PASS": return "QA"
-        if w["review_status"]=="REVIEW_PASS": return "READY"
-        if builder=="READY_FOR_REVIEW" or w["reviewer_agent"]: return "REVIEW"
-        return "DEVELOPMENT"
-    STAGE_ORDER=["DEVELOPMENT","REVIEW","QA","READY"]
-    def task_stage(t,workspaces,ti,ready_for_main):
-        """The Task's overall pipeline stage. BACKLOG/PREPARE/MERGED/
-        CLOSED/CANCELLED are explicit, persisted decisions (nothing to
-        derive them from -- a BACKLOG task has zero workspaces by
-        definition). Everything from DEVELOPMENT onward is derived live
-        from workspace/review/QA/integration state, never a second
-        independently-advanced status a route could forget to bump."""
-        status=t["status"]
-        if status in ("MERGED","CLOSED","CANCELLED"): return status
-        if status=="BACKLOG": return "BACKLOG"
-        if not workspaces: return "PREPARE"
-        if ready_for_main: return "READY_FOR_MAIN"
-        if ti: return "INTEGRATION"
-        stages=[workspace_pipeline_stage(w,w.get("builder_status") or workspace_builder_status(w,latest_session_for_workspace(w["id"]),workspace_verification(w["id"])),t["risk_profile"]) for w in workspaces]
-        idx=min(STAGE_ORDER.index(s) for s in stages)
-        return STAGE_ORDER[idx] if STAGE_ORDER[idx]!="READY" else "INTEGRATION"
     def render_agent_prompt(t):
         """Deterministic template fill from the structured brief -- never
         an actual model call. The user reviews/edits the result before any
@@ -318,17 +275,24 @@ def create_app(settings=None):
         ints=db.all("SELECT i.*,r.repo_name FROM integration_workspaces i JOIN repositories r ON r.id=i.repository_id WHERE i.status!='CLOSED' ORDER BY i.updated_at DESC")
         running_sandboxes=sandboxes.running_count()
         cleanup_pending=db.one("SELECT COUNT(*) n FROM sandboxes WHERE status='CLEANUP_ELIGIBLE'")["n"]
-        # Dashboard is Task-centric (section 22): every count below comes
-        # from task_card_view's derived Kanban column, the same function
-        # /tasks and /kanban use -- never a second, dashboard-only tally.
-        active_task_rows=db.all("SELECT * FROM tasks WHERE status NOT IN ('MERGED','CANCELLED','CLOSED')")
-        active_cards=[task_card_view(t) for t in active_task_rows]
-        by_col={c:sum(1 for card in active_cards if card["column"]==c) for c in KANBAN_COLUMNS}
+        # Dashboard is Task-centric (section 48): every count below comes
+        # from TaskDecisionService.evaluate() (via task_card_view), the
+        # same source Kanban/List/Detail use -- never a raw worktree
+        # count standing in for Task state, never a second dashboard-only
+        # tally that could drift from the real gate engine.
+        task_rows=db.all("SELECT * FROM tasks WHERE status!='CANCELLED'")
+        cards=[task_card_view(t) for t in task_rows]
+        by_status={s:sum(1 for c in cards if c["status"]==s) for s in ("BACKLOG","ACTIVE","BLOCKED","READY_FOR_MAIN","DONE")}
         summary={"active":len(agents),"ready":sum(x["status"]=="READY" for x in agents),"testing":sum(x["status"]=="TESTING" for x in ints),"main":sum(bool(x["ready_for_main"]) for x in ints),
-                 "tasks":len(active_task_rows),"sandboxes":running_sandboxes,"cleanup":cleanup_pending,
-                 "tasks_development":by_col["DEVELOPMENT"],"tasks_review":by_col["REVIEW"],"tasks_fix_required":sum(1 for c in active_cards if c["needs_fix"]),
-                 "integrations_running":by_col["INTEGRATION"],"tasks_ready_for_main":by_col["READY_FOR_MAIN"]}
-        return render(request,"dashboard.html",agents=agents,integrations=ints,summary=summary,first_run=not db.one("SELECT id FROM repositories LIMIT 1"))
+                 "tasks":len(task_rows),"sandboxes":running_sandboxes,"cleanup":cleanup_pending,
+                 "backlog":by_status["BACKLOG"],"tasks_active":by_status["ACTIVE"],"blocked":by_status["BLOCKED"],
+                 "tasks_ready_for_main":by_status["READY_FOR_MAIN"],"done_recent":by_status["DONE"],
+                 "builders_running":sum(1 for c in cards for w in c["workspaces"] if not w["ready"]),
+                 "review_pending":sum(1 for c in cards if c["decision"]["next_action"]["action"] in ("SUBMIT_FOR_REVIEW","START_REVIEW")),
+                 "qa_pending":sum(1 for c in cards if c["decision"]["next_action"]["action"]=="START_QA"),
+                 "integrations_running":sum(1 for c in cards if c["stage"] in ("INTEGRATION","MERGING")),
+                 "tasks_fix_required":sum(1 for c in cards if c["needs_fix"])}
+        return render(request,"dashboard.html",agents=agents,integrations=ints,summary=summary,cards=cards,first_run=not db.one("SELECT id FROM repositories LIMIT 1"))
 
     @app.get("/help", response_class=HTMLResponse)
     def help_page(request: Request): return render(request, "help.html")
@@ -360,19 +324,29 @@ def create_app(settings=None):
     def api_workspaces(): return db.all("SELECT * FROM agent_workspaces")
     @app.get("/workspaces/{wid}",response_class=HTMLResponse)
     def workspace_detail(request:Request,wid:int):
+        """Section 39: Task Status, Workspace Status, Sandbox Status and
+        Test Status are shown as four clearly separate values -- Task
+        Status/review gate state come only from decision.evaluate() (the
+        `task_decision`/`builder` values below); `readiness` stays scoped
+        to this workspace's own runtime signals (sandbox/automated tests/
+        manual verification), a different concern from the Review/QA
+        gate. Neither is allowed to stand in for the other."""
         w=agent_row(wid); details=safe_details(w["worktree_path"])
         runs=db.all("SELECT * FROM test_runs WHERE workspace_type='agent' AND workspace_id=? ORDER BY id DESC",(wid,))
         readiness=workspace_readiness(w)
         report=workspace_verification(wid) or (task_verification(w["task_id"]) if w["task_id"] else None)
         manual_history=db.all("SELECT * FROM manual_verifications WHERE workspace_id=? ORDER BY id DESC",(wid,))
-        ti=task_integration_row(w["task_id"]) if w["task_id"] else None
-        integration_exists=None if not w["task_id"] else bool(ti)
-        ready_for_main=bool(ti and ti["ready_for_main"])
+        task_decision=decision.evaluate(w["task_id"]) if w["task_id"] else None
+        builder=next((b for b in task_decision["builders"] if b["id"]==wid),None) if task_decision else None
+        integration_exists=None if not w["task_id"] else bool(task_decision["task_integration"])
+        ready_for_main=bool(task_decision and task_decision["ready_for_main"])
         code=next_action_code(readiness,integration_exists,ready_for_main)
         action=resolve_next_action(code,wid=wid,tid=w["task_id"],sandbox_id=readiness["sandbox"]["id"] if readiness["sandbox"] else None)
         sessions=db.all("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 10",(wid,))
+        review_history=decision.review_history(wid)
         return render(request,"workspace_detail.html",w=w,details=details,runs=runs,readiness=readiness,report=report,
-                      manual_history=manual_history,next_action=action,sessions=sessions)
+                      manual_history=manual_history,next_action=action,sessions=sessions,
+                      task_decision=task_decision,builder=builder,review_history=review_history)
     @app.get("/api/workspaces/{wid}")
     def api_workspace(wid:int): return agent_row(wid)
     @app.post("/api/workspaces/{wid}/ready")
@@ -393,21 +367,26 @@ def create_app(settings=None):
         return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/verification-report")
     def submit_workspace_report(wid:int,work_status:str=Form("READY"),what_changed:str=Form(""),files_changed:str=Form(""),tests_run:str=Form(""),automated_tests:str=Form(""),how_to_verify:str=Form(""),expected_result:str=Form(""),test_data:str=Form(""),runtime_requirements:str=Form("NONE"),risks:str=Form("")):
-        """Builder completion report (section 5): WHAT_CHANGED/
-        FILES_CHANGED/TESTS_RUN/HOW_TO_VERIFY/EXPECTED_RESULT/RISKS. This
-        submission IS the builder's own "I'm done" signal -- it's what
-        workspace_builder_status() reads to show READY_FOR_REVIEW."""
-        w=agent_row(wid)
-        db.execute("INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,files_changed,tests_run,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                   (w["task_id"],wid,work_status.strip().upper() or "READY",what_changed.strip(),files_changed.strip(),tests_run.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip()))
+        """Submit for Review (section 14/15): the Builder completion
+        report (WHAT_CHANGED/FILES_CHANGED/TESTS_RUN/HOW_TO_VERIFY/
+        EXPECTED_RESULT/RISKS) is what workspace becomes READY_FOR_REVIEW
+        from. Pinned to the exact commit_sha and brief_version at
+        submission time (section 15) -- both are what
+        TaskDecisionService.builder_view() later compares against to
+        decide a downstream Review/QA/Integration result is still valid.
+        WORK_STATUS: READY requires a clean git worktree (section 14) --
+        an uncommitted change can never silently become "ready"."""
+        w=agent_row(wid); t=task_row(w["task_id"]) if w["task_id"] else None
+        status_upper=work_status.strip().upper() or "READY"
+        if status_upper=="READY" and git.status(w["worktree_path"]).strip():
+            raise GitSafetyError("Git worktree must be clean before submitting for review (uncommitted changes present)")
+        head=git.head(w["worktree_path"])
+        db.execute("INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,files_changed,tests_run,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks,commit_sha,brief_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (w["task_id"],wid,status_upper,what_changed.strip(),files_changed.strip(),tests_run.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip(),head,t["brief_version"] if t else None))
         db.event("agent",wid,"VERIFICATION_REPORT_ADDED",work_status)
-        if work_status.strip().upper()=="READY" and w["status"]!="READY":
-            # WORK_STATUS: READY *is* Mark Ready -- a builder that already
-            # filed a structured completion report shouldn't also need a
-            # separate manual click to reach the same state.
-            head=git.head(w["worktree_path"])
+        if status_upper=="READY" and w["status"]!="READY":
             db.execute("UPDATE agent_workspaces SET status='READY',ready_for_integration=1,last_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,wid))
-            db.event("agent",wid,"READY_MARKED",head); recompute_task_status(w.get("task_id"))
+            db.event("agent",wid,"SUBMITTED_FOR_REVIEW",head); recompute_task_status(w.get("task_id"))
         return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/close")
     def close_agent(wid:int): w=agent_row(wid); git.close(w["repo_path"],w["worktree_path"]); db.execute("UPDATE agent_workspaces SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(wid,)); db.event("agent",wid,"WORKSPACE_CLOSED"); return RedirectResponse("/workspaces",303)
@@ -421,7 +400,9 @@ def create_app(settings=None):
         if w["task_id"]: raise GitSafetyError("Workspace already belongs to a Task")
         title=w["task_name"].replace("-"," ").replace("_"," ").strip() or w["task_name"]
         slug=slugify(title)
-        tid=db.execute("INSERT INTO tasks(slug,title,description,status) VALUES(?,?,?,?)",(slug,title,f"Created from existing Agent Workspace #{wid} ({w['agent']}/{w['repo_name']}).","IN_PROGRESS" if w["status"]!="CREATED" else "OPEN"))
+        # Section 5: a Task with >=1 Builder Workspace is never BACKLOG --
+        # this one already has code underway, so it starts ACTIVE.
+        tid=db.execute("INSERT INTO tasks(slug,title,description,status) VALUES(?,?,?,?)",(slug,title,f"Created from existing Agent Workspace #{wid} ({w['agent']}/{w['repo_name']}).","ACTIVE"))
         db.execute("UPDATE agent_workspaces SET task_id=? WHERE id=?",(tid,wid))
         db.event("task",tid,"TASK_CREATED_FROM_WORKSPACE",str(wid)); db.event("agent",wid,"ATTACHED_TO_TASK",str(tid))
         return RedirectResponse(f"/tasks/{tid}",303)
@@ -437,49 +418,68 @@ def create_app(settings=None):
     # ------------------------------------------------------ Review / QA
     @app.post("/api/workspaces/{wid}/start-review")
     def start_review(wid:int,reviewer_agent:str=Form(...)):
-        """[Start Review] (section 6): only after Builder is
-        READY_FOR_REVIEW. Generates the review prompt deterministically
-        (real branch/commit/brief/builder-report, never an LLM call) and
-        records who is reviewing; does not touch source."""
+        """[Start Review] (section 6/11): only after Builder submitted
+        (status=READY). Inserts a NEW review_runs row -- a fresh review
+        cycle after a fix is a new row, never an overwrite of the old
+        one's evidence (section 18). Default mode is READ_ONLY: no new
+        worktree is created here at all; a reviewer only ever gets a
+        worktree if explicitly escalated to repair mode via the normal
+        Create Agent Workspace flow."""
         w=agent_row(wid)
-        if workspace_builder_status(w,latest_session_for_workspace(wid),workspace_verification(wid))!="READY_FOR_REVIEW":
-            raise GitSafetyError("Builder is not READY_FOR_REVIEW yet")
+        if w["status"]!="READY": raise GitSafetyError("Builder has not submitted for review yet")
         t=task_row(w["task_id"]) if w["task_id"] else None
         report=workspace_verification(wid)
         prompt=render_review_prompt(t,w,report) if t else render_review_prompt({"title":w["task_name"],"brief_acceptance_criteria":""},w,report)
-        db.execute("UPDATE agent_workspaces SET reviewer_agent=?,review_status=NULL,review_notes=? WHERE id=?",(slugify(reviewer_agent),prompt,wid))
-        db.event("agent",wid,"REVIEW_STARTED",reviewer_agent)
+        head=git.head(w["worktree_path"])
+        bv=t["brief_version"] if t else None
+        rid=db.execute("INSERT INTO review_runs(task_id,workspace_id,reviewer_type,reviewer_agent,brief_version,reviewed_commit,status,findings) VALUES(?,?,?,?,?,?,?,?)",
+                        (w["task_id"],wid,"BUILDER_WORKSPACE",slugify(reviewer_agent),bv,head,"RUNNING",prompt))
+        if t: db.execute("INSERT INTO prompts(task_id,workspace_id,prompt_type,brief_version,content) VALUES(?,?,?,?,?)",(t["id"],wid,"REVIEWER",bv,prompt))
+        db.event("agent",wid,"REVIEW_STARTED",f"run={rid} reviewer={reviewer_agent}")
         return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/submit-review")
     def submit_review(wid:int,result:str=Form(...),notes:str=Form("")):
-        """Reviewer result (section 6/7): REVIEW_PASS/FIX_REQUIRED/
-        BLOCKED. review_commit pins the exact commit reviewed -- a new
-        commit after this is what invalidates a PASS (checked at render
-        time, never a second stale flag). FIX_REQUIRED returns the Task
-        to the Builder; findings are persisted in review_notes."""
+        """Reviewer result (section 6/7/17): REVIEW_PASS/FIX_REQUIRED/
+        BLOCKED, completing the most recent RUNNING review_runs row for
+        this workspace (never overwriting an earlier, already-completed
+        one -- that stays queryable history). FIX_REQUIRED returns the
+        Task to the Builder; a later commit or Brief bump independently
+        makes this same row STALE at read time (TaskDecisionService),
+        never something this route has to remember to invalidate."""
         w=agent_row(wid)
-        if result not in ("REVIEW_PASS","FIX_REQUIRED","BLOCKED"): raise GitSafetyError("Invalid review result")
-        head=git.head(w["worktree_path"])
-        db.execute("UPDATE agent_workspaces SET review_status=?,review_notes=?,review_commit=? WHERE id=?",(result,notes.strip(),head,wid))
-        db.event("agent",wid,"REVIEW_SUBMITTED",result)
+        if result not in ("PASS","FIX_REQUIRED","BLOCKED"): raise GitSafetyError("Invalid review result")
+        run=db.one("SELECT * FROM review_runs WHERE workspace_id=? ORDER BY id DESC LIMIT 1",(wid,))
+        if not run or run["status"] not in ("PENDING","RUNNING"): raise GitSafetyError("No review in progress for this workspace")
+        db.execute("UPDATE review_runs SET status=?,findings=?,completed_at=CURRENT_TIMESTAMP WHERE id=?",(result,notes.strip(),run["id"]))
+        db.event("agent",wid,"REVIEW_SUBMITTED",f"run={run['id']} result={result}")
         return RedirectResponse(f"/workspaces/{wid}",303)
-    @app.post("/api/workspaces/{wid}/start-tester")
-    def start_tester(wid:int,tester_agent:str=Form("")):
-        """[Start Tester] (section 8): only offered after REVIEW_PASS.
-        QA verifies sandbox/automated tests/manual acceptance criteria --
-        all of which already exist (readiness/manual_verifications); QA
-        itself only records the human/agent's PASS/FAIL/BLOCKED decision,
-        never a second copy of the sandbox or test data."""
-        w=agent_row(wid)
-        if w["review_status"]!="REVIEW_PASS": raise GitSafetyError("QA requires REVIEW_PASS first")
-        db.execute("UPDATE agent_workspaces SET qa_status=NULL,tester_agent=? WHERE id=?",(slugify(tester_agent) if tester_agent else "qa",wid)); db.event("agent",wid,"QA_STARTED",tester_agent)
-        return RedirectResponse(f"/workspaces/{wid}",303)
-    @app.post("/api/workspaces/{wid}/submit-qa")
-    def submit_qa(wid:int,result:str=Form(...),notes:str=Form("")):
-        w=agent_row(wid)
-        if result not in ("QA_PASS","QA_FAIL","BLOCKED"): raise GitSafetyError("Invalid QA result")
-        db.execute("UPDATE agent_workspaces SET qa_status=?,qa_notes=? WHERE id=?",(result,notes.strip(),wid)); db.event("agent",wid,"QA_SUBMITTED",result)
-        return RedirectResponse(f"/workspaces/{wid}",303)
+    @app.post("/api/tasks/{tid}/start-qa")
+    def start_qa(tid:int,tester_agent:str=Form("")):
+        """[Start Tester] (section 8/12/19): QA is Task-level (it may
+        cover cross-repo behavior), gated on every required Builder's
+        review being PASS-and-current. Primarily reads the sandbox +
+        exact source manifest already in place -- no new worktree unless
+        the tester must change test code/fixtures, which stays a manual,
+        explicit Create Agent Workspace outside this route."""
+        t=task_row(tid); d=decision.evaluate(tid)
+        if d["stage"] not in ("QA","INTEGRATION","MERGING","COMPLETE") or any(b["review_status"]!="PASS" for b in d["builders"]):
+            raise GitSafetyError("QA requires every required Builder's review to be PASS and current")
+        sbxs=task_sandboxes(tid); sandbox_id=next((s["id"] for s in sbxs if s["status"]=="RUNNING"),None)
+        manifest=db.one("SELECT source_manifest_json FROM sandboxes WHERE id=?",(sandbox_id,))["source_manifest_json"] if sandbox_id else "{}"
+        qid=db.execute("INSERT INTO qa_runs(task_id,brief_version,source_manifest,sandbox_id,tester_agent,status) VALUES(?,?,?,?,?,?)",
+                        (tid,t["brief_version"],manifest,sandbox_id,slugify(tester_agent) if tester_agent else "qa","RUNNING"))
+        db.event("task",tid,"QA_STARTED",f"run={qid} tester={tester_agent}")
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/submit-qa")
+    def submit_qa(tid:int,result:str=Form(...),notes:str=Form(""),manual_result:str=Form(""),hardware_result:str=Form("")):
+        task_row(tid)
+        if result not in ("PASS","FAIL","BLOCKED"): raise GitSafetyError("Invalid QA result")
+        run=db.one("SELECT * FROM qa_runs WHERE task_id=? ORDER BY id DESC LIMIT 1",(tid,))
+        if not run or run["status"] not in ("PENDING","RUNNING"): raise GitSafetyError("No QA run in progress for this Task")
+        db.execute("UPDATE qa_runs SET status=?,notes=?,manual_result=?,hardware_result=?,completed_at=CURRENT_TIMESTAMP WHERE id=?",
+                   (result,notes.strip(),manual_result.strip() or None,hardware_result.strip() or None,run["id"]))
+        db.event("task",tid,"QA_SUBMITTED",f"run={run['id']} result={result}")
+        return RedirectResponse(f"/tasks/{tid}",303)
 
     # ------------------------------------------------- Agent Sessions (PTY)
     def session_row(sid):
@@ -653,13 +653,13 @@ def create_app(settings=None):
 
     # ---------------------------------------------------------------- Tasks
     def recompute_task_status(tid):
-        """No-op since the control-plane phase: task_stage() now derives
-        DEVELOPMENT/REVIEW/QA/INTEGRATION/READY_FOR_MAIN live from
-        workspace/review/QA/integration state on every read. Only
-        BACKLOG/PREPARE/MERGED/CLOSED/CANCELLED are ever persisted, and
-        those are explicit user actions (select/mark-merged/close/cancel),
-        never something Mark Ready should silently overwrite. Kept as a
-        no-op so its existing call sites (e.g. ready()) don't need to
+        """No-op (section 31/32): TaskDecisionService.evaluate() now
+        derives ACTIVE/BLOCKED/READY_FOR_MAIN/DONE live from real
+        workspace/review/QA/integration/merge state on every read. Only
+        BACKLOG/ACTIVE/CANCELLED are ever persisted to tasks.status, and
+        those change only through explicit user actions (select/cancel) --
+        never something Submit for Review should silently overwrite. Kept
+        as a no-op so its existing call sites (e.g. ready()) don't need to
         change."""
         return
 
@@ -680,72 +680,48 @@ def create_app(settings=None):
         except SandboxError: pass  # sandbox row already recorded FAILED; source worktree untouched
         return sid
 
-    KANBAN_COLUMNS=["BACKLOG","PREPARE","DEVELOPMENT","REVIEW","QA","INTEGRATION","READY_FOR_MAIN","DONE"]
-    TIMELINE_STAGES=["Backlog","Prepare","Development","Review","QA","Integration","Ready for Main","Done"]
+    KANBAN_COLUMNS=["Backlog","Development","Review / QA","Integration","Ready for Main","Done","Blocked"]
     def workspace_status_label(status):
         """CREATED reads as CODING to a user -- the DB enum stays CREATED/
         READY/CLOSED (no new status column), this is presentation only."""
         return {"CREATED":"CODING"}.get(status,status)
-    def kanban_column_for(t,workspaces,ti,ready_for_main):
-        """Kanban column = task_stage(), with the three terminal
-        dispositions folded into one DONE column (their real distinction
-        stays visible as the Task Status badge on the card/detail page)."""
-        stage=task_stage(t,workspaces,ti,ready_for_main)
-        return "DONE" if stage in ("MERGED","CLOSED","CANCELLED") else stage
-    def timeline_stage_for(t,workspaces,ti,ready_for_main):
-        stage=kanban_column_for(t,workspaces,ti,ready_for_main)
-        return TIMELINE_STAGES[KANBAN_COLUMNS.index(stage)]
-    def compute_task_next_action(tid,ws,ti,ready_for_main):
-        """Bước tiếp theo (section 13): deterministic, shared by Task
-        Detail, the Kanban card and the List row so they can never
-        disagree. `ws` items must already carry w['readiness']."""
-        blocking=None
-        for w in ws:
-            if next_action_code(w["readiness"],None,False) not in ("VERIFIED_STANDALONE","NO_SANDBOX_CONTRACT_WAIT"): blocking=w; break
-        if blocking:
-            code=next_action_code(blocking["readiness"],None,False)
-            return resolve_next_action(code,wid=blocking["id"],tid=tid,sandbox_id=blocking["readiness"]["sandbox"]["id"] if blocking["readiness"]["sandbox"] else None)
-        if ws:
-            code=next_action_code(ws[-1]["readiness"],bool(ti),ready_for_main)
-            return resolve_next_action(code,tid=tid)
-        return {"code":"NO_WORKSPACE","text":"Task chưa có Agent Workspace nào.","label":"Add Agent Workspace","href":None,"method":"GET"}
-    def task_ready_for_main(tid,ti):
-        """READY_FOR_MAIN, computed live the same way Task Detail's own
-        page does (per-repo integration_readiness()) -- task_integrations.
-        ready_for_main is never actually written by any route, so Kanban/
-        List must never read that stale column as the source of truth."""
-        if not ti: return False
-        ti_repos=db.all("SELECT id FROM integration_workspaces WHERE task_integration_id=?",(ti["id"],))
-        return bool(ti_repos) and all(integration_readiness(r["id"])["ready"] for r in ti_repos)
+    def kanban_column_for(d):
+        """Kanban column, mapped from TaskDecisionService's own computed
+        status/stage -- never a second calculation. Section 35's 7 columns
+        are coarser than the 6 statuses x 7 stages TaskDecisionService can
+        return, so this is a pure lookup, not new logic."""
+        if d["status"]=="BLOCKED": return "Blocked"
+        if d["status"]=="BACKLOG": return "Backlog"
+        if d["status"]=="DONE": return "Done"
+        if d["status"]=="READY_FOR_MAIN": return "Ready for Main"
+        return {"PLANNING":"Development","DEVELOPMENT":"Development","REVIEW":"Review / QA","QA":"Review / QA",
+                "INTEGRATION":"Integration","MERGING":"Integration","COMPLETE":"Done"}.get(d["stage"],"Development")
     def task_card_view(t):
-        """Everything one Task card (Kanban or List) needs, derived from
-        child state -- never a second, independently-tracked task field.
-        Kanban column is computed, not stored: BACKLOG (no workspace) ->
-        DEVELOPMENT (coding) -> TEST (all workspaces READY, not yet
-        integrated) -> INTEGRATION (Task Integration exists) ->
-        READY_FOR_MAIN (gate passed) -> DONE (merged/cancelled), with
-        FIX_REQUIRED entered from anywhere a signal is actually failing."""
-        ws=task_workspaces(t["id"])
-        for w in ws: w["readiness"]=workspace_readiness(w); w["status_label"]=workspace_status_label(w["status"])
-        readiness=[w["readiness"] for w in ws]
-        agents={"total":len(ws),"ready":sum(1 for w in ws if w["status"]=="READY"),
-                "coding":sum(1 for w in ws if w["status"]=="CREATED"),
-                "failed":sum(1 for r in readiness if r["automated_status"]=="FAIL" or r["manual"]["status"] in ("FAIL",))}
+        """Everything one Task card (Kanban or List) needs. status/stage/
+        next_action/ready_for_main/blocking_reasons all come from
+        TaskDecisionService.evaluate() -- this function only adds the
+        lightweight display aggregates (sandbox/test tallies, repo list)
+        that decision itself has no reason to compute."""
+        d=decision.evaluate(t["id"])
+        ws=d["builders"]
         sbxs=task_sandboxes(t["id"])
         sandbox={"total":len(sbxs),"running":sum(1 for s in sbxs if s["status"]=="RUNNING"),
                  "unhealthy":sum(1 for s in sbxs if s["status"]=="RUNNING" and s["health_status"]!="HEALTHY")}
-        tests={"passed":sum(1 for r in readiness if r["automated_status"]=="PASS"),"total":len(ws)}
-        ti=task_integration_row(t["id"])
-        ready_for_main=task_ready_for_main(t["id"],ti)
-        integration=("NONE" if not ti else "CONFLICT" if ti["status"]=="CONFLICT" else "READY" if ready_for_main else ti["status"])
-        column=kanban_column_for(t,ws,ti,ready_for_main)
-        blocking_workspace=next((w for w,r in zip(ws,readiness) if r["automated_status"]=="FAIL" or r["manual"]["status"]=="FAIL"),
-                                 next((w for w in ws if w["status"]!="READY"),None))
-        next_action=compute_task_next_action(t["id"],ws,ti,ready_for_main)
-        needs_fix=any(w["review_status"]=="FIX_REQUIRED" or w["qa_status"] in ("QA_FAIL","BLOCKED") for w in ws)
-        return {"task":t,"workspaces":ws,"agents":agents,"sandbox":sandbox,"tests":tests,"integration":integration,
-                "column":column,"blocking_workspace":blocking_workspace,"repos":sorted({w["repo_name"] for w in ws}),
-                "next_action":next_action,"needs_fix":needs_fix}
+        tests={"passed":sum(1 for w in ws if w["ready"]),"total":len(ws)}
+        agents={"total":len(ws),"ready":sum(1 for w in ws if w["ready"]),
+                "coding":sum(1 for w in ws if not w["ready"]),"failed":sum(1 for w in ws if w["fix_required"])}
+        column=kanban_column_for(d)
+        # CSS-safe class for the column badge -- "Review / QA" etc. can't
+        # be lowercased straight into a class name.
+        column_class={"Backlog":"backlog","Development":"development","Review / QA":"review",
+                      "Integration":"integration","Ready for Main":"ready","Done":"done","Blocked":"blocked"}.get(column,"development")
+        for w in ws: w["status_label"]=workspace_status_label(w["status"])
+        blocking_workspace=next((w for w in ws if w["fix_required"]), next((w for w in ws if not w["ready"]), None))
+        return {"task":t,"decision":d,"workspaces":ws,"agents":agents,"sandbox":sandbox,"tests":tests,
+                "integration":("NONE" if not d["task_integration"] else d["task_integration"]["status"]),
+                "column":column,"column_class":column_class,"blocking_workspace":blocking_workspace,"repos":sorted({w["repo_name"] for w in ws}),
+                "next_action":d["next_action"],"needs_fix":bool(d["blocking_reasons"]),
+                "status":d["status"],"stage":d["stage"],"ready_for_main":d["ready_for_main"]}
 
     def task_matches_filters(card,*,status,repository,agent,sandbox_status,test_status,integration_status,q):
         t=card["task"]
@@ -798,51 +774,73 @@ def create_app(settings=None):
         db.event("task",tid,"TASK_CREATED_BACKLOG",slug); return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/select")
     def select_task(tid:int):
-        """[Select for Development] (section 2): BACKLOG -> PREPARE. Still
-        allocates nothing -- PREPARE is exactly "no Agent Workspace yet"
-        until Create Agent Workspace is used."""
+        """[Select for Development] (section 7): BACKLOG -> ACTIVE. Still
+        allocates nothing -- Task Stage stays PLANNING (computed) until an
+        Agent Workspace actually exists."""
         t=task_row(tid)
         if t["status"]!="BACKLOG": raise GitSafetyError(f"Task is not in BACKLOG (status={t['status']})")
-        db.execute("UPDATE tasks SET status='PREPARE',updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,)); db.event("task",tid,"TASK_SELECTED")
+        db.execute("UPDATE tasks SET status='ACTIVE',updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,)); db.event("task",tid,"TASK_SELECTED")
         return RedirectResponse(f"/tasks/{tid}",303)
+    BRIEF_FIELDS=("brief_goal","brief_context","brief_requirements","brief_acceptance_criteria","brief_out_of_scope","brief_test_plan","brief_risks")
     @app.post("/api/tasks/{tid}/brief")
     def save_brief(tid:int,goal:str=Form(""),context:str=Form(""),requirements:str=Form(""),acceptance_criteria:str=Form(""),out_of_scope:str=Form(""),test_plan:str=Form(""),risks:str=Form(""),risk_profile:str=Form("")):
-        """Implementation Brief (section 3): structured fields, saved
-        in place (one current brief per Task, not a history log)."""
-        task_row(tid)
+        """Implementation Brief (section 8): structured fields, saved in
+        place (one current brief per Task, not a history log) -- but
+        brief_version bumps whenever the content that actually drives a
+        Builder/Reviewer prompt changes, which is what makes existing
+        Review/QA evidence recompute STALE (TaskDecisionService.
+        builder_view) instead of silently staying valid."""
+        t=task_row(tid)
+        new_values={"brief_goal":goal.strip(),"brief_context":context.strip(),"brief_requirements":requirements.strip(),
+                    "brief_acceptance_criteria":acceptance_criteria.strip(),"brief_out_of_scope":out_of_scope.strip(),
+                    "brief_test_plan":test_plan.strip(),"brief_risks":risks.strip()}
+        changed=any((t.get(f) or "")!=new_values[f] for f in BRIEF_FIELDS)
         rp=risk_profile.strip().upper()
-        sets=["brief_goal=?","brief_context=?","brief_requirements=?","brief_acceptance_criteria=?","brief_out_of_scope=?","brief_test_plan=?","brief_risks=?","updated_at=CURRENT_TIMESTAMP"]
-        params=[goal.strip(),context.strip(),requirements.strip(),acceptance_criteria.strip(),out_of_scope.strip(),test_plan.strip(),risks.strip()]
+        sets=[f"{f}=?" for f in BRIEF_FIELDS]+["updated_at=CURRENT_TIMESTAMP"]
+        params=[new_values[f] for f in BRIEF_FIELDS]
         if rp in RISK_PROFILES: sets.insert(-1,"risk_profile=?"); params.append(rp)
-        db.execute(f"UPDATE tasks SET {','.join(sets)} WHERE id=?",(*params,tid)); db.event("task",tid,"BRIEF_SAVED")
+        if changed: sets.insert(-1,"brief_version=brief_version+1")
+        db.execute(f"UPDATE tasks SET {','.join(sets)} WHERE id=?",(*params,tid))
+        db.event("task",tid,"BRIEF_SAVED",f"brief_version+1={changed}")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/generate-prompt")
     def generate_prompt(tid:int):
         """Fill AGENT PROMPT from the structured brief (deterministic
         template, never a model call) -- the user still reviews/edits it
-        before any agent is launched (section 3)."""
+        before any agent is launched (section 3). Persisted as a `prompts`
+        row stamped with the exact brief_version it was generated from
+        (section 9) -- never just overwritten text with no version
+        binding, so a stale prompt (generated before a later Brief edit)
+        is a fact you can see, not something silently reused."""
         t=task_row(tid); prompt=render_agent_prompt(t)
-        db.execute("UPDATE tasks SET agent_prompt=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(prompt,tid)); db.event("task",tid,"PROMPT_GENERATED")
+        db.execute("INSERT INTO prompts(task_id,prompt_type,brief_version,content) VALUES(?,?,?,?)",(tid,"BUILDER",t["brief_version"],prompt))
+        db.execute("UPDATE tasks SET agent_prompt=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(prompt,tid)); db.event("task",tid,"PROMPT_GENERATED",f"brief_version={t['brief_version']}")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/agent-prompt")
     def save_agent_prompt(tid:int,agent_prompt:str=Form("")):
-        task_row(tid); db.execute("UPDATE tasks SET agent_prompt=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(agent_prompt,tid))
+        t=task_row(tid); db.execute("UPDATE tasks SET agent_prompt=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(agent_prompt,tid))
+        latest=db.one("SELECT id FROM prompts WHERE task_id=? AND prompt_type='BUILDER' ORDER BY id DESC LIMIT 1",(tid,))
+        if latest: db.execute("UPDATE prompts SET content=? WHERE id=?",(agent_prompt,latest["id"]))
+        else: db.execute("INSERT INTO prompts(task_id,prompt_type,brief_version,content) VALUES(?,?,?,?)",(tid,"BUILDER",t["brief_version"],agent_prompt))
         return RedirectResponse(f"/tasks/{tid}",303)
+    def latest_prompt(tid,prompt_type="BUILDER"):
+        return db.one("SELECT * FROM prompts WHERE task_id=? AND prompt_type=? ORDER BY id DESC LIMIT 1",(tid,prompt_type))
     @app.post("/api/tasks/new-with-workspace")
     async def create_task_with_workspace(request:Request):
         """Advanced/quick-start shortcut: Task + at least one Agent
         Workspace in one submit (optionally many, for a cross-repo Task
-        defined immediately), skipping BACKLOG/PREPARE for when planning
-        is unnecessary. A failed workspace never rolls back the Task or
-        any already-created workspace -- it is recorded and shown, not
-        hidden."""
+        defined immediately), skipping BACKLOG for when planning is
+        unnecessary -- created directly ACTIVE since a Builder Workspace
+        is being attached in the same request (section 5/7). A failed
+        workspace never rolls back the Task or any already-created
+        workspace -- it is recorded and shown, not hidden."""
         form=await request.form()
         title=str(form.get("title","")).strip()
         if not title: raise GitSafetyError("Task title is required")
         description=str(form.get("description",""))
         repo_ids=form.getlist("ws_repository_id"); agents=form.getlist("ws_agent"); roles=form.getlist("ws_role")
         bases=form.getlist("ws_base_branch"); profiles=form.getlist("ws_sandbox_profile")
-        slug=slugify(title); tid=db.execute("INSERT INTO tasks(slug,title,description,status) VALUES(?,?,?,?)",(slug,title,description,"PREPARE"))
+        slug=slugify(title); tid=db.execute("INSERT INTO tasks(slug,title,description,status) VALUES(?,?,?,?)",(slug,title,description,"ACTIVE"))
         db.event("task",tid,"TASK_CREATED",slug)
         for i,rid_raw in enumerate(repo_ids):
             if not str(rid_raw).strip(): continue
@@ -857,30 +855,28 @@ def create_app(settings=None):
     def api_tasks(): return db.all("SELECT * FROM tasks ORDER BY updated_at DESC")
     @app.get("/tasks/{tid}",response_class=HTMLResponse)
     def task_detail(request:Request,tid:int):
-        t=task_row(tid); workspaces=task_workspaces(tid); sbxs=task_sandboxes(tid); ti=task_integration_row(tid)
-        ti_repos=db.all("SELECT i.*,r.repo_name FROM integration_workspaces i JOIN repositories r ON r.id=i.repository_id WHERE i.task_integration_id=?",(ti["id"],)) if ti else []
-        all_ready=bool(workspaces) and all(w["status"]=="READY" for w in workspaces)
+        """Every status/stage/gate/next-action value on this page comes
+        from one call to decision.evaluate() (TaskDecisionService) --
+        this route only attaches display-only detail (git worktree info,
+        live session, per-workspace/integration sandbox view) onto that
+        result. No independent readiness/stage computation lives here
+        any more (section 32/37)."""
+        t=task_row(tid)
+        d=decision.evaluate(tid)
+        workspaces=d["builders"]; ti=d["task_integration"]; ti_repos=d["integration_repos"]
+        sbxs=task_sandboxes(tid)
 
-        # Nest each Agent Workspace's own sandbox (Sandbox remains the
-        # source of truth -- this only joins by owner_id, it stores no
-        # sandbox field on agent_workspaces itself) and, for a workspace
-        # with none, tell "not yet created" apart from "repo has no
-        # sandbox: contract" so the empty state never lies. workspace_readiness()
-        # is the single place that reads sandbox/tests/manual-verification for
-        # a workspace -- reused here so this section can never disagree with
-        # the "Bước tiếp theo" box below or workspace_detail's own page.
         for w in workspaces:
-            r=workspace_readiness(w); w["readiness"]=r; w["report"]=workspace_verification(w["id"])
             w["details"]=safe_details(w["worktree_path"]); w["status_label"]=workspace_status_label(w["status"])
-            w["session"]=latest_session_for_workspace(w["id"])
-            w["builder"]=workspace_builder_status(w,w["session"],w["report"])
-            w["qa_required"]=requires_qa(t["risk_profile"])
-            if r["sandbox_view"]:
-                w["sandbox"]=r["sandbox_view"]; w["sandbox"]["stale"]=sandboxes.is_stale(r["sandbox"]["id"],sandbox_current_commits(r["sandbox"]["id"]))
+            session=latest_session_for_workspace(w["id"]); w["session"]=session
+            try: w["sandbox_configured"]=load_sandbox_contract(Path(repo(w["repository_id"])["repo_path"])) is not None
+            except SandboxContractError: w["sandbox_configured"]=True  # misconfigured contract is not "absent"
+            sb=next((s for s in sbxs if s["owner_type"]=="AGENT_WORKSPACE" and s["owner_id"]==w["id"]),None)
+            if sb:
+                v=sandbox_view(sb); v["stale"]=sandboxes.is_stale(sb["id"],sandbox_current_commits(sb["id"]))
+                w["sandbox"]=v
             else:
-                w["sandbox"]=None; w["sandbox_configured"]=r["sandbox_configured"]
-        blocking_workspace=next((w for w in workspaces if w["readiness"]["automated_status"]=="FAIL" or w["readiness"]["manual"]["status"]=="FAIL"),
-                                 next((w for w in workspaces if w["status"]!="READY"),None))
+                w["sandbox"]=None
 
         integration_sandboxes=[]
         for sb in sbxs:
@@ -890,72 +886,47 @@ def create_app(settings=None):
             v["hardware"]=db.one("SELECT * FROM hardware_test_results WHERE sandbox_id=? ORDER BY id DESC LIMIT 1",(sb["id"],))
             integration_sandboxes.append(v)
 
-        # Integration Readiness: one real check per participating repo's
-        # Integration Workspace, reusing the exact gate /ready-for-main
-        # enforces -- never a second, template-only status calculation.
-        readiness=[{"repo":r,**integration_readiness(r["id"])} for r in ti_repos]
-        tests_passed=sum(r["tests_passed"] for r in readiness); tests_required=sum(r["tests_required"] for r in readiness)
-        ready_for_main=bool(ti_repos) and all(r["ready"] for r in readiness)
-        hw=[v["hardware"] for v in integration_sandboxes if v["hardware"]]
-        hardware_status=hw[0]["result"] if hw else ("PENDING" if any(v["row"]["profile"]=="HARDWARE" for v in integration_sandboxes) else None)
-        summary={
-            "agents_ready":sum(1 for w in workspaces if w["status"]=="READY"),"agents_total":len(workspaces),
-            "sandboxes_running":sum(1 for sb in sbxs if sb["status"]=="RUNNING"),"sandboxes_total":len(sbxs),
-            "integration_health":integration_sandboxes[0]["row"]["health_status"] if integration_sandboxes else None,
-            "tests_passed":tests_passed,"tests_required":tests_required,"hardware_status":hardware_status,"ready_for_main":ready_for_main,
-        }
         earliest_cleanup=min((sb["cleanup_eligible_at"] for sb in sbxs if sb["cleanup_eligible_at"]),default=None)
+        blocking_workspace=next((w for w in workspaces if w["fix_required"]), next((w for w in workspaces if not w["ready"]),None))
+        not_ready=[w for w in workspaces if not w["ready"]]
 
-        report=effective_verification(tid,workspaces)
-        manual_status=[w["readiness"]["manual"]["status"] for w in workspaces if w["readiness"]["sandbox"]]
-        summary["manual_verification"]=("PASS" if manual_status and all(s=="PASS" for s in manual_status) else
-                                         "FAIL" if "FAIL" in manual_status else
-                                         "STALE" if "STALE" in manual_status else
-                                         "NOT_RUN" if manual_status else None)
-        summary["automated_tests"]=("PASS" if workspaces and all(w["readiness"]["automated_status"]=="PASS" for w in workspaces) else
-                                     "FAIL" if any(w["readiness"]["automated_status"]=="FAIL" for w in workspaces) else "NOT_RUN")
+        # Overview gate checklist (section 38): one row per gate this
+        # Task's risk policy actually requires, ✓/○ from the same
+        # decision the rest of the page reads -- explains exactly why
+        # not ready, never a second ad hoc readiness calculation.
+        gates=[{"label":"Task Brief complete (GOAL + ACCEPTANCE_CRITERIA)","ok":decision.brief_complete(t)},
+               {"label":"At least one Builder Workspace","ok":bool(workspaces)},
+               {"label":"All Builder Workspaces submitted for review","ok":bool(workspaces) and all(b["ready"] for b in workspaces)},
+               {"label":"All reviews PASS (exact commit, current Brief)","ok":bool(workspaces) and all(b["review_status"]=="PASS" for b in workspaces)}]
+        if decision.requires_qa(d["risk_profile"]):
+            gates.append({"label":"QA PASS (current Brief)","ok":decision.qa_current(d["qa"],t) and d["qa"]["status"]=="PASS"})
+        else:
+            gates.append({"label":"QA","ok":True,"note":"NOT_REQUIRED for this risk profile"})
+        if decision.requires_integration(d["risk_profile"]):
+            gates.append({"label":"Integration healthy, tests PASS, no conflicts","ok":decision.integration_healthy(ti,ti_repos)})
+        else:
+            gates.append({"label":"Integration","ok":True,"note":"NOT_REQUIRED for this risk profile"})
+        gates.append({"label":"No blocking findings","ok":not d["blocking_reasons"]})
+        gates.append({"label":"All required repos merged to main","ok":bool(d["merge_records"]) and all(m["merge_status"]=="MERGED" for m in d["merge_records"] if m["required"])})
 
-        # Bước tiếp theo: the exact same deterministic function the Kanban
-        # card and List row use (compute_task_next_action) -- never a
-        # second, page-only computation.
-        next_action=compute_task_next_action(tid,workspaces,ti,ready_for_main)
-
-        # Test Readiness (section 9): can this task be tested NOW? Derived,
-        # never a stored field. NO if any required workspace still CODING,
-        # a needed sandbox is absent/unhealthy/stale, or there's an
-        # unresolved conflict; YES only once every workspace is READY with
-        # a healthy (or not-applicable) sandbox and current source; PARTIAL
-        # for everything in between (some but not all workspaces testable).
-        checks=[]; per_ws_ok=[]
-        for w in workspaces:
-            r=w["readiness"]
-            ok=r["agent_ready"] and (not r["sandbox_required"] or (r["sandbox_status"]=="RUNNING" and not (w["sandbox"] and w["sandbox"].get("stale"))))
-            per_ws_ok.append(ok)
-            checks.append({"label":f"{w['agent'].capitalize()} · {w['role'] or w['repo_name']} workspace READY","ok":ok})
-        conflict=any(not r["no_conflicts"] for r in readiness)  # per participating repo's Integration Workspace
-        if ti_repos: checks.append({"label":"Không còn merge conflict","ok":not conflict})
-        if integration_sandboxes:
-            all_healthy=all(v["row"]["health_status"]=="HEALTHY" for v in integration_sandboxes)
-            checks.append({"label":"Integration Sandbox HEALTHY","ok":all_healthy})
-        if not workspaces or conflict or not any(per_ws_ok): test_readiness="NO"
-        elif all(per_ws_ok): test_readiness="YES"
-        else: test_readiness="PARTIAL"
-        full_integration_ok = test_readiness=="YES" and bool(ti) and not conflict
-
-        stage=timeline_stage_for(t,workspaces,ti,ready_for_main)
-        column=kanban_column_for(t,workspaces,ti,ready_for_main)
-        not_ready=[w for w in workspaces if w["status"]!="READY"]
-
-        return render(request,"task_detail.html",t=t,workspaces=workspaces,sandboxes=sbxs,task_integration=ti,ti_repos=ti_repos,
-                      integration_sandboxes=integration_sandboxes,readiness=readiness,summary=summary,all_ready=all_ready,
-                      task_cleanup_countdown=format_countdown(earliest_cleanup),report=report,next_action=next_action,
-                      test_readiness=test_readiness,test_readiness_checks=checks,full_integration_ok=full_integration_ok,
-                      blocking_workspace=blocking_workspace,timeline_stages=TIMELINE_STAGES,current_stage=stage,column=column,
-                      not_ready_workspaces=not_ready,integration_conflict=conflict,
+        return render(request,"task_detail.html",t=t,decision=d,workspaces=workspaces,sandboxes=sbxs,task_integration=ti,ti_repos=ti_repos,
+                      integration_sandboxes=integration_sandboxes,
+                      status=d["status"],stage=d["stage"],risk_profile=d["risk_profile"],next_action=d["next_action"],
+                      blocking_reasons=d["blocking_reasons"],test_readiness=d["test_readiness"],ready_for_main=d["ready_for_main"],
+                      merge_records=d["merge_records"],qa=d["qa"],gates=gates,
+                      task_cleanup_countdown=format_countdown(earliest_cleanup),
+                      blocking_workspace=blocking_workspace,not_ready_workspaces=not_ready,
                       repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=settings.agents)
     @app.get("/api/tasks/{tid}")
     def api_task(tid:int):
         t=task_row(tid); return {**t,"workspaces":task_workspaces(tid),"sandboxes":task_sandboxes(tid),"task_integration":task_integration_row(tid)}
+    @app.get("/api/tasks/{tid}/decision")
+    def api_task_decision(tid:int):
+        """The exact TaskDecisionService.evaluate() result -- the single
+        source every page on this Task reads (section 32). Exposed
+        directly so automation/tests never have to re-derive status/
+        stage/gates from raw child rows themselves."""
+        task_row(tid); return decision.evaluate(tid)
     def add_task_workspace(tid,repository_id,agent,role,base_branch,sandbox_profile):
         """Single source for 'create one Agent Workspace inside a Task':
         used by the classic one-at-a-time /api/tasks/{tid}/workspaces route
@@ -991,10 +962,20 @@ def create_app(settings=None):
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/integrations")
     def create_task_integration(tid:int):
-        t=task_row(tid); ready=[w for w in task_workspaces(tid) if w["status"]=="READY"]
-        if not ready: raise GitSafetyError("No READY agent workspaces to integrate")
+        """Integration eligibility (section 22): only once every Builder
+        Workspace is READY with a current, PASS review and nothing
+        unresolved -- decision.evaluate() is the one gate, never a looser
+        'has at least one READY workspace' check a route computes itself."""
+        t=task_row(tid)
+        d=decision.evaluate(tid)
+        if not d["integration_eligibility"]["eligible"]:
+            raise GitSafetyError("Not eligible for Integration yet: every Builder Workspace must be READY with a current, PASS review")
+        ready=[w for w in task_workspaces(tid) if w["status"]=="READY"]
         tiid=db.execute("INSERT INTO task_integrations(task_id,status) VALUES(?,?)",(tid,"MERGING"))
-        db.execute("UPDATE tasks SET status='INTEGRATING',updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,)); db.event("task",tid,"INTEGRATION_CREATED",str(tiid))
+        # tasks.status stays ACTIVE -- INTEGRATING/TESTING are Task Stage
+        # values now, computed live by TaskDecisionService, never persisted
+        # to this column (section 3/31).
+        db.event("task",tid,"INTEGRATION_CREATED",str(tiid))
         by_repo={}
         for w in ready: by_repo.setdefault(w["repository_id"],[]).append(w)
         overall_conflict=False; repo_rows=[]
@@ -1027,7 +1008,6 @@ def create_app(settings=None):
             repo_rows.append({"repository_id":repository_id,"integration_id":iid,"repo_path":r["repo_path"],"worktree_path":str(path),"branch":pinned_branch,"pinned_commit":pinned_commit})
         if overall_conflict:
             db.execute("UPDATE task_integrations SET status='CONFLICT',updated_at=CURRENT_TIMESTAMP WHERE id=?",(tiid,))
-            db.execute("UPDATE tasks SET status='INTEGRATING',updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,))
             return RedirectResponse(f"/tasks/{tid}",303)
         db.execute("UPDATE task_integrations SET status='TESTING',updated_at=CURRENT_TIMESTAMP WHERE id=?",(tiid,))
         provider=None; extra=[]
@@ -1050,23 +1030,61 @@ def create_app(settings=None):
                 db.event("task",tid,"SANDBOX_CONTRACT_REQUIRED","integration profile not runnable")
         else:
             db.event("task",tid,"SANDBOX_CONTRACT_REQUIRED","no participating repo declares sandbox: contract")
-        db.execute("UPDATE tasks SET status='TESTING',updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,))
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/merges/{repository_id}/mark-merged")
+    def mark_merge_record(tid:int,repository_id:int,pr_ref:str=Form(""),merged_commit:str=Form("")):
+        """Per-repository merge tracking (section 25): a cross-repo Task
+        does NOT become DONE just because one repo's PR landed --
+        MergeRecord is the fact TaskDecisionService actually checks. If no
+        commit is given, pin whatever the repo's Task Integration branch
+        (or, absent Integration, the Builder's own branch) is at right
+        now, never a guess."""
+        task_row(tid); decision.merge_records(tid)
+        row=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
+        if not row: raise GitSafetyError("No MergeRecord for this repository on this Task")
+        commit=merged_commit.strip()
+        if not commit:
+            ti=task_integration_row(tid)
+            ir=db.one("SELECT worktree_path FROM integration_workspaces WHERE task_integration_id=? AND repository_id=?",(ti["id"],repository_id)) if ti else None
+            w=db.one("SELECT worktree_path FROM agent_workspaces WHERE task_id=? AND repository_id=? ORDER BY id DESC LIMIT 1",(tid,repository_id))
+            path=(ir or w or {}).get("worktree_path")
+            commit=git.head(path) if path else None
+        db.execute("UPDATE merge_records SET merge_status='MERGED',merged_commit=?,pr_ref=?,merged_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(commit,pr_ref.strip() or row["pr_ref"],row["id"]))
+        db.event("task",tid,"MERGE_RECORDED",f"repo={repository_id} commit={commit}")
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/merges/{repository_id}/mark-pr-open")
+    def mark_merge_pr_open(tid:int,repository_id:int,pr_ref:str=Form("")):
+        task_row(tid); decision.merge_records(tid)
+        row=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
+        if not row: raise GitSafetyError("No MergeRecord for this repository on this Task")
+        db.execute("UPDATE merge_records SET merge_status='PR_OPEN',pr_ref=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(pr_ref.strip(),row["id"]))
+        db.event("task",tid,"MERGE_PR_OPEN",f"repo={repository_id}")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/mark-merged")
     def mark_task_merged(tid:int):
-        task_row(tid); db.execute("UPDATE tasks SET status='MERGED',merged_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,)); db.event("task",tid,"TASK_MERGED")
+        """Bulk convenience for the common single-repo Task (or "I already
+        confirmed everything is merged manually") -- marks every required
+        MergeRecord MERGED at once. Task DONE still only ever falls out of
+        that same MergeRecord state (section 41/42), never a status value
+        this route sets directly."""
+        task_row(tid)
+        for m in decision.merge_records(tid):
+            if m["required"] and m["merge_status"]!="MERGED":
+                db.execute("UPDATE merge_records SET merge_status='MERGED',merged_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(m["id"],))
+        db.event("task",tid,"ALL_MERGES_RECORDED")
         for sb in task_sandboxes(tid):
             if sb["status"] not in ("CLOSED","CLEANING"): sandboxes.mark_cleanup_eligible(sb["id"])
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/close")
     def close_task(tid:int):
-        """READY_FOR_MAIN -> PR (external/GitHub) -> MERGED -> CLOSED
-        (section 22): only reachable once already MERGED. Closing forces
-        every remaining task sandbox onto the cleanup path immediately
-        rather than waiting out its retention window."""
-        t=task_row(tid)
-        if t["status"]!="MERGED": raise GitSafetyError("Task must be MERGED before it can be Closed")
-        db.execute("UPDATE tasks SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,)); db.event("task",tid,"TASK_CLOSED")
+        """Close (section 41/42): available once computed status is DONE.
+        closed_at is only ever a timestamp annotation on an already-DONE
+        Task, never its own status -- and forcing sandbox cleanup here is
+        independent of that: a Task can be DONE for a long time with its
+        sandboxes still sitting in their normal retention window."""
+        t=task_row(tid); d=decision.evaluate(tid)
+        if d["status"]!="DONE": raise GitSafetyError(f"Task is not DONE yet (status={d['status']})")
+        db.execute("UPDATE tasks SET closed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,)); db.event("task",tid,"TASK_CLOSED")
         for sb in task_sandboxes(tid):
             if sb["status"] not in ("CLOSED","CLEANING"): sandboxes.cleanup(sb["id"],force=True)
         return RedirectResponse(f"/tasks/{tid}",303)

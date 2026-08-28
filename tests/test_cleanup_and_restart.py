@@ -81,7 +81,9 @@ def test_merged_task_schedules_cleanup_and_worker_removes_only_owned_resources(c
     events = client.app.state.db.all("SELECT * FROM workspace_events WHERE entity_type='sandbox' AND entity_id=?", (sb["id"],))
     assert any(e["action"] == "SANDBOX_CLEANED" for e in events)
     task = client.get(f"/api/tasks/{tid}").json()
-    assert task["status"] == "MERGED"  # task metadata itself is never touched by sandbox cleanup
+    assert task["status"] == "ACTIVE"  # task metadata itself is never touched by sandbox cleanup
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert all(m["merge_status"] == "MERGED" for m in d["merge_records"] if m["required"])
 
 
 def test_extend_retention_keeps_sandbox_from_being_cleaned(client, git_repo, sandboxable_repo_factory):
