@@ -42,6 +42,7 @@ def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, ta
     r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
     assert r.status_code == 303
     tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+    client.post(f"/api/tasks/{tid}/select")
     r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
     assert r.status_code == 303
     ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
@@ -130,6 +131,7 @@ def test_integration_sandbox_shows_multiple_source_repos_in_task_detail(client, 
 
     client.post("/api/tasks", data={"title": "Task A cross-repo"}, follow_redirects=False)
     tid_a = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == "Task A cross-repo"][0]
+    client.post(f"/api/tasks/{tid_a}/select")
     r = client.post(f"/api/tasks/{tid_a}/workspaces", data={"repository_id": repos["backend-repo"], "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
     assert r.status_code == 303
     backend_ws = client.get("/api/workspaces").json()[-1]
@@ -222,6 +224,7 @@ def test_empty_states_distinguish_not_configured_from_not_yet_created(client, gi
     rid = client.get("/api/repositories").json()[0]["id"]
     client.post("/api/tasks", data={"title": "Task No Sandbox"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
+    client.post(f"/api/tasks/{tid}/select")
     r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main"}, follow_redirects=False)
     assert r.status_code == 303
 

@@ -182,12 +182,12 @@ def test_kanban_maps_task_states_to_correct_columns(client, git_repo, sandboxabl
 
     kanban = client.get("/kanban").text
     board_positions = {}
-    for col in ["BACKLOG", "DEVELOPMENT", "TEST", "FIX_REQUIRED", "INTEGRATION", "READY_FOR_MAIN", "DONE"]:
+    for col in ["BACKLOG", "PREPARE", "DEVELOPMENT", "REVIEW", "QA", "INTEGRATION", "READY_FOR_MAIN", "DONE"]:
         board_positions[col] = kanban.find(f">{col.replace('_',' ')}")
     draft_pos = kanban.find("Draft task")
     dev_pos = kanban.find("Dev task")
-    assert board_positions["BACKLOG"] < draft_pos < board_positions["DEVELOPMENT"]
-    assert board_positions["DEVELOPMENT"] < dev_pos < board_positions["TEST"]
+    assert board_positions["BACKLOG"] < draft_pos < board_positions["PREPARE"]
+    assert board_positions["DEVELOPMENT"] < dev_pos < board_positions["REVIEW"]
 
     # MERGED task -> DONE
     client.app.state.db.execute("UPDATE tasks SET status='MERGED' WHERE id=?", (tid_backlog,))

@@ -189,6 +189,7 @@ def test_ready_never_implies_ready_for_main(client, git_repo, sandboxable_repo_f
     rid = client.get("/api/repositories").json()[0]["id"]
     client.post("/api/tasks", data={"title": "Ready is not verified"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
+    client.post(f"/api/tasks/{tid}/select")
     client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"})
     w = client.get("/api/workspaces").json()[0]
     for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
@@ -214,6 +215,7 @@ def test_task_detail_and_sandbox_detail_show_identical_runtime_identity(client, 
     rid = client.get("/api/repositories").json()[0]["id"]
     client.post("/api/tasks", data={"title": "Identity check"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
+    client.post(f"/api/tasks/{tid}/select")
     client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"})
     sb = client.get("/api/sandboxes").json()[0]
     cleanup_sandboxes.append(sb["id"])

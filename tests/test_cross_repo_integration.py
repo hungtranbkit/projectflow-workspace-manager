@@ -67,6 +67,7 @@ def test_backend_and_client_test_together_without_either_merging_to_main(client,
 
     client.post("/api/tasks", data={"title": "Cross-repo kiosk fixture"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
+    client.post(f"/api/tasks/{tid}/select")
 
     # backend agent workspace: real feature commit on an UNMERGED branch
     r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": repos["backend-repo"], "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)

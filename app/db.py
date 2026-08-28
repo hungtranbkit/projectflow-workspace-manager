@@ -147,6 +147,61 @@ CREATE INDEX IF NOT EXISTS idx_verification_workspace ON verification_reports(wo
 CREATE INDEX IF NOT EXISTS idx_manual_verif_sandbox ON manual_verifications(sandbox_id);
 CREATE INDEX IF NOT EXISTS idx_manual_verif_workspace ON manual_verifications(workspace_id);
 """),
+    # V5: task-first control plane. tasks.status now moves through an
+    # explicit BACKLOG->PREPARE->DEVELOPMENT->REVIEW->QA->INTEGRATION->
+    # READY_FOR_MAIN->MERGED->CLOSED (+CANCELLED) lifecycle -- a Task can
+    # sit in BACKLOG with no branch/worktree/sandbox at all until
+    # explicitly selected. Old rows (OPEN/IN_PROGRESS/READY_FOR_INTEGRATION/
+    # INTEGRATING/TESTING) keep their existing string; app/main.py maps them
+    # for display (normalize_task_status) rather than rewriting history.
+    # review_status/qa_status/review_commit live on agent_workspaces (a
+    # discrete recorded decision, like manual_verifications already is)
+    # so per-workspace gate state is never a second guess derived
+    # elsewhere. AgentSession is the new real entity behind the web
+    # terminal: one row per PTY-backed agent process, cwd always pinned to
+    # a registered Agent Workspace worktree, never a browser-supplied path.
+    (5, """
+ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'NORMAL';
+ALTER TABLE tasks ADD COLUMN tags TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN repo_scope_id INTEGER REFERENCES repositories(id);
+ALTER TABLE tasks ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN risk_profile TEXT NOT NULL DEFAULT 'NORMAL';
+ALTER TABLE tasks ADD COLUMN brief_goal TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN brief_context TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN brief_requirements TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN brief_acceptance_criteria TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN brief_out_of_scope TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN brief_test_plan TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN brief_risks TEXT NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN agent_prompt TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_workspaces ADD COLUMN reviewer_agent TEXT;
+ALTER TABLE agent_workspaces ADD COLUMN review_status TEXT;
+ALTER TABLE agent_workspaces ADD COLUMN review_notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_workspaces ADD COLUMN review_commit TEXT;
+ALTER TABLE agent_workspaces ADD COLUMN tester_agent TEXT;
+ALTER TABLE agent_workspaces ADD COLUMN qa_status TEXT;
+ALTER TABLE agent_workspaces ADD COLUMN qa_notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE verification_reports ADD COLUMN files_changed TEXT NOT NULL DEFAULT '';
+ALTER TABLE verification_reports ADD COLUMN tests_run TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS agent_sessions(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER REFERENCES tasks(id),
+  workspace_id INTEGER NOT NULL REFERENCES agent_workspaces(id),
+  agent TEXT NOT NULL,
+  command_profile TEXT NOT NULL,
+  cwd TEXT NOT NULL,
+  pid INTEGER,
+  status TEXT NOT NULL DEFAULT 'STARTING',
+  mode TEXT NOT NULL DEFAULT 'INTERACTIVE',
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_activity_at TEXT,
+  exited_at TEXT,
+  exit_code INTEGER,
+  transcript_tail TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_workspace ON agent_sessions(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON agent_sessions(status);
+"""),
 ]
 
 

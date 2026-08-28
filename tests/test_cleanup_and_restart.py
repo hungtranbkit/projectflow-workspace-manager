@@ -34,6 +34,7 @@ def _provision_one(client, root, repo):
     rid = client.get("/api/repositories").json()[0]["id"]
     client.post("/api/tasks", data={"title": "Cleanup check"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
+    client.post(f"/api/tasks/{tid}/select")
     r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "A", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
     assert r.status_code == 303
     return client.get("/api/sandboxes").json()[0]

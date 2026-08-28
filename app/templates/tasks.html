@@ -29,10 +29,20 @@
 </section>
 
 <section class="panel" id="new"><h3>New Task</h3>
-<p><small>Một Task luôn tạo kèm ít nhất một Agent Workspace (repo + branch + worktree riêng, sandbox tuỳ chọn) — bạn không cần tự tạo worktree.</small></p>
-<form method="post" action="/api/tasks/new-with-workspace">
+<p><small>Task vào <b>BACKLOG</b> — chưa tạo branch/worktree/sandbox nào. Chọn <b>Select for Development</b> trong Task Detail khi sẵn sàng làm.</small></p>
+<form method="post" action="/api/tasks">
 <label>Task title<input name="title" required placeholder="Fix kiosk session scan"></label>
 <label>Description<textarea name="description" rows="2" placeholder="Ngắn gọn: cần sửa gì, ảnh hưởng repo nào"></textarea></label>
+<label>Priority<select name="priority"><option>LOW</option><option selected>NORMAL</option><option>HIGH</option></select></label>
+<label>Tags<input name="tags" placeholder="kiosk, backend, urgent"></label>
+<label>Repository scope<select name="repo_scope_id"><option value="">(chưa xác định)</option>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
+<label>Notes<textarea name="notes" rows="2" placeholder="Ghi chú thêm cho việc lên kế hoạch"></textarea></label>
+<button class="success">Add to Backlog</button>
+</form>
+<details><summary>Advanced: tạo Task + Agent Workspace ngay (bỏ qua BACKLOG/PREPARE)</summary>
+<form method="post" action="/api/tasks/new-with-workspace">
+<label>Task title<input name="title" required placeholder="Fix kiosk session scan"></label>
+<label>Description<textarea name="description" rows="2"></textarea></label>
 <div id="ws-rows">
 <fieldset class="ws-row"><legend>Agent Workspace 1</legend>
 <label>Repository<select name="ws_repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
@@ -43,10 +53,8 @@
 </fieldset>
 </div>
 <button type="button" class="ghost" id="add-ws-row">+ Add another Agent Workspace</button>
-<button class="success">Create Task &amp; Agent Workspace</button>
+<button>Create Task &amp; Agent Workspace</button>
 </form>
-<details><summary>Advanced: Task rỗng (DRAFT, không tạo Agent Workspace)</summary>
-<form method="post" action="/api/tasks"><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="2"></textarea></label><button class="ghost">Create DRAFT Task</button></form>
 </details>
 </section>
 <script>
