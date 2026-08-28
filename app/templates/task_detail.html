@@ -200,8 +200,31 @@
 <!-- STEP 7: READY FOR MAIN -->
 <section class="panel wizard-panel">
 {% for g in gates %}<div class="check">{{'✓' if g.ok else '○'}} {{g.label}}{% if g.note %} <small>({{g.note}})</small>{% endif %}</div>{% endfor %}
-<div class="primary-action"><a class="button big" href="#merges">Prepare PR</a></div>
-<div class="warning"><b>GitHub automation chưa tự động.</b><p>Push branch và tạo Pull Request thủ công trên GitHub, sau đó đánh dấu Merged bên dưới (mục "Xem tất cả chi tiết kỹ thuật" → Merge Tracking).</p></div>
+{% for m in merge_records if m.required %}
+<div class="row merge-card"><div><strong>{{m.repo_name}}</strong>
+{% if m.pr_number %}<small>PR <a href="{{m.pr_url}}" target="_blank" rel="noopener">#{{m.pr_number}}</a> · {{m.pr_state}}{% if m.ci_status!='UNKNOWN' %} · CI {{m.ci_status}}{% endif %}{% if m.mergeability!='UNKNOWN' %} · {{m.mergeability}}{% endif %}</small>{% endif %}
+{% if m.merged_commit %}<br><code>{{m.merged_commit[:12]}}</code>{% endif %}
+</div>
+<span class="badge {{'ready' if m.merge_status=='MERGED' else ('failed' if m.merge_status in ['FAILED','CONFLICT'] else '')}}">{{m.merge_status.replace('_',' ')}}</span></div>
+{% if m.merge_status != 'MERGED' %}
+<div class="primary-action">
+{% if not m.pr_number %}
+  {% if m.github_available %}<form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/create-pr" class="inline"><button class="success">Create PR</button></form>
+  {% else %}<span class="badge">No GitHub remote</span> <a class="ghost button" href="#merges">Confirm External Merge (Advanced)</a>{% endif %}
+{% elif 'CONFLICT' in m.gate.blockers %}
+  <a class="button danger" href="/integrations/{{m.integration_id}}">Open Integrator</a>
+{% elif 'CI_PENDING' in m.gate.blockers %}
+  <span class="badge pending">Waiting for CI…</span><form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/refresh" class="inline"><button class="ghost">Refresh</button></form>
+{% elif m.gate.eligible %}
+  <form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/merge" class="inline" onsubmit="return confirm('Merge PR #{{m.pr_number}} ({{m.source_branch}} → {{m.base_branch}})?\nStrategy: {{m.merge_strategy}}\nVerified: {{(m.verified_commit or '')[:12]}}\nCI: {{m.ci_status}}')"><button class="success big">Merge</button></form>
+  <form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/refresh" class="inline"><button class="ghost">Refresh</button></form>
+{% else %}
+  <span class="badge failed">{{m.gate.blockers|join(', ')}}</span><form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/refresh" class="inline"><button class="ghost">Refresh</button></form>
+{% endif %}
+</div>
+{% endif %}
+{% endfor %}
+<div class="info">PR/Merge được thực hiện thật qua GitHub (gh CLI đã đăng nhập). Repo không có GitHub remote dùng Confirm External Merge (mục "Xem tất cả chi tiết kỹ thuật" → Merge Tracking).</div>
 </section>
 
 {% elif current_step == 'DONE' %}
@@ -357,14 +380,41 @@
 <h3 class="subgroup">Merge Tracking</h3>
 <section class="panel" id="merges">
 {% if merge_records|length > 1 %}<div class="info">Cross-repo rollout may temporarily produce mixed versions.</div>{% endif %}
-{% for m in merge_records %}<div class="row"><div><strong>{{m.repo_name}}</strong>{% if m.pr_ref %}<small> {{m.pr_ref}}</small>{% endif %}{% if m.merged_commit %}<br><code>{{m.merged_commit[:12]}}</code>{% endif %}</div>
-<span class="badge {{'ready' if m.merge_status=='MERGED' else ('failed' if m.merge_status=='FAILED' else '')}}">{{m.merge_status.replace('_',' ')}}</span></div>
-{% if m.merge_status not in ['MERGED','FAILED'] %}<div class="quick-actions">
-<form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/mark-pr-open"><input name="pr_ref" placeholder="PR link/#"><button class="ghost">Mark PR Open</button></form>
-<form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/mark-merged"><input name="merged_commit" placeholder="commit (optional — uses current HEAD)"><button class="ghost">Mark Merged</button></form>
+{% for m in merge_records %}
+<div class="merge-card">
+<div class="row"><div><strong>{{m.repo_name}}</strong>
+{% if m.pr_number %}<small>PR <a href="{{m.pr_url}}" target="_blank" rel="noopener">#{{m.pr_number}}</a> · {{m.pr_state}}</small>{% endif %}
+</div>
+<span class="badge {{'ready' if m.merge_status=='MERGED' else ('failed' if m.merge_status in ['FAILED','CONFLICT'] else '')}}">{{m.merge_status.replace('_',' ')}}</span></div>
+{% if m.pr_number %}
+<div class="facts">
+<div><small>CI</small><b>{{m.ci_status}}</b></div>
+<div><small>Mergeability</small><b>{{m.mergeability}}</b></div>
+<div><small>Source → Target</small><code>{{m.source_branch}} → {{m.base_branch}}</code></div>
+<div><small>Verified</small><code>{{(m.verified_commit or '—')[:12]}}</code></div>
+</div>
+{% endif %}
+{% if m.merged_commit %}<p><small>Merge commit</small><code>{{m.merged_commit[:12]}}</code>{% if m.external_merge_reason %} <small>({{m.external_merge_reason}})</small>{% endif %}</p>{% endif %}
+{% if m.merge_status != 'MERGED' %}<div class="quick-actions">
+{% if not m.pr_number %}
+  {% if m.github_available %}<form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/create-pr"><button class="ghost">Create PR</button></form>{% endif %}
+{% else %}
+  <form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/refresh"><button class="ghost">Refresh</button></form>
+  {% if m.gate.eligible %}<form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/merge" onsubmit="return confirm('Merge PR #{{m.pr_number}}? Strategy: {{m.merge_strategy}}')"><button class="success">Merge</button></form>
+  {% else %}<span class="badge failed">{{m.gate.blockers|join(', ')}}</span>{% endif %}
+{% endif %}
 </div>{% endif %}
+{% if m.merge_status != 'MERGED' and not m.github_available %}
+<details class="danger-zone"><summary>Confirm External Merge (manual, no GitHub integration)</summary>
+<form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/confirm-external-merge" onsubmit="return confirm('Xác nhận repo này đã merge THẬT trên GitHub/nơi khác? Hệ thống sẽ kiểm tra verified commit có thực sự nằm trong target branch không.')">
+<label>Merged commit SHA <small>(tuỳ chọn — để trống dùng HEAD hiện tại của target branch)</small><input name="merged_commit" placeholder="abc1234..."></label>
+<label>Lý do / bằng chứng <small>(bắt buộc)</small><input name="reason" required placeholder="VD: merged qua GitHub UI ngoài, PR #.., link..."></label>
+<button class="danger">Confirm External Merge</button>
+</form>
+</details>
+{% endif %}
+</div>
 {% else %}<p class="empty">No repositories yet.</p>{% endfor %}
-{% if merge_records and status=='READY_FOR_MAIN' %}<form method="post" action="/api/tasks/{{t.id}}/mark-merged" onsubmit="return confirm('Tất cả repo liên quan đã merge?')"><button>Mark All Merged</button></form>{% endif %}
 <p><b>DONE</b> chỉ đúng khi <i>mọi</i> repo bắt buộc đều MERGED — một PR còn mở ở bất kỳ repo nào cũng giữ Task ở ACTIVE/MERGING.</p>
 </section>
 
