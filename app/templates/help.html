@@ -40,21 +40,26 @@
 <a href="#scenarios">Ví dụ theo tình huống</a>
 <a href="#troubleshoot">Khi có lỗi</a>
 <a href="#nav-map">Bản đồ điều hướng</a>
+<a href="#risk-profile">Risk profile LOW/NORMAL/HIGH</a>
+<a href="#live-agents">Web Terminal</a>
+<a href="#remote-access">Remote Access Security</a>
 </nav>
 <div class="guide-content">
 
 <section class="guide-section" id="quick-start"><span class="section-kicker">BẮT ĐẦU NHANH</span><h3>Bắt đầu nhanh</h3><p>Toàn bộ vòng đời một task, từ lúc tạo tới lúc sandbox được dọn dẹp:</p>
 <ol class="steps">
-<li><a href="/tasks#new">Tạo Task</a><span>Một công việc mới cho bug hoặc feature.</span></li>
-<li><b>Thêm Agent Workspace</b><span>Chọn repository, agent, role và sandbox cho từng phần việc.</span></li>
-<li><b>Mở Claude / Codex</b><span>Bấm Open Claude / Open Codex, terminal mở đúng worktree của task.</span></li>
-<li><b>Agent sửa code + test</b><span>Làm việc trong source riêng, không đụng main hay agent khác.</span></li>
-<li><b>Mark Ready</b><span>Báo workspace đã sẵn sàng để tích hợp.</span></li>
-<li><a href="#integration">Create Integration</a><span>Ghép các Agent Workspace đã Ready lại để kiểm tra chung.</span></li>
-<li><a href="#integration-agent">Integration Agent merge + test</a><span>Xem diff, merge, chạy test, kiểm tra sandbox.</span></li>
+<li><a href="/tasks#new">Add to Backlog</a><span>Một ý định công việc — chưa tạo branch/worktree/sandbox.</span></li>
+<li><b>Select for Development</b><span>BACKLOG → PREPARE, vẫn chưa cấp resource.</span></li>
+<li><b>Viết Implementation Brief + Generate Prompt</b><span>GOAL/REQUIREMENTS/ACCEPTANCE_CRITERIA... rồi sinh AGENT PROMPT để review trước.</span></li>
+<li><b>Create Agent Workspace</b><span>Chọn repository, agent, role, sandbox — lúc này mới tạo branch/worktree.</span></li>
+<li><b>Mở Claude / Codex (desktop hoặc Open in Web)</b><span>Agent sửa code trong source riêng.</span></li>
+<li><b>Builder report</b><span>WHAT_CHANGED/FILES_CHANGED/TESTS_RUN/HOW_TO_VERIFY — coi như Mark Ready.</span></li>
+<li><b>Start Review</b><span>Chọn reviewer agent, prompt review tự sinh từ brief + builder report.</span></li>
+<li><b>REVIEW_PASS (hoặc Start Tester nếu risk HIGH)</b><span>FIX_REQUIRED trả task về Development.</span></li>
+<li><a href="#integration">Create Integration</a><span>Ghép các Agent Workspace đã sẵn sàng lại để kiểm tra chung.</span></li>
 <li><a href="#ready-for-main">READY_FOR_MAIN</a><span>Đủ điều kiện để mở Pull Request.</span></li>
 <li><a href="#github-flow">PR / CI / Merge</a><span>Tạo GitHub Pull Request, chờ CI PASS, merge trên GitHub.</span></li>
-<li><a href="#merge-cleanup">Sandbox tự cleanup</a><span>Sau thời gian giữ lại (mặc định 24 giờ).</span></li>
+<li><b>Close Task</b><span>Sau khi MERGED — sandbox vào lịch cleanup.</span></li>
 </ol>
 </section>
 
@@ -357,8 +362,10 @@
 <section class="guide-section" id="nav-map"><span class="section-kicker">ĐIỀU HƯỚNG</span><h3>Bản đồ điều hướng</h3>
 <table><tbody>
 <tr><td><a href="/">Dashboard</a></td><td>Tổng quan</td></tr>
-<tr><td><a href="/tasks">Tasks</a></td><td>Công việc</td></tr>
+<tr><td><a href="/tasks">Tasks</a></td><td>Công việc (List)</td></tr>
+<tr><td><a href="/kanban">Kanban</a></td><td>Công việc (Board)</td></tr>
 <tr><td><a href="/workspaces">Agent Workspaces</a></td><td>Nơi agent code</td></tr>
+<tr><td><a href="/agents/live">Live Agents</a></td><td>Web terminal đang chạy</td></tr>
 <tr><td><a href="/integrations">Integrations</a></td><td>Merge + verification</td></tr>
 <tr><td><a href="/sandboxes">Sandboxes</a></td><td>Môi trường runtime</td></tr>
 <tr><td><a href="/repositories">Repositories</a></td><td>Source repositories</td></tr>
@@ -366,6 +373,36 @@
 <tr><td><a href="/settings">Settings</a></td><td>Cấu hình</td></tr>
 <tr><td><a href="/help">Help</a></td><td>Hướng dẫn</td></tr>
 </tbody></table>
+</section>
+
+<section class="guide-section" id="risk-profile"><span class="section-kicker">POLICY</span><h3>LOW/NORMAL/HIGH khác nhau thế nào?</h3>
+<p>Mỗi Task chọn một risk profile ở bước viết Implementation Brief — quyết định những gate nào bắt buộc trước khi Integration:</p>
+<div class="sample-grid">
+<article><b>LOW</b><small>Builder → Review. Bỏ qua QA.</small></article>
+<article><b>NORMAL</b><small>Builder → Review → Integration. (mặc định)</small></article>
+<article><b>HIGH</b><small>Builder → Review → QA → Integration. Bắt buộc QA trước khi ghép.</small></article>
+</div>
+<div class="info">Không có một luồng cứng cho mọi Task — Kanban tự thêm/bớt cột QA tuỳ risk profile.</div>
+</section>
+
+<section class="guide-section" id="live-agents"><span class="section-kicker">WEB TERMINAL</span><h3>Web terminal dùng thế nào?</h3>
+<p>Mỗi Agent Workspace có thể mở một <b>AgentSession</b> — một PTY thật (không phải log giả) chạy đúng agent CLI (Claude/Codex) trong đúng worktree, xem trực tiếp từ trình duyệt qua WebSocket.</p>
+<ol class="steps">
+<li><b>Open in Web</b><span>Trên Agent Workspace hoặc Task Detail.</span></li>
+<li><b>Xem output trực tiếp</b><span>xterm.js render đúng những gì terminal thật in ra.</span></li>
+<li><b>Gõ lệnh nếu ở chế độ INTERACTIVE</b><span>VIEW_ONLY chỉ xem, không gửi được phím.</span></li>
+<li><b>Stop khi xong</b><span>Dừng hẳn tiến trình, không chỉ đóng tab.</span></li>
+</ol>
+<p>Vào <a href="/agents/live">Live Agents</a> để xem mọi session đang chạy trên máy này (Task / Agent / Workspace / State / Sandbox / Last activity).</p>
+<div class="warning"><b>An toàn lệnh:</b> trình duyệt chỉ gửi được workspace_id + chế độ xem — không gửi được cwd, executable, hay flags. Backend luôn tự suy ra lệnh thật từ danh sách agent đã cấu hình sẵn (giống launcher desktop).</div>
+<div class="info">Nếu server Workspace Manager khởi động lại, mọi PTY đang chạy trước đó thực sự đã mất — trạng thái sẽ hiện FAILED trung thực, không báo nhầm là RUNNING.</div>
+</section>
+
+<section class="guide-section" id="remote-access"><span class="section-kicker">BẢO MẬT</span><h3>Remote Access Security</h3>
+<div class="alert"><b>Không expose Web Terminal ra Internet công khai, không xác thực.</b> Terminal PTY tương tác có thể thực thi lệnh thật trong worktree thật.</div>
+<p>Nếu cần truy cập từ xa, dùng một trong các phương án đã xác thực:</p>
+<ul class="checklist"><li>Tailscale (mạng riêng, xác thực thiết bị)</li><li>Cloudflare Access (xác thực trước khi tới app)</li><li>SSH tunnel / port-forward tới localhost</li></ul>
+<p>Workspace Manager tự nó chỉ bind <code>127.0.0.1</code> — đây là lớp bảo vệ đầu tiên; lớp xác thực remote access là trách nhiệm của người vận hành.</p>
 </section>
 
 <section class="guide-section" id="practices"><span class="section-kicker">AN TOÀN</span><h3>Quy tắc nên tuân theo</h3>

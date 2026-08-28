@@ -1,0 +1,53 @@
+{% extends 'base.html' %}{% block title %}Session · {{w.agent|capitalize}} · {{w.task_name}}{% endblock %}{% block header_action %}<span class="badge {{s.status|lower}}">{{s.status.replace('_',' ')}}</span> <a href="/agents/live">Live Agents</a>{% endblock %}{% block content %}
+<link rel="stylesheet" href="/static/vendor/xterm.min.css">
+<section class="facts">
+<div><small>Agent</small><b class="cap">{{w.agent}}</b></div>
+<div><small>Workspace</small><code>{{w.branch}}</code></div>
+<div><small>Mode</small><b id="mode-label">{{s.mode}}</b></div>
+<div><small>Started</small><code>{{s.started_at}}</code></div>
+</section>
+<div class="actions">
+<button class="ghost" id="mode-toggle" type="button">{{ 'Switch to VIEW_ONLY' if s.mode=='INTERACTIVE' else 'Switch to INTERACTIVE' }}</button>
+<form method="post" action="/api/sessions/{{s.id}}/stop" onsubmit="return confirm('Dừng session này?')"><button class="danger">Stop</button></form>
+</div>
+{% if s.status in ['EXITED','FAILED'] %}<div class="alert"><b>Session {{s.status}}</b><p>exit code: {{s.exit_code if s.exit_code is not none else '—'}}</p></div>{% endif %}
+<div id="terminal" class="terminal-box"></div>
+<script src="/static/vendor/xterm.min.js"></script>
+<script>
+(function(){
+  var term = new Terminal({convertEol:true, fontSize:13, theme:{background:'#17252f'}});
+  term.open(document.getElementById('terminal'));
+  var interactive = {{ 'true' if s.mode=='INTERACTIVE' else 'false' }};
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var ws = new WebSocket(proto + '//' + location.host + '/ws/sessions/{{s.id}}');
+  ws.binaryType = 'arraybuffer';
+  ws.onmessage = function(ev){
+    if (typeof ev.data === 'string') {
+      try { var msg = JSON.parse(ev.data); if (msg.type === 'exit') { term.write('\r\n\n[session exited]\r\n'); } } catch(e){}
+      return;
+    }
+    term.write(new Uint8Array(ev.data));
+  };
+  term.onData(function(data){
+    if (!interactive || ws.readyState !== 1) return;
+    ws.send(new TextEncoder().encode(data));
+  });
+  function sendResize(){
+    if (ws.readyState === 1) ws.send(JSON.stringify({type:'resize', rows: term.rows, cols: term.cols}));
+  }
+  window.addEventListener('resize', sendResize);
+  ws.onopen = sendResize;
+  var toggleBtn = document.getElementById('mode-toggle');
+  toggleBtn.onclick = function(){
+    var nextMode = interactive ? 'VIEW_ONLY' : 'INTERACTIVE';
+    var body = new URLSearchParams({mode: nextMode});
+    fetch('/api/sessions/{{s.id}}/mode', {method:'POST', body: body}).then(function(r){ return r.json(); }).then(function(data){
+      if (!data.ok) return;
+      interactive = nextMode === 'INTERACTIVE';
+      document.getElementById('mode-label').textContent = nextMode;
+      toggleBtn.textContent = interactive ? 'Switch to VIEW_ONLY' : 'Switch to INTERACTIVE';
+    });
+  };
+})();
+</script>
+{% endblock %}

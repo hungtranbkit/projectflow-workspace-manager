@@ -42,6 +42,7 @@ def test_agent_sandbox_provisions_real_container_and_is_healthy(client, git_repo
     rid = [r for r in client.get("/api/repositories").json() if r["repo_name"] == "svc-a"][0]["id"]
     client.post("/api/tasks", data={"title": "Single sandbox check"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
+    client.post(f"/api/tasks/{tid}/select")
 
     w = create_task_workspace(client, tid, rid)
     sb = client.get("/api/sandboxes").json()[0]
@@ -69,6 +70,7 @@ def test_two_agent_sandboxes_are_fully_isolated(client, git_repo, sandboxable_re
     repos = {r["repo_name"]: r["id"] for r in client.get("/api/repositories").json()}
     client.post("/api/tasks", data={"title": "Isolation check"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
+    client.post(f"/api/tasks/{tid}/select")
 
     create_task_workspace(client, tid, repos["svc-a"], agent="codex", role="A")
     create_task_workspace(client, tid, repos["svc-b"], agent="claude", role="B")
@@ -96,6 +98,7 @@ def test_sandbox_capacity_limit_blocks_a_new_sandbox(client, git_repo, sandboxab
     rid = client.get("/api/repositories").json()[0]["id"]
     client.post("/api/tasks", data={"title": "Capacity check"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
+    client.post(f"/api/tasks/{tid}/select")
     client.app.state.sandboxes.max_running = 1
     try:
         create_task_workspace(client, tid, rid, agent="codex", role="A")

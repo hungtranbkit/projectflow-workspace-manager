@@ -90,6 +90,7 @@ def test_contextual_help_links_from_primary_screens(client, git_repo):
 
     client.post("/api/tasks", data={"title": "Contextual link check"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
+    client.post(f"/api/tasks/{tid}/select")  # BACKLOG's minimal view has none of these; select first
     task_page = client.get(f"/tasks/{tid}").text
     assert "/help#task-detail-sandbox" in task_page
     assert "/help#sandbox-modes" in task_page  # sandbox profile selector
