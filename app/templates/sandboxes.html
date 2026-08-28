@@ -1,4 +1,4 @@
-{% extends 'base.html' %}{% block title %}Sandboxes{% endblock %}{% block header_action %}<span class="badge">{{running}}/{{max_running}} running</span>{% endblock %}{% block content %}
+{% extends 'base.html' %}{% block title %}Sandboxes{% endblock %}{% block header_action %}<span class="badge">{{running}}/{{max_running}} running</span> <a href="/help#global-sandbox">? Xem hướng dẫn</a>{% endblock %}{% block content %}
 <div class="filters">
 <a href="/sandboxes" class="{{'active' if not filters.status else ''}}">All</a>
 <a href="/sandboxes?status=running" class="{{'active' if filters.status=='running' else ''}}">Running</a>
