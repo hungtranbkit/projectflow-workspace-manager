@@ -45,6 +45,7 @@ class FakeGh:
         self.next_number = 1
         self.target_heads: dict[str, str] = {}  # base_branch -> fake remote HEAD sha
         self.ancestors: set[str] = set()  # commits considered ancestors of the target for external-merge tests
+        self.pushed_branches: list[str] = []
 
     def real_head(self, repo_path, branch):
         r = subprocess.run(["git", "rev-parse", branch], cwd=str(repo_path), text=True, capture_output=True)
@@ -98,6 +99,9 @@ class FakeGh:
             return FR(0, "")
         if argv[:2] == ["git", "fetch"]:
             return FR(0, "")
+        if argv[:2] == ["git", "push"]:
+            self.pushed_branches.append(argv[3])
+            return FR(0, "")
         if argv[:2] == ["git", "rev-parse"] and str(argv[2]).startswith("origin/"):
             base = argv[2].split("/", 1)[1]
             return FR(0, self.target_heads.get(base, "0" * 40) + "\n")
@@ -145,6 +149,32 @@ def test_create_pr_persists_number_url_and_verified_commit(client, git_repo):
     assert row["merge_status"] == "PR_OPEN"
     assert row["verified_commit"] == w["head"] if "head" in w else row["verified_commit"]
     assert row["source_branch"] == w["branch"]
+    assert fake.pushed_branches == [f"{w['branch']}:{w['branch']}"]  # real bug found live: neither a Builder nor an
+    # Integration branch is ever pushed anywhere before Create PR --
+    # this proves the branch is pushed to origin BEFORE `gh pr create`
+    # is attempted, matching the real "Head sha can't be blank / No
+    # commits between main and <branch> / Head ref must be a branch"
+    # GraphQL error GitHub gives when the ref doesn't exist remotely.
+
+
+def test_create_pr_fails_loudly_if_push_fails(client, git_repo):
+    """A push failure (e.g. the remote rejects it) must block PR
+    creation with a clear PUSH_FAILED reason -- never silently attempt
+    `gh pr create` against a branch GitHub can't see."""
+    class PushFails(FakeGh):
+        def __call__(self, argv, cwd, timeout=30):
+            if argv[:2] == ["git", "push"]:
+                return FR(1, "", "remote rejected (non-fast-forward)")
+            return super().__call__(argv, cwd, timeout)
+    fake = PushFails()
+    client.app.state.github_merge.runner = fake
+    tid, rid, w = ready_low_risk_task(client, git_repo, "Push fails task")
+
+    r = client.post(f"/api/tasks/{tid}/merges/{rid}/create-pr", follow_redirects=False)
+    assert r.status_code == 409
+    assert not fake.prs  # gh pr create was never even attempted
+    row = client.app.state.db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?", (tid, rid))
+    assert row["pr_number"] is None
 
 
 def test_create_pr_is_idempotent_no_duplicate(client, git_repo):

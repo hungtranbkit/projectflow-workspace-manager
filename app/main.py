@@ -1467,6 +1467,14 @@ def create_app(settings=None):
         if not github_merge.available(r["repo_path"]): raise GitSafetyError("Repository has no GitHub remote -- use Confirm External Merge instead")
         base_branch=r["default_branch"] or "main"
         try:
+            # Neither a Builder Workspace branch nor a Task Integration
+            # branch is ever pushed anywhere automatically before this
+            # point (both only exist as local worktree branches) --
+            # push the exact verified branch to origin first, every
+            # time, so GitHub actually has something to open a PR
+            # against (and so a later commit landing on the same branch
+            # gets synced too, not just the first push).
+            github_merge.push_branch(r["repo_path"],branch)
             existing=github_merge.find_existing_pr(r["repo_path"],branch,base_branch)
             if existing and existing["state"]!="CLOSED":
                 status=github_merge.pr_status(r["repo_path"],existing["number"])

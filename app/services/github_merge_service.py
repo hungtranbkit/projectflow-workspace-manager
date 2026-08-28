@@ -50,6 +50,22 @@ class GitHubMergeService:
         except Exception:
             return False
 
+    def push_branch(self, repo_path, branch: str) -> None:
+        """Real `git push` of the exact verified source branch to origin
+        -- Create PR always pushes first. Neither a Builder Workspace's
+        branch nor a Task Integration branch is ever pushed anywhere
+        automatically elsewhere in this app (both only ever exist as
+        local worktree branches until this point), so `gh pr create`
+        would otherwise fail with GitHub's own honest 'no commits
+        between main and <branch>' / 'Head ref must be a branch' error
+        -- exactly what it does when the ref simply doesn't exist on the
+        remote yet. Never force-pushed (this app never force-pushes
+        anywhere); a genuinely diverged remote branch fails loudly here
+        rather than being silently overwritten."""
+        r = self.runner(["git", "push", "origin", f"{branch}:{branch}"], repo_path)
+        if r.returncode != 0:
+            raise GitHubIntegrationError("PUSH_FAILED", (r.stderr or r.stdout or "git push failed").strip())
+
     def find_existing_pr(self, repo_path, head_branch: str, base_branch: str) -> dict | None:
         r = self.runner(
             ["gh", "pr", "list", "--head", head_branch, "--base", base_branch, "--state", "all",
