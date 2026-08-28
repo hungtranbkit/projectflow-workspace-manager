@@ -202,6 +202,120 @@ CREATE TABLE IF NOT EXISTS agent_sessions(
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_workspace ON agent_sessions(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON agent_sessions(status);
 """),
+    # V6: Task Lifecycle & Gate Model Refactor. tasks.status is reduced to
+    # three PERSISTED values from here on -- BACKLOG / ACTIVE / CANCELLED.
+    # BLOCKED / READY_FOR_MAIN / DONE are never written to this column;
+    # TaskDecisionService computes them live from real child evidence on
+    # every read (the same fix already applied twice before in this
+    # codebase's history to task_integrations.ready_for_main and the V5
+    # Kanban column -- a status a route can forget to update is a status
+    # that WILL drift). review_runs/qa_runs are real history tables (never
+    # overwritten -- old evidence stays queryable) replacing the single
+    # mutable reviewer_agent/review_status/... columns V5 added directly
+    # on agent_workspaces; those columns are left in place, unused by any
+    # new code, and their last known values are copied into one seed
+    # review_runs/qa_runs row each so V5 evidence is not silently lost.
+    # merge_records makes cross-repo partial-merge tracking real: Task
+    # DONE is a fact derived from every REQUIRED repo's MergeRecord being
+    # MERGED, never a single "Mark Merged" click for the whole Task.
+    (6, """
+ALTER TABLE tasks ADD COLUMN brief_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE tasks ADD COLUMN legacy_status TEXT;
+ALTER TABLE tasks ADD COLUMN needs_reconciliation INTEGER NOT NULL DEFAULT 0;
+-- Section 13: Builder completion is pinned to the exact commit and Brief
+-- version at submission time, so a later commit or Brief edit can make a
+-- downstream Review/QA PASS stale without rewriting the report itself.
+ALTER TABLE verification_reports ADD COLUMN commit_sha TEXT;
+ALTER TABLE verification_reports ADD COLUMN brief_version INTEGER;
+CREATE TABLE IF NOT EXISTS review_runs(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER REFERENCES tasks(id),
+  workspace_id INTEGER REFERENCES agent_workspaces(id),
+  integration_id INTEGER REFERENCES integration_workspaces(id),
+  reviewer_type TEXT NOT NULL DEFAULT 'BUILDER_WORKSPACE',
+  reviewer_agent TEXT,
+  brief_version INTEGER,
+  reviewed_commit TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  findings TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS qa_runs(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  workspace_id INTEGER REFERENCES agent_workspaces(id),
+  brief_version INTEGER,
+  source_manifest TEXT NOT NULL DEFAULT '{}',
+  sandbox_id INTEGER REFERENCES sandboxes(id),
+  tester_agent TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  automated_results TEXT NOT NULL DEFAULT '',
+  manual_result TEXT,
+  hardware_result TEXT,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS merge_records(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  repository_id INTEGER NOT NULL REFERENCES repositories(id),
+  required INTEGER NOT NULL DEFAULT 1,
+  integration_branch TEXT,
+  pr_ref TEXT,
+  merge_status TEXT NOT NULL DEFAULT 'NOT_STARTED',
+  merged_commit TEXT,
+  merged_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(task_id, repository_id)
+);
+CREATE TABLE IF NOT EXISTS prompts(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  workspace_id INTEGER REFERENCES agent_workspaces(id),
+  prompt_type TEXT NOT NULL,
+  brief_version INTEGER NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
+  generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_review_runs_workspace ON review_runs(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_review_runs_task ON review_runs(task_id);
+CREATE INDEX IF NOT EXISTS idx_qa_runs_task ON qa_runs(task_id);
+CREATE INDEX IF NOT EXISTS idx_merge_records_task ON merge_records(task_id);
+CREATE INDEX IF NOT EXISTS idx_prompts_task ON prompts(task_id);
+
+-- Seed review_runs/qa_runs from V5's single-row columns so existing
+-- evidence survives as real history instead of being dropped.
+INSERT INTO review_runs(task_id,workspace_id,reviewer_type,reviewer_agent,reviewed_commit,status,findings,created_at)
+  SELECT task_id,id,'BUILDER_WORKSPACE',reviewer_agent,review_commit,COALESCE(review_status,'PENDING'),COALESCE(review_notes,''),updated_at
+  FROM agent_workspaces WHERE reviewer_agent IS NOT NULL;
+INSERT INTO qa_runs(task_id,workspace_id,tester_agent,status,notes,created_at)
+  SELECT task_id,id,tester_agent,COALESCE(qa_status,'PENDING'),COALESCE(qa_notes,''),updated_at
+  FROM agent_workspaces WHERE tester_agent IS NOT NULL AND task_id IS NOT NULL;
+
+-- Required MergeRecord per distinct repository already represented by a
+-- Task's Builder Workspaces, so cross-repo merge tracking exists for
+-- every Task carried over from before this phase.
+INSERT OR IGNORE INTO merge_records(task_id,repository_id,required,merge_status)
+  SELECT DISTINCT task_id,repository_id,1,'NOT_STARTED' FROM agent_workspaces WHERE task_id IS NOT NULL;
+UPDATE merge_records SET merge_status='MERGED',merged_at=CURRENT_TIMESTAMP
+  WHERE task_id IN (SELECT id FROM tasks WHERE status IN ('MERGED','CLOSED'));
+
+-- Collapse the old, much larger status vocabulary into the three values
+-- this column holds from now on. BLOCKED/READY_FOR_MAIN/DONE are NEVER
+-- written here -- they are always computed live by TaskDecisionService.
+-- A legacy MERGED/CLOSED task becomes ACTIVE with its merge_records
+-- already marked MERGED above, so the decision engine derives DONE for
+-- it on the very next read -- exactly the same evidence-based path a
+-- brand new Task reaches DONE through, not a special-cased status value.
+UPDATE tasks SET legacy_status=status WHERE legacy_status IS NULL;
+UPDATE tasks SET status='BACKLOG' WHERE status IN ('OPEN');
+UPDATE tasks SET status='ACTIVE' WHERE status IN ('PREPARE','IN_PROGRESS','READY_FOR_INTEGRATION','INTEGRATING','TESTING','MERGED','CLOSED');
+UPDATE tasks SET needs_reconciliation=1 WHERE legacy_status IN ('MERGED','CLOSED','READY_FOR_INTEGRATION','INTEGRATING','TESTING');
+-- BACKLOG/ACTIVE/CANCELLED rows were already valid values and pass through unchanged.
+"""),
 ]
 
 

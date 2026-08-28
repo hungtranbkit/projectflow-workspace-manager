@@ -172,6 +172,7 @@ def test_kanban_maps_task_states_to_correct_columns(client, git_repo, sandboxabl
     # BACKLOG: draft task, no workspace
     client.post("/api/tasks", data={"title": "Draft task"}, follow_redirects=False)
     tid_backlog = client.get("/api/tasks").json()[0]["id"]
+    assert client.get(f"/api/tasks/{tid_backlog}/decision").json()["status"] == "BACKLOG"
 
     # DEVELOPMENT: task with a CODING (not-yet-Ready) workspace
     post_multi(client, "/api/tasks/new-with-workspace", [
@@ -179,22 +180,28 @@ def test_kanban_maps_task_states_to_correct_columns(client, git_repo, sandboxabl
         ("ws_repository_id", str(rid)), ("ws_agent", "codex"), ("ws_role", "Backend"), ("ws_base_branch", "main"), ("ws_sandbox_profile", "NONE"),
     ])
     tid_dev = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == "Dev task"][0]
+    assert client.get(f"/api/tasks/{tid_dev}/decision").json()["stage"] == "DEVELOPMENT"
 
     kanban = client.get("/kanban").text
-    board_positions = {}
-    for col in ["BACKLOG", "PREPARE", "DEVELOPMENT", "REVIEW", "QA", "INTEGRATION", "READY_FOR_MAIN", "DONE"]:
-        board_positions[col] = kanban.find(f">{col.replace('_',' ')}")
+    board_positions = {col: kanban.find(f">{col} <") for col in ["Backlog", "Development", "Review / QA", "Integration", "Ready for Main", "Done", "Blocked"]}
     draft_pos = kanban.find("Draft task")
     dev_pos = kanban.find("Dev task")
-    assert board_positions["BACKLOG"] < draft_pos < board_positions["PREPARE"]
-    assert board_positions["DEVELOPMENT"] < dev_pos < board_positions["REVIEW"]
+    assert board_positions["Backlog"] != -1 and board_positions["Backlog"] < draft_pos < board_positions["Development"]
+    assert board_positions["Development"] < dev_pos < board_positions["Review / QA"]
 
-    # MERGED task -> DONE
-    client.app.state.db.execute("UPDATE tasks SET status='MERGED' WHERE id=?", (tid_backlog,))
+    # All required repos merged (LOW risk -> no QA/Integration needed) -> DONE, computed live
+    client.app.state.db.execute("UPDATE tasks SET status='CANCELLED' WHERE id=?", (tid_backlog,))  # keep BACKLOG task out of the way
+    w = client.get(f"/api/tasks/{tid_dev}").json()["workspaces"][0]
+    client.post(f"/api/tasks/{tid_dev}/brief", data={"goal": "g", "acceptance_criteria": "a", "risk_profile": "LOW"})
+    client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
+    client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+    client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
+    client.post(f"/api/tasks/{tid_dev}/mark-merged")
+    assert client.get(f"/api/tasks/{tid_dev}/decision").json()["status"] == "DONE"
     kanban2 = client.get("/kanban").text
-    done_pos = kanban2.find(">DONE")
-    draft_pos2 = kanban2.find("Draft task")
-    assert done_pos < draft_pos2
+    done_pos = kanban2.find(">Done <")
+    dev_pos2 = kanban2.find("Dev task")
+    assert done_pos < dev_pos2
 
 
 def test_task_detail_aggregates_child_state_and_never_duplicates_it(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
@@ -235,25 +242,32 @@ def test_test_readiness_no_partial_yes(client, git_repo, sandboxable_repo_factor
     for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
     ws = client.get(f"/api/tasks/{tid}").json()["workspaces"]
 
-    # neither workspace Ready yet -> NO
+    # neither workspace submitted for review yet -> NO
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["test_readiness"] == "NO"
     page = client.get(f"/tasks/{tid}").text
-    assert "Full integration test:</b> NO" in page or ">NO<" in page
+    assert "Test Readiness</small><code>NO</code>" in page
 
-    # mark only ONE workspace ready (its repo needs no sandbox) -> that one
-    # workspace is individually testable, the other isn't -> PARTIAL
+    # mark only ONE workspace ready (submitted for review) -> PARTIAL
     ready_ws = next(w for w in ws if w["agent"] == "codex")
     client.post(f"/api/workspaces/{ready_ws['id']}/ready")
-    page = client.get(f"/tasks/{tid}").text
-    assert "Full integration test:</b> PARTIAL" in page
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["test_readiness"] == "PARTIAL"
 
-    # mark the sandboxed workspace ready too -> YES once its sandbox is RUNNING/healthy
+    # mark the other workspace ready too -> YES, every Builder submitted
     backend_ws = next(w for w in ws if w["agent"] == "claude")
     client.post(f"/api/workspaces/{backend_ws['id']}/ready")
-    page = client.get(f"/tasks/{tid}").text
-    assert "Full integration test:</b> YES" in page
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["test_readiness"] == "YES"
 
 
 def test_blocking_workspace_shown_and_next_action_progresses(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+    """The Task-level next_action (TaskDecisionService) progresses through
+    OPEN_BUILDER -> SUBMIT_FOR_REVIEW -> START_REVIEW -> CREATE_INTEGRATION
+    as the one Builder Workspace moves through the gate model. (The
+    older per-sandbox "Run Tests"/"Open App and Verify" steps still exist,
+    but now live only on the Workspace's own Runtime section, a separate
+    concern from this Task-level gate engine -- section 39.)"""
     root, _ = git_repo
     repo = sandboxable_repo_factory(root, "block-repo", port_range=(21960, 21979))
     register(client, repo, "block-repo")
@@ -264,22 +278,24 @@ def test_blocking_workspace_shown_and_next_action_progresses(client, git_repo, s
     ], follow_redirects=False)
     tid = int(r.headers["location"].split("/")[-1])
     w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
+    for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
 
     page = client.get(f"/tasks/{tid}").text
-    assert "Task blocked by:" in page
     assert "codex" in page
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["next_action"]["action"] == "OPEN_BUILDER"
 
-    client.post(f"/api/workspaces/{w['id']}/ready")
-    sb = client.get("/api/sandboxes").json()[0]; cleanup_sandboxes.append(sb["id"])
-    page = client.get(f"/tasks/{tid}").text
-    assert "Run Tests" in page  # next action progressed off "not ready"
+    client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["next_action"]["action"] == "SUBMIT_FOR_REVIEW"  # builder READY, no review started
 
-    client.post(f"/api/workspaces/{w['id']}/test")
-    wait_agent_tests(client, w["id"])
-    page = client.get(f"/tasks/{tid}").text
-    assert "Open App and Verify" in page
+    client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["next_action"]["action"] == "START_REVIEW"  # review in progress
 
-    client.post(f"/api/sandboxes/{sb['id']}/manual-verification", data={"result": "PASS"})
+    client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["next_action"]["action"] == "CREATE_INTEGRATION"  # NORMAL risk, review PASS -- ready to integrate
     page = client.get(f"/tasks/{tid}").text
     assert "Create Integration" in page
 
@@ -298,9 +314,9 @@ def test_ready_workspace_never_makes_task_ready_for_main(client, git_repo, sandb
     for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
     client.post(f"/api/workspaces/{w['id']}/ready")
 
-    page = client.get(f"/tasks/{tid}").text
-    assert "<small>READY_FOR_MAIN</small><b>NO</b>" in page  # summary block, no integration created at all yet
-    assert client.get(f"/api/tasks/{tid}").json()["status"] != "READY_FOR_MAIN"
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["ready_for_main"] is False  # workspace READY (agent thinks it's done) is not a review PASS, let alone Integration
+    assert d["status"] != "READY_FOR_MAIN"
 
 
 def test_create_integration_gated_with_reason_when_not_all_ready(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
@@ -324,8 +340,17 @@ def test_create_integration_gated_with_reason_when_not_all_ready(client, git_rep
     assert "Create Integration disabled" in page
     assert "Waiting for" in page and "codex" in page
 
-    for w in client.get(f"/api/tasks/{tid}").json()["workspaces"]:
-        client.post(f"/api/workspaces/{w['id']}/ready")
+    # READY alone (agent thinks it's done) is not enough -- eligibility
+    # requires every Builder's review to be PASS (section 22).
+    ws = client.get(f"/api/tasks/{tid}").json()["workspaces"]
+    for w in ws:
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
+    page = client.get(f"/tasks/{tid}").text
+    assert "Create Integration disabled" in page  # still disabled -- no reviews yet
+
+    for w in ws:
+        client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+        client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
     page = client.get(f"/tasks/{tid}").text
     assert "Create Integration disabled" not in page
     assert 'action="/api/tasks/%s/integrations"' % tid in page
@@ -345,7 +370,9 @@ def test_ready_for_main_task_enters_ready_for_main_column(client, git_repo, sand
     ], follow_redirects=False)
     tid = int(r.headers["location"].split("/")[-1])
     w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
-    client.post(f"/api/workspaces/{w['id']}/ready")
+    client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
+    client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+    client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
     client.post(f"/api/tasks/{tid}/integrations")
     for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
     iid = client.get("/api/integrations").json()[0]["id"]
@@ -353,24 +380,37 @@ def test_ready_for_main_task_enters_ready_for_main_column(client, git_repo, sand
     for _ in range(100):
         if client.app.state.db.one("SELECT status FROM integration_workspaces WHERE id=?", (iid,))["status"] != "TESTING": break
         time.sleep(.05)
+    client.post(f"/api/integrations/{iid}/ready-for-main")
 
-    page = client.get(f"/tasks/{tid}").text
-    assert "READY_FOR_MAIN:</b> YES" in page
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["status"] == "READY_FOR_MAIN" and d["ready_for_main"] is True
 
     kanban = client.get("/kanban").text
-    rfm_pos = kanban.find(">READY FOR MAIN")
-    done_pos = kanban.find(">DONE")
+    rfm_pos = kanban.find(">Ready for Main <")
+    done_pos = kanban.find(">Done <")
     title_pos = kanban.find("RFM column task")
-    assert rfm_pos < title_pos < done_pos
+    assert rfm_pos != -1 and rfm_pos < title_pos < done_pos
 
 
 def test_merged_task_enters_done_column(client, git_repo):
+    """DONE is computed purely from MergeRecord state (section 25/41) --
+    never from a raw tasks.status write. LOW risk here so Review PASS is
+    the only required gate before every repo can be marked merged."""
     root, repo = git_repo
     register(client, repo, "demo")
-    client.post("/api/tasks", data={"title": "To be merged"}, follow_redirects=False)
+    client.post("/api/tasks", data={"title": "To be merged", "risk_profile": "LOW"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
-    client.app.state.db.execute("UPDATE tasks SET status='MERGED' WHERE id=?", (tid,))
+    client.post(f"/api/tasks/{tid}/select")
+    rid = client.get("/api/repositories").json()[0]["id"]
+    client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "base_branch": "main"})
+    w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
+    client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
+    client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+    client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
+    client.post(f"/api/tasks/{tid}/mark-merged")
+    assert client.get(f"/api/tasks/{tid}/decision").json()["status"] == "DONE"
+
     kanban = client.get("/kanban").text
-    done_idx = kanban.find(">DONE")
+    done_idx = kanban.find(">Done <")
     title_idx = kanban.find("To be merged")
     assert 0 <= done_idx < title_idx

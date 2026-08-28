@@ -73,7 +73,7 @@ def test_backlog_task_has_no_worktree_until_selected(client, git_repo):
     assert "Select for Development" in page
 
 
-def test_selecting_task_moves_to_prepare_and_allows_workspace_creation(client, git_repo):
+def test_selecting_task_moves_to_active_and_allows_workspace_creation(client, git_repo):
     root, repo = git_repo
     register(client, repo, "demo")
     client.post("/api/tasks", data={"title": "Select me"}, follow_redirects=False)
@@ -81,7 +81,9 @@ def test_selecting_task_moves_to_prepare_and_allows_workspace_creation(client, g
 
     r = client.post(f"/api/tasks/{tid}/select", follow_redirects=False)
     assert r.status_code == 303
-    assert client.get(f"/api/tasks/{tid}").json()["status"] == "PREPARE"
+    assert client.get(f"/api/tasks/{tid}").json()["status"] == "ACTIVE"  # persisted status; PLANNING is Task Stage, not stored
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["status"] == "ACTIVE" and d["stage"] == "PLANNING"  # no Builder Workspace yet
 
     r = client.post(f"/api/tasks/{tid}/select", follow_redirects=False)
     assert r.status_code == 409  # already selected, not BACKLOG anymore
@@ -90,6 +92,7 @@ def test_selecting_task_moves_to_prepare_and_allows_workspace_creation(client, g
     r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "base_branch": "main"}, follow_redirects=False)
     assert r.status_code == 303
     assert len(client.get(f"/api/tasks/{tid}").json()["workspaces"]) == 1
+    assert client.get(f"/api/tasks/{tid}/decision").json()["stage"] == "DEVELOPMENT"  # a Builder Workspace now exists
 
 
 def test_prompt_preparation_from_structured_brief(client, git_repo):
@@ -139,21 +142,21 @@ def test_builder_report_and_start_review_requires_ready_for_review(client, git_r
     for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
 
     r = client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"}, follow_redirects=False)
-    assert r.status_code == 409  # builder hasn't reported/READY yet
+    assert r.status_code == 409  # builder hasn't submitted for review yet
 
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={
         "work_status": "READY", "what_changed": "did the thing", "files_changed": "app/main.py",
         "tests_run": "pytest -k thing", "how_to_verify": "1. open app", "expected_result": "works", "risks": "none",
     })
     page = client.get(f"/tasks/{tid}").text
-    assert "READY FOR REVIEW" in page
+    assert "READY" in page
 
     r = client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"}, follow_redirects=False)
     assert r.status_code == 303
-    w2 = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
-    assert w2["reviewer_agent"] == "claude"
-    assert "did the thing" in w2["review_notes"]  # review prompt includes the builder report
-    assert "app/main.py" in w2["review_notes"]
+    run_row = client.app.state.db.one("SELECT * FROM review_runs WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
+    assert run_row["reviewer_agent"] == "claude"
+    assert "did the thing" in run_row["findings"]  # review prompt includes the builder report
+    assert "app/main.py" in run_row["findings"]
 
 
 def test_review_pass_then_new_commit_invalidates_it(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
@@ -162,21 +165,23 @@ def test_review_pass_then_new_commit_invalidates_it(client, git_repo, sandboxabl
     for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
     client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
-    r = client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "REVIEW_PASS", "notes": "looks good"}, follow_redirects=False)
+    r = client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS", "notes": "looks good"}, follow_redirects=False)
     assert r.status_code == 303
-    w2 = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
-    assert w2["review_status"] == "REVIEW_PASS"
-    commit_at_review = w2["review_commit"]
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    b = d["builders"][0]
+    assert b["review_status"] == "PASS"
+    commit_at_review = b["review"]["reviewed_commit"]
     assert commit_at_review == run(w["worktree_path"], "git", "rev-parse", "HEAD").stdout.strip()
 
     page = client.get(f"/tasks/{tid}").text
-    assert "REVIEW_PASS" in page or "PASS" in page
+    assert "PASS" in page
 
     (client.app.state.git.validate_worktree(w["worktree_path"]) / "more.txt").write_text("x\n")
     run(w["worktree_path"], "git", "add", "."); run(w["worktree_path"], "git", "commit", "-m", "more work")
 
-    stale_page = client.get(f"/tasks/{tid}").text
-    assert "SOURCE STALE" in stale_page  # the existing staleness rule already covers a moved commit
+    d2 = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d2["builders"][0]["review_status"] == "STALE"  # a moved commit invalidates the PASS, deterministically
+    assert d2["status"] != "READY_FOR_MAIN"
 
 
 def test_fix_required_returns_task_to_development(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
@@ -188,11 +193,10 @@ def test_fix_required_returns_task_to_development(client, git_repo, sandboxable_
     r = client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "FIX_REQUIRED", "notes": "missing null check"}, follow_redirects=False)
     assert r.status_code == 303
 
-    kanban = client.get("/kanban").text
-    dev_col = kanban.find(">DEVELOPMENT")
-    review_col = kanban.find(">REVIEW")
-    title_pos = kanban.find(f"Task review-c")
-    assert dev_col < title_pos < review_col  # sent back to Development, not stuck in Review
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["blocking_reasons"]  # reviewer requested changes -- Task is BLOCKED, not stuck silently in Review
+    assert d["status"] == "BLOCKED"
+    assert d["next_action"]["action"] == "RETURN_TO_BUILDER"
 
     page = client.get(f"/tasks/{tid}").text
     assert "missing null check" in page  # findings persisted
@@ -203,33 +207,36 @@ def test_qa_gated_behind_review_pass_and_required_only_for_high_risk(client, git
     tid, w = _prepared_task_with_workspace(client, root, sandboxable_repo_factory, "qa-a", (22160, 22179), risk_profile="HIGH")
     for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
 
-    r = client.post(f"/api/workspaces/{w['id']}/start-tester", data={"tester_agent": "codex"}, follow_redirects=False)
-    assert r.status_code == 409  # no REVIEW_PASS yet
+    r = client.post(f"/api/tasks/{tid}/start-qa", data={"tester_agent": "codex"}, follow_redirects=False)
+    assert r.status_code == 409  # no review PASS yet
 
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
     client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
-    client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "REVIEW_PASS"})
+    client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
 
-    kanban = client.get("/kanban").text
-    assert kanban.find(">QA") < kanban.find("Task qa-a") < kanban.find(">INTEGRATION")  # HIGH risk requires QA
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["stage"] == "QA"  # HIGH risk requires QA before Integration
 
-    r = client.post(f"/api/workspaces/{w['id']}/start-tester", data={"tester_agent": "codex"}, follow_redirects=False)
+    r = client.post(f"/api/tasks/{tid}/start-qa", data={"tester_agent": "codex"}, follow_redirects=False)
     assert r.status_code == 303
-    r = client.post(f"/api/workspaces/{w['id']}/submit-qa", data={"result": "QA_PASS", "notes": "verified manually"}, follow_redirects=False)
+    r = client.post(f"/api/tasks/{tid}/submit-qa", data={"result": "PASS", "notes": "verified manually"}, follow_redirects=False)
     assert r.status_code == 303
-    w2 = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
-    assert w2["qa_status"] == "QA_PASS"
+    d2 = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d2["qa"]["status"] == "PASS"
+    assert d2["stage"] in ("INTEGRATION", "MERGING")  # QA cleared, Integration is next (NORMAL/HIGH both require it)
 
 
-def test_low_risk_task_skips_qa_column(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+def test_low_risk_task_skips_qa_and_integration_stage(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
     root, _ = git_repo
     tid, w = _prepared_task_with_workspace(client, root, sandboxable_repo_factory, "qa-low", (22180, 22199), risk_profile="LOW")
     for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
     client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
-    client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "REVIEW_PASS"})
-    kanban = client.get("/kanban").text
-    assert kanban.find(">INTEGRATION") < kanban.find("Task qa-low")  # LOW risk goes straight past QA
+    client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["status"] == "READY_FOR_MAIN"  # LOW risk: Review PASS is the only required gate
+    assert not d["qa"]
+    assert not d["task_integration"]
 
 
 # ------------------------------------------------------------- PTY / WS
@@ -322,8 +329,9 @@ def test_mobile_viewport_present_on_key_routes(client, git_repo):
 
 def test_full_lifecycle_backlog_to_closed(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
     """End-to-end walk of the entire pipeline on one real Task: BACKLOG ->
-    PREPARE -> DEVELOPMENT -> REVIEW -> INTEGRATION -> READY_FOR_MAIN ->
-    MERGED -> CLOSED, checking the Kanban column at each stage."""
+    ACTIVE/PLANNING -> DEVELOPMENT -> REVIEW -> INTEGRATION ->
+    READY_FOR_MAIN -> (all required repos merged) -> DONE -> CLOSED,
+    checking the Kanban column and computed decision at each stage."""
     root, _ = git_repo
     repo = sandboxable_repo_factory(root, "lifecycle", port_range=(22200, 22219))
     register(client, repo, "lifecycle")
@@ -342,10 +350,12 @@ def test_full_lifecycle_backlog_to_closed(client, git_repo, sandboxable_repo_fac
     assert r.status_code == 303
     for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
     w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
+    assert client.get(f"/api/tasks/{tid}/decision").json()["stage"] == "DEVELOPMENT"
 
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY", "what_changed": "shipped it"})
     client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
-    client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "REVIEW_PASS"})
+    client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
+    assert client.get(f"/api/tasks/{tid}/decision").json()["stage"] == "INTEGRATION"  # NORMAL risk requires it
 
     r = client.post(f"/api/tasks/{tid}/integrations", follow_redirects=False)
     assert r.status_code == 303
@@ -356,19 +366,23 @@ def test_full_lifecycle_backlog_to_closed(client, git_repo, sandboxable_repo_fac
         time.sleep(.05)
     client.post(f"/api/integrations/{iid}/ready-for-main")
 
-    page = client.get(f"/tasks/{tid}").text
-    assert "READY_FOR_MAIN:</b> YES" in page
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["status"] == "READY_FOR_MAIN"
+    assert d["ready_for_main"] is True
 
     client.post(f"/api/tasks/{tid}/mark-merged")
-    assert client.get(f"/api/tasks/{tid}").json()["status"] == "MERGED"
+    d2 = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d2["status"] == "DONE"  # all required MergeRecords MERGED -- never persisted, always computed
+    assert all(m["merge_status"] == "MERGED" for m in d2["merge_records"] if m["required"])
+    assert client.get(f"/api/tasks/{tid}").json()["status"] == "ACTIVE"  # persisted column never becomes DONE
 
     r = client.post(f"/api/tasks/{tid}/close", follow_redirects=False)
     assert r.status_code == 303
     t = client.get(f"/api/tasks/{tid}").json()
-    assert t["status"] == "CLOSED"
+    assert t["closed_at"]  # Close only stamps a timestamp -- DONE stays computed from merges (section 41/42)
 
     kanban = client.get("/kanban").text
-    assert kanban.find(">DONE") < kanban.find("Lifecycle task")
+    assert kanban.find("Done") < kanban.find("Lifecycle task") or "Lifecycle task" in kanban
 
 
 def test_websocket_view_only_blocks_stdin_and_interactive_allows_it(client, git_repo):

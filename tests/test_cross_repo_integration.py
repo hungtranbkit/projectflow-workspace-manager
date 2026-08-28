@@ -93,6 +93,11 @@ def test_backend_and_client_test_together_without_either_merging_to_main(client,
 
     for w in (backend_ws, client_ws):
         assert client.post(f"/api/workspaces/{w['id']}/ready", follow_redirects=False).status_code == 303
+        # Integration eligibility (section 22) requires every Builder's
+        # review to be PASS at the exact current commit -- READY alone
+        # is not enough.
+        client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+        assert client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"}, follow_redirects=False).status_code == 303
 
     sandbox_id = None
     try:

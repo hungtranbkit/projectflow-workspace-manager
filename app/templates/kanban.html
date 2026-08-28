@@ -11,16 +11,17 @@
 <div class="kanban">
 {% for col in columns %}
 <div class="kanban-col">
-<h4>{{col.replace('_',' ')}} <small>({{board[col]|length}})</small></h4>
+<h4>{{col}} <small>({{board[col]|length}})</small></h4>
 {% for c in board[col] %}
 <a class="task-card" href="/tasks/{{c.task.id}}">
 <h5>{{c.task.title}}</h5>
-<small>{{c.task.slug}}</small>
-<div class="stat">Agents<br><b>{{c.agents.ready}} / {{c.agents.total}} READY</b>{% if c.agents.failed %} · {{c.agents.failed}} FAIL{% endif %}</div>
-{% for w in c.workspaces %}<div class="stat cap">{{w.agent}} · {{w.role or c.task.slug}}<br><span class="badge {{w.status|lower}}">{{w.status_label}}</span></div>{% endfor %}
+<small>{{c.task.slug}} · {{c.decision.risk_profile}} risk</small>
+<div class="stat">Builders<br><b>{{c.agents.ready}} / {{c.agents.total}} READY</b>{% if c.agents.failed %} · {{c.agents.failed}} FIX_REQUIRED{% endif %}</div>
+{% for w in c.workspaces %}<div class="stat cap">{{w.agent}} · {{w.role or c.task.slug}}<br><span class="badge {{w.status|lower}}">{{w.status_label}}</span> <span class="badge {{'ready' if w.review_status=='PASS' else ('failed' if w.review_status in ['FIX_REQUIRED','BLOCKED'] else '')}}">Review: {{w.review_status}}</span></div>{% endfor %}
 <div class="stat">Sandbox<br><b>{{c.sandbox.running}} RUNNING</b>{% if c.sandbox.unhealthy %} · {{c.sandbox.unhealthy}} unhealthy{% endif %}</div>
-<div class="stat">Tests<br><b>{{c.tests.passed}} / {{c.tests.total}} PASS</b></div>
+{% if c.decision.qa %}<div class="stat">QA<br><b>{{c.decision.qa.status}}</b></div>{% endif %}
 <div class="stat">Integration<br><b>{{c.integration.replace('_',' ')}}</b></div>
+{% if c.next_action.label %}<div class="stat">Next<br><b>{{c.next_action.label}}</b></div>{% endif %}
 </a>
 {% else %}<p class="empty">—</p>{% endfor %}
 </div>

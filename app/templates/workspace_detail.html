@@ -1,15 +1,36 @@
-{% extends 'base.html' %}{% block title %}{{w.agent|capitalize}} · {{w.task_name}}{% endblock %}{% block header_action %}<span class="badge {{w.status|lower}}">{{w.status}}</span> <a href="/help#agent-ready-next">? Agent báo READY rồi thì làm gì?</a>{% endblock %}{% block content %}
+{% extends 'base.html' %}{% block title %}{{w.agent|capitalize}} · {{w.task_name}}{% endblock %}{% block header_action %}{% if task_decision %}<span class="badge {{task_decision.status|lower}}">Task: {{task_decision.status.replace('_',' ')}}</span>{% endif %} <span class="badge {{w.status|lower}}">Workspace: {{w.status}}</span> <a href="/help#agent-ready-next">? Agent báo READY rồi thì làm gì?</a>{% endblock %}{% block content %}
 
-<div class="warning"><b>READY chỉ có nghĩa:</b> agent coi source đã xong, sẵn sàng để verify/tích hợp. Không có nghĩa là đã test, đã verify thủ công, đã tích hợp, hay sẵn sàng lên main.</div>
+<div class="warning"><b>READY chỉ có nghĩa:</b> agent coi source đã xong, sẵn sàng để review. Không có nghĩa là đã review PASS, đã QA, đã tích hợp, hay sẵn sàng lên main.</div>
 
+<!-- Section 39: Task Status, Workspace Status, Sandbox Status and Test
+     Status are four separate signals -- never collapsed into one badge. -->
 <section class="cards">
-<article><b>{{w.status}}</b><span>Agent code</span></article>
-<article><b>{{readiness.sandbox_status.replace('_',' ') if readiness.sandbox_configured else 'NOT CONFIGURED'}}</b><span>Sandbox</span></article>
-<article><b>{{readiness.automated_status.replace('_',' ')}}</b><span>Automated tests</span></article>
-<article><b>{{readiness.manual.status.replace('_',' ')}}</b><span>Manual verification</span></article>
+{% if task_decision %}<article><b>{{task_decision.status.replace('_',' ')}}</b><span>Task Status</span></article>{% endif %}
+<article><b>{{w.status}}</b><span>Workspace Status</span></article>
+{% if builder %}<article><b>{{builder.review_status}}</b><span>Review Status</span></article>{% endif %}
+<article><b>{{readiness.sandbox_status.replace('_',' ') if readiness.sandbox_configured else 'NOT CONFIGURED'}}</b><span>Sandbox Status</span></article>
+<article><b>{{readiness.automated_status.replace('_',' ')}}</b><span>Test Status (automated)</span></article>
+<article><b>{{readiness.manual.status.replace('_',' ')}}</b><span>Test Status (manual)</span></article>
 </section>
 
 <div class="info"><b>Bước tiếp theo</b><p>{{next_action.text}}</p>{% if next_action.label %}{% if next_action.href and next_action.method=='POST' %}<form method="post" action="{{next_action.href}}"><button class="button">{{next_action.label}}</button></form>{% elif next_action.href %}<a class="button" href="{{next_action.href}}">{{next_action.label}}</a>{% endif %}{% endif %}</div>
+
+{% if builder %}
+<h3 class="subgroup">Review (this exact commit)</h3>
+<section class="panel">
+<div class="row"><div><small>Reviewed commit</small><code>{{(builder.review.reviewed_commit or '—')[:12]}}</code> <small>current HEAD</small><code>{{(builder.head or '—')[:12]}}</code></div><span class="badge {{'ready' if builder.review_status=='PASS' else ('failed' if builder.review_status in ['FIX_REQUIRED','BLOCKED'] else '')}}">{{builder.review_status}}</span></div>
+{% if builder.review_status=='STALE' %}<div class="warning"><b>STALE</b><p>Source or Task Brief changed since this review -- it is no longer valid evidence. Start a new Review.</p></div>{% endif %}
+{% if builder.ready and builder.review_status in ['NONE','STALE'] %}
+<!-- Section 11: default READ_ONLY review session -- no worktree is
+     created here, only a new review_runs row pinned to this exact commit. -->
+<form method="post" action="/api/workspaces/{{w.id}}/start-review"><label>Reviewer<select name="reviewer_agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><button class="ghost">{{'Start Review' if builder.review_status=='NONE' else 'Re-review (source changed)'}}</button></form>
+{% elif builder.review_status in ['PENDING','RUNNING'] %}
+<div class="quick-actions"><form method="post" action="/api/workspaces/{{w.id}}/submit-review"><input type="hidden" name="result" value="PASS"><button class="ghost">PASS</button></form><form method="post" action="/api/workspaces/{{w.id}}/submit-review"><input type="hidden" name="result" value="FIX_REQUIRED"><button class="ghost">FIX_REQUIRED</button></form><form method="post" action="/api/workspaces/{{w.id}}/submit-review"><input type="hidden" name="result" value="BLOCKED"><button class="ghost">BLOCKED</button></form></div>
+{% endif %}
+{% if builder.review and builder.review.findings %}<p><small>Findings</small>{{builder.review.findings}}</p>{% endif %}
+{% if review_history %}<h4>History</h4>{% for r in review_history %}<div class="row"><div><small>{{r.created_at}}</small> · {{r.reviewer_agent or '—'}}<br><small>commit {{(r.reviewed_commit or '—')[:12]}}</small></div><span class="badge {{'ready' if r.status=='PASS' else ('failed' if r.status in ['FIX_REQUIRED','BLOCKED'] else '')}}">{{r.status}}</span></div>{% endfor %}{% endif %}
+</section>
+{% endif %}
 
 <h3 class="subgroup">Source</h3>
 <section class="development"><div><span class="section-kicker">DEVELOPMENT</span><h3>Mở đúng source được cấp</h3><p><b>Agent:</b> <span class="cap">{{w.agent}}</span></p><small>Worktree</small><code>{{w.worktree_path}}</code><p class="launch-feedback" data-launch-feedback="{{w.id}}"></p></div><div class="development-actions">{% if w.agent in ['codex','claude'] %}<button onclick="launchWorkspace({{w.id}},'agent',this)">Open {{w.agent|capitalize}}</button>{% endif %}<button class="secondary" onclick="launchWorkspace({{w.id}},'terminal',this)">Open Terminal</button><button class="ghost" onclick="navigator.clipboard.writeText('{{w.worktree_path}}')">Copy Path</button></div></section>
@@ -77,7 +98,7 @@
 <label>TEST_DATA<textarea name="test_data" rows="2"></textarea></label>
 <label>RUNTIME_REQUIREMENTS<select name="runtime_requirements"><option>NONE</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label>
 <label>RISKS<textarea name="risks" rows="2"></textarea></label>
-<button>Save Verification Instructions</button>
+<button>Save Report — Submit for Review (if WORK_STATUS=READY)</button>
 </form>
 </details>
 
@@ -97,5 +118,10 @@
 <h3 class="subgroup">Integration</h3>
 <section class="panel">{% if w.task_id %}<a class="row" href="/tasks/{{w.task_id}}"><div><strong>Xem Task</strong><small>Integration được tạo và theo dõi ở Task Detail.</small></div><span>→</span></a>{% else %}<p class="empty">Workspace này không thuộc Task nào — dùng Integrations để tích hợp trực tiếp.</p><a class="button" href="/integrations">Đi tới Integrations</a>{% endif %}</section>
 
-<div class="actions"><form method="post" action="/api/workspaces/{{w.id}}/ready"><button>Mark Ready</button></form><form method="post" action="/api/workspaces/{{w.id}}/test"><button class="secondary">Run Test</button></form><a href="/help#open-agent">? Mở agent trực tiếp</a><form method="post" action="/api/workspaces/{{w.id}}/close"><button class="danger">Close Workspace</button></form></div>
+<!-- Section 14/40: "Mark Ready" is gone from the primary UI -- the only
+     way to become READY_FOR_REVIEW is the Agent Report above with
+     WORK_STATUS=READY, which enforces a clean git worktree and a real
+     completion report. (The old /ready endpoint stays for API
+     compatibility only, no longer surfaced as a button here.) -->
+<div class="actions"><form method="post" action="/api/workspaces/{{w.id}}/test"><button class="secondary">Run Test</button></form><a href="#agent-report" class="ghost">Submit for Review →</a><a href="/help#open-agent">? Mở agent trực tiếp</a><form method="post" action="/api/workspaces/{{w.id}}/close"><button class="danger">Close Workspace</button></form></div>
 {% endblock %}
