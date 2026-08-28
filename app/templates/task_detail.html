@@ -8,6 +8,17 @@
 {% if summary.hardware_status %}<article><b>{{summary.hardware_status}}</b><span>Hardware Test</span></article>{% endif %}
 </section>
 
+<div class="warning"><b>READY chỉ có nghĩa:</b> agent coi source đã xong. Không có nghĩa là sandbox đã test, đã verify thủ công, đã tích hợp, hay sẵn sàng lên main.</div>
+<section class="facts">
+<div><small>Agent code</small><b>{{'READY' if all_ready else 'IN PROGRESS'}}</b></div>
+<div><small>Sandbox</small><b>{{summary.sandboxes_running}} running / {{summary.sandboxes_total}}</b></div>
+<div><small>Automated tests</small><b>{{summary.automated_tests.replace('_',' ')}}</b></div>
+<div><small>Manual verification</small><b>{{(summary.manual_verification or 'NOT_RUN').replace('_',' ')}}</b></div>
+<div><small>Integration</small><b>{{task_integration.status.replace('_',' ') if task_integration else 'NOT CREATED'}}</b></div>
+<div><small>READY_FOR_MAIN</small><b>{{'YES' if summary.ready_for_main else 'NO'}}</b></div>
+</section>
+<div class="info"><b>Bước tiếp theo</b><p>{{next_action.text}}</p>{% if next_action.label %}{% if next_action.href and next_action.method=='POST' %}<form method="post" action="{{next_action.href}}"><button class="button">{{next_action.label}}</button></form>{% elif next_action.href %}<a class="button" href="{{next_action.href}}">{{next_action.label}}</a>{% endif %}{% endif %}</div>
+
 <section class="facts"><div class="wide"><small>Description</small><code>{{t.description or '—'}}</code></div><div><small>Slug</small><code>{{t.slug}}</code></div><div><small>Created</small><code>{{t.created_at}}</code></div></section>
 
 <div class="actions">
@@ -36,6 +47,7 @@
 <a class="ghost" href="/sandboxes/{{w.sandbox.row.id}}#operations">Logs</a>
 <form method="post" action="/api/sandboxes/{{w.sandbox.row.id}}/restart"><button class="ghost">Restart</button></form>
 </div>
+<div class="row"><div><small>Manual verification</small><span class="badge {{'ready' if w.readiness.manual.status=='PASS' else ('failed' if w.readiness.manual.status in ['FAIL','STALE'] else 'created')}}">{{w.readiness.manual.status.replace('_',' ')}}</span></div><div class="quick-actions"><form method="post" action="/api/sandboxes/{{w.sandbox.row.id}}/manual-verification"><input type="hidden" name="result" value="PASS"><button class="ghost">Record PASS</button></form><form method="post" action="/api/sandboxes/{{w.sandbox.row.id}}/manual-verification"><input type="hidden" name="result" value="FAIL"><button class="ghost">Record FAIL</button></form><a class="ghost" href="/workspaces/{{w.id}}#agent-report">Cách kiểm tra →</a></div></div>
 {% else %}
 <p><small>Sandbox</small><code>NONE</code></p>
 {% if w.sandbox_configured %}<p class="empty">No runtime sandbox has been created for this task.</p><form method="post" action="/api/tasks/{{t.id}}/workspaces/{{w.id}}/create-sandbox"><button class="ghost">Create Sandbox</button></form>
@@ -65,6 +77,34 @@
 <a class="ghost" href="/sandboxes/{{v.row.id}}">Sandbox Details</a>
 </div>
 </section>{% endfor %}{% elif task_integration %}<h4 class="subgroup">Integration</h4><section class="panel"><p class="empty">{{task_integration.status.replace('_',' ')}} — no dedicated sandbox for this integration (no participating repo declares a sandbox: contract).</p></section>{% endif %}
+
+<h3 class="subgroup">Verification — Cách kiểm tra</h3>
+<section class="panel">
+{% if report and (report.how_to_verify or report.what_changed) %}
+<p><small>Mục tiêu</small>{{report.what_changed or '—'}}</p>
+<p><small>Các bước</small></p>
+<ol class="steps">{% for line in (report.how_to_verify or '').split('\n') %}{% if line.strip() %}<li><b>{{line.strip()}}</b><span></span></li>{% endif %}{% endfor %}</ol>
+<p><small>Expected</small>{{report.expected_result or '—'}}</p>
+<p><small>Test data</small>{{report.test_data or '—'}}</p>
+<p><small>Risks</small>{{report.risks or '—'}}</p>
+{% else %}
+<p class="empty">Agent chưa cung cấp hướng dẫn kiểm tra.</p>
+<a href="#task-report" class="ghost">Add Verification Instructions</a>
+{% endif %}
+<details id="task-report"><summary>+ Task-level Agent Report</summary>
+<form method="post" action="/api/tasks/{{t.id}}/verification-report">
+<label>WORK_STATUS<select name="work_status"><option>READY</option><option>FIX_REQUIRED</option></select></label>
+<label>WHAT_CHANGED<textarea name="what_changed" rows="2"></textarea></label>
+<label>AUTOMATED_TESTS<textarea name="automated_tests" rows="2"></textarea></label>
+<label>HOW_TO_VERIFY (mỗi dòng một bước)<textarea name="how_to_verify" rows="4" placeholder="1. Open the sandbox application.&#10;2. Login using the configured test/default user.&#10;3. ..."></textarea></label>
+<label>EXPECTED_RESULT<textarea name="expected_result" rows="2"></textarea></label>
+<label>TEST_DATA<textarea name="test_data" rows="2"></textarea></label>
+<label>RUNTIME_REQUIREMENTS<select name="runtime_requirements"><option>NONE</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label>
+<label>RISKS<textarea name="risks" rows="2"></textarea></label>
+<button>Save Verification Instructions</button>
+</form>
+</details>
+</section>
 
 {% if task_integration %}<section class="panel"><h3>Integration <span class="badge {{task_integration.status|lower}}">{{task_integration.status.replace('_',' ')}}</span></h3>{% for r in ti_repos %}<a class="row" href="/integrations/{{r.id}}"><div><strong>{{r.repo_name}}</strong><small>{{r.branch}}</small></div><span class="badge {{r.status|lower}}">{{r.status.replace('_',' ')}}</span></a>{% endfor %}</section>
 <section class="panel"><h3>Integration Readiness</h3>

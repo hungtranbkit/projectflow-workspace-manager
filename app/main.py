@@ -110,6 +110,101 @@ def create_app(settings=None):
         return {"integration":i,"head":head,"clean":clean,"no_conflicts":no_conflicts,"sources_current":sources_current,
                 "tests_pass":tests_pass,"tests_passed":sum(1 for v in latest.values() if v=="PASS"),"tests_required":required,
                 "ready":clean and no_conflicts and sources_current and tests_pass}
+    def sandbox_for_workspace(wid):
+        return db.one("SELECT * FROM sandboxes WHERE owner_type='AGENT_WORKSPACE' AND owner_id=? ORDER BY id DESC LIMIT 1",(wid,))
+    def latest_test_status(workspace_type,workspace_id):
+        row=db.one("SELECT status FROM test_runs WHERE workspace_type=? AND workspace_id=? ORDER BY id DESC LIMIT 1",(workspace_type,workspace_id))
+        return row["status"] if row else "NOT_RUN"
+    def manual_verification_status(sandbox_id,worktree_path):
+        """Latest manual verification for a sandbox. Staleness is never
+        stored -- recomputed here by comparing its recorded source_commit
+        to the source branch's CURRENT git HEAD, same rule as sandbox
+        staleness. A PASS never survives new commits on the branch."""
+        row=db.one("SELECT * FROM manual_verifications WHERE sandbox_id=? ORDER BY id DESC LIMIT 1",(sandbox_id,))
+        if not row: return {"status":"NOT_RUN","row":None}
+        try: current=git.head(worktree_path)
+        except Exception: current=None
+        stale=current is not None and current!=row["source_commit"]
+        return {"status":"STALE" if stale else row["result"],"row":row}
+    def workspace_readiness(w):
+        """The one place that reads a workspace's four independent
+        verification signals -- sandbox, automated tests, manual
+        verification, sandbox-contract presence -- so workspace_detail,
+        task_detail and next_action_code never compute a conflicting
+        answer for the same workspace."""
+        sb=sandbox_for_workspace(w["id"])
+        try: configured=load_sandbox_contract(Path(w["repo_path"])) is not None
+        except SandboxContractError: configured=True  # misconfigured contract is not "absent"
+        manual={"status":"NOT_RUN","row":None}; sb_view=None
+        if sb:
+            sb_view=sandbox_view(sb)
+            manual=manual_verification_status(sb["id"],w["worktree_path"])
+        return {"agent_ready":w["status"]=="READY","sandbox":sb,"sandbox_view":sb_view,
+                "sandbox_configured":configured,"sandbox_status":sb["status"] if sb else "NOT_CREATED",
+                "automated_status":latest_test_status("agent",w["id"]),"manual":manual}
+    def task_verification(tid): return db.one("SELECT * FROM verification_reports WHERE task_id=? AND workspace_id IS NULL ORDER BY id DESC LIMIT 1",(tid,))
+    def workspace_verification(wid): return db.one("SELECT * FROM verification_reports WHERE workspace_id=? ORDER BY id DESC LIMIT 1",(wid,))
+    def effective_verification(tid,workspaces):
+        """Task-level note wins; for the common single-workspace task, the
+        one workspace's own report stands in for the task's -- never
+        invented, only ever what an agent/user actually recorded."""
+        tv=task_verification(tid) if tid else None
+        if tv: return tv
+        if len(workspaces)==1: return workspace_verification(workspaces[0]["id"])
+        return None
+
+    NEXT_ACTION_COPY={
+        "MARK_READY":("Agent chưa Mark Ready — code chưa được coi là hoàn thành.",None,None),
+        "NO_SANDBOX_CONTRACT_WAIT":("Repo này không có sandbox: contract. Verify thủ công qua worktree, sau đó theo dõi Integration.",None,None),
+        "NO_SANDBOX_CONTRACT_INTEGRATE":("Repo này không có sandbox: contract. Verify thủ công qua worktree, sau đó tích hợp.","Create Integration","integration"),
+        "CREATE_SANDBOX":("Code đã được agent hoàn thành nhưng chưa có runtime verification.","Create Sandbox","create-sandbox"),
+        "SANDBOX_FAILED":("Sandbox tạo thất bại.","Xem Logs","sandbox"),
+        "SANDBOX_STARTING":("Sandbox đang khởi động, chờ vài giây rồi tải lại.",None,None),
+        "SANDBOX_NOT_RUNNING":("Sandbox không chạy.","Start Sandbox","sandbox"),
+        "RUN_TESTS":("Sandbox đã sẵn sàng — nên chạy automated tests trước khi kiểm tra thủ công.","Run Tests","run-tests"),
+        "TESTS_FAILING":("Automated tests đang FAIL.","Xem log test","tests"),
+        "OPEN_APP_VERIFY":("Automated tests PASS — mở app và kiểm tra thủ công theo hướng dẫn.","Open App and Verify","open-app"),
+        "MANUAL_FAILING":("Kiểm tra thủ công FAIL — quay lại agent workspace để sửa.",None,None),
+        "VERIFIED_STANDALONE":("Agent code đã được verify (sandbox + test).","Create Integration","legacy-integration"),
+        "CREATE_INTEGRATION":("Đã verify — sẵn sàng tích hợp.","Create Integration","integration"),
+        "VIEW_INTEGRATION":("Integration đang chạy — còn điều kiện chưa đạt, xem Integration Readiness.","Xem Integration","integration"),
+        "PREPARE_PR":("Mọi điều kiện đã đạt.","Prepare PR (push + tạo Pull Request)","github-flow"),
+    }
+    def next_action_code(r,integration_exists=None,ready_for_main=False):
+        """Pure state -> action mapping. Deterministic, no AI: same inputs
+        always produce the same recommendation."""
+        if not r["agent_ready"]: return "MARK_READY"
+        if not r["sandbox_configured"]:
+            if integration_exists is None: return "NO_SANDBOX_CONTRACT_WAIT"
+            return "VIEW_INTEGRATION" if integration_exists else "NO_SANDBOX_CONTRACT_INTEGRATE"
+        st=r["sandbox_status"]
+        if st=="NOT_CREATED": return "CREATE_SANDBOX"
+        if st=="FAILED": return "SANDBOX_FAILED"
+        if st in ("CREATED","PROVISIONING","STARTING"): return "SANDBOX_STARTING"
+        if st!="RUNNING": return "SANDBOX_NOT_RUNNING"
+        if r["automated_status"]=="NOT_RUN": return "RUN_TESTS"
+        if r["automated_status"]=="FAIL": return "TESTS_FAILING"
+        if r["manual"]["status"] in ("NOT_RUN","STALE"): return "OPEN_APP_VERIFY"
+        if r["manual"]["status"]=="FAIL": return "MANUAL_FAILING"
+        if integration_exists is None: return "VERIFIED_STANDALONE"
+        if not integration_exists: return "CREATE_INTEGRATION"
+        if not ready_for_main: return "VIEW_INTEGRATION"
+        return "PREPARE_PR"
+    def resolve_next_action(code,*,wid=None,tid=None,sandbox_id=None):
+        """Turns a symbolic action tag into a real href/method for the
+        context it is shown in (workspace page vs task page)."""
+        text,label,tag=NEXT_ACTION_COPY[code]
+        href=None; method="GET"
+        if tag=="create-sandbox":
+            href=f"/api/tasks/{tid}/workspaces/{wid}/create-sandbox" if tid else f"/api/workspaces/{wid}/create-sandbox"; method="POST"
+        elif tag=="sandbox" and sandbox_id: href=f"/sandboxes/{sandbox_id}"
+        elif tag=="run-tests" and wid: href=f"/api/workspaces/{wid}/test"; method="POST"
+        elif tag=="tests" and wid: href=f"/workspaces/{wid}"
+        elif tag=="open-app" and sandbox_id: href=f"/sandboxes/{sandbox_id}"
+        elif tag=="integration" and tid: href=f"/tasks/{tid}"
+        elif tag=="legacy-integration": href="/integrations"
+        elif tag=="github-flow": href="/help#github-flow"
+        return {"code":code,"text":text,"label":label,"href":href,"method":method}
 
     @app.exception_handler(GitSafetyError)
     @app.exception_handler(GitCommandError)
@@ -163,7 +258,17 @@ def create_app(settings=None):
     @app.get("/workspaces/{wid}",response_class=HTMLResponse)
     def workspace_detail(request:Request,wid:int):
         w=agent_row(wid); details=safe_details(w["worktree_path"])
-        runs=db.all("SELECT * FROM test_runs WHERE workspace_type='agent' AND workspace_id=? ORDER BY id DESC",(wid,)); return render(request,"workspace_detail.html",w=w,details=details,runs=runs)
+        runs=db.all("SELECT * FROM test_runs WHERE workspace_type='agent' AND workspace_id=? ORDER BY id DESC",(wid,))
+        readiness=workspace_readiness(w)
+        report=workspace_verification(wid) or (task_verification(w["task_id"]) if w["task_id"] else None)
+        manual_history=db.all("SELECT * FROM manual_verifications WHERE workspace_id=? ORDER BY id DESC",(wid,))
+        ti=task_integration_row(w["task_id"]) if w["task_id"] else None
+        integration_exists=None if not w["task_id"] else bool(ti)
+        ready_for_main=bool(ti and ti["ready_for_main"])
+        code=next_action_code(readiness,integration_exists,ready_for_main)
+        action=resolve_next_action(code,wid=wid,tid=w["task_id"],sandbox_id=readiness["sandbox"]["id"] if readiness["sandbox"] else None)
+        return render(request,"workspace_detail.html",w=w,details=details,runs=runs,readiness=readiness,report=report,
+                      manual_history=manual_history,next_action=action)
     @app.get("/api/workspaces/{wid}")
     def api_workspace(wid:int): return agent_row(wid)
     @app.post("/api/workspaces/{wid}/ready")
@@ -173,6 +278,22 @@ def create_app(settings=None):
         return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/test")
     def test_agent(wid:int): w=agent_row(wid); runner.start("agent",wid,Path(w["worktree_path"])); return RedirectResponse(f"/workspaces/{wid}",303)
+    @app.post("/api/workspaces/{wid}/create-sandbox")
+    def create_workspace_sandbox_standalone(wid:int,profile:str=Form("")):
+        w=agent_row(wid)
+        task_default=None
+        if w["task_id"]:
+            t=db.one("SELECT default_sandbox_profile FROM tasks WHERE id=?",(w["task_id"],)); task_default=t["default_sandbox_profile"] if t else None
+        sid=auto_create_sandbox(w["task_id"],w["repository_id"],w["repo_path"],"AGENT_WORKSPACE",wid,w["role"] or w["agent"],w["branch"],w["last_commit"],w["worktree_path"],profile.strip().upper() or None,task_default)
+        if sid: db.execute("UPDATE agent_workspaces SET sandbox_profile=(SELECT profile FROM sandboxes WHERE id=?) WHERE id=?",(sid,wid))
+        return RedirectResponse(f"/workspaces/{wid}",303)
+    @app.post("/api/workspaces/{wid}/verification-report")
+    def submit_workspace_report(wid:int,work_status:str=Form("READY"),what_changed:str=Form(""),automated_tests:str=Form(""),how_to_verify:str=Form(""),expected_result:str=Form(""),test_data:str=Form(""),runtime_requirements:str=Form("NONE"),risks:str=Form("")):
+        w=agent_row(wid)
+        db.execute("INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                   (w["task_id"],wid,work_status.strip().upper() or "READY",what_changed.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip()))
+        db.event("agent",wid,"VERIFICATION_REPORT_ADDED",work_status)
+        return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/close")
     def close_agent(wid:int): w=agent_row(wid); git.close(w["repo_path"],w["worktree_path"]); db.execute("UPDATE agent_workspaces SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(wid,)); db.event("agent",wid,"WORKSPACE_CLOSED"); return RedirectResponse("/workspaces",303)
     @app.post("/api/workspaces/{wid}/open-terminal")
@@ -313,16 +434,16 @@ def create_app(settings=None):
         # source of truth -- this only joins by owner_id, it stores no
         # sandbox field on agent_workspaces itself) and, for a workspace
         # with none, tell "not yet created" apart from "repo has no
-        # sandbox: contract" so the empty state never lies.
-        by_owner={(sb["owner_type"],sb["owner_id"]):sb for sb in sbxs}
+        # sandbox: contract" so the empty state never lies. workspace_readiness()
+        # is the single place that reads sandbox/tests/manual-verification for
+        # a workspace -- reused here so this section can never disagree with
+        # the "Bước tiếp theo" box below or workspace_detail's own page.
         for w in workspaces:
-            sb=by_owner.get(("AGENT_WORKSPACE",w["id"]))
-            if sb:
-                w["sandbox"]=sandbox_view(sb); w["sandbox"]["stale"]=sandboxes.is_stale(sb["id"],sandbox_current_commits(sb["id"]))
+            r=workspace_readiness(w); w["readiness"]=r; w["report"]=workspace_verification(w["id"])
+            if r["sandbox_view"]:
+                w["sandbox"]=r["sandbox_view"]; w["sandbox"]["stale"]=sandboxes.is_stale(r["sandbox"]["id"],sandbox_current_commits(r["sandbox"]["id"]))
             else:
-                w["sandbox"]=None
-                try: w["sandbox_configured"]=load_sandbox_contract(Path(w["repo_path"])) is not None
-                except SandboxContractError: w["sandbox_configured"]=True
+                w["sandbox"]=None; w["sandbox_configured"]=r["sandbox_configured"]
 
         integration_sandboxes=[]
         for sb in sbxs:
@@ -347,9 +468,36 @@ def create_app(settings=None):
             "tests_passed":tests_passed,"tests_required":tests_required,"hardware_status":hardware_status,"ready_for_main":ready_for_main,
         }
         earliest_cleanup=min((sb["cleanup_eligible_at"] for sb in sbxs if sb["cleanup_eligible_at"]),default=None)
+
+        report=effective_verification(tid,workspaces)
+        manual_status=[w["readiness"]["manual"]["status"] for w in workspaces if w["readiness"]["sandbox"]]
+        summary["manual_verification"]=("PASS" if manual_status and all(s=="PASS" for s in manual_status) else
+                                         "FAIL" if "FAIL" in manual_status else
+                                         "STALE" if "STALE" in manual_status else
+                                         "NOT_RUN" if manual_status else None)
+        summary["automated_tests"]=("PASS" if workspaces and all(w["readiness"]["automated_status"]=="PASS" for w in workspaces) else
+                                     "FAIL" if any(w["readiness"]["automated_status"]=="FAIL" for w in workspaces) else "NOT_RUN")
+
+        # Bước tiếp theo: deterministic, not AI -- first workspace that
+        # still has something to do on its own; once every workspace is
+        # individually verified (or has no sandbox contract), the action
+        # becomes about Integration/PR instead.
+        blocking=None
+        for w in workspaces:
+            if next_action_code(w["readiness"],None,False) not in ("VERIFIED_STANDALONE","NO_SANDBOX_CONTRACT_WAIT"): blocking=w; break
+        if blocking:
+            code=next_action_code(blocking["readiness"],None,False)
+            next_action=resolve_next_action(code,wid=blocking["id"],tid=tid,sandbox_id=blocking["readiness"]["sandbox"]["id"] if blocking["readiness"]["sandbox"] else None)
+        elif workspaces:
+            ref=workspaces[-1]["readiness"]
+            code=next_action_code(ref,bool(ti),ready_for_main)
+            next_action=resolve_next_action(code,tid=tid)
+        else:
+            next_action={"code":"NO_WORKSPACE","text":"Task chưa có Agent Workspace nào.","label":"Add Agent Workspace","href":None,"method":"GET"}
+
         return render(request,"task_detail.html",t=t,workspaces=workspaces,sandboxes=sbxs,task_integration=ti,ti_repos=ti_repos,
                       integration_sandboxes=integration_sandboxes,readiness=readiness,summary=summary,all_ready=all_ready,
-                      task_cleanup_countdown=format_countdown(earliest_cleanup),
+                      task_cleanup_countdown=format_countdown(earliest_cleanup),report=report,next_action=next_action,
                       repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=settings.agents)
     @app.get("/api/tasks/{tid}")
     def api_task(tid:int):
@@ -463,6 +611,13 @@ def create_app(settings=None):
         for sb in task_sandboxes(tid):
             if sb["status"]!="CLOSED": sandboxes.cleanup(sb["id"],force=True)
         return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/verification-report")
+    def submit_task_report(tid:int,work_status:str=Form("READY"),what_changed:str=Form(""),automated_tests:str=Form(""),how_to_verify:str=Form(""),expected_result:str=Form(""),test_data:str=Form(""),runtime_requirements:str=Form("NONE"),risks:str=Form("")):
+        task_row(tid)
+        db.execute("INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks) VALUES(?,NULL,?,?,?,?,?,?,?,?)",
+                   (tid,work_status.strip().upper() or "READY",what_changed.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip()))
+        db.event("task",tid,"VERIFICATION_REPORT_ADDED",work_status)
+        return RedirectResponse(f"/tasks/{tid}",303)
 
     # ------------------------------------------------------------ Sandboxes
     @app.get("/sandboxes",response_class=HTMLResponse)
@@ -490,8 +645,11 @@ def create_app(settings=None):
         outputs_=sandboxes.outputs(sid); lan_ip=sandbox_runtime.local_ip() if sb["profile"]=="HARDWARE" else None
         task=db.one("SELECT id,title FROM tasks WHERE id=?",(sb["task_id"],)) if sb["task_id"] else None
         stale=sandboxes.is_stale(sid,sandbox_current_commits(sid))
+        primary=sources[0] if sources else None
+        manual=manual_verification_status(sid,primary["worktree_path"]) if primary else {"status":"NOT_RUN","row":None}
+        manual_history=db.all("SELECT * FROM manual_verifications WHERE sandbox_id=? ORDER BY id DESC",(sid,))
         return render(request,"sandbox_detail.html",sb=sb,sources=sources,ports=ports_,ops=ops,hw=hw,outputs=outputs_,lan_ip=lan_ip,
-                      task=task,stale=stale,view=sandbox_view(sb))
+                      task=task,stale=stale,view=sandbox_view(sb),manual=manual,manual_history=manual_history)
     @app.get("/api/sandboxes/{sid}")
     def api_sandbox(sid:int): return sandbox_row(sid)
     @app.post("/api/sandboxes/{sid}/start")
@@ -518,6 +676,19 @@ def create_app(settings=None):
         sandbox_row(sid)
         if result not in ("PASS","FAIL","NOT_RUN"): raise GitSafetyError("Invalid hardware test result")
         db.execute("INSERT INTO hardware_test_results(sandbox_id,result,notes) VALUES(?,?,?)",(sid,result,notes)); db.event("sandbox",sid,"HARDWARE_TEST_RECORDED",result)
+        return RedirectResponse(f"/sandboxes/{sid}",303)
+    @app.post("/api/sandboxes/{sid}/manual-verification")
+    def record_manual_verification(sid:int,result:str=Form(...),note:str=Form("")):
+        sb=sandbox_row(sid)
+        if result not in ("PASS","FAIL"): raise GitSafetyError("Invalid manual verification result")
+        primary=db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1",(sid,))
+        worktree_path=primary["worktree_path"] if primary else sb["worktree_path"]
+        try: source_commit=git.head(worktree_path)
+        except Exception: source_commit=primary["commit_sha"] if primary else ""
+        workspace_id=sb["owner_id"] if sb["owner_type"]=="AGENT_WORKSPACE" else None
+        db.execute("INSERT INTO manual_verifications(task_id,workspace_id,sandbox_id,result,note,source_commit) VALUES(?,?,?,?,?,?)",
+                   (sb["task_id"],workspace_id,sid,result,note.strip()[:2000],source_commit))
+        db.event("sandbox",sid,"MANUAL_VERIFICATION_RECORDED",result)
         return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/build-firmware")
     def build_firmware(sid:int):
