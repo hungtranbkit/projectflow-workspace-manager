@@ -1,0 +1,1 @@
+"""Safety-focused application services."""

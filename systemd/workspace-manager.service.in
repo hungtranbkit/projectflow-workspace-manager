@@ -1,0 +1,18 @@
+[Unit]
+Description=ProjectFlow Workspace Manager (local only)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__PROJECT_DIR__
+EnvironmentFile=-__PROJECT_DIR__/.env
+ExecStart=__PROJECT_DIR__/scripts/start.sh
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+KillSignal=SIGINT
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

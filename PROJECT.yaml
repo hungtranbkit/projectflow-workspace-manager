@@ -1,0 +1,46 @@
+schema_version: 1
+project:
+  code: workspace-manager
+  name: ProjectFlow Workspace Manager
+  type: web-application
+  role: local-development-tool
+source:
+  root: .
+version:
+  file: VERSION
+runtime:
+  type: python
+commands:
+  start:
+    command: ./scripts/start.sh
+    working_directory: .
+    timeout_seconds: 30
+  preflight:
+    command: ./scripts/preflight.sh
+    working_directory: .
+    timeout_seconds: 120
+  test:
+    command: ./scripts/test.sh
+    working_directory: .
+    timeout_seconds: 900
+  build:
+    command: ./scripts/build.sh
+    working_directory: .
+    timeout_seconds: 120
+  smoke:
+    command: ./scripts/smoke.sh
+    working_directory: .
+    timeout_seconds: 300
+  status:
+    command: ./scripts/status.sh
+    working_directory: .
+    timeout_seconds: 30
+  logs:
+    command: ./scripts/logs.sh
+    working_directory: .
+    timeout_seconds: 30
+ci:
+  required: [preflight, test]
+deployment:
+  production:
+    enabled: false
