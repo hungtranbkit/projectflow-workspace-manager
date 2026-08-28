@@ -10,6 +10,7 @@
 <nav class="guide-toc"><b>Trong hướng dẫn này</b>
 <a href="#quick-start">Bắt đầu nhanh</a>
 <a href="#tasks">1. Có task mới</a>
+<a href="#task-vs-worktree">Task khác Worktree?</a>
 <a href="#agent-workspaces">2. Agent Workspace là gì?</a>
 <a href="#open-agent">3. Mở Claude / Codex</a>
 <a href="#sandbox">4. Sandbox là gì?</a>
@@ -28,6 +29,8 @@
 <a href="#restart-rebuild">Restart hay Rebuild?</a>
 <a href="#sandbox-status">Bảng trạng thái Sandbox</a>
 <a href="#test-progress">12. Task đã xong tới đâu?</a>
+<a href="#test-readiness">Test được chưa? (YES/NO/PARTIAL)</a>
+<a href="#kanban">Kanban dùng thế nào?</a>
 <a href="#ready-for-main">13. READY_FOR_MAIN là gì?</a>
 <a href="#github-flow">14. Đưa code lên main</a>
 <a href="#merge-cleanup">15. Sandbox sau khi merge</a>
@@ -56,13 +59,24 @@
 </section>
 
 <section class="guide-section" id="tasks"><span class="section-kicker">BƯỚC 1</span><h3>Khi có bug hoặc task mới</h3>
-<p><b>Bước 1 — </b>Vào <a href="/tasks">Tasks</a> → <b>New Task</b>. Nhập:</p>
-<ul class="checklist"><li>Tên task</li><li>Mô tả ngắn (không bắt buộc)</li></ul>
-<div class="example"><small>Ví dụ</small><p><b>Title:</b> Fix lỗi kiosk không gửi được sản lượng</p></div>
-<p><b>Bước 2 — </b>Sau khi task được tạo, bấm <b>Add Agent Workspace</b> trong Task Detail. Chọn:</p>
-<div class="sample-grid"><article><small>Repository</small><b>esp-kiosk</b></article><article><small>Agent</small><b>Claude</b></article><article><small>Role</small><b>Firmware</b></article><article><small>Sandbox</small><b>Auto</b></article></div>
-<p>Workspace Manager sẽ tự tạo branch và worktree riêng cho agent — bạn không cần tự tạo branch bằng tay.</p>
-<div class="info"><b>Tiếp theo:</b> Thêm một Agent Workspace cho task.<br><a class="button" href="/tasks#new">Đi tới Tasks</a></div>
+<p>Vào <a href="/tasks">Tasks</a> → <b>New Task</b>. Form New Task tạo <b>Task + Agent Workspace đầu tiên trong cùng một lần bấm</b> — bạn không cần tự tạo worktree riêng.</p>
+<ul class="checklist"><li>Task title</li><li>Description (không bắt buộc)</li><li>Repository / Agent / Role / Base branch / Sandbox cho Agent Workspace đầu tiên</li></ul>
+<div class="example"><small>Ví dụ</small><p><b>Title:</b> Fix lỗi kiosk không gửi được sản lượng</p><p><b>Repository:</b> esp-kiosk · <b>Agent:</b> Claude · <b>Role:</b> Firmware · <b>Sandbox:</b> Auto</p></div>
+<p>Task nhiều repo? Bấm <b>+ Add another Agent Workspace</b> để khai báo thêm Agent Workspace (repo/agent/role khác) ngay trong lúc tạo Task — xem mục <a href="#cross-repo">Task nhiều repository</a>.</p>
+<p>Workspace Manager sẽ tự tạo branch và worktree riêng cho từng agent. Nếu một Agent Workspace tạo lỗi (ví dụ repo chưa đăng ký), Task và các Agent Workspace đã tạo thành công vẫn giữ nguyên — lỗi hiển thị rõ, không tự rollback.</p>
+<p>Cần một Task rỗng để lên kế hoạch trước? Dùng mục "Advanced: Task rỗng (DRAFT)" — Task này chưa có Agent Workspace nào cho tới khi bạn thêm.</p>
+<div class="info"><b>Tiếp theo:</b> Xem Task vừa tạo, mở agent để bắt đầu code.<br><a class="button" href="/tasks">Đi tới Tasks</a></div>
+</section>
+
+<section class="guide-section" id="task-vs-worktree"><span class="section-kicker">PHÂN BIỆT</span><h3>Task khác Worktree thế nào?</h3>
+<p>Bạn quản lý <b>Task</b> — Workspace Manager tự lo phần Git bên dưới.</p>
+<div class="sample-grid">
+<article><b>Task</b><small>Công việc cần hoàn thành. Có thể trải nhiều repo, nhiều Agent Workspace.</small></article>
+<article><b>Agent Workspace</b><small>Nơi một agent làm một phần của Task — sở hữu đúng một branch/worktree/sandbox.</small></article>
+<article><b>Worktree</b><small>Cơ chế Git bên dưới. Bạn không cần tự cd vào đây.</small></article>
+<article><b>Sandbox</b><small>Môi trường chạy/test cho một Agent Workspace hoặc cho Integration.</small></article>
+</div>
+<div class="rule">TASK · AGENT WORKSPACE(S) · INTEGRATION · VERIFICATION · MERGE</div>
 </section>
 
 <section class="guide-section" id="agent-workspaces"><span class="section-kicker">AGENT WORKSPACE</span><h3>Agent Workspace là gì?</h3>
@@ -220,7 +234,35 @@
 <section class="guide-section" id="test-progress"><span class="section-kicker">TIẾN ĐỘ</span><h3>Xem task đã hoàn thiện tới đâu</h3>
 <p>Đầu trang Task Detail luôn có phần tóm tắt:</p>
 <div class="test-demo"><div><span>Agents</span><b>2 / 2 READY</b></div><div><span>Sandbox</span><b>HEALTHY</b></div><div><span>Tests</span><b>4 / 5 PASS</b></div><div><span>Hardware</span><b>PENDING</b></div><div><span>Integration</span><b>TESTING</b></div></div>
-<p>Đây là nơi chính để xem task còn thiếu bước nào.</p>
+<p>Đây là nơi chính để xem task còn thiếu bước nào. Task Detail cũng có thanh tiến độ (progress track) <code>Created → Development → Verification → Integration → Ready for Main → Merged</code>, luôn tô sáng đúng giai đoạn hiện tại — không hiện phần trăm giả, chỉ dựa trên các gate đã thực sự đạt.</p>
+<p>Nếu một Agent Workspace đang chặn Task lại (chưa Ready, test fail, hoặc verify fail), Task Detail hiện rõ:</p>
+<div class="alert"><b>Task blocked by:</b><p>Codex · frontend<br><small>status: FIX_REQUIRED</small></p></div>
+</section>
+
+<section class="guide-section" id="test-readiness"><span class="section-kicker">TEST READINESS</span><h3>Task này test được chưa?</h3>
+<p>Task Detail trả lời trực tiếp câu hỏi này bằng phần <b>Test Readiness</b>, suy ra từ trạng thái thật (không phải một cờ lưu riêng):</p>
+<ul class="checklist"><li>✓ Backend workspace READY</li><li>✓ Frontend workspace READY</li><li>✓ Sandbox HEALTHY</li></ul>
+<p>Full integration test: <b>YES</b> / <b>NO</b> / <b>PARTIAL</b></p>
+<div class="sample-grid">
+<article><b>NO</b><small>Còn workspace CODING, sandbox cần mà chưa có/unhealthy/SOURCE STALE, hoặc còn conflict chưa xử lý.</small></article>
+<article><b>PARTIAL</b><small>Một số Agent Workspace test được riêng, nhưng full integration test chưa sẵn sàng.</small></article>
+<article><b>YES</b><small>Mọi Agent Workspace cần thiết đã READY, runtime cần thiết sẵn sàng, source đang current.</small></article>
+</div>
+<p>Task Detail cũng phân biệt rõ <b>Workspace Tests</b> (test riêng branch một agent) và <b>Integration Tests</b> (test trạng thái đã ghép) — không coi Task là "đã test đầy đủ" chỉ vì từng workspace test riêng đã PASS.</p>
+</section>
+
+<section class="guide-section" id="kanban"><span class="section-kicker">KANBAN</span><h3>Kanban dùng thế nào?</h3>
+<p><a href="/kanban">Kanban</a> hiển thị vòng đời Task theo cột — dùng khi bạn muốn nhìn nhanh nhiều task đang ở đâu. <a href="/tasks">Tasks</a> (List) cùng dữ liệu, dạng bảng, tiện lọc/tìm kiếm. Board và List giữ nguyên bộ lọc khi chuyển qua lại.</p>
+<table><thead><tr><th>Cột</th><th>Ý nghĩa</th></tr></thead><tbody>
+<tr><td><span class="badge backlog">BACKLOG</span></td><td>Task chưa có Agent Workspace</td></tr>
+<tr><td><span class="badge development">DEVELOPMENT</span></td><td>Agent đang code</td></tr>
+<tr><td><span class="badge test">TEST</span></td><td>Mọi Agent Workspace đã READY, chưa Integration</td></tr>
+<tr><td><span class="badge fix_required">FIX REQUIRED</span></td><td>Có test/verify FAIL hoặc merge conflict</td></tr>
+<tr><td><span class="badge integration">INTEGRATION</span></td><td>Đã Create Integration, đang ghép/test</td></tr>
+<tr><td><span class="badge ready_for_main">READY FOR MAIN</span></td><td>Đủ điều kiện mở Pull Request</td></tr>
+<tr><td><span class="badge done">DONE</span></td><td>Đã merge hoặc huỷ</td></tr>
+</tbody></table>
+<div class="info">Cột được tính tự động từ trạng thái Agent Workspace/Sandbox/Test/Integration thật — không kéo-thả tuỳ ý để bỏ qua điều kiện.</div>
 </section>
 
 <section class="guide-section" id="ready-for-main"><span class="section-kicker">READINESS</span><h3>READY_FOR_MAIN nghĩa là gì?</h3>

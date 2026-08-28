@@ -1,0 +1,29 @@
+{% extends 'base.html' %}{% block title %}Kanban{% endblock %}{% block header_action %}<a class="button" href="/tasks#new">+ New Task</a> <a href="/tasks?{{filters_qs}}">List</a> <a href="/help#kanban">? Kanban dùng thế nào?</a>{% endblock %}{% block content %}
+
+<form method="get" class="filters">
+<input type="text" name="q" value="{{filters.q}}" placeholder="Tìm theo tên task...">
+<select name="repository" onchange="this.form.submit()"><option value="">Mọi repository</option>{% for r in repositories %}<option value="{{r.repo_name}}" {{'selected' if filters.repository==r.repo_name else ''}}>{{r.repo_name}}</option>{% endfor %}</select>
+<select name="agent" onchange="this.form.submit()"><option value="">Mọi agent</option>{% for a in agents %}<option value="{{a}}" {{'selected' if filters.agent==a else ''}}>{{a}}</option>{% endfor %}</select>
+<select name="sandbox_status" onchange="this.form.submit()"><option value="">Sandbox: bất kỳ</option><option value="running" {{'selected' if filters.sandbox_status=='running' else ''}}>Running</option><option value="unhealthy" {{'selected' if filters.sandbox_status=='unhealthy' else ''}}>Unhealthy</option></select>
+<button class="ghost" type="submit">Lọc</button>
+</form>
+
+<div class="kanban">
+{% for col in columns %}
+<div class="kanban-col">
+<h4>{{col.replace('_',' ')}} <small>({{board[col]|length}})</small></h4>
+{% for c in board[col] %}
+<a class="task-card" href="/tasks/{{c.task.id}}">
+<h5>{{c.task.title}}</h5>
+<small>{{c.task.slug}}</small>
+<div class="stat">Agents<br><b>{{c.agents.ready}} / {{c.agents.total}} READY</b>{% if c.agents.failed %} · {{c.agents.failed}} FAIL{% endif %}</div>
+{% for w in c.workspaces %}<div class="stat cap">{{w.agent}} · {{w.role or c.task.slug}}<br><span class="badge {{w.status|lower}}">{{w.status_label}}</span></div>{% endfor %}
+<div class="stat">Sandbox<br><b>{{c.sandbox.running}} RUNNING</b>{% if c.sandbox.unhealthy %} · {{c.sandbox.unhealthy}} unhealthy{% endif %}</div>
+<div class="stat">Tests<br><b>{{c.tests.passed}} / {{c.tests.total}} PASS</b></div>
+<div class="stat">Integration<br><b>{{c.integration.replace('_',' ')}}</b></div>
+</a>
+{% else %}<p class="empty">—</p>{% endfor %}
+</div>
+{% endfor %}
+</div>
+{% endblock %}
