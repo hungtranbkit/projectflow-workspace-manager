@@ -32,6 +32,12 @@ def create_app(settings=None):
         if not row: raise HTTPException(404)
         return row
     def invalidate(iid): db.execute("UPDATE integration_workspaces SET ready_for_main=0,verified_commit=NULL,verified_at=NULL,status='TESTING',updated_at=CURRENT_TIMESTAMP WHERE id=?",(iid,))
+    def safe_details(worktree_path):
+        path=Path(worktree_path)
+        empty={"head":None,"status":[],"modified":[],"untracked":[],"commits":[]}
+        if not path.exists(): return empty
+        try: return git.details(path)
+        except GitSafetyError: return empty
 
     @app.exception_handler(GitSafetyError)
     @app.exception_handler(GitCommandError)
@@ -74,7 +80,7 @@ def create_app(settings=None):
     def api_workspaces(): return db.all("SELECT * FROM agent_workspaces")
     @app.get("/workspaces/{wid}",response_class=HTMLResponse)
     def workspace_detail(request:Request,wid:int):
-        w=agent_row(wid); details=git.details(w["worktree_path"]) if Path(w["worktree_path"]).exists() else {"head":None,"status":[],"modified":[],"untracked":[],"commits":[]}
+        w=agent_row(wid); details=safe_details(w["worktree_path"])
         runs=db.all("SELECT * FROM test_runs WHERE workspace_type='agent' AND workspace_id=? ORDER BY id DESC",(wid,)); return render(request,"workspace_detail.html",w=w,details=details,runs=runs)
     @app.get("/api/workspaces/{wid}")
     def api_workspace(wid:int): return agent_row(wid)

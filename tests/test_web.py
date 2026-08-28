@@ -59,6 +59,13 @@ def test_launch_api_rejects_invalid_workspace_and_outside_path(client,tmp_path):
     assert response.status_code==409
     assert response.json()["code"] in ("WORKTREE_NOT_FOUND","INVALID_WORKTREE")
 
+def test_legacy_external_worktree_record_renders_but_launcher_stays_blocked(client,git_repo,tmp_path):
+    _,repo=git_repo; register(client,repo); rid=client.get("/api/repositories").json()[0]["id"]
+    legacy=tmp_path.parent/"legacy-worktree"; legacy.mkdir(exist_ok=True)
+    wid=client.app.state.db.execute("INSERT INTO agent_workspaces(repository_id,agent,task_name,branch,worktree_path,base_branch,base_commit) VALUES(?,?,?,?,?,?,?)",(rid,"codex","legacy","agent/codex/legacy",str(legacy),"main","deadbeef"))
+    assert client.get(f"/workspaces/{wid}").status_code==200
+    assert client.post(f"/api/workspaces/{wid}/open-terminal").status_code==409
+
 def test_create_agent_and_integration_pages(client,git_repo):
     _,repo=git_repo; register(client,repo); rid=client.get("/api/repositories").json()[0]["id"]
     response=client.post("/api/workspaces",data={"repository_id":rid,"agent":"codex","task_name":"Web Feature","base_branch":"main"},follow_redirects=False)
