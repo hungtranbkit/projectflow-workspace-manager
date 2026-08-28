@@ -12,7 +12,15 @@ RestartSec=2s
 TimeoutStopSec=15s
 KillSignal=SIGINT
 NoNewPrivileges=true
-PrivateTmp=true
+# PrivateTmp is deliberately NOT set: it breaks OpenSSH's config-file
+# ownership check for /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf
+# (a real, confirmed live failure -- "Bad owner or permissions on
+# /etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf", reproduced via
+# `systemd-run --user --property=PrivateTmp=true -- git push ...`),
+# which makes every SSH-remote `git push`/`gh` call this app's real
+# GitHub merge integration depends on fail outright. This app is
+# already local-only (binds 127.0.0.1) and single-user; PrivateTmp's
+# /tmp isolation is not worth breaking a core feature over.
 
 [Install]
 WantedBy=default.target
