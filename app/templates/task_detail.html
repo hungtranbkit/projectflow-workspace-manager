@@ -1,4 +1,4 @@
-{% extends 'base.html' %}{% block title %}Task · {{t.title}}{% endblock %}{% block header_action %}<span class="badge {{t.status|lower}}">{{t.status.replace('_',' ')}}</span>{% endblock %}{% block content %}
+{% extends 'base.html' %}{% block title %}Task · {{t.title}}{% endblock %}{% block header_action %}<span class="badge {{t.status|lower}}">{{t.status.replace('_',' ')}}</span> <a href="/help#test-progress">? Task đã xong tới đâu?</a>{% endblock %}{% block content %}
 <section class="cards">
 <article><b>{{t.status.replace('_',' ')}}</b><span>Task Status</span></article>
 <article><b>{{summary.agents_ready}} / {{summary.agents_total}}</b><span>Agents READY</span></article>
@@ -15,7 +15,7 @@
 {% if t.status not in ['MERGED','CANCELLED','CLOSED'] %}<form method="post" action="/api/tasks/{{t.id}}/mark-merged" onsubmit="return confirm('Tất cả repo PR liên quan đã merge?')"><button>Mark Merged</button></form><form method="post" action="/api/tasks/{{t.id}}/cancel" onsubmit="return confirm('Huỷ task này?')"><button class="danger">Cancel Task</button></form>{% endif %}
 </div>
 
-<h3 class="subgroup">Sandbox Environments</h3>
+<h3 class="subgroup">Sandbox Environments <a href="/help#task-detail-sandbox">? Xem hướng dẫn</a></h3>
 <h4 class="subgroup">Agent Workspaces</h4>
 <section class="panel">{% for w in workspaces %}
 <div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.repo_name}} <small>{{w.role or 'no role'}}</small><br><code>{{w.branch}}</code></div><span class="badge {{w.status|lower}}">{{w.status}}</span></div>
@@ -44,7 +44,7 @@
 </div>
 {% else %}<p class="empty">Chưa có Agent Workspace nào trong Task này.</p>{% endfor %}
 <h4>+ Add Agent Workspace</h4>
-<form method="post" action="/api/tasks/{{t.id}}/workspaces"><label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label><label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><label>Task role<input name="role" placeholder="Backend / Firmware / Frontend"></label><label>Base branch<input name="base_branch" value="main"></label><label>Sandbox profile<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label><button>Add Agent Workspace</button></form>
+<form method="post" action="/api/tasks/{{t.id}}/workspaces"><label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label><label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><label>Task role<input name="role" placeholder="Backend / Firmware / Frontend"></label><label>Base branch<input name="base_branch" value="main"></label><label>Sandbox profile<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select><a href="/help#sandbox-modes">? Chọn Sandbox thế nào?</a></label><button>Add Agent Workspace</button></form>
 </section>
 
 {% if integration_sandboxes %}<h4 class="subgroup">Integration</h4>{% for v in integration_sandboxes %}<section class="panel">

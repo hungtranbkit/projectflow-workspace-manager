@@ -1,33 +1,328 @@
 {% extends 'base.html' %}
 {% block title %}Hướng dẫn sử dụng Workspace Manager{% endblock %}
 {% block content %}
-<div class="guide-intro"><p>Quản lý source riêng cho Codex, Claude và các coding agent, tích hợp nhiều branch an toàn và chỉ đưa code lên main sau khi test PASS.</p><div class="warning"><b>Ba giới hạn an toàn:</b> Không sửa main trực tiếp · Không xoá worktree có thay đổi chưa commit · READY_FOR_MAIN vẫn phải qua GitHub PR + CI.</div></div>
+<div class="guide-intro">
+<p class="guide-subtitle">Từ khi nhận một task mới đến lúc kiểm tra, tích hợp và merge code.</p>
+<p>Workspace Manager giúp mỗi agent làm việc trong source riêng, chạy môi trường test riêng khi cần, sau đó tích hợp và kiểm tra trước khi đưa code vào main.</p>
+<div class="warning"><b>Ba giới hạn an toàn:</b> Không sửa main trực tiếp · Không xoá worktree có thay đổi chưa commit · READY_FOR_MAIN vẫn phải qua GitHub PR + CI.</div>
+</div>
 <div class="guide-layout">
-<nav class="guide-toc"><b>Trong hướng dẫn này</b><a href="#purpose">Mô hình hoạt động</a><a href="#quick-start">Bắt đầu nhanh</a><a href="#repositories">1. Đăng ký Repository</a><a href="#agent-workspaces">2. Agent Workspace</a><a href="#open-agent">Mở agent trực tiếp</a><a href="#integration">3. Integration</a><a href="#testing">4. Chạy test</a><a href="#ready-for-main">READY_FOR_MAIN</a><a href="#github-flow">GitHub PR & CI</a><a href="#tasks">Task & Sandbox nhiều repo</a><a href="#statuses">Bảng trạng thái</a><a href="#practices">Quy tắc nên theo</a><a href="#demo">Demo quy trình</a></nav>
+<nav class="guide-toc"><b>Trong hướng dẫn này</b>
+<a href="#quick-start">Bắt đầu nhanh</a>
+<a href="#tasks">1. Có task mới</a>
+<a href="#agent-workspaces">2. Agent Workspace là gì?</a>
+<a href="#open-agent">3. Mở Claude / Codex</a>
+<a href="#sandbox">4. Sandbox là gì?</a>
+<a href="#sandbox-modes">5. Chọn Sandbox thế nào?</a>
+<a href="#sandbox-auto">Sandbox tạo tự động ra sao?</a>
+<a href="#global-sandbox">6. Xem sandbox đang chạy</a>
+<a href="#task-detail-sandbox">7. Sandbox trong Task Detail</a>
+<a href="#agent-done">8. Agent sửa xong thì sao?</a>
+<a href="#integration">9. Khi nào tạo Integration?</a>
+<a href="#integration-agent">10. Integration Agent làm gì?</a>
+<a href="#conflict">Nếu merge bị conflict</a>
+<a href="#cross-repo">11. Task nhiều repository</a>
+<a href="#cross-repo-example">Ví dụ: Fix Kiosk Session</a>
+<a href="#source-stale">SOURCE STALE là gì?</a>
+<a href="#restart-rebuild">Restart hay Rebuild?</a>
+<a href="#sandbox-status">Bảng trạng thái Sandbox</a>
+<a href="#test-progress">12. Task đã xong tới đâu?</a>
+<a href="#ready-for-main">13. READY_FOR_MAIN là gì?</a>
+<a href="#github-flow">14. Đưa code lên main</a>
+<a href="#merge-cleanup">15. Sandbox sau khi merge</a>
+<a href="#stop-cleanup">Stop khác Cleanup thế nào?</a>
+<a href="#repositories">Repositories</a>
+<a href="#hardware">ESP / Kiosk thật</a>
+<a href="#scenarios">Ví dụ theo tình huống</a>
+<a href="#troubleshoot">Khi có lỗi</a>
+<a href="#nav-map">Bản đồ điều hướng</a>
+</nav>
 <div class="guide-content">
-<section class="guide-section" id="purpose"><span class="section-kicker">TỔNG QUAN</span><h3>Workspace Manager dùng để làm gì?</h3><p>Mỗi agent làm việc trong <strong>1 branch riêng + 1 Git worktree riêng + 1 source folder riêng</strong>. Codex và Claude không dùng chung checkout, nên có thể code và test độc lập mà không ghi đè working tree của nhau.</p><div class="sample-grid"><article><span class="badge coding">CODING</span><h4>Codex</h4><code>agent/codex/session-filter</code><small>.worktrees/codex-session-filter</small></article><article><span class="badge ready">READY</span><h4>Claude</h4><code>agent/claude/session-review</code><small>.worktrees/claude-session-review</small></article></div><div class="flow-tree"><code>main</code><div>├── Codex workspace</div><div>├── Claude workspace</div><div>└── Integration workspace</div><b>↓ Tests ↓ READY_FOR_MAIN ↓ GitHub PR ↓ CI ↓ main</b></div></section>
 
-<section class="guide-section" id="quick-start"><span class="section-kicker">12 BƯỚC</span><h3>Bắt đầu nhanh</h3><ol class="steps"><li><a href="/repositories">Đăng ký Repository</a><span>Chỉ cấp quyền quản lý cho repo bạn chọn.</span></li><li><a href="/workspaces#new">Tạo Agent Workspace</a><span>Chọn agent, task và base branch.</span></li><li><b>Cho agent code trong folder được cấp</b><span>Không dùng canonical checkout.</span></li><li><b>Mark Ready</b><span>Khi branch agent đã commit và sẵn sàng.</span></li><li><a href="/integrations">Tạo Integration</a><span>Chọn các agent branch cần test chung.</span></li><li><b>Merge các agent branch</b><span>App merge vào integration, không merge main.</span></li><li><b>Run Tests</b><span>Chạy contract thật từ PROJECT.yaml.</span></li><li><b>PASS → READY_FOR_MAIN</b><span>Chỉ cho đúng HEAD đã test.</span></li><li><b>Push integration branch</b><span>Copy lệnh push từ integration detail.</span></li><li><b>Tạo GitHub Pull Request</b><span>Target là main.</span></li><li><b>Chờ CI PASS và review</b><span>GitHub là gate cuối.</span></li><li><b>Merge main</b><span>Thực hiện ngoài Workspace Manager.</span></li></ol></section>
+<section class="guide-section" id="quick-start"><span class="section-kicker">BẮT ĐẦU NHANH</span><h3>Bắt đầu nhanh</h3><p>Toàn bộ vòng đời một task, từ lúc tạo tới lúc sandbox được dọn dẹp:</p>
+<ol class="steps">
+<li><a href="/tasks#new">Tạo Task</a><span>Một công việc mới cho bug hoặc feature.</span></li>
+<li><b>Thêm Agent Workspace</b><span>Chọn repository, agent, role và sandbox cho từng phần việc.</span></li>
+<li><b>Mở Claude / Codex</b><span>Bấm Open Claude / Open Codex, terminal mở đúng worktree của task.</span></li>
+<li><b>Agent sửa code + test</b><span>Làm việc trong source riêng, không đụng main hay agent khác.</span></li>
+<li><b>Mark Ready</b><span>Báo workspace đã sẵn sàng để tích hợp.</span></li>
+<li><a href="#integration">Create Integration</a><span>Ghép các Agent Workspace đã Ready lại để kiểm tra chung.</span></li>
+<li><a href="#integration-agent">Integration Agent merge + test</a><span>Xem diff, merge, chạy test, kiểm tra sandbox.</span></li>
+<li><a href="#ready-for-main">READY_FOR_MAIN</a><span>Đủ điều kiện để mở Pull Request.</span></li>
+<li><a href="#github-flow">PR / CI / Merge</a><span>Tạo GitHub Pull Request, chờ CI PASS, merge trên GitHub.</span></li>
+<li><a href="#merge-cleanup">Sandbox tự cleanup</a><span>Sau thời gian giữ lại (mặc định 24 giờ).</span></li>
+</ol>
+</section>
 
-<section class="guide-section" id="repositories"><span class="section-kicker">BƯỚC 1</span><h3>Đăng ký Repository</h3><p>Vào <a href="/repositories">Repositories</a>, chọn repo Workspace Manager được phép quản lý. Repo phải nằm dưới workspace root; app resolve absolute path và chặn arbitrary filesystem path. Đăng ký repo <strong>không sửa code</strong>.</p><div class="example"><small>Ví dụ</small><p><b>Repository:</b> mesflow</p><code>/home/dell/workspace/mesflow/mesflow</code><p><b>Default branch:</b> main</p></div></section>
+<section class="guide-section" id="tasks"><span class="section-kicker">BƯỚC 1</span><h3>Khi có bug hoặc task mới</h3>
+<p><b>Bước 1 — </b>Vào <a href="/tasks">Tasks</a> → <b>New Task</b>. Nhập:</p>
+<ul class="checklist"><li>Tên task</li><li>Mô tả ngắn (không bắt buộc)</li></ul>
+<div class="example"><small>Ví dụ</small><p><b>Title:</b> Fix lỗi kiosk không gửi được sản lượng</p></div>
+<p><b>Bước 2 — </b>Sau khi task được tạo, bấm <b>Add Agent Workspace</b> trong Task Detail. Chọn:</p>
+<div class="sample-grid"><article><small>Repository</small><b>esp-kiosk</b></article><article><small>Agent</small><b>Claude</b></article><article><small>Role</small><b>Firmware</b></article><article><small>Sandbox</small><b>Auto</b></article></div>
+<p>Workspace Manager sẽ tự tạo branch và worktree riêng cho agent — bạn không cần tự tạo branch bằng tay.</p>
+<div class="info"><b>Tiếp theo:</b> Thêm một Agent Workspace cho task.<br><a class="button" href="/tasks#new">Đi tới Tasks</a></div>
+</section>
 
-<section class="guide-section" id="agent-workspaces"><span class="section-kicker">BƯỚC 2</span><h3>Tạo workspace cho agent</h3><div class="example"><p><b>Repository:</b> mesflow · <b>Agent:</b> Codex</p><p><b>Task:</b> session-filter · <b>Base:</b> main</p><small>Branch</small><code>agent/codex/session-filter</code><small>Worktree</small><code>.worktrees/mesflow-codex-session-filter</code></div><p><strong>Codex chỉ làm việc trong folder này.</strong> Mở terminal bằng:</p><pre>cd /home/dell/workspace/.worktrees/mesflow-codex-session-filter</pre><button class="ghost" onclick="navigator.clipboard.writeText('/home/dell/workspace/.worktrees/mesflow-codex-session-filter')">Copy path</button><h4>Hai agent cùng làm</h4><div class="flow-tree"><div>main</div><div>├── agent/codex/session-filter-ui</div><div>└── agent/claude/session-exception-backend</div></div><p>Hai agent code/test song song trong hai source folder khác nhau và không đụng working tree của nhau.</p></section>
+<section class="guide-section" id="agent-workspaces"><span class="section-kicker">AGENT WORKSPACE</span><h3>Agent Workspace là gì?</h3>
+<p>Mỗi Agent Workspace là một vùng source riêng cho một agent. Claude sửa task A sẽ không sửa trực tiếp vào source đang dùng bởi Codex hoặc main.</p>
+<div class="flow-tree"><code>Claude</code><div>→ branch riêng</div><div>→ worktree riêng</div><code>Codex</code><div>→ branch riêng</div><div>→ worktree riêng</div></div>
+<div class="rule">MỘT AGENT WORKSPACE = MỘT REPOSITORY + MỘT BRANCH + MỘT WORKTREE</div>
+<p>Bạn không cần tự <code>cd</code> tới thư mục worktree. Bấm <b>Open Claude</b> / <b>Open Codex</b> để Workspace Manager mở đúng nơi (xem mục kế tiếp).</p>
+</section>
 
-<section class="guide-section" id="open-agent"><span class="section-kicker">DESKTOP LAUNCHER</span><h3>Mở agent trực tiếp</h3><ol class="steps"><li><b>Tạo Codex hoặc Claude Workspace</b><span>Workspace xác định owner, branch và source folder.</span></li><li><b>Bấm Open Codex / Open Claude</b><span>Browser không gửi command hoặc path tùy ý.</span></li><li><b>Terminal mở đúng folder</b><span>Launcher kiểm tra Git worktree và desktop session trước.</span></li><li><b>Agent chạy trong branch đã cấp</b><span>Codex dùng <code>--yolo</code>; Claude dùng <code>--dangerously-skip-permissions</code>.</span></li><li><b>Hoàn tất → Mark Ready</b><span>Commit thay đổi trước khi tích hợp.</span></li></ol><div class="alert"><b>Cảnh báo mức quyền cao</b><p><code>codex --yolo</code> và <code>claude --dangerously-skip-permissions</code> chạy agent với mức permission cao. Chỉ dùng trong worktree riêng đã được Workspace Manager tạo.</p></div><div class="info"><b>Agent được quyền mạnh + source tree bị cô lập + main vẫn được bảo vệ.</b> Terminal launcher chỉ hỗ trợ desktop session local. VPS, container không GUI hoặc remote server sẽ báo unsupported, không fake success.</div></section>
+<section class="guide-section" id="open-agent"><span class="section-kicker">DESKTOP LAUNCHER</span><h3>Bắt đầu cho agent sửa code</h3>
+<p>Trong Agent Workspace có các nút:</p>
+<div class="sample-grid"><article><b>Open Claude / Open Codex</b><small>Mở terminal ngay tại worktree của task, chạy sẵn agent CLI.</small></article><article><b>Open Terminal</b><small>Chỉ mở terminal tại đúng worktree, không tự chạy agent.</small></article><article><b>Copy Path</b><small>Sao chép đường dẫn worktree nếu bạn muốn tự mở bằng công cụ khác.</small></article><article><b>Mark Ready</b><small>Báo workspace đã sẵn sàng để tích hợp, sau khi đã commit.</small></article></div>
+<div class="example"><small>Ví dụ</small><p>Nếu workspace thuộc Claude: bấm <b>Open Claude</b>. Terminal sẽ mở ngay tại đúng worktree của task.</p></div>
+<div class="warning"><b>Không nên</b> mở Claude/Codex ở source main/shared rồi yêu cầu sửa cùng task.</div>
+<div class="alert"><b>Cảnh báo mức quyền cao</b><p>Claude có thể được mở bằng <code>claude --dangerously-skip-permissions</code>. Codex có thể được mở bằng <code>codex --yolo</code>. Các mode này cho agent quyền thao tác mạnh trong worktree. Chỉ dùng vì source của task đã được cô lập — không dùng các mode này trên main hoặc source dùng chung.</p></div>
+</section>
 
-<section class="guide-section" id="integration"><span class="section-kicker">BƯỚC 3</span><h3>Tạo Integration</h3><div class="example"><p><b>Integration name:</b> session-management</p><p>✓ agent/codex/session-filter-ui<br>✓ agent/claude/session-exception-backend</p><code>integration/session-management</code><small>.worktrees/integration-session-management</small></div><div class="info"><b>Không merge agent branch thẳng vào main để test chung.</b> Merge vào integration workspace trước.</div><h4>Khi source branch có commit mới</h4><div class="step-flow"><span>Codex sửa thêm commit</span><i>↓</i><span>Integration trở thành STALE</span><i>↓</i><span>Merge Latest</span><i>↓</i><span>Run Tests lại</span></div><div class="warning"><b>READY_FOR_MAIN chỉ hợp lệ cho đúng commit đã được test.</b></div></section>
+<section class="guide-section" id="sandbox"><span class="section-kicker">SANDBOX</span><h3>Sandbox dùng để làm gì?</h3>
+<div class="sample-grid"><article><b>Worktree</b><small>= cô lập source code</small></article><article><b>Sandbox</b><small>= cô lập ứng dụng đang chạy</small></article></div>
+<div class="flow-tree"><code>Claude Worktree A</code><div>→ Sandbox A</div><code>Codex Worktree B</code><div>→ Sandbox B</div></div>
+<p>Nếu hai agent cùng chạy backend/database trên một môi trường chung, test có thể đạp dữ liệu hoặc port của nhau. Sandbox tạo môi trường test riêng cho từng task — mỗi sandbox có port và database riêng.</p>
+</section>
 
-<section class="guide-section" id="testing"><span class="section-kicker">BƯỚC 4</span><h3>Chạy test</h3><p>Workspace Manager không tự nghĩ command test riêng. Nó đọc <code>PROJECT.yaml → ci.required</code> của repository và chạy contract thật trong integration worktree.</p><div class="test-demo"><div><code>preflight</code><span class="badge pass">PASS</span></div><div><code>test</code><span class="badge running">RUNNING</span></div></div><p>Khi mọi required stage PASS tại cùng HEAD, integration có thể được đánh dấu READY_FOR_MAIN.</p><h4>Khi test fail</h4><div class="step-flow"><span>TEST FAILED</span><i>↓</i><span>View Log</span><i>↓</i><span>Agent owner sửa branch</span><i>↓</i><span>Commit → Merge Latest → test lại</span></div><div class="info">Không nên sửa lỗi thuộc Codex branch trực tiếp trong integration branch, trừ khi lỗi thực sự chỉ phát sinh do interaction giữa nhiều branch.</div></section>
+<section class="guide-section" id="sandbox-modes"><span class="section-kicker">CHỌN SANDBOX</span><h3>Chọn Sandbox thế nào?</h3>
+<div class="sample-grid">
+<article><b>Auto</b><small>Khuyên dùng. Workspace Manager chọn profile theo cấu hình của project.</small></article>
+<article><b>None</b><small>Không tạo môi trường runtime. Dùng cho docs, code analysis, thay đổi không cần chạy app.</small></article>
+<article><b>Backend</b><small>Tạo backend + database cần thiết cho task.</small></article>
+<article><b>Full Stack</b><small>Tạo môi trường đầy đủ: backend, frontend, QA hoặc service phụ.</small></article>
+<article><b>Hardware / Kiosk</b><small>Dùng khi ESP/Kiosk cần kết nối tới backend sandbox qua LAN.</small></article>
+<article><b>Shared Dev</b><small>Dùng môi trường development dùng chung, không hoàn toàn isolated. Chỉ dùng khi biết rõ task không ảnh hưởng môi trường khác.</small></article>
+</div>
+<div class="readybox"><b>Nếu không chắc, chọn Auto.</b></div>
+</section>
 
-<section class="guide-section" id="ready-for-main"><span class="section-kicker">READINESS</span><h3>Khi nào là READY_FOR_MAIN?</h3><ul class="checklist"><li>No merge conflict</li><li>Integration tree clean</li><li>All source branches merged at latest commit</li><li>Required tests PASS</li><li><code>verified_commit == current HEAD</code></li></ul><div class="readybox"><b>READY_FOR_MAIN không có nghĩa là đã merge main.</b><p>Nó chỉ có nghĩa local integration đã đủ điều kiện để tạo Pull Request.</p></div></section>
+<section class="guide-section" id="sandbox-auto"><span class="section-kicker">TỰ ĐỘNG</span><h3>Sandbox được tạo tự động thế nào?</h3>
+<div class="flow-tree"><code>Create Agent Workspace</code><div>↓ branch</div><div>↓ worktree</div><div>↓ allocate ports</div><div>↓ database riêng</div><div>↓ start services</div><div>↓ health check</div><b>↓ RUNNING</b></div>
+<div class="info">Nếu sandbox tạo thất bại, Agent Workspace vẫn tồn tại. Bạn có thể sửa code trước và bấm <b>Start</b> lại sandbox sau (không cần tạo lại workspace).</div>
+</section>
 
-<section class="guide-section" id="github-flow"><span class="section-kicker">BƯỚC CUỐI</span><h3>Đưa code lên main</h3><div class="horizontal-flow"><span>READY_FOR_MAIN</span><b>→</b><span>Push integration</span><b>→</b><span>GitHub PR</span><b>→</b><span>Actions CI PASS</span><b>→</b><span>Review</span><b>→</b><span>main</span></div><pre>git push -u origin integration/session-management</pre><div class="warning"><b>Workspace Manager không bypass GitHub CI và không tự merge main.</b></div></section>
+<section class="guide-section" id="global-sandbox"><span class="section-kicker">SANDBOXES</span><h3>Xem các môi trường đang chạy</h3>
+<p>Vào <a href="/sandboxes">Sandboxes</a> để xem toàn bộ sandbox trên máy này — trang này trả lời câu hỏi: <b>"Máy này hiện đang chạy những task nào?"</b></p>
+<div class="example"><small>Ví dụ</small><p><b>Task:</b> Fix Kiosk Session · <b>Status:</b> RUNNING</p><small>Backend</small><code>http://127.0.0.1:18127</code><small>LAN</small><code>http://192.168.1.142:18127</code><small>Source</small><code>mesflow @ abc123</code><code>esp-kiosk @ def456</code></p></div>
+<p>Mỗi dòng sandbox có các nút: <b>Open Backend</b>, <b>Open Frontend</b>, <b>Open LAN</b>, <b>Details</b>, <b>Logs</b>, <b>Health Check</b>, <b>Restart</b>, <b>Stop</b> — nút nào không áp dụng cho sandbox đó sẽ không hiện ra. Dùng bộ lọc Running / Unhealthy / Stopped / Cleanup Pending, hoặc lọc theo Task / Repository / Owner / Profile để tìm nhanh.</p>
+<div class="test-demo"><div><span>Running</span><b>3</b></div><div><span>Unhealthy</span><b>1</b></div><div><span>Stopped</span><b>2</b></div><div><span>Cleanup Pending</span><b>1</b></div><div><span>Capacity</span><b>3 / 5</b></div></div>
+<p>Bạn có thể bấm trực tiếp vào URL để xem giao diện/kết quả agent đang làm — không cần biết cổng hay đường dẫn worktree.</p>
+</section>
 
-<section class="guide-section" id="tasks"><span class="section-kicker">NHIỀU REPO</span><h3>Task & Sandbox cho task nhiều repo (backend + frontend/ESP)</h3><div class="flow-tree"><code>Tạo Task</code><div>↓</div><code>Add Backend Agent Workspace</code><div>↓</div><code>Add Frontend/ESP Agent Workspace</code><div>↓</div><code>Mỗi repo có branch + worktree riêng</code><div>↓</div><code>(tuỳ chọn) Sandbox riêng cho từng agent</code><div>↓</div><code>Create Integration</code><div>↓</div><code>Repo-specific integration worktree cho từng repo</code><div>↓</div><code>Integration Sandbox mới, độc lập</code><div>↓</div><code>Cross-repo test</code><div>↓</div><code>READY_FOR_MAIN</code><div>↓</div><code>GitHub PR mỗi repo + CI</code><div>↓</div><code>Mark Merged</code><div>↓</div><code>Giữ sandbox 24h</code><div>↓</div><code>Tự động cleanup</code></div><div class="readybox"><b>Không cần merge backend vào main trước để frontend/ESP test.</b><p>Integration Sandbox chạy trực tiếp từ backend integration branch chưa merge, với đúng commit đã pin trong source manifest. Chỉ khi có PASS ở Integration Sandbox mới mở PR.</p></div><div class="info"><b>Sandbox không phải yêu cầu bắt buộc.</b> Chỉ project khai báo <code>sandbox:</code> trong <code>PROJECT.yaml</code> mới tự tạo runtime; các project khác vẫn dùng đúng flow ONE AGENT · ONE BRANCH · ONE WORKTREE như cũ.</div></section>
-<section class="guide-section" id="statuses"><span class="section-kicker">TRA CỨU</span><h3>Status glossary</h3><table><thead><tr><th>Status</th><th>Ý nghĩa</th></tr></thead><tbody><tr><td><span class="badge created">CREATED</span></td><td>Workspace vừa được tạo</td></tr><tr><td><span class="badge coding">CODING</span></td><td>Agent đang làm việc</td></tr><tr><td><span class="badge ready">READY</span></td><td>Agent báo branch đã sẵn sàng tích hợp</td></tr><tr><td><span class="badge failed">BLOCKED</span></td><td>Agent đang bị chặn</td></tr><tr><td><span class="badge created">MERGING</span></td><td>Integration đang merge</td></tr><tr><td><span class="badge conflict">CONFLICT</span></td><td>Có conflict cần xử lý</td></tr><tr><td><span class="badge testing">TESTING</span></td><td>Đang chạy test</td></tr><tr><td><span class="badge failed">FAILED</span></td><td>Test hoặc integration thất bại</td></tr><tr><td><span class="badge ready_for_main">READY_FOR_MAIN</span></td><td>Đã test đúng HEAD và đủ điều kiện PR</td></tr><tr><td><span class="badge">CLOSED</span></td><td>Workspace đã đóng</td></tr></tbody></table></section>
+<section class="guide-section" id="task-detail-sandbox"><span class="section-kicker">TASK DETAIL</span><h3>Xem môi trường của riêng một task</h3>
+<p>Trong Task Detail (<code>/tasks/{id}</code>) cũng có phần <b>Sandbox Environments</b>, chia thành <b>Agent Workspaces</b> và <b>Integration</b>. Bạn không cần vào màn hình Sandboxes nếu chỉ muốn kiểm tra task hiện tại.</p>
+<div class="example"><small>Task: Fix Kiosk Session</small>
+<p><b>Claude · Backend</b> — READY<br>Sandbox RUNNING<br>Backend: <code>http://127.0.0.1:18127</code> [Open]</p>
+<p><b>Codex · ESP</b> — READY<br>Integration Sandbox RUNNING<br>Hardware URL: <code>http://192.168.1.142:18201</code> [Open LAN]</p>
+</div>
+<table><thead><tr><th>Màn hình</th><th>Dùng khi</th></tr></thead><tbody>
+<tr><td><a href="/sandboxes">Sandboxes</a></td><td>Xem toàn bộ môi trường trên máy</td></tr>
+<tr><td>Task Detail</td><td>Xem môi trường chỉ của task đang xem</td></tr>
+</tbody></table>
+</section>
 
-<section class="guide-section" id="practices"><span class="section-kicker">AN TOÀN</span><h3>Quy tắc nên tuân theo</h3><div class="rule"><b>ONE AGENT · ONE BRANCH · ONE WORKTREE</b></div><ul class="checklist"><li>Không code trực tiếp trên main</li><li>Không share cùng source folder cho nhiều agent</li><li>Không merge branch chưa commit vào integration</li><li>Source branch thay đổi → integration phải test lại</li><li>Không xoá worktree đang dirty</li><li>Không dùng <code>reset --hard</code> để giải quyết conflict</li><li>Main chỉ nhận code qua PR + CI</li></ul></section>
+<section class="guide-section" id="agent-done"><span class="section-kicker">HOÀN THÀNH</span><h3>Khi agent sửa xong</h3>
+<p>Agent nên:</p>
+<ol class="steps"><li><b>Sửa code</b><span></span></li><li><b>Chạy test</b><span></span></li><li><b>Review diff</b><span></span></li><li><b>Commit</b><span></span></li><li><b>Báo kết quả</b><span></span></li></ol>
+<p>Sau đó bạn bấm <b>Mark Ready</b>.</p>
+<div class="readybox"><b>Mark Ready có nghĩa:</b><p>Workspace này đã sẵn sàng để đưa sang bước Integration. Không có nghĩa là code đã vào main.</p></div>
+<div class="info"><b>Tiếp theo:</b> Tạo Integration để kiểm tra code đã ghép.<br><a class="button" href="/tasks">Đi tới Tasks</a></div>
+</section>
 
-<section class="guide-section" id="demo"><span class="section-kicker">SAMPLE / DEMO</span><h3>Demo quy trình</h3><p>Đây là <strong>visual sample</strong>, chỉ minh hoạ giao diện. Nó không tạo repository, branch hay worktree và không đụng repository thật.</p><div class="demo-board"><article><small>1 · CREATE CODEX WORKSPACE</small><h4>Codex · Product Filter UI</h4><code>agent/codex/product-filter-ui</code><span class="badge coding">CODING</span></article><article><small>2 · CREATE CLAUDE WORKSPACE</small><h4>Claude · Product API</h4><code>agent/claude/product-api</code><span class="badge ready">READY</span></article><article><small>3–5 · INTEGRATE & TEST</small><h4>Integration · Product Filter</h4><code>integration/product-filter</code><span class="badge testing">TESTING</span></article><article><small>6–7 · READY & PR</small><h4>Exact HEAD verified</h4><code>preflight PASS · test PASS</code><span class="badge ready_for_main">READY_FOR_MAIN</span></article></div><div class="step-flow"><span>New Codex commit</span><i>↓</i><span>READY_FOR_MAIN → STALE</span><i>↓</i><span>Merge Latest → test lại</span></div></section>
+<section class="guide-section" id="integration"><span class="section-kicker">TÍCH HỢP</span><h3>Create Integration dùng khi nào?</h3>
+<p>Sau khi các Agent Workspace cần thiết đã Ready, tạo Integration để ghép và kiểm tra trạng thái cuối.</p>
+<div class="sample-grid">
+<article><b>Một agent</b><small>Task chỉ có một agent vẫn có thể dùng Integration để có môi trường verification riêng.</small></article>
+<article><b>Nhiều agent</b><small>Nếu nhiều agent cùng làm một task, Integration là bắt buộc.</small></article>
+</div>
+<div class="flow-tree"><code>Claude branch</code><div>       \</div><div>        → Integration</div><div>       /</div><code>Codex branch</code></div>
+<h4>Khi source branch có commit mới</h4>
+<div class="step-flow"><span>Agent sửa thêm commit</span><i>↓</i><span>Integration trở thành STALE</span><i>↓</i><span>Merge Latest</span><i>↓</i><span>Run Tests lại</span></div>
+</section>
+
+<section class="guide-section" id="integration-agent"><span class="section-kicker">INTEGRATION AGENT</span><h3>Integration Agent làm gì?</h3>
+<p>Integration Agent không phải agent viết feature chính. Nó chịu trách nhiệm:</p>
+<ul class="checklist"><li>Xem diff của các branch</li><li>Kiểm tra source nào thay đổi</li><li>Merge</li><li>Phát hiện conflict</li><li>Xử lý conflict đơn giản</li><li>Chạy test</li><li>Kiểm tra sandbox</li><li>Báo READY_FOR_MAIN hay FIX_REQUIRED</li></ul>
+<p>Bấm <b>Open Integrator</b> để mở Claude/Codex tại môi trường Integration.</p>
+</section>
+
+<section class="guide-section" id="conflict"><span class="section-kicker">CONFLICT</span><h3>Nếu merge bị conflict</h3>
+<ul class="checklist">
+<li><b>Conflict đơn giản:</b> Integration Agent có thể tự xử lý.</li>
+<li><b>Conflict logic/API/schema:</b> Integration Agent phải phân tích trước khi sửa.</li>
+<li><b>Nếu không chắc:</b> status = FIX_REQUIRED và trả việc về Agent Workspace phù hợp.</li>
+</ul>
+<div class="warning">Không cần sửa lỗi của Claude trên integration branch nếu lỗi đó thực sự thuộc branch Claude. Quay lại Claude Workspace → sửa → commit mới → Merge Latest.</div>
+</section>
+
+<section class="guide-section" id="cross-repo"><span class="section-kicker">NHIỀU REPO</span><h3>Nếu một task phải sửa nhiều repository</h3>
+<div class="example"><small>Ví dụ</small><p>Backend cần API mới <b>+</b> ESP cần gọi API mới</p></div>
+<p><b>Không cần:</b></p>
+<div class="step-flow"><span>backend → merge main</span><i>→</i><span>ESP mới test</span></div>
+<p><b>Cách đúng:</b></p>
+<div class="flow-tree"><code>Task</code><div>├── Backend Workspace</div><div>└── ESP Workspace</div><b>↓ Create Integration</b><div>Backend integration branch</div><div>+ ESP integration branch</div><div>+ Integration Sandbox</div></div>
+<p>Integration Sandbox chạy backend từ branch backend <b>chưa merge main</b>. ESP test build trỏ trực tiếp vào backend sandbox đó.</p>
+<div class="flow-tree"><code>Backend branch @ abc123</code><div>           \</div><div>            → Integration Sandbox</div><div>           /</div><code>ESP branch @ def456</code></div>
+<p>Hardware URL ví dụ: <code>http://192.168.1.142:18127</code></p>
+<div class="readybox">Nhờ vậy backend và ESP (hoặc frontend) có thể phát triển/test song song, không phải chờ nhau merge main.</div>
+</section>
+
+<section class="guide-section" id="cross-repo-example"><span class="section-kicker">VÍ DỤ ĐẦY ĐỦ</span><h3>Ví dụ: Fix Kiosk Session</h3>
+<ol class="steps">
+<li><b>Create Task</b><span></span></li>
+<li><b>Add Workspace</b><span>Repo: mesflow · Agent: Claude · Role: Backend · Sandbox: Backend</span></li>
+<li><b>Add Workspace</b><span>Repo: esp-kiosk · Agent: Codex · Role: Firmware · Sandbox: None</span></li>
+<li><b>Claude sửa backend, Codex sửa ESP</b><span>Làm song song, mỗi bên một worktree riêng.</span></li>
+<li><b>Mark Ready cả hai</b><span></span></li>
+<li><b>Create Integration</b><span></span></li>
+<li><b>Integration Sandbox tạo backend riêng</b><span>Backend LAN URL: <code>http://192.168.1.142:18201</code></span></li>
+<li><b>ESP firmware/test trỏ vào URL này</b><span></span></li>
+<li><b>Run integration tests</b><span></span></li>
+<li><b>READY_FOR_MAIN</b><span></span></li>
+</ol>
+</section>
+
+<section class="guide-section" id="source-stale"><span class="section-kicker">CẢNH BÁO</span><h3>SOURCE STALE nghĩa là gì?</h3>
+<p>Sandbox đã được tạo từ commit cũ, nhưng branch đã có commit mới.</p>
+<div class="example"><small>Ví dụ</small><p><b>Sandbox:</b> <code>abc123</code> · <b>Current:</b> <code>abc999</code></p></div>
+<p>Hành động: bấm <b>Rebuild Sandbox</b>.</p>
+<div class="warning">Kết quả test cũ không còn đủ để xác nhận code mới.</div>
+</section>
+
+<section class="guide-section" id="restart-rebuild"><span class="section-kicker">SO SÁNH</span><h3>Restart hay Rebuild?</h3>
+<div class="sample-grid">
+<article><b>Restart</b><small>Chạy lại cùng sandbox/source hiện có.<br><br><b>Dùng khi:</b> service treo, backend cần restart.</small></article>
+<article><b>Rebuild</b><small>Build lại sandbox từ source hiện tại (commit mới nhất).<br><br><b>Dùng khi:</b> agent vừa commit code mới, Docker image cần build lại, source đang SOURCE STALE.</small></article>
+</div>
+</section>
+
+<section class="guide-section" id="sandbox-status"><span class="section-kicker">TRA CỨU</span><h3>Trạng thái Sandbox</h3>
+<table><thead><tr><th>Trạng thái</th><th>Ý nghĩa</th></tr></thead><tbody>
+<tr><td><span class="badge running">RUNNING</span></td><td>Sandbox đang chạy và health check PASS.</td></tr>
+<tr><td><span class="badge">UNHEALTHY</span></td><td>Container có thể đang chạy nhưng ứng dụng chưa healthy.</td></tr>
+<tr><td><span class="badge">STOPPED</span></td><td>Sandbox đã dừng nhưng data vẫn còn.</td></tr>
+<tr><td><span class="badge failed">FAILED</span></td><td>Provision/start/rebuild gặp lỗi.</td></tr>
+<tr><td><span class="badge failed">SOURCE STALE</span></td><td>Source đã thay đổi từ lần sandbox được build/test.</td></tr>
+<tr><td><span class="badge created">CLEANUP ELIGIBLE</span></td><td>Task đã merge/cancel và sandbox đang chờ cleanup.</td></tr>
+<tr><td><span class="badge">CLOSED</span></td><td>Runtime sandbox đã được dọn. Metadata/test evidence vẫn còn.</td></tr>
+</tbody></table>
+</section>
+
+<section class="guide-section" id="test-progress"><span class="section-kicker">TIẾN ĐỘ</span><h3>Xem task đã hoàn thiện tới đâu</h3>
+<p>Đầu trang Task Detail luôn có phần tóm tắt:</p>
+<div class="test-demo"><div><span>Agents</span><b>2 / 2 READY</b></div><div><span>Sandbox</span><b>HEALTHY</b></div><div><span>Tests</span><b>4 / 5 PASS</b></div><div><span>Hardware</span><b>PENDING</b></div><div><span>Integration</span><b>TESTING</b></div></div>
+<p>Đây là nơi chính để xem task còn thiếu bước nào.</p>
+</section>
+
+<section class="guide-section" id="ready-for-main"><span class="section-kicker">READINESS</span><h3>READY_FOR_MAIN nghĩa là gì?</h3>
+<p>Task đã qua các bước kiểm tra cần thiết và có thể đưa sang PR/CI.</p>
+<ul class="checklist">
+<li>Các source branch đã merge vào Integration</li>
+<li>Không còn conflict</li>
+<li>Integration sandbox healthy</li>
+<li>Required tests PASS</li>
+<li>Source chưa thay đổi sau lần test</li>
+<li>Verified commit đúng với HEAD hiện tại</li>
+</ul>
+<div class="info">Với task nhiều repo: tất cả repository tham gia phải đạt trạng thái tương ứng.</div>
+<div class="readybox"><b>READY_FOR_MAIN không có nghĩa là đã merge main.</b><p>Nó chỉ có nghĩa integration đã đủ điều kiện để tạo Pull Request.</p></div>
+</section>
+
+<section class="guide-section" id="github-flow"><span class="section-kicker">BƯỚC CUỐI</span><h3>Sau READY_FOR_MAIN</h3>
+<div class="horizontal-flow"><span>Push integration branch</span><b>→</b><span>Tạo GitHub Pull Request</span><b>→</b><span>GitHub CI</span><b>→</b><span>CI PASS</span><b>→</b><span>Merge main</span></div>
+<pre>git push -u origin integration/session-management</pre>
+<div class="warning"><b>Workspace Manager không bypass GitHub CI và không tự merge main.</b> Tạo Pull Request và merge trên GitHub là thao tác thủ công ngoài Workspace Manager — hiện tại phiên bản này chưa tự động tạo PR hay tự merge.</div>
+<div class="info"><b>Tiếp theo:</b> Push branch và tạo Pull Request.</div>
+</section>
+
+<section class="guide-section" id="merge-cleanup"><span class="section-kicker">SAU MERGE</span><h3>Sau khi task merge thành công</h3>
+<p>Sandbox không bị xóa ngay.</p>
+<div class="flow-tree"><code>MERGED</code><div>↓ Retention</div><div>↓ mặc định 24 giờ</div><b>↓ Auto Cleanup</b></div>
+<p>Giữ lại một thời gian để còn xem logs, runtime, DB sandbox, evidence — nếu vừa merge xong mà phát hiện vấn đề.</p>
+<p>Cleanup xoá: containers, sandbox network, sandbox volumes, generated runtime env, port reservations.</p>
+<p>Cleanup giữ lại: task history, source commits, test results, audit, integration report.</p>
+<h4>Nút điều khiển cleanup</h4>
+<div class="sample-grid">
+<article><b>Extend 24h</b><small>Dời thời điểm cleanup thêm 24 giờ.</small></article>
+<article><b>Cleanup Now</b><small>Dọn ngay lập tức. Chỉ xoá runtime/data của sandbox, <b>không xoá source code</b>.</small></article>
+<article><b>Huỷ lịch cleanup</b><small>Bấm <b>Start</b> trên sandbox đang Cleanup Pending — sandbox chạy lại và tự động ra khỏi hàng chờ cleanup.</small></article>
+</div>
+</section>
+
+<section class="guide-section" id="stop-cleanup"><span class="section-kicker">SO SÁNH</span><h3>Stop khác Cleanup thế nào?</h3>
+<div class="sample-grid">
+<article><b>Stop</b><small>Dừng ứng dụng · giữ data · giữ port · có thể Start lại.</small></article>
+<article><b>Cleanup</b><small>Xóa runtime sandbox · xóa sandbox-owned data/volume · release port · metadata/evidence vẫn còn.</small></article>
+</div>
+</section>
+
+<section class="guide-section" id="repositories"><span class="section-kicker">REPOSITORIES</span><h3>Repositories</h3>
+<p>Workspace Manager không cần nằm trong repository được quản lý — repo có thể ở bất kỳ đâu dưới workspace root đã cấu hình.</p>
+<div class="example"><small>Configured root</small><code>{{settings.root}}</code></div>
+<p>Vào <a href="/repositories">Repositories</a> để <b>Register</b> repo mới, hoặc chọn từ danh sách <b>Discovered</b>. Danh sách Discovered luôn tự làm mới mỗi khi bạn mở lại trang — nếu vừa thêm hoặc di chuyển một repo, chỉ cần tải lại trang Repositories.</p>
+</section>
+
+<section class="guide-section" id="no-sandbox-contract"><span class="section-kicker">KHÔNG CÓ SANDBOX</span><h3>Project không khai báo Sandbox</h3>
+<p>Nếu Task Detail hiện dòng:</p>
+<div class="alert">Sandbox is not configured for this repository.</div>
+<p>Agent vẫn có thể làm việc bình thường bằng worktree — Sandbox chỉ là tính năng tuỳ chọn. Muốn có sandbox tự động, project cần khai báo <code>sandbox:</code> trong <code>PROJECT.yaml</code> của repository đó (phần kỹ thuật này do người phụ trách repo cấu hình, không bắt buộc với mọi project).</p>
+</section>
+
+<section class="guide-section" id="hardware"><span class="section-kicker">PHẦN CỨNG</span><h3>Test ESP / Kiosk</h3>
+<p>ESP thật không truy cập được <code>127.0.0.1</code> trên máy dev, nên phải dùng <b>Hardware / LAN URL</b>.</p>
+<div class="example"><small>Ví dụ</small><code>http://192.168.1.142:18127</code></div>
+<ol class="steps">
+<li><b>Create Hardware/Integration Sandbox</b><span></span></li>
+<li><b>Copy LAN URL</b><span></span></li>
+<li><b>Build/config firmware test với URL đó</b><span></span></li>
+<li><b>Flash test device nếu cần</b><span></span></li>
+<li><b>Kiểm tra E2E</b><span></span></li>
+<li><b>Ghi Hardware Test result</b><span>PASS / FAIL / NOT_RUN, nếu project yêu cầu.</span></li>
+</ol>
+<div class="warning">Không dùng Production endpoint để test task. Việc flash thiết bị thật vẫn là thao tác thủ công — Workspace Manager chưa tự động flash firmware.</div>
+</section>
+
+<section class="guide-section" id="scenarios"><span class="section-kicker">TÌNH HUỐNG</span><h3>Ví dụ theo tình huống</h3>
+<div class="demo-board">
+<article><small>SCENARIO A</small><h4>Một bug backend đơn giản</h4><div class="flow-tree">Task → Claude workspace → Backend Sandbox → fix → test → Ready → Integration → PASS</div></article>
+<article><small>SCENARIO B</small><h4>UI frontend</h4><div class="flow-tree">Task → Codex workspace → Full/Frontend Sandbox → Open Frontend URL → kiểm tra trực tiếp</div></article>
+<article><small>SCENARIO C</small><h4>Backend + ESP</h4><div class="flow-tree">Backend workspace + ESP workspace → Integration Sandbox → ESP trỏ vào LAN backend</div></article>
+<article><small>SCENARIO D</small><h4>Hai agent sửa cùng repo</h4><div class="flow-tree">Claude branch + Codex branch → one repo Integration → merge/test</div></article>
+<article><small>SCENARIO E</small><h4>Nhiều repo</h4><div class="flow-tree">backend + frontend + firmware → Task Integration coordinator → integration sandbox dùng chung</div></article>
+</div>
+</section>
+
+<section class="guide-section" id="troubleshoot"><span class="section-kicker">KHI CÓ LỖI</span><h3>Khi test fail</h3>
+<p>Nếu lỗi thuộc một Agent Workspace: quay lại workspace đó → Open Claude/Codex → sửa → commit → Mark Ready → Integration Merge Latest → retest.</p>
+<p>Nếu là conflict chỉ phát sinh khi tích hợp (không thuộc riêng branch nào): Integration Agent có thể tạo integration-only fix.</p>
+<h3 id="sandbox-fail">Nếu sandbox fail</h3>
+<ol class="steps"><li><b>Xem Status</b><span></span></li><li><b>Mở Logs</b><span></span></li><li><b>Xem Health</b><span></span></li><li><b>Retry / Rebuild</b><span>Bấm Start để thử lại, hoặc Rebuild nếu source đã đổi.</span></li></ol>
+<div class="info">Sandbox fail không đồng nghĩa source worktree bị mất — code của agent vẫn còn nguyên, chỉ môi trường chạy thử bị lỗi.</div>
+<h3 id="capacity-full">Nếu hết chỗ chạy sandbox</h3>
+<div class="alert">SANDBOX_CAPACITY_FULL</div>
+<p>Lựa chọn: Stop sandbox không dùng, Cleanup sandbox cũ, hoặc tạo workspace không có sandbox (profile None). Workspace Manager không tự kill sandbox khác của bạn.</p>
+</section>
+
+<section class="guide-section" id="nav-map"><span class="section-kicker">ĐIỀU HƯỚNG</span><h3>Bản đồ điều hướng</h3>
+<table><tbody>
+<tr><td><a href="/">Dashboard</a></td><td>Tổng quan</td></tr>
+<tr><td><a href="/tasks">Tasks</a></td><td>Công việc</td></tr>
+<tr><td><a href="/workspaces">Agent Workspaces</a></td><td>Nơi agent code</td></tr>
+<tr><td><a href="/integrations">Integrations</a></td><td>Merge + verification</td></tr>
+<tr><td><a href="/sandboxes">Sandboxes</a></td><td>Môi trường runtime</td></tr>
+<tr><td><a href="/repositories">Repositories</a></td><td>Source repositories</td></tr>
+<tr><td><a href="/test-runs">Test Runs</a></td><td>Lịch sử test</td></tr>
+<tr><td><a href="/settings">Settings</a></td><td>Cấu hình</td></tr>
+<tr><td><a href="/help">Help</a></td><td>Hướng dẫn</td></tr>
+</tbody></table>
+</section>
+
+<section class="guide-section" id="practices"><span class="section-kicker">AN TOÀN</span><h3>Quy tắc nên tuân theo</h3>
+<ul class="checklist"><li>Không code trực tiếp trên main</li><li>Không share cùng source folder cho nhiều agent</li><li>Source branch thay đổi → integration phải test lại</li><li>Không xoá worktree đang dirty</li><li>Main chỉ nhận code qua PR + CI</li></ul>
+</section>
+
+<section class="guide-section" id="demo"><span class="section-kicker">SAMPLE / DEMO</span><h3>Demo quy trình</h3><p>Đây là <strong>visual sample</strong>, chỉ minh hoạ giao diện. Nó không tạo repository, branch hay worktree và không đụng repository thật.</p><div class="demo-board"><article><small>1 · CREATE CODEX WORKSPACE</small><h4>Codex · Product Filter UI</h4><code>agent/codex/product-filter-ui</code><span class="badge coding">CODING</span></article><article><small>2 · CREATE CLAUDE WORKSPACE</small><h4>Claude · Product API</h4><code>agent/claude/product-api</code><span class="badge ready">READY</span></article><article><small>3–5 · INTEGRATE & TEST</small><h4>Integration · Product Filter</h4><code>integration/product-filter</code><span class="badge testing">TESTING</span></article><article><small>6–7 · READY & PR</small><h4>Exact HEAD verified</h4><code>preflight PASS · test PASS</code><span class="badge ready_for_main">READY_FOR_MAIN</span></article></div><div class="step-flow"><span>New commit</span><i>↓</i><span>READY_FOR_MAIN → STALE</span><i>↓</i><span>Merge Latest → test lại</span></div></section>
+
 </div></div>
 {% endblock %}
