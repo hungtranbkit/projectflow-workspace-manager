@@ -1,0 +1,17 @@
+{% extends 'base.html' %}{% block title %}Task · {{t.title}}{% endblock %}{% block header_action %}<span class="badge {{t.status|lower}}">{{t.status.replace('_',' ')}}</span>{% endblock %}{% block content %}
+<section class="facts"><div class="wide"><small>Description</small><code>{{t.description or '—'}}</code></div><div><small>Slug</small><code>{{t.slug}}</code></div><div><small>Created</small><code>{{t.created_at}}</code></div></section>
+
+<div class="actions">
+{% if all_ready and not task_integration %}<form method="post" action="/api/tasks/{{t.id}}/integrations"><button class="success">Create Integration</button></form>{% endif %}
+{% if t.status not in ['MERGED','CANCELLED','CLOSED'] %}<form method="post" action="/api/tasks/{{t.id}}/mark-merged" onsubmit="return confirm('Tất cả repo PR liên quan đã merge?')"><button>Mark Merged</button></form><form method="post" action="/api/tasks/{{t.id}}/cancel" onsubmit="return confirm('Huỷ task này?')"><button class="danger">Cancel Task</button></form>{% endif %}
+</div>
+
+<section class="panel"><h3>Agent Workspaces</h3>{% for w in workspaces %}<div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.repo_name}} <small>{{w.role or 'no role'}}</small><br><code>{{w.branch}}</code></div><span class="badge {{w.status|lower}}">{{w.status}}</span></div>{% else %}<p class="empty">Chưa có Agent Workspace nào trong Task này.</p>{% endfor %}
+<h4>+ Add Agent Workspace</h4>
+<form method="post" action="/api/tasks/{{t.id}}/workspaces"><label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label><label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><label>Task role<input name="role" placeholder="Backend / Firmware / Frontend"></label><label>Base branch<input name="base_branch" value="main"></label><label>Sandbox profile<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label><button>Add Agent Workspace</button></form>
+</section>
+
+<section class="panel"><h3>Sandboxes</h3>{% for sb in sandboxes %}<a class="row" href="/sandboxes/{{sb.id}}"><div><strong>{{sb.sandbox_slug}}</strong><small>{{sb.owner_type}} · profile {{sb.profile}}</small></div><span class="badge {{sb.status|lower}}">{{sb.status.replace('_',' ')}}</span></a>{% else %}<p class="empty">Chưa có sandbox nào cho Task này.</p>{% endfor %}</section>
+
+{% if task_integration %}<section class="panel"><h3>Integration <span class="badge {{task_integration.status|lower}}">{{task_integration.status.replace('_',' ')}}</span></h3>{% for r in ti_repos %}<a class="row" href="/integrations/{{r.id}}"><div><strong>{{r.repo_name}}</strong><small>{{r.branch}}</small></div><span class="badge {{r.status|lower}}">{{r.status.replace('_',' ')}}</span></a>{% endfor %}</section>{% endif %}
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends 'base.html' %}{% block title %}Sandbox · {{sb.sandbox_slug}}{% endblock %}{% block header_action %}<span class="badge {{sb.status|lower}}">{{sb.status.replace('_',' ')}}</span>{% endblock %}{% block content %}
+<section class="facts"><div><small>Profile</small><code>{{sb.profile}}</code></div><div><small>Compose project</small><code>{{sb.compose_project}}</code></div><div><small>Health</small><code>{{sb.health_status}}</code></div><div><small>Cleanup eligible at</small><code>{{sb.cleanup_eligible_at or '—'}}</code></div>{% if sb.error_message %}<div class="wide"><small>Error</small><code>{{sb.error_code}}: {{sb.error_message}}</code></div>{% endif %}</section>
+
+{% if outputs %}<div class="readybox"><b>Sandbox Test Target</b>{% for name,url in outputs.items() %}<p>{{name}}: <code>{{url}}</code> <button class="ghost" onclick="navigator.clipboard.writeText('{{url}}')">Copy URL</button></p>{% endfor %}{% if lan_ip %}<p>LAN (dùng cho ESP/Kiosk thật): <code>http://{{lan_ip}}:{{ports[0].host_port if ports}}</code></p>{% endif %}</div>{% endif %}
+
+<div class="actions">
+<form method="post" action="/api/sandboxes/{{sb.id}}/start"><button>Start</button></form>
+<form method="post" action="/api/sandboxes/{{sb.id}}/stop"><button class="secondary">Stop</button></form>
+<form method="post" action="/api/sandboxes/{{sb.id}}/restart"><button class="secondary">Restart</button></form>
+<form method="post" action="/api/sandboxes/{{sb.id}}/rebuild" onsubmit="return confirm('Rebuild sẽ dùng commit hiện tại và huỷ readiness cũ.')"><button class="secondary">Rebuild</button></form>
+<form method="post" action="/api/sandboxes/{{sb.id}}/health"><button class="secondary">Health Check</button></form>
+{% if sb.status == 'CLEANUP_ELIGIBLE' %}<form method="post" action="/api/sandboxes/{{sb.id}}/extend-retention"><input type="hidden" name="hours" value="24"><button class="secondary">Keep 24h More</button></form>{% endif %}
+<form method="post" action="/api/sandboxes/{{sb.id}}/cleanup" onsubmit="return confirm('Cleanup ngay lập tức?')"><button class="danger">Cleanup Now</button></form>
+</div>
+
+<section class="panel"><h3>Sources (exact commits)</h3>{% for s in sources %}<div class="row"><div><strong>{{s.role}}</strong> · {{s.repo_name}}<small>{{s.branch}} @ <code>{{s.commit_sha[:12]}}</code></small></div><span class="badge">{{s.source_type}}</span></div>{% endfor %}</section>
+
+{% if sb.profile == 'HARDWARE' %}<section class="panel"><h3>Hardware Test</h3><form method="post" action="/api/sandboxes/{{sb.id}}/build-firmware"><button class="secondary">Build Test Firmware</button></form><form method="post" action="/api/sandboxes/{{sb.id}}/hardware-test"><label>Result<select name="result"><option>PASS</option><option>FAIL</option><option>NOT_RUN</option></select></label><label>Notes<input name="notes" placeholder="Board/serial, evidence"></label><button>Record Hardware Test</button></form>{% for h in hw %}<div class="row"><div><strong>{{h.result}}</strong><small>{{h.notes}}</small></div><span class="badge">{{h.created_at}}</span></div>{% endfor %}</section>{% endif %}
+
+<section class="panel"><h3>Operations</h3>{% for op in ops %}<div class="timeline"><small>{{op.started_at}}</small><b>{{op.operation_type}}</b><span class="badge {{op.status|lower}}">{{op.status}}</span></div>{% else %}<p class="empty">Chưa có operation.</p>{% endfor %}</section>
+{% endblock %}
