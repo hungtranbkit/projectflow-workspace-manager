@@ -12,7 +12,6 @@ from app.config import load_settings
 from app.db import Database
 from app.repositories import discover_repositories
 from app.services.git_workspace import GitWorkspaceService, GitSafetyError, GitCommandError, slugify
-from app.services.project_contract import ContractError, load_contract
 from app.services.test_runner import TestRunner
 from app.services.terminal_launcher import TerminalLauncherService, LauncherError
 from app.services.cleanup_worker import CleanupWorker
@@ -24,6 +23,7 @@ from app.services.sandbox_manager import SandboxError, SandboxManager, SourceSpe
 from app.services.sandbox_runtime import SandboxRuntimeService
 from app.services.agent_session_manager import AgentSessionManager, SessionError
 from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source
+from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -33,6 +33,7 @@ def create_app(settings=None):
     cleanup_worker = CleanupWorker(db, sandboxes, settings.cleanup_poll_seconds)
     agent_sessions = AgentSessionManager(db)
     decision = TaskDecisionService(db, git)
+    gate_waivers = GateWaiverService(db, git)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
@@ -40,6 +41,7 @@ def create_app(settings=None):
     app.state.sandboxes, app.state.ports, app.state.sandbox_runtime, app.state.cleanup_worker = sandboxes, ports, sandbox_runtime, cleanup_worker
     app.state.agent_sessions = agent_sessions
     app.state.decision = decision
+    app.state.gate_waivers = gate_waivers
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -103,22 +105,23 @@ def create_app(settings=None):
         """The single readiness computation for one repo's Integration
         Workspace -- backs BOTH the POST ready-for-main gate and the
         Task Detail readiness checklist, so the template never derives a
-        second, independently-calculated status."""
-        i=integration_row(iid); head=git.head(i["worktree_path"])
+        second, independently-calculated status. Test-gate PASS/FAIL
+        (including baseline-waiver awareness, section 16-17) is delegated
+        to TaskDecisionService.integration_gate_status() -- the one
+        authoritative place that decision lives, never recomputed here."""
+        i=integration_row(iid)
         clean=not git.status(i["worktree_path"]).strip(); no_conflicts=not git.conflict_files(i["worktree_path"])
         sources_current=True
         for s in db.all("SELECT s.*,w.branch FROM integration_sources s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.integration_id=?",(iid,)):
             current=git.head(i["repo_path"],s["branch"])
             if current!=s["merged_commit"] or not git.is_ancestor(i["worktree_path"],current): sources_current=False
-        try: required=len(load_contract(Path(i["worktree_path"])))
-        except ContractError: required=0
-        latest={}
-        for x in db.all("SELECT stage,status FROM test_runs WHERE workspace_type='integration' AND workspace_id=? AND tested_commit=? ORDER BY id DESC",(iid,head)):
-            latest.setdefault(x["stage"],x["status"])
-        tests_pass=required>0 and len(latest)>=required and all(v=="PASS" for v in latest.values())
+        ti=db.one("SELECT task_id FROM task_integrations WHERE id=?",(i["task_integration_id"],)) if i["task_integration_id"] else None
+        gate=decision.integration_gate_status(i,ti["task_id"] if ti else None)
+        head=gate["head"] or git.head(i["worktree_path"])
         return {"integration":i,"head":head,"clean":clean,"no_conflicts":no_conflicts,"sources_current":sources_current,
-                "tests_pass":tests_pass,"tests_passed":sum(1 for v in latest.values() if v=="PASS"),"tests_required":required,
-                "ready":clean and no_conflicts and sources_current and tests_pass}
+                "tests_pass":gate["tests_pass"],"tests_status":gate["tests_status"],"failures":gate["failures"],
+                "tests_passed":gate.get("tests_passed",0),"tests_required":gate["tests_required"],"summary":gate.get("summary") or {},
+                "ready":clean and no_conflicts and sources_current and gate["tests_pass"]}
     def sandbox_for_workspace(wid):
         return db.one("SELECT * FROM sandboxes WHERE owner_type='AGENT_WORKSPACE' AND owner_id=? ORDER BY id DESC LIMIT 1",(wid,))
     def latest_test_status(workspace_type,workspace_id):
@@ -584,28 +587,63 @@ def create_app(settings=None):
         row=db.one("SELECT s.*,w.worktree_path,w.agent workspace_agent FROM agent_sessions s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.id=?",(sid,))
         if not row: raise HTTPException(404,"Session not found")
         return row
+    def _deliver_to_session(w,sid):
+        """Compute the current effective Builder prompt -- the Task's
+        intent as usual, or, if the latest review for this workspace is
+        FIX_REQUIRED, the repair prompt with findings appended (exactly
+        what workspace_agent_prompt() already composes, section 4C) --
+        and deliver it into a LIVE session's stdin. Always snapshots a
+        `prompts` audit row first, regardless of whether delivery itself
+        succeeds, so the exact text that was (attempted to be) sent is
+        always recoverable. Returns True only on confirmed delivery."""
+        if not w.get("task_id"): return False
+        try:
+            t=task_row(w["task_id"]); repo_row=repo(w["repository_id"])
+            prompt=workspace_agent_prompt(w,t,repo_row)
+            review=decision.latest_review(w["id"])
+            source="REPAIR" if review and review["status"]=="FIX_REQUIRED" else "TASK"
+            db.execute("INSERT INTO prompts(task_id,workspace_id,prompt_type,brief_version,content) VALUES(?,?,?,?,?)",
+                       (w["task_id"],w["id"],"BUILDER",t["brief_version"],prompt))
+            return agent_sessions.deliver_prompt(sid,prompt,source,t["brief_version"])
+        except Exception:
+            return False  # snapshot/delivery is best-effort audit, never raises into the caller
     def _start_builder_session(w,mode="INTERACTIVE"):
         """The one place 'Start Builder' actually happens: validates
         (Task exists, Builder Workspace exists, worktree path is the
         trusted server-resolved one, agent is in the trusted launcher
-        registry) and starts the AgentSession -- deliberately does NOT
-        check implementation_prompt at all; Task Title fallback means
-        intent is always resolvable. Snapshots the exact effective
-        Builder prompt (Task/Title-or-Prompt + role + instructions +
-        sandbox + AGENTS.md) into `prompts` at the moment of start, for
-        audit -- never a precondition for starting."""
+        registry), starts the AgentSession, then WAITS for the CLI to be
+        ready and delivers the exact generated Builder Prompt into it
+        (section 1) -- deliberately does NOT check implementation_prompt
+        at all; Task Title fallback means intent is always resolvable.
+        The user is never expected to paste the prompt manually as the
+        normal flow; a failed delivery is recorded as prompt_status
+        FAILED for [Retry Prompt Delivery], not silently retried."""
         if w["agent"] not in settings.agents: raise GitSafetyError("Agent is not allowed")
         mode="VIEW_ONLY" if mode=="VIEW_ONLY" else "INTERACTIVE"
         sid=agent_sessions.start(task_id=w["task_id"],workspace_id=w["id"],agent=w["agent"],worktree_path=w["worktree_path"],mode=mode)
         db.event("agent",w["id"],"SESSION_STARTED",f"session={sid} mode={mode}")
-        if w.get("task_id"):
-            try:
-                t=task_row(w["task_id"]); repo_row=repo(w["repository_id"])
-                prompt=workspace_agent_prompt(w,t,repo_row)
-                db.execute("INSERT INTO prompts(task_id,workspace_id,prompt_type,brief_version,content) VALUES(?,?,?,?,?)",
-                           (w["task_id"],w["id"],"BUILDER",t["brief_version"],prompt))
-            except Exception: pass  # snapshot is best-effort audit, never blocks starting the agent
+        delivered=_deliver_to_session(w,sid)
+        db.event("agent",w["id"],"PROMPT_DELIVERED" if delivered else "PROMPT_DELIVERY_FAILED",f"session={sid}")
         return sid
+    def _resume_builder_session(w):
+        """[Resume Agent] (section 4): never blindly starts a second
+        session on top of one already doing real work.
+        A. no live session, or one that already exited -- start a fresh
+           one (this doubles as the FIX_REQUIRED repair path, since
+           _deliver_to_session already appends review findings then).
+        B. a live session whose prompt was already DELIVERED -- the
+           agent is presumably still working; no-op, never resend the
+           original task a second time.
+        C. a live session that never got its prompt delivered (PENDING/
+           FAILED) -- deliver into that SAME session, no duplicate
+           process."""
+        session=decision.latest_session(w["id"])
+        if session and session["status"] in ("STARTING","RUNNING","WAITING_FOR_INPUT"):
+            if session["prompt_status"] in ("PENDING","FAILED"):
+                delivered=_deliver_to_session(w,session["id"])
+                db.event("agent",w["id"],"PROMPT_DELIVERED" if delivered else "PROMPT_DELIVERY_FAILED",f"session={session['id']} (retry)")
+            return session["id"]
+        return _start_builder_session(w)
     @app.post("/api/workspaces/{wid}/sessions")
     def create_session(wid:int,mode:str=Form("INTERACTIVE")):
         """Command safety (section 14): the browser supplies only
@@ -616,6 +654,15 @@ def create_app(settings=None):
         try: sid=_start_builder_session(w,mode)
         except SessionError as exc: raise GitSafetyError(str(exc)) from exc
         return RedirectResponse(f"/workspaces/{wid}/sessions/{sid}",303)
+    @app.post("/api/sessions/{sid}/deliver-prompt")
+    def retry_prompt_delivery(sid:int):
+        """[Retry Prompt Delivery] (section 3): the explicit, exceptional
+        recovery action for a session whose automatic delivery failed --
+        never triggered automatically on a timer/poll."""
+        s=session_row(sid); w=agent_row(s["workspace_id"])
+        delivered=_deliver_to_session(w,sid)
+        db.event("agent",w["id"],"PROMPT_DELIVERED" if delivered else "PROMPT_DELIVERY_FAILED",f"session={sid} (manual retry)")
+        return RedirectResponse(f"/workspaces/{w['id']}/sessions/{sid}",303)
     @app.post("/api/tasks/{tid}/start-all-builders")
     def start_all_builders(tid:int):
         """[Start All Builders]: for every valid Builder Workspace that
@@ -768,6 +815,47 @@ def create_app(settings=None):
         if not r["sources_current"]: raise GitSafetyError("Source not current")
         if not r["tests_pass"]: raise GitSafetyError("All required tests must PASS at current HEAD")
         db.execute("UPDATE integration_workspaces SET status='READY_FOR_MAIN',ready_for_main=1,verified_commit=?,verified_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(r["head"],iid)); db.event("integration",iid,"READY_FOR_MAIN",r["head"]); return RedirectResponse(f"/integrations/{iid}",303)
+    @app.post("/api/integrations/{iid}/reproduce-baseline")
+    def reproduce_baseline_failure(iid:int,gate:str=Form(...),test_identifier:str=Form(...)):
+        """[View Baseline Evidence] step 1 (section 12/22): actually
+        reproduces the failure against this Integration's own recorded
+        base_commit in a disposable, detached worktree -- the only way a
+        BaselineFailureEvidence row is ever written. Runs in the
+        background (a real gate command can take minutes); the route
+        returns immediately, the Integration step polls/shows the
+        resulting evidence once it lands."""
+        i=integration_row(iid)
+        try: run_id=gate_waivers.start_reproduction(repository_id=i["repository_id"],repo_path=i["repo_path"],base_commit=i["base_commit"],gate=gate,test_identifier=test_identifier)
+        except GateWaiverError as exc: raise GitSafetyError(str(exc)) from exc
+        db.event("integration",iid,"BASELINE_REPRODUCTION_STARTED",f"gate={gate} test={test_identifier} run={run_id}")
+        return RedirectResponse(f"/integrations/{iid}",303)
+    @app.post("/api/integrations/{iid}/waive-baseline-failure")
+    def waive_baseline_failure(iid:int,gate:str=Form(...),test_identifier:str=Form(...),reason:str=Form("")):
+        """[Waive Baseline Failure] (section 14-17): the ONLY way past a
+        currently-failing required gate other than actually fixing it --
+        and only for a failure this route independently re-classifies
+        (via the exact same TaskDecisionService.integration_gate_status()
+        the Integration step itself displays) as BASELINE_FAILURE right
+        now, at the current fingerprint. Never a blanket 'ignore tests':
+        a mismatched or already-resolved failure is refused, not silently
+        accepted. A waiver never marks anything PASS -- it only makes
+        this one exact (gate, test, fingerprint) not block Ready for
+        Main, via PASS_WITH_APPROVED_BASELINE_WAIVER."""
+        i=integration_row(iid)
+        ti=db.one("SELECT task_id FROM task_integrations WHERE id=?",(i["task_integration_id"],)) if i["task_integration_id"] else None
+        if not ti: raise GitSafetyError("Integration has no parent Task")
+        gs=decision.integration_gate_status(i,ti["task_id"])
+        match=next((f for f in gs["failures"] if f["stage"]==gate and f["test_identifier"]==test_identifier),None)
+        if not match: raise GitSafetyError("No matching current failure to waive at this exact commit")
+        if match["classification"]!="BASELINE_FAILURE": raise GitSafetyError(f"Not eligible for a baseline waiver (classification={match['classification']})")
+        evidence=db.one("SELECT * FROM baseline_failure_evidence WHERE id=?",(match["evidence_id"],))
+        gate_waivers.approve_waiver(task_id=ti["task_id"],integration_id=iid,gate=gate,test_identifier=test_identifier,
+                                     failure_fingerprint_value=match["fingerprint"],baseline_commit=evidence["base_commit"],
+                                     baseline_run_id=evidence["baseline_run_id"],integration_run_id=None,
+                                     reason=reason.strip() or "Verified pre-existing baseline failure, unrelated to this Task.",
+                                     approved_by="local-operator")
+        db.event("integration",iid,"BASELINE_WAIVER_APPROVED",f"gate={gate} test={test_identifier}")
+        return RedirectResponse(f"/tasks/{ti['task_id']}",303)
     @app.post("/api/integrations/{iid}/close")
     def close_integration(iid:int): i=integration_row(iid); git.close(i["repo_path"],i["worktree_path"]); db.execute("UPDATE integration_workspaces SET status='CLOSED',ready_for_main=0,closed_at=CURRENT_TIMESTAMP WHERE id=?",(iid,)); db.event("integration",iid,"WORKSPACE_CLOSED"); return RedirectResponse("/integrations",303)
 
@@ -1121,7 +1209,14 @@ def create_app(settings=None):
         else:
             gates.append({"label":"QA","ok":True,"note":"NOT_REQUIRED for this risk profile"})
         if decision.requires_integration(d["risk_profile"]):
-            gates.append({"label":"Integration healthy, tests PASS, no conflicts","ok":decision.integration_healthy(ti,ti_repos)})
+            # Section 16: READY_FOR_MAIN must never look like a plain PASS
+            # when it only got there via an approved baseline waiver --
+            # count waived failures across every participating repo's
+            # live gate_status so the checklist says PASS WITH N BASELINE
+            # WAIVER, never a silent, indistinguishable-from-real PASS.
+            waived_count=sum(1 for r in ti_repos for f in ((r.get("gate_status") or {}).get("failures") or []) if f["classification"]=="WAIVED")
+            note=f"PASS WITH {waived_count} BASELINE WAIVER" if waived_count and decision.integration_healthy(ti,ti_repos) else None
+            gates.append({"label":"Integration healthy, tests PASS, no conflicts","ok":decision.integration_healthy(ti,ti_repos),"note":note})
         else:
             gates.append({"label":"Integration","ok":True,"note":"NOT_REQUIRED for this risk profile"})
         gates.append({"label":"No blocking findings","ok":not d["blocking_reasons"]})
@@ -1224,7 +1319,7 @@ def create_app(settings=None):
                 if not result["ok"]: raise GitSafetyError(result["error"])
                 w=[x for x in task_workspaces(tid) if x["repository_id"]==rid and x["agent"]==agent_s][-1]
         if w is not None:
-            try: _start_builder_session(w)
+            try: _resume_builder_session(w)
             except SessionError as exc: raise GitSafetyError(str(exc)) from exc
         else:
             for b in decision.evaluate(tid)["builders"]:
@@ -1437,6 +1532,15 @@ def create_app(settings=None):
             db.execute("UPDATE sandbox_sources SET commit_sha=? WHERE id=?",(git.head(src["worktree_path"]),src["id"]))
         sandboxes._write_manifest(sid); db.execute("UPDATE sandboxes SET status='CREATED',health_status='UNKNOWN' WHERE id=?",(sid,)); db.event("sandbox",sid,"SANDBOX_REBUILD_REQUESTED")
         sandboxes.provision(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
+    @app.post("/api/sandboxes/{sid}/reset-data")
+    def reset_sandbox_data(sid:int):
+        """[Reset Sandbox Data] (sections 6-9): the first-class, audited
+        way to test default-credential/first-run/seed/migration behavior
+        from a genuinely clean state -- never a raw docker compose down
+        -v exposed to the browser. Real ownership check + volume removal
+        + re-provision from the exact current source, all through
+        SandboxManager, all recorded as a RESET_DATA SandboxOperation."""
+        sandbox_row(sid); sandboxes.reset_data(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/health")
     def health_sandbox(sid:int): sandbox_row(sid); sandboxes.health_check(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/cleanup")

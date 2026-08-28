@@ -1,5 +1,6 @@
 from __future__ import annotations
 import fcntl
+import hashlib
 import os
 import pty
 import shutil
@@ -7,6 +8,7 @@ import signal
 import struct
 import termios
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -130,6 +132,16 @@ class AgentSessionManager:
         self.launchers = launchers if launchers is not None else AGENT_LAUNCHERS
         self.which = which
         self._live: dict[int, LivePtySession] = {}
+        # Bounded CLI-readiness detection for deliver_prompt (section 3):
+        # 'ready' means the PTY's output buffer has gone quiet for
+        # `prompt_quiet_window` seconds -- a real interactive CLI stops
+        # writing once it settles at its own idle prompt, and (observed
+        # live against both Codex and Claude) only resumes continuous
+        # output once it is actively processing a submitted prompt, never
+        # while idle. Deliberately NOT parsing any agent-specific banner
+        # text as a state machine -- overridable per-instance for tests.
+        self.prompt_ready_timeout = 8.0
+        self.prompt_quiet_window = 0.4
 
     def start(self, *, task_id: int | None, workspace_id: int, agent: str, worktree_path: str | Path, mode: str = "INTERACTIVE") -> int:
         launcher = self.launchers.get(agent.lower())
@@ -171,6 +183,58 @@ class AgentSessionManager:
         self._live[sid] = session
         self.db.execute("UPDATE agent_sessions SET status='RUNNING',pid=? WHERE id=?", (pid, sid))
         return sid
+
+    def _wait_ready(self, session: LivePtySession) -> bool:
+        """Bounded readiness wait (section 3): true only once the PTY's
+        output has gone quiet for `prompt_quiet_window` seconds, within
+        `prompt_ready_timeout` overall. Returns False (never blocks
+        forever, never guesses) if the session closes or the CLI is
+        still actively rendering when the deadline hits -- callers must
+        treat False as a real, reportable delivery failure, not retry
+        silently."""
+        deadline = time.monotonic() + self.prompt_ready_timeout
+        last_len = -1
+        last_change = time.monotonic()
+        while time.monotonic() < deadline:
+            if session.closed:
+                return False
+            with session._lock:
+                cur_len = len(session._buffer)
+            t = time.monotonic()
+            if cur_len != last_len:
+                last_len = cur_len
+                last_change = t
+            elif cur_len > 0 and (t - last_change) >= self.prompt_quiet_window:
+                return True
+            time.sleep(0.03)
+        return False
+
+    def deliver_prompt(self, sid: int, prompt: str, source: str, version) -> bool:
+        """Sends the exact, already-generated, trusted Builder Prompt
+        into a live session's stdin as one bracketed paste (so a
+        multi-line prompt is never mistaken for several separate Enter
+        presses by the agent's own TUI) followed by a single submit
+        keystroke. This is the ONLY prompt text this method ever sends --
+        never anything supplied by a browser request (section 2: 'do not
+        accept arbitrary raw command execution from browser'). Persists
+        prompt_status/prompt_version/prompt_sha256/prompt_source/
+        delivered_at so 'Agent RUNNING' is never conflated with 'prompt
+        actually delivered' (section 2)."""
+        session = self._live.get(sid)
+        if not session or not self._wait_ready(session):
+            self.db.execute("UPDATE agent_sessions SET prompt_status='FAILED' WHERE id=?", (sid,))
+            return False
+        try:
+            session.write(("\x1b[200~" + prompt + "\x1b[201~\r").encode("utf-8"))
+        except SessionError:
+            self.db.execute("UPDATE agent_sessions SET prompt_status='FAILED' WHERE id=?", (sid,))
+            return False
+        sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        self.db.execute(
+            "UPDATE agent_sessions SET prompt_status='DELIVERED',prompt_version=?,prompt_sha256=?,prompt_source=?,delivered_at=? WHERE id=?",
+            (version, sha256, source, now(), sid),
+        )
+        return True
 
     def get(self, sid: int) -> LivePtySession | None:
         return self._live.get(sid)

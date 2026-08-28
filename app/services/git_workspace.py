@@ -83,6 +83,32 @@ class GitWorkspaceService:
         return self.git(path, "merge", "--no-ff", "--no-edit", source_branch, check=False)
     def conflict_files(self, path): return [x for x in self.git(self.validate_worktree(path), "diff", "--name-only", "--diff-filter=U", check=False).stdout.splitlines() if x]
     def is_ancestor(self, path, commit): return self.git(self.validate_worktree(path), "merge-base", "--is-ancestor", commit, "HEAD", check=False).returncode == 0
+    def create_baseline_probe(self, repo, commit):
+        """A disposable, detached-HEAD worktree checked out at an exact
+        historical commit -- used only to reproduce a required-gate
+        failure against a Task's own base commit (never a branch, never
+        anything a human is meant to work in). Reused if already probed
+        for this exact commit, so repeated waiver checks don't pile up
+        worktrees. Removal is always --force (see remove_baseline_probe)
+        since nothing meaningful can ever be committed here."""
+        repo = self.validate_repo(repo)
+        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", (commit or "").strip()):
+            raise GitSafetyError("Invalid commit sha")
+        path = self.validate_worktree(self.worktree_root / f"{self.repo_slug(repo)}-baseline-{commit[:12]}")
+        if path.exists():
+            return path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.git(repo, "worktree", "add", "--detach", str(path), commit)
+        return path
+
+    def remove_baseline_probe(self, repo, path):
+        """Force-remove a baseline probe worktree (see create_baseline_probe)
+        -- unlike close(), never checks for a dirty tree, since a probe is
+        by definition disposable and never a place real work happens."""
+        repo = self.validate_repo(repo)
+        path = self.validate_worktree(path)
+        self.git(repo, "worktree", "remove", "--force", str(path), check=False)
+
     def close(self, repo, path):
         repo = self.validate_repo(repo); path = self.validate_worktree(path)
         if self.status(path).strip(): raise GitSafetyError("Worktree is dirty; close blocked")

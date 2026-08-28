@@ -1,5 +1,9 @@
 from __future__ import annotations
 from datetime import datetime, timezone
+from pathlib import Path
+
+from app.services.failure_classifier import fingerprint as fingerprint_of, parse_failures, parse_summary
+from app.services.project_contract import ContractError, load_contract
 
 # Task Lifecycle & Gate Model Refactor -- the single authoritative source
 # for Task status/stage/next-action/gate-eligibility. No route or template
@@ -25,6 +29,7 @@ NEXT_ACTIONS = (
     "START_BUILDER", "VIEW_BUILDER", "REVIEW_BUILDER_RESULT", "RUN_BUILDER_TEST",
     "SUBMIT_FOR_REVIEW", "START_REVIEW", "RETURN_TO_BUILDER",
     "START_QA", "CREATE_INTEGRATION", "OPEN_INTEGRATOR", "RUN_INTEGRATION_TEST", "RESOLVE_CONFLICT",
+    "REVIEW_BASELINE_FAILURE", "FIX_INTEGRATION_FAILURE",
     "REBUILD_SANDBOX", "PREPARE_PR", "WAIT_FOR_MERGES", "CLOSE_TASK", "NONE",
 )
 
@@ -190,6 +195,8 @@ class TaskDecisionService:
         builders = [self.builder_view(w, t["brief_version"]) for w in workspaces]
         ti = self.task_integration(task_id)
         ti_repos = self.integration_repos(ti["id"]) if ti else []
+        for r in ti_repos:
+            r["gate_status"] = self.integration_gate_status(r, task_id)
         qa = self.latest_qa(task_id)
         merges = self.merge_records(task_id, workspaces)
         required_merges = [m for m in merges if m["required"]]
@@ -283,6 +290,83 @@ class TaskDecisionService:
             return "DONE"
         return "READY_FOR_MAIN"
 
+    # ---- baseline-waiver failure classification (section 11) -----------
+    def integration_gate_status(self, ti_repo, task_id):
+        """Classifies one per-repo Integration Workspace's required-gate
+        result at its current HEAD: PASS / FAIL / NOT_RUN /
+        PASS_WITH_APPROVED_BASELINE_WAIVER, plus each individual failure
+        classified as NEW_FAILURE / BASELINE_FAILURE / WAIVED / UNKNOWN.
+        A failure only ever becomes BASELINE_FAILURE against a REAL,
+        stored BaselineFailureEvidence row whose fingerprint matches this
+        exact failure -- never inferred from 'this looks unrelated'
+        (section 11-13). A waiver only ever applies to the exact
+        (gate, test_identifier, fingerprint) it was approved for -- if
+        the failure's fingerprint has since changed, the old waiver
+        simply does not match anymore (section 17: 'if failure changes,
+        waiver invalid')."""
+        iid = ti_repo["id"]
+        try:
+            head = self.git.head(ti_repo["worktree_path"])
+        except Exception:
+            return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": 0, "head": None}
+        try:
+            required = len(load_contract(Path(ti_repo["worktree_path"])))
+        except ContractError:
+            required = 0
+        rows = self.db.all(
+            "SELECT * FROM test_runs WHERE workspace_type='integration' AND workspace_id=? AND tested_commit=? ORDER BY id DESC",
+            (iid, head))
+        latest = {}
+        for r in rows:
+            latest.setdefault(r["stage"], r)  # first seen per stage, DESC id -> most recent
+        if required == 0 or len(latest) < required:
+            return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required,
+                     "tests_passed": sum(1 for v in latest.values() if v["status"] == "PASS"), "head": head, "summary": {}}
+        failures = []
+        summary = {"passed": 0, "failed": 0, "skipped": 0}
+        for stage, row in latest.items():
+            if row["stage"] == "test":
+                for k, v in parse_summary(row["stdout_tail"] or "").items():
+                    summary[k] = max(summary[k], v)
+            if row["status"] == "PASS":
+                continue
+            parsed = parse_failures(row["stdout_tail"] or "") or [{"test_identifier": stage, "reason": row["status"]}]
+            for f in parsed:
+                fp = fingerprint_of(f["test_identifier"], f["reason"])
+                waiver = self.db.one(
+                    "SELECT * FROM gate_waivers WHERE task_id=? AND integration_id=? AND gate=? AND test_identifier=? AND failure_fingerprint=? AND revoked_at IS NULL ORDER BY id DESC LIMIT 1",
+                    (task_id, iid, stage, f["test_identifier"], fp))
+                evidence = self.db.one(
+                    "SELECT * FROM baseline_failure_evidence WHERE repository_id=? AND base_commit=? AND gate=? AND test_identifier=? ORDER BY id DESC LIMIT 1",
+                    (ti_repo["repository_id"], ti_repo["base_commit"], stage, f["test_identifier"]))
+                if waiver:
+                    cls = "WAIVED"
+                elif evidence and evidence["failure_fingerprint"] == fp:
+                    cls = "BASELINE_FAILURE"
+                elif evidence:
+                    cls = "NEW_FAILURE"  # evidence exists for this test id but the failure itself changed
+                else:
+                    cls = "UNKNOWN"
+                failures.append({
+                    "stage": stage, "test_identifier": f["test_identifier"], "reason": f["reason"],
+                    "fingerprint": fp, "classification": cls,
+                    "evidence_id": evidence["id"] if evidence else None,
+                    "waiver_id": waiver["id"] if waiver else None,
+                })
+        unresolved = [f for f in failures if f["classification"] != "WAIVED"]
+        if not failures:
+            tests_status = "PASS"
+        elif not unresolved:
+            tests_status = "PASS_WITH_APPROVED_BASELINE_WAIVER"
+        else:
+            tests_status = "FAIL"
+        return {
+            "tests_pass": tests_status in ("PASS", "PASS_WITH_APPROVED_BASELINE_WAIVER"),
+            "tests_status": tests_status, "failures": failures, "tests_required": required,
+            "tests_passed": sum(1 for v in latest.values() if v["status"] == "PASS"),
+            "head": head, "summary": summary,
+        }
+
     def _integration_ok(self, ti, ti_repos):
         """Healthy AND verified -- 'TESTING' means tests are only in
         flight, not proof of anything yet, so only an explicit
@@ -348,7 +432,23 @@ class TaskDecisionService:
         if self.requires_integration(risk):
             if not ti: return _action("CREATE_INTEGRATION", "Create Integration", "All required gates PASS -- ready to integrate.", f"/api/tasks/{tid}/integrations")
             if ti["status"] == "CONFLICT": return _action("RESOLVE_CONFLICT", "Resolve Conflict", "Integration has a merge conflict.", f"/tasks/{tid}#integration")
-            if not self._integration_ok(ti, ti_repos): return _action("RUN_INTEGRATION_TEST", "Run Integration Tests", "Integration exists, tests not current/passing.", f"/tasks/{tid}#integration")
+            if not self._integration_ok(ti, ti_repos):
+                # Section 20: distinguish "tests haven't run yet" from the
+                # two flavors of "tests ran and failed" -- a failure set
+                # that is ENTIRELY verified-baseline (and not yet waived)
+                # gets its own action rather than being lumped in with a
+                # genuinely new/unclassified failure.
+                blocker = next((r for r in ti_repos if r["status"] != "READY_FOR_MAIN"), None)
+                gs = (blocker or {}).get("gate_status") or {}
+                failures = gs.get("failures") or []
+                unresolved = [f for f in failures if f["classification"] != "WAIVED"]
+                if unresolved and all(f["classification"] == "BASELINE_FAILURE" for f in unresolved):
+                    return _action("REVIEW_BASELINE_FAILURE", "Review Baseline Failure",
+                                    f"{len(unresolved)} failure(s) match verified baseline evidence -- waive or fix the baseline.", f"/tasks/{tid}#integration")
+                if unresolved:
+                    return _action("FIX_INTEGRATION_FAILURE", "Fix Integration Failure",
+                                    f"{len(unresolved)} new/unclassified failure(s) block Ready for Main.", f"/tasks/{tid}#integration")
+                return _action("RUN_INTEGRATION_TEST", "Run Integration Tests", "Integration exists, tests not current/passing.", f"/tasks/{tid}#integration")
         if status == "BLOCKED":
             return _action("NONE", "Blocked", blocking[0] if blocking else "Blocked.", None)
         if status == "DONE":
