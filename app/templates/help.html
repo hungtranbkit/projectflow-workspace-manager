@@ -50,7 +50,7 @@
 <ol class="steps">
 <li><a href="/tasks#new">Add to Backlog</a><span>Một ý định công việc — <b>chưa tạo branch/worktree/sandbox nào cả</b>, kể cả khi Task đã có risk profile/brief.</span></li>
 <li><b>Select for Development</b><span>BACKLOG → ACTIVE. Stage vẫn là PLANNING, vẫn chưa cấp resource nào tới khi có Builder Workspace đầu tiên.</span></li>
-<li><b>Viết Task Brief + Generate Prompt</b><span>GOAL/REQUIREMENTS/ACCEPTANCE_CRITERIA... rồi sinh AGENT PROMPT để review trước. Sửa Brief sau khi đã có Review PASS sẽ làm review đó STALE.</span></li>
+<li><b>Viết Implementation Prompt</b><span>Một prompt tự nhiên, không cần điền GOAL/REQUIREMENTS/ACCEPTANCE_CRITERIA riêng từng ô. Workspace Manager tự sinh AGENT PROMPT (prompt của bạn + context + rule của repo) để review trước khi agent chạy. Sửa prompt sau khi đã có Review PASS sẽ làm review đó STALE.</span></li>
 <li><b>Create Builder Workspace</b><span>Chọn repository, agent, role, sandbox — lúc này mới tạo branch/worktree. Một Task có thể có nhiều Builder Workspace (nhiều repo).</span></li>
 <li><b>Mở Claude / Codex (desktop hoặc Open in Web)</b><span>Agent sửa code trong source riêng.</span></li>
 <li><b>Submit for Review</b><span>Agent Report (WHAT_CHANGED/FILES_CHANGED/TESTS_RUN/HOW_TO_VERIFY) + git worktree sạch — workspace chuyển READY_FOR_REVIEW, ghim đúng commit hiện tại.</span></li>
@@ -66,12 +66,12 @@
 </section>
 
 <section class="guide-section" id="tasks"><span class="section-kicker">BƯỚC 1</span><h3>Khi có bug hoặc task mới</h3>
-<p>Vào <a href="/tasks">Tasks</a> → <b>New Task</b>. Form New Task tạo <b>Task + Agent Workspace đầu tiên trong cùng một lần bấm</b> — bạn không cần tự tạo worktree riêng.</p>
-<ul class="checklist"><li>Task title</li><li>Description (không bắt buộc)</li><li>Repository / Agent / Role / Base branch / Sandbox cho Agent Workspace đầu tiên</li></ul>
-<div class="example"><small>Ví dụ</small><p><b>Title:</b> Fix lỗi kiosk không gửi được sản lượng</p><p><b>Repository:</b> esp-kiosk · <b>Agent:</b> Claude · <b>Role:</b> Firmware · <b>Sandbox:</b> Auto</p></div>
-<p>Task nhiều repo? Bấm <b>+ Add another Agent Workspace</b> để khai báo thêm Agent Workspace (repo/agent/role khác) ngay trong lúc tạo Task — xem mục <a href="#cross-repo">Task nhiều repository</a>.</p>
-<p>Workspace Manager sẽ tự tạo branch và worktree riêng cho từng agent. Nếu một Agent Workspace tạo lỗi (ví dụ repo chưa đăng ký), Task và các Agent Workspace đã tạo thành công vẫn giữ nguyên — lỗi hiển thị rõ, không tự rollback.</p>
-<p>Cần một Task rỗng để lên kế hoạch trước? Dùng mục "Advanced: Task rỗng (DRAFT)" — Task này chưa có Agent Workspace nào cho tới khi bạn thêm.</p>
+<p>Vào <a href="/tasks">Tasks</a> → <b>New Task</b>. <b>Bạn chỉ cần mô tả task trong một prompt.</b> Workspace Manager tự bổ sung context về repo, branch, worktree, sandbox và rule (AGENTS.md/PROJECT.yaml) khi build prompt thật gửi cho agent — bạn không phải điền GOAL/CONTEXT/REQUIREMENTS/ACCEPTANCE_CRITERIA/... từng ô một.</p>
+<ul class="checklist"><li>Task title</li><li>Implementation Prompt — mô tả tự nhiên, không bắt buộc theo khuôn mẫu</li><li>Repository / Agent / Sandbox (bỏ trống = chỉ vào Backlog)</li></ul>
+<div class="example"><small>Ví dụ Implementation Prompt</small><p>"Update the MESFlow default password. The seeded admin should use the new password. First login must still require password change. Do not affect existing users. Verify in a fresh sandbox that the new password works and old password does not. Run tests, commit, and report how to verify."</p></div>
+<p>Điền Repository + Agent → bấm <b>Create &amp; Start</b> sẽ tạo Task + Builder Workspace đầu tiên trong cùng một lần bấm, bạn không cần tự tạo worktree riêng. Bỏ trống hai ô này → Task chỉ vào <b>Backlog</b>, chưa tạo branch/worktree/sandbox nào, chọn <b>Select for Development</b> sau khi sẵn sàng.</p>
+<p>Mở <b>Advanced</b> nếu cần: base branch, role, <b>Workflow</b> (Low/Normal/High — xem <a href="#risk-profile">chi tiết</a>, mặc định Normal), hoặc <b>+ Add another repository</b> để khai báo thêm repo/agent khác ngay trong lúc tạo Task — xem mục <a href="#cross-repo">Task nhiều repository</a>. Không cần mở Advanced nếu không cần các tuỳ chọn này.</p>
+<p>Workspace Manager sẽ tự tạo branch và worktree riêng cho từng agent. Nếu một Builder Workspace tạo lỗi (ví dụ repo chưa đăng ký), Task và các Builder Workspace đã tạo thành công vẫn giữ nguyên — lỗi hiển thị rõ, không tự rollback.</p>
 <div class="info"><b>Tiếp theo:</b> Xem Task vừa tạo, mở agent để bắt đầu code.<br><a class="button" href="/tasks">Đi tới Tasks</a></div>
 </section>
 
@@ -378,12 +378,12 @@
 </tbody></table>
 </section>
 
-<section class="guide-section" id="risk-profile"><span class="section-kicker">POLICY</span><h3>LOW/NORMAL/HIGH khác nhau thế nào?</h3>
-<p>Mỗi Task chọn một risk profile ở bước viết Implementation Brief — quyết định những gate nào bắt buộc trước khi Integration:</p>
+<section class="guide-section" id="risk-profile"><span class="section-kicker">POLICY</span><h3>Workflow: Low/Normal/High khác nhau thế nào?</h3>
+<p>Trên giao diện, trường này hiện tên là <b>Workflow</b> (nằm trong <b>Advanced</b> khi tạo Task — bạn không cần hiểu chi tiết nếu không mở Advanced; mặc định <b>Normal</b>). Nó quyết định những gate nào bắt buộc trước khi Integration:</p>
 <div class="sample-grid">
-<article><b>LOW</b><small>Builder → Review. Bỏ qua cả QA lẫn Integration — Review PASS là đủ để READY_FOR_MAIN.</small></article>
-<article><b>NORMAL</b><small>Builder → Review → Integration. Bỏ qua QA. (mặc định)</small></article>
-<article><b>HIGH</b><small>Builder → Review → QA → Integration. Bắt buộc QA trước khi ghép.</small></article>
+<article><b>Low</b><small>code + review. Bỏ qua cả QA lẫn Integration — Review PASS là đủ để READY_FOR_MAIN.</small></article>
+<article><b>Normal</b><small>code + review + integration. Bỏ qua QA. (mặc định)</small></article>
+<article><b>High</b><small>code + review + QA + integration. Bắt buộc QA trước khi ghép.</small></article>
 </div>
 <div class="info">Không có một luồng cứng cho mọi Task — Task Detail's Overview gate checklist và Kanban tự thêm/bớt gate QA/Integration tuỳ risk profile. Một gate bị bỏ qua hiện rõ là <code>NOT_REQUIRED</code>, không bao giờ hiện như thể đã PASS.</div>
 </section>

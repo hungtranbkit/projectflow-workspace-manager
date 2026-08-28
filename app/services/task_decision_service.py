@@ -109,6 +109,13 @@ class TaskDecisionService:
         return self.db.all("SELECT m.*,r.repo_name FROM merge_records m JOIN repositories r ON r.id=m.repository_id WHERE m.task_id=? ORDER BY m.id", (task_id,))
 
     def brief_complete(self, t) -> bool:
+        """A Task's intent is 'complete' either way: the new single
+        Implementation Prompt (the primary path -- one non-empty prompt is
+        enough, nothing else required), or the legacy structured brief
+        (GOAL + ACCEPTANCE_CRITERIA, for Tasks created before the prompt-
+        first UX existed)."""
+        if (t.get("implementation_prompt") or "").strip():
+            return True
         return bool((t.get("brief_goal") or "").strip() and (t.get("brief_acceptance_criteria") or "").strip())
 
     def current_commit(self, worktree_path):
@@ -246,7 +253,7 @@ class TaskDecisionService:
         tid = t["id"]
         if not builders:
             if not self.brief_complete(t):
-                return _action("COMPLETE_BRIEF", "Complete Task Brief", "Brief needs GOAL and ACCEPTANCE_CRITERIA.", f"/tasks/{tid}#brief")
+                return _action("COMPLETE_BRIEF", "Write Task Prompt", "Describe the task in the Implementation Prompt.", f"/tasks/{tid}#prompt")
             return _action("CREATE_BUILDER_WORKSPACE", "Create Builder Workspace", "No Builder Workspace yet.", f"/tasks/{tid}#new-workspace")
         for b in builders:
             if b["fix_required"]:
