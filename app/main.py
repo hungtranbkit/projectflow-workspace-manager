@@ -24,6 +24,7 @@ from app.services.sandbox_runtime import SandboxRuntimeService
 from app.services.agent_session_manager import AgentSessionManager, SessionError
 from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source
 from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
+from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -34,6 +35,7 @@ def create_app(settings=None):
     agent_sessions = AgentSessionManager(db)
     decision = TaskDecisionService(db, git)
     gate_waivers = GateWaiverService(db, git)
+    github_merge = GitHubMergeService()
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
@@ -42,6 +44,7 @@ def create_app(settings=None):
     app.state.agent_sessions = agent_sessions
     app.state.decision = decision
     app.state.gate_waivers = gate_waivers
+    app.state.github_merge = github_merge
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -1196,6 +1199,17 @@ def create_app(settings=None):
         blocking_workspace=next((w for w in workspaces if w["fix_required"]), next((w for w in workspaces if not w["ready"]),None))
         not_ready=[w for w in workspaces if not w["ready"]]
 
+        # Real merge tracking (section 4/9): every MergeRecord's live
+        # blocker list, computed fresh from the same `d` the rest of the
+        # page already reads -- never a second, template-side gate.
+        for m in d["merge_records"]:
+            try: m_repo=repo(m["repository_id"])
+            except HTTPException: m_repo=None
+            m["github_available"]=bool(m_repo) and github_merge.available(m_repo["repo_path"])
+            m["gate"]=decision.merge_gate_status(d,m["repository_id"],m)
+            repo_ti=next((x for x in ti_repos if x["repository_id"]==m["repository_id"]),None)
+            m["integration_id"]=repo_ti["id"] if repo_ti else None
+
         # Overview gate checklist (section 38): one row per gate this
         # Task's risk policy actually requires, ✓/○ from the same
         # decision the rest of the page reads -- explains exactly why
@@ -1426,6 +1440,116 @@ def create_app(settings=None):
         if not row: raise GitSafetyError("No MergeRecord for this repository on this Task")
         db.execute("UPDATE merge_records SET merge_status='PR_OPEN',pr_ref=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(pr_ref.strip(),row["id"]))
         db.event("task",tid,"MERGE_PR_OPEN",f"repo={repository_id}")
+        return RedirectResponse(f"/tasks/{tid}",303)
+    def _schedule_cleanup_if_done(tid):
+        """Section 14: Task DONE only ever falls out of every required
+        MergeRecord being MERGED (TaskDecisionService computes it, never
+        set directly here) -- but the moment that becomes true, sandbox
+        retention starts counting down. Never deletes a worktree/branch
+        itself (section 14/15)."""
+        d=decision.evaluate(tid)
+        if d["status"]=="DONE":
+            for sb in task_sandboxes(tid):
+                if sb["status"] not in ("CLOSED","CLEANING"): sandboxes.mark_cleanup_eligible(sb["id"])
+    @app.post("/api/tasks/{tid}/merges/{repository_id}/create-pr")
+    def create_merge_pr(tid:int,repository_id:int):
+        """[Create PR] (section 3): only from the exact verified source
+        (the repo's Task Integration branch when Integration is required,
+        else the Builder's own branch) -- never a branch name accepted
+        from the browser. Reuses an existing OPEN/MERGED PR for the same
+        head/base instead of creating a duplicate (section 3)."""
+        t=task_row(tid); r=repo(repository_id); d=decision.evaluate(tid)
+        row=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
+        if not row: raise GitSafetyError("No MergeRecord for this repository on this Task")
+        if not d["ready_for_main"]: raise GitSafetyError("Task is not READY_FOR_MAIN yet")
+        branch,commit=decision.effective_source_for_repo(d,repository_id)
+        if not branch or not commit: raise GitSafetyError("No verified source branch/commit for this repository")
+        if not github_merge.available(r["repo_path"]): raise GitSafetyError("Repository has no GitHub remote -- use Confirm External Merge instead")
+        base_branch=r["default_branch"] or "main"
+        try:
+            existing=github_merge.find_existing_pr(r["repo_path"],branch,base_branch)
+            if existing and existing["state"]!="CLOSED":
+                status=github_merge.pr_status(r["repo_path"],existing["number"])
+            else:
+                title,body=t["title"],f"Automated PR for Task #{t['id']}: {t['title']}\n\nGenerated by ProjectFlow Workspace Manager."
+                status=github_merge.create_pr(r["repo_path"],branch,base_branch,title,body)
+                db.event("task",tid,"PR_CREATED",f"repo={repository_id} pr={status['pr_number']} head={status['head_sha']}")
+        except GitHubIntegrationError as exc: raise GitSafetyError(f"{exc.code}: {exc}") from exc
+        db.execute(
+            "UPDATE merge_records SET merge_status=?,pr_number=?,pr_url=?,pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,base_branch=?,source_branch=?,verified_commit=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            ("MERGED" if status["pr_state"]=="MERGED" else ("CONFLICT" if status["mergeability"]=="CONFLICTING" else "PR_OPEN"),
+             status["pr_number"],status["pr_url"],status["pr_state"],status["ci_status"],status["mergeability"],
+             status["merge_state_status"],status["head_sha"],base_branch,branch,commit,row["id"]))
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/merges/{repository_id}/refresh")
+    def refresh_merge_pr(tid:int,repository_id:int):
+        """[Refresh] (section 2): re-reads live PR/CI/mergeability from
+        GitHub -- never trusts whatever was last rendered."""
+        task_row(tid); r=repo(repository_id)
+        row=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
+        if not row or not row["pr_number"]: raise GitSafetyError("No PR to refresh yet")
+        try: status=github_merge.pr_status(r["repo_path"],row["pr_number"])
+        except GitHubIntegrationError as exc: raise GitSafetyError(f"{exc.code}: {exc}") from exc
+        db.execute(
+            "UPDATE merge_records SET pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (status["pr_state"],status["ci_status"],status["mergeability"],status["merge_state_status"],status["head_sha"],row["id"]))
+        if status["mergeability"]=="CONFLICTING": db.execute("UPDATE merge_records SET merge_status='CONFLICT' WHERE id=?",(row["id"],))
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/merges/{repository_id}/merge")
+    def real_merge_pr(tid:int,repository_id:int):
+        """[Merge] (section 5): re-fetches PR status, revalidates head
+        SHA/CI/mergeability against the Task's live decision one more
+        time right here (never trusts whatever the page last rendered),
+        then -- only if every gate still actually passes -- calls the
+        real GitHub merge API. Persists the exact merge commit GitHub
+        reports back, never a guess."""
+        t=task_row(tid); r=repo(repository_id)
+        row=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
+        if not row or not row["pr_number"]: raise GitSafetyError("No open PR for this repository")
+        try: status=github_merge.pr_status(r["repo_path"],row["pr_number"])
+        except GitHubIntegrationError as exc: raise GitSafetyError(f"{exc.code}: {exc}") from exc
+        db.execute(
+            "UPDATE merge_records SET pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (status["pr_state"],status["ci_status"],status["mergeability"],status["merge_state_status"],status["head_sha"],row["id"]))
+        row=db.one("SELECT * FROM merge_records WHERE id=?",(row["id"],))
+        d=decision.evaluate(tid)
+        gate=decision.merge_gate_status(d,repository_id,row)
+        if not gate["eligible"]:
+            db.event("task",tid,"MERGE_BLOCKED",f"repo={repository_id} blockers={','.join(gate['blockers'])}")
+            raise GitSafetyError(f"Merge blocked: {', '.join(gate['blockers'])}")
+        db.event("task",tid,"MERGE_REQUESTED",f"repo={repository_id} pr={row['pr_number']} head={row['head_sha']}")
+        try: merged=github_merge.merge_pr(r["repo_path"],row["pr_number"],row["merge_strategy"] or "MERGE_COMMIT")
+        except GitHubIntegrationError as exc:
+            db.event("task",tid,"MERGE_BLOCKED",f"repo={repository_id} error={exc.code}")
+            raise GitSafetyError(f"{exc.code}: {exc}") from exc
+        db.execute(
+            "UPDATE merge_records SET merge_status='MERGED',merged_commit=?,pr_state=?,pr_ref=?,merged_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,last_synced_at=CURRENT_TIMESTAMP WHERE id=?",
+            (merged["merged_commit"],merged["pr_state"],merged["pr_url"],row["id"]))
+        db.event("task",tid,"MERGE_SUCCEEDED",f"repo={repository_id} pr={row['pr_number']} merge_sha={merged['merged_commit']}")
+        _schedule_cleanup_if_done(tid)
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/merges/{repository_id}/confirm-external-merge")
+    def confirm_external_merge(tid:int,repository_id:int,merged_commit:str=Form(""),reason:str=Form(...)):
+        """Manual fallback (section 12), Advanced-only: real ancestry
+        verification -- refuses unless the verified source commit is
+        actually an ancestor of the target branch's real, freshly-fetched
+        HEAD. Never a bare 'trust the click' (unlike the legacy
+        mark-merged route this supersedes for GitHub-less repos)."""
+        t=task_row(tid); r=repo(repository_id); d=decision.evaluate(tid)
+        row=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
+        if not row: raise GitSafetyError("No MergeRecord for this repository on this Task")
+        branch,commit=decision.effective_source_for_repo(d,repository_id)
+        if not commit: raise GitSafetyError("No verified source commit for this repository")
+        base_branch=row["base_branch"] or r["default_branch"] or "main"
+        target_head=github_merge.target_head(r["repo_path"],base_branch)
+        if not target_head or not github_merge.is_ancestor(r["repo_path"],commit,f"origin/{base_branch}"):
+            raise GitSafetyError(f"Verified commit {(commit or '?')[:12]} is not an ancestor of origin/{base_branch} -- cannot confirm external merge")
+        final_commit=merged_commit.strip() or target_head
+        db.execute(
+            "UPDATE merge_records SET merge_status='MERGED',merged_commit=?,verified_commit=?,base_branch=?,external_merge_reason=?,merged_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (final_commit,commit,base_branch,reason.strip(),row["id"]))
+        db.event("task",tid,"EXTERNAL_MERGE_CONFIRMED",f"repo={repository_id} commit={final_commit} reason={reason.strip()[:200]}")
+        _schedule_cleanup_if_done(tid)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/mark-merged")
     def mark_task_merged(tid:int):

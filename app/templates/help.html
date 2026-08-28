@@ -12,6 +12,7 @@
 <a href="#start-agent">Start Agent làm gì?</a>
 <a href="#reset-sandbox-data">Reset Sandbox Data dùng khi nào?</a>
 <a href="#baseline-failure">Baseline failure là gì?</a>
+<a href="#real-merge">PR/Merge thật hoạt động thế nào?</a>
 <a href="#quick-start">Bắt đầu nhanh (chi tiết kỹ thuật)</a>
 <a href="#tasks">1. Có task mới</a>
 <a href="#task-vs-worktree">Task khác Worktree?</a>
@@ -60,7 +61,7 @@
 <tr><td><b>Review</b></td><td>Sau khi agent nộp báo cáo hoàn thành, bước tự chuyển sang Review — bấm <b>Start Reviewer</b>, xem kết quả PASS/FIX_REQUIRED/BLOCKED.</td></tr>
 <tr><td><b>Kiểm tra</b> (QA)</td><td>Chỉ hiện nếu Workflow yêu cầu (HIGH). Xem sandbox/app URL, làm theo hướng dẫn kiểm tra thủ công, bấm <b>Record PASS</b>/<b>Record FAIL</b>.</td></tr>
 <tr><td><b>Integration</b></td><td>Chỉ hiện nếu Workflow yêu cầu (NORMAL/HIGH). Bấm <b>Start Integration</b>, theo dõi conflict/tests.</td></tr>
-<tr><td><b>Sẵn sàng merge</b></td><td>Checklist các điều kiện đã đạt + hướng dẫn Prepare PR (GitHub thao tác thủ công).</td></tr>
+<tr><td><b>Sẵn sàng merge</b></td><td>Với repo có GitHub remote: <b>Create PR</b> tạo Pull Request thật, <b>Merge</b> merge thật qua GitHub sau khi CI/mergeability sạch — xem <a href="#real-merge">PR/Merge thật hoạt động thế nào?</a>.</td></tr>
 <tr><td><b>Hoàn tất</b></td><td>Mọi repository bắt buộc đã Merged — xem lịch dọn sandbox.</td></tr>
 </tbody></table>
 <div class="info">Workflow policy (Low/Normal/High) có thể bỏ qua Kiểm tra và/hoặc Integration — thanh tiến trình vẫn hiện đủ các bước nhưng bước bị bỏ qua sẽ mờ đi kèm nhãn "(bỏ qua)", không bao giờ hiện như đã hoàn thành giả.</div>
@@ -93,6 +94,17 @@
 <p>Một <b>baseline failure</b> là lỗi test đã tồn tại từ <i>trước khi Task này thay đổi bất kỳ gì</i> — chứng minh được bằng cách chạy lại đúng test đó trên commit gốc (base commit) sạch, không phải chỉ "nhìn có vẻ không liên quan".</p>
 <p>Mỗi lỗi khi mới thấy đều mặc định là <b>UNKNOWN</b>. Chỉ khi bấm <b>Reproduce on Baseline</b> và lỗi thật sự lặp lại y hệt (cùng fingerprint) trên base commit, nó mới chuyển thành <b>VERIFIED BASELINE</b> — không bao giờ tự suy đoán.</p>
 <p>Khi đó mới có thể <b>Waive Baseline Failure</b>: waiver <b>KHÔNG</b> đánh dấu test PASS — nó chỉ ghi nhận công khai "lỗi này có từ trước, cho Task này đi tiếp" (PASS_WITH_APPROVED_BASELINE_WAIVER), có audit đầy đủ (ai duyệt, lúc nào, lý do). Nếu lỗi thay đổi (fingerprint khác) hoặc là lỗi hoàn toàn mới, waiver không áp dụng được — vẫn phải sửa.</p>
+</section>
+
+<section class="guide-section" id="real-merge"><span class="section-kicker">MERGE</span><h3>PR/Merge thật hoạt động thế nào?</h3>
+<p>Ở bước <b>Sẵn sàng merge</b>, mỗi repository bắt buộc có một thẻ merge riêng:</p>
+<ul>
+<li><b>Repo có GitHub remote</b> (đăng nhập qua <code>gh auth status</code>): <b>Create PR</b> tạo Pull Request thật từ đúng branch đã verify (Integration branch nếu Workflow yêu cầu, hoặc branch của Builder). Không tạo PR trùng — nếu đã có PR cho đúng head/base, dùng lại PR đó.</li>
+<li><b>Merge</b> chỉ bật khi: PR đang OPEN, CI không FAIL/PENDING, mergeability CLEAN, source chưa đổi kể từ lúc verify. Bấm Merge sẽ kiểm tra lại toàn bộ (fetch PR mới nhất) ngay trước khi gọi API merge thật của GitHub — không bao giờ tin trạng thái cũ trên màn hình.</li>
+<li><b>Conflict</b>: không bao giờ ép merge. Hiện nút <b>Open Integrator</b> để giải quyết xung đột (merge target mới nhất, chạy lại test, push lại).</li>
+<li><b>Repo không có GitHub remote</b>: dùng <b>Confirm External Merge</b> (mục "Xem tất cả chi tiết kỹ thuật" → Merge Tracking) — hệ thống kiểm tra thật commit đã verify có nằm trong target branch không trước khi ghi nhận MERGED, bắt buộc nhập lý do, có audit.</li>
+</ul>
+<p><b>Task chỉ DONE khi mọi repository bắt buộc đều MERGED thật</b> — không có nút "Mark All Merged" giả trạng thái nữa.</p>
 </section>
 
 <section class="guide-section" id="quick-start"><span class="section-kicker">BẮT ĐẦU NHANH</span><h3>Bắt đầu nhanh (chi tiết kỹ thuật)</h3><p>Toàn bộ vòng đời một task, từ lúc tạo tới lúc sandbox được dọn dẹp. Task chỉ có <b>6 trạng thái</b> (BACKLOG/ACTIVE/BLOCKED/READY_FOR_MAIN/DONE/CANCELLED) — mọi bước bên dưới (Development/Review/QA/Integration/Merging) là <b>Task Stage</b>, tính tự động, không phải trạng thái riêng lưu trong DB:</p>

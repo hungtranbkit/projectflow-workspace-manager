@@ -367,6 +367,78 @@ class TaskDecisionService:
             "head": head, "summary": summary,
         }
 
+    # ---- real merge gate (section 4/9) ----------------------------------
+    MERGE_BLOCKER_CODES = (
+        "NOT_READY", "CI_FAIL", "CI_PENDING", "SOURCE_STALE", "REVIEW_STALE", "QA_STALE",
+        "INTEGRATION_STALE", "BASELINE_WAIVER_REQUIRED", "PR_CLOSED", "TARGET_BRANCH_CHANGED",
+        "UNKNOWN_MERGEABILITY", "CONFLICT", "NO_PR",
+    )
+
+    def effective_source_for_repo(self, d, repository_id):
+        """The exact branch + commit that reached READY_FOR_MAIN for one
+        repository -- its Task Integration branch when Integration is
+        required (NORMAL/HIGH), else its own Builder Workspace branch
+        (LOW risk skips Integration entirely, READY_FOR_MAIN comes
+        straight from Review PASS). Never a guess -- the same
+        branch/commit _integration_ok/integration_gate_status already
+        treat as authoritative for that repo."""
+        if self.requires_integration(d["risk_profile"]):
+            repo_ti = next((r for r in d["integration_repos"] if r["repository_id"] == repository_id), None)
+            if not repo_ti:
+                return None, None
+            gs = repo_ti.get("gate_status") or {}
+            return repo_ti["branch"], gs.get("head")
+        b = next((x for x in d["builders"] if x["repository_id"] == repository_id), None)
+        return (b["branch"], b["head"]) if b else (None, None)
+
+    def merge_gate_status(self, d, repository_id, merge_record):
+        """Every reason [Merge] must stay disabled for one repository,
+        computed fresh from the Task's own live decision plus the
+        MergeRecord's last-synced GitHub snapshot -- never a second,
+        template-side calculation, and never trusting stale UI state
+        (section 4/5/9: the real merge action re-fetches all of this
+        again immediately before actually calling the GitHub merge API)."""
+        branch, commit = self.effective_source_for_repo(d, repository_id)
+        blockers: list[str] = []
+        if not d["ready_for_main"]:
+            blockers.append("NOT_READY")
+        b = next((x for x in d["builders"] if x["repository_id"] == repository_id), None)
+        if b and b["review_status"] == "STALE":
+            blockers.append("REVIEW_STALE")
+        qa = d.get("qa")
+        if self.requires_qa(d["risk_profile"]) and qa and not self._qa_current(qa, d["task"]):
+            blockers.append("QA_STALE")
+        if self.requires_integration(d["risk_profile"]):
+            repo_ti = next((r for r in d["integration_repos"] if r["repository_id"] == repository_id), None)
+            gs = (repo_ti or {}).get("gate_status") or {}
+            if gs.get("tests_status") == "FAIL":
+                unresolved = [f for f in (gs.get("failures") or []) if f["classification"] != "WAIVED"]
+                if unresolved and all(f["classification"] == "BASELINE_FAILURE" for f in unresolved):
+                    blockers.append("BASELINE_WAIVER_REQUIRED")
+                elif unresolved:
+                    blockers.append("INTEGRATION_STALE")
+            elif repo_ti and repo_ti["status"] != "READY_FOR_MAIN":
+                blockers.append("INTEGRATION_STALE")
+        if not merge_record.get("pr_number"):
+            blockers.append("NO_PR")
+        else:
+            if merge_record.get("pr_state") == "CLOSED":
+                blockers.append("PR_CLOSED")
+            if merge_record.get("ci_status") == "FAIL":
+                blockers.append("CI_FAIL")
+            elif merge_record.get("ci_status") == "PENDING":
+                blockers.append("CI_PENDING")
+            if merge_record.get("mergeability") == "CONFLICTING":
+                blockers.append("CONFLICT")
+            elif merge_record.get("mergeability") == "UNKNOWN":
+                blockers.append("UNKNOWN_MERGEABILITY")
+            if merge_record.get("merge_state_status") == "BEHIND":
+                blockers.append("TARGET_BRANCH_CHANGED")
+            verified = merge_record.get("verified_commit")
+            if verified and ((commit and verified != commit) or (merge_record.get("head_sha") and merge_record["head_sha"] != verified)):
+                blockers.append("SOURCE_STALE")
+        return {"eligible": not blockers, "blockers": blockers, "source_branch": branch, "current_commit": commit}
+
     def _integration_ok(self, ti, ti_repos):
         """Healthy AND verified -- 'TESTING' means tests are only in
         flight, not proof of anything yet, so only an explicit

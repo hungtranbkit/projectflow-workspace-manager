@@ -390,6 +390,32 @@ CREATE TABLE IF NOT EXISTS gate_waivers(
 CREATE INDEX IF NOT EXISTS idx_gate_waivers_task ON gate_waivers(task_id);
 CREATE INDEX IF NOT EXISTS idx_gate_waivers_integration ON gate_waivers(integration_id,gate,test_identifier);
 """),
+    # V10: real GitHub-backed merge execution. merge_records grows real
+    # PR/CI/mergeability tracking fields, all of them a live snapshot
+    # from the last successful `gh pr view` (never hand-typed) --
+    # `verified_commit`/`source_branch`/`target_branch` are pinned at
+    # Create PR time so staleness (a later commit landing on the source
+    # branch) is a real, detectable fact, never assumed current.
+    # merge_status keeps its existing small vocabulary
+    # (NOT_STARTED/PR_OPEN/MERGED/FAILED/CONFLICT) -- pr_state/ci_status/
+    # mergeability are the NEW, separate, more granular live signals a
+    # route/template reads to compute the exact merge-blocker reason,
+    # never re-derived ad hoc.
+    (10, """
+ALTER TABLE merge_records ADD COLUMN pr_number INTEGER;
+ALTER TABLE merge_records ADD COLUMN pr_url TEXT;
+ALTER TABLE merge_records ADD COLUMN pr_state TEXT;
+ALTER TABLE merge_records ADD COLUMN ci_status TEXT NOT NULL DEFAULT 'UNKNOWN';
+ALTER TABLE merge_records ADD COLUMN mergeability TEXT NOT NULL DEFAULT 'UNKNOWN';
+ALTER TABLE merge_records ADD COLUMN merge_state_status TEXT;
+ALTER TABLE merge_records ADD COLUMN head_sha TEXT;
+ALTER TABLE merge_records ADD COLUMN base_branch TEXT;
+ALTER TABLE merge_records ADD COLUMN source_branch TEXT;
+ALTER TABLE merge_records ADD COLUMN verified_commit TEXT;
+ALTER TABLE merge_records ADD COLUMN merge_strategy TEXT NOT NULL DEFAULT 'MERGE_COMMIT';
+ALTER TABLE merge_records ADD COLUMN last_synced_at TEXT;
+ALTER TABLE merge_records ADD COLUMN external_merge_reason TEXT;
+"""),
 ]
 
 
