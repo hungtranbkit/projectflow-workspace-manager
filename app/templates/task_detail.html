@@ -1,0 +1,79 @@
+{% extends 'base.html' %}{% block title %}Task · {{t.title}}{% endblock %}{% block header_action %}<span class="badge {{t.status|lower}}">{{t.status.replace('_',' ')}}</span>{% endblock %}{% block content %}
+<section class="cards">
+<article><b>{{t.status.replace('_',' ')}}</b><span>Task Status</span></article>
+<article><b>{{summary.agents_ready}} / {{summary.agents_total}}</b><span>Agents READY</span></article>
+<article><b>{{summary.sandboxes_running}} / {{summary.sandboxes_total}}</b><span>Sandboxes RUNNING</span></article>
+<article><b>{{summary.integration_health or '—'}}</b><span>Integration</span></article>
+<article><b>{{summary.tests_passed}} / {{summary.tests_required}}</b><span>Tests PASS</span></article>
+{% if summary.hardware_status %}<article><b>{{summary.hardware_status}}</b><span>Hardware Test</span></article>{% endif %}
+</section>
+
+<section class="facts"><div class="wide"><small>Description</small><code>{{t.description or '—'}}</code></div><div><small>Slug</small><code>{{t.slug}}</code></div><div><small>Created</small><code>{{t.created_at}}</code></div></section>
+
+<div class="actions">
+{% if all_ready and not task_integration %}<form method="post" action="/api/tasks/{{t.id}}/integrations"><button class="success">Create Integration</button></form>{% endif %}
+{% if t.status not in ['MERGED','CANCELLED','CLOSED'] %}<form method="post" action="/api/tasks/{{t.id}}/mark-merged" onsubmit="return confirm('Tất cả repo PR liên quan đã merge?')"><button>Mark Merged</button></form><form method="post" action="/api/tasks/{{t.id}}/cancel" onsubmit="return confirm('Huỷ task này?')"><button class="danger">Cancel Task</button></form>{% endif %}
+</div>
+
+<h3 class="subgroup">Sandbox Environments</h3>
+<h4 class="subgroup">Agent Workspaces</h4>
+<section class="panel">{% for w in workspaces %}
+<div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.repo_name}} <small>{{w.role or 'no role'}}</small><br><code>{{w.branch}}</code></div><span class="badge {{w.status|lower}}">{{w.status}}</span></div>
+<div class="nested">
+{% if w.sandbox %}
+<div class="row"><div><strong>Sandbox</strong><small>{{w.sandbox.row.status.replace('_',' ')}} · {{w.sandbox.row.health_status}}</small></div><a href="/sandboxes/{{w.sandbox.row.id}}">Sandbox →</a></div>
+{% if w.sandbox.stale %}<div class="warning"><b>SOURCE STALE</b><p>Sandbox source: <code>{{w.sandbox.primary_source.commit_sha[:12] if w.sandbox.primary_source else '—'}}</code> — a source branch has moved.</p><form method="post" action="/api/sandboxes/{{w.sandbox.row.id}}/rebuild"><button class="secondary">Rebuild Sandbox</button></form></div>{% endif %}
+{% if w.sandbox.backend_url %}<p><small>Backend</small><code>{{w.sandbox.backend_url}}</code></p>{% endif %}
+{% if w.sandbox.frontend_url %}<p><small>Frontend</small><code>{{w.sandbox.frontend_url}}</code></p>{% endif %}
+{% if w.sandbox.hardware_api_url %}<p><small>Hardware Target</small><code>{{w.sandbox.hardware_api_url}}</code></p>{% endif %}
+{% if w.sandbox.ports %}<p><small>Ports</small> {% for p in w.sandbox.ports %}{{p.service}} {{p.container_port}} → {{p.host_port}}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+{% if w.sandbox.primary_source %}<p><small>Source</small><code>{{w.sandbox.primary_source.repo_name}} @ {{w.sandbox.primary_source.commit_sha[:8]}}</code></p>{% endif %}
+<div class="quick-actions">
+{% if w.sandbox.backend_url %}<a class="ghost" href="{{w.sandbox.backend_url}}" target="_blank" rel="noopener">Open Backend</a>{% endif %}
+{% if w.sandbox.frontend_url %}<a class="ghost" href="{{w.sandbox.frontend_url}}" target="_blank" rel="noopener">Open Frontend</a>{% endif %}
+{% if w.sandbox.hardware_api_url %}<a class="ghost" href="{{w.sandbox.hardware_api_url}}" target="_blank" rel="noopener">Open LAN</a>{% endif %}
+<a class="ghost" href="/sandboxes/{{w.sandbox.row.id}}">Details</a>
+<a class="ghost" href="/sandboxes/{{w.sandbox.row.id}}#operations">Logs</a>
+<form method="post" action="/api/sandboxes/{{w.sandbox.row.id}}/restart"><button class="ghost">Restart</button></form>
+</div>
+{% else %}
+<p><small>Sandbox</small><code>NONE</code></p>
+{% if w.sandbox_configured %}<p class="empty">No runtime sandbox has been created for this task.</p><form method="post" action="/api/tasks/{{t.id}}/workspaces/{{w.id}}/create-sandbox"><button class="ghost">Create Sandbox</button></form>
+{% else %}<p class="empty">Sandbox is not configured for this repository.</p>{% endif %}
+{% endif %}
+</div>
+{% else %}<p class="empty">Chưa có Agent Workspace nào trong Task này.</p>{% endfor %}
+<h4>+ Add Agent Workspace</h4>
+<form method="post" action="/api/tasks/{{t.id}}/workspaces"><label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label><label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><label>Task role<input name="role" placeholder="Backend / Firmware / Frontend"></label><label>Base branch<input name="base_branch" value="main"></label><label>Sandbox profile<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label><button>Add Agent Workspace</button></form>
+</section>
+
+{% if integration_sandboxes %}<h4 class="subgroup">Integration</h4>{% for v in integration_sandboxes %}<section class="panel">
+<div class="row"><div><strong>Integration Sandbox</strong><small>{{v.row.status.replace('_',' ')}} · {{v.row.health_status}}</small></div><a href="/sandboxes/{{v.row.id}}">Sandbox →</a></div>
+{% if v.stale %}<div class="warning"><b>SOURCE STALE</b><p>A participating source branch has moved since this sandbox was built.</p></div>{% endif %}
+<p><small>Integration Sources</small></p>
+{% for s in v.sources %}<div class="row"><div><strong>{{s.role}}</strong> · {{s.repo_name}}<small>{{s.branch}}</small></div><code>{{s.commit_sha[:8]}}</code></div>{% endfor %}
+{% if v.backend_url %}<p><small>Backend</small><code>{{v.backend_url}}</code></p>{% endif %}
+{% if v.frontend_url %}<p><small>Frontend</small><code>{{v.frontend_url}}</code></p>{% endif %}
+{% if v.hardware_api_url %}<p><small>Hardware Target</small><code>{{v.hardware_api_url}}</code></p>{% endif %}
+<p><small>Tests</small>{{summary.tests_passed}} / {{summary.tests_required}} PASS</p>
+<p><small>Current Stage</small>{{v.row.status.replace('_',' ')}}</p>
+<div class="quick-actions">
+{% if v.backend_url %}<a class="ghost" href="{{v.backend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}
+{% if v.frontend_url %}<a class="ghost" href="{{v.frontend_url}}" target="_blank" rel="noopener">Open Frontend</a>{% endif %}
+{% if v.hardware_api_url %}<a class="ghost" href="{{v.hardware_api_url}}" target="_blank" rel="noopener">Open LAN</a>{% endif %}
+<a class="ghost" href="/sandboxes/{{v.row.id}}#operations">Logs</a>
+<a class="ghost" href="/sandboxes/{{v.row.id}}">Sandbox Details</a>
+</div>
+</section>{% endfor %}{% elif task_integration %}<h4 class="subgroup">Integration</h4><section class="panel"><p class="empty">{{task_integration.status.replace('_',' ')}} — no dedicated sandbox for this integration (no participating repo declares a sandbox: contract).</p></section>{% endif %}
+
+{% if task_integration %}<section class="panel"><h3>Integration <span class="badge {{task_integration.status|lower}}">{{task_integration.status.replace('_',' ')}}</span></h3>{% for r in ti_repos %}<a class="row" href="/integrations/{{r.id}}"><div><strong>{{r.repo_name}}</strong><small>{{r.branch}}</small></div><span class="badge {{r.status|lower}}">{{r.status.replace('_',' ')}}</span></a>{% endfor %}</section>
+<section class="panel"><h3>Integration Readiness</h3>
+{% for r in readiness %}<div class="check">{{'✓' if r.sources_current else '○'}} All source branches merged ({{r.repo.repo_name}})</div>{% endfor %}
+<div class="check">{{'✓' if summary.integration_health=='HEALTHY' else '○'}} Sandbox healthy</div>
+{% for r in readiness %}<div class="check">{{'✓' if r.tests_pass else '○'}} Tests PASS ({{r.repo.repo_name}}: {{r.tests_passed}}/{{r.tests_required}})</div>{% endfor %}
+{% if summary.hardware_status %}<div class="check">{{'✓' if summary.hardware_status=='PASS' else '○'}} Hardware test ({{summary.hardware_status}})</div>{% endif %}
+<p><b>READY_FOR_MAIN:</b> {{'YES' if summary.ready_for_main else 'NO'}}</p>
+</section>{% endif %}
+
+{% if t.status == 'MERGED' %}<section class="panel"><h3>Sandbox Retention</h3>{% if task_cleanup_countdown %}<p>Cleanup in {{task_cleanup_countdown}}</p><div class="actions"><form method="post" action="/api/tasks/{{t.id}}/extend-retention"><input type="hidden" name="hours" value="24"><button class="secondary">Extend 24h</button></form><form method="post" action="/api/tasks/{{t.id}}/cleanup-now" onsubmit="return confirm('Cleanup ngay lập tức?')"><button class="danger">Cleanup Now</button></form></div>{% else %}<p><code>CLOSED</code><br><small>Runtime cleaned. Evidence retained.</small></p>{% endif %}</section>{% endif %}
+{% endblock %}
