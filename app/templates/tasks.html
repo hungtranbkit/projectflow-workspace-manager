@@ -1,1 +1,65 @@
-{% extends 'base.html' %}{% block title %}Tasks{% endblock %}{% block header_action %}<a class="button" href="#new">+ New Task</a> <a href="/help#tasks">? Có task mới thì bắt đầu ở đâu?</a>{% endblock %}{% block content %}<div class="grid"><section class="panel"><h3>All tasks</h3>{% for t in tasks %}<a class="row" href="/tasks/{{t.id}}"><div><strong>{{t.title}}</strong><small>{{t.slug}} · {{t.workspace_count}} workspace(s)</small></div><span class="badge {{t.status|lower}}">{{t.status.replace('_',' ')}}</span></a>{% else %}<div class="empty-state"><h4>Chưa có Task</h4><p>Một Task có thể trải nhiều repo (backend, frontend, ESP...), mỗi repo vẫn một branch/worktree riêng.</p><a href="/help#tasks">Xem hướng dẫn</a></div>{% endfor %}</section><section class="panel" id="new"><h3>New Task</h3><form method="post" action="/api/tasks"><label>Title<input name="title" required placeholder="Fix kiosk session scan"></label><label>Description<textarea name="description" rows="3" placeholder="Ngắn gọn: cần sửa gì, ảnh hưởng repo nào"></textarea></label><button>Create Task</button></form></section></div>{% endblock %}
+{% extends 'base.html' %}{% block title %}Tasks{% endblock %}{% block header_action %}<a class="button" href="#new">+ New Task</a> <a href="/kanban?{{filters_qs}}">Board</a> <a href="/help#tasks">? Có task mới thì bắt đầu ở đâu?</a>{% endblock %}{% block content %}
+
+<form method="get" class="filters">
+<input type="text" name="q" value="{{filters.q}}" placeholder="Tìm theo tên task...">
+<select name="status" onchange="this.form.submit()"><option value="">Mọi trạng thái</option>{% for c in columns %}<option value="{{c}}" {{'selected' if filters.status==c else ''}}>{{c.replace('_',' ')}}</option>{% endfor %}</select>
+<select name="repository" onchange="this.form.submit()"><option value="">Mọi repository</option>{% for r in repositories %}<option value="{{r.repo_name}}" {{'selected' if filters.repository==r.repo_name else ''}}>{{r.repo_name}}</option>{% endfor %}</select>
+<select name="agent" onchange="this.form.submit()"><option value="">Mọi agent</option>{% for a in agents %}<option value="{{a}}" {{'selected' if filters.agent==a else ''}}>{{a}}</option>{% endfor %}</select>
+<select name="sandbox_status" onchange="this.form.submit()"><option value="">Sandbox: bất kỳ</option><option value="running" {{'selected' if filters.sandbox_status=='running' else ''}}>Running</option><option value="unhealthy" {{'selected' if filters.sandbox_status=='unhealthy' else ''}}>Unhealthy</option><option value="none" {{'selected' if filters.sandbox_status=='none' else ''}}>Không có sandbox</option></select>
+<select name="test_status" onchange="this.form.submit()"><option value="">Tests: bất kỳ</option><option value="pass" {{'selected' if filters.test_status=='pass' else ''}}>PASS</option><option value="fail" {{'selected' if filters.test_status=='fail' else ''}}>FAIL</option><option value="not_run" {{'selected' if filters.test_status=='not_run' else ''}}>NOT RUN</option></select>
+<select name="integration_status" onchange="this.form.submit()"><option value="">Integration: bất kỳ</option><option value="NONE" {{'selected' if filters.integration_status=='NONE' else ''}}>NONE</option><option value="TESTING" {{'selected' if filters.integration_status=='TESTING' else ''}}>TESTING</option><option value="CONFLICT" {{'selected' if filters.integration_status=='CONFLICT' else ''}}>CONFLICT</option><option value="READY" {{'selected' if filters.integration_status=='READY' else ''}}>READY</option></select>
+<button class="ghost" type="submit">Lọc</button>
+</form>
+
+<section class="panel"><h3>Tasks</h3>
+{% if cards %}<div class="table-scroll"><table><thead><tr><th>Task</th><th>Status</th><th>Repos</th><th>Agents</th><th>Sandbox</th><th>Tests</th><th>Integration</th><th>Updated</th><th>Next Action</th></tr></thead><tbody>
+{% for c in cards %}<tr>
+<td><a href="/tasks/{{c.task.id}}"><strong>{{c.task.title}}</strong></a><br><small>{{c.task.slug}}</small></td>
+<td><span class="badge {{c.column|lower}}">{{c.column.replace('_',' ')}}</span></td>
+<td>{{c.repos|join(', ') or '—'}}</td>
+<td>{{c.agents.ready}} / {{c.agents.total}} READY{% if c.agents.failed %} · {{c.agents.failed}} FAIL{% endif %}</td>
+<td>{% if c.sandbox.total %}{{c.sandbox.running}} running{% if c.sandbox.unhealthy %} · {{c.sandbox.unhealthy}} unhealthy{% endif %}{% else %}—{% endif %}</td>
+<td>{{c.tests.passed}} / {{c.tests.total}} PASS</td>
+<td>{{c.integration.replace('_',' ')}}</td>
+<td><small>{{c.task.updated_at}}</small></td>
+<td><small>{{c.next_action.text}}</small></td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}<div class="empty-state"><h4>Chưa có Task</h4><p>Một Task có thể trải nhiều repo (backend, frontend, ESP...), mỗi repo vẫn một branch/worktree riêng.</p><a href="/help#tasks">Xem hướng dẫn</a></div>{% endif %}
+</section>
+
+<section class="panel" id="new"><h3>New Task</h3>
+<p><small>Một Task luôn tạo kèm ít nhất một Agent Workspace (repo + branch + worktree riêng, sandbox tuỳ chọn) — bạn không cần tự tạo worktree.</small></p>
+<form method="post" action="/api/tasks/new-with-workspace">
+<label>Task title<input name="title" required placeholder="Fix kiosk session scan"></label>
+<label>Description<textarea name="description" rows="2" placeholder="Ngắn gọn: cần sửa gì, ảnh hưởng repo nào"></textarea></label>
+<div id="ws-rows">
+<fieldset class="ws-row"><legend>Agent Workspace 1</legend>
+<label>Repository<select name="ws_repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
+<label>Agent<select name="ws_agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label>
+<label>Role<input name="ws_role" placeholder="Backend / Firmware / Frontend"></label>
+<label>Base branch<input name="ws_base_branch" value="main"></label>
+<label>Sandbox<select name="ws_sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select><a href="/help#sandbox-modes">? Chọn Sandbox thế nào?</a></label>
+</fieldset>
+</div>
+<button type="button" class="ghost" id="add-ws-row">+ Add another Agent Workspace</button>
+<button class="success">Create Task &amp; Agent Workspace</button>
+</form>
+<details><summary>Advanced: Task rỗng (DRAFT, không tạo Agent Workspace)</summary>
+<form method="post" action="/api/tasks"><label>Title<input name="title" required></label><label>Description<textarea name="description" rows="2"></textarea></label><button class="ghost">Create DRAFT Task</button></form>
+</details>
+</section>
+<script>
+(function(){
+  var rows=document.getElementById('ws-rows'), addBtn=document.getElementById('add-ws-row'), n=1;
+  addBtn.onclick=function(){
+    n+=1;
+    var row=rows.firstElementChild.cloneNode(true);
+    row.querySelector('legend').textContent='Agent Workspace '+n;
+    row.querySelectorAll('input').forEach(function(i){i.value=i.name==='ws_base_branch'?'main':'';});
+    row.querySelectorAll('select').forEach(function(s){s.selectedIndex=0;});
+    rows.appendChild(row);
+  };
+})();
+</script>
+{% endblock %}
