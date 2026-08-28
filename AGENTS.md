@@ -40,3 +40,23 @@ This file and `PROJECT.yaml` are the standalone repository contract.
   (containers/networks/volumes/env file/port reservations). It never
   deletes Task metadata, audit events, test results, source manifests,
   git branches, or worktrees.
+
+## Verification UX (V1)
+
+- When you consider your source change complete, report back using the
+  format in `templates/agent-completion-report.md` (WORK_STATUS /
+  WHAT_CHANGED / AUTOMATED_TESTS / HOW_TO_VERIFY / EXPECTED_RESULT /
+  TEST_DATA / RUNTIME_REQUIREMENTS / RISKS). Paste it into the workspace's
+  **+ Agent Report** form so it renders under Verification on the
+  workspace/Task page instead of only living in chat history.
+- `Mark Ready` / `agent_workspaces.status='READY'` means only "source
+  change complete, ready for verification/integration" -- never "sandbox
+  tested", "manually verified", "integration passed", or "ready for
+  main". Do not imply otherwise in any report or commit message.
+- Never invent `HOW_TO_VERIFY` steps for a change you did not make. An
+  absent report must render as an honest empty state, not a guessed one.
+- A recorded manual verification PASS is tied to one exact
+  `(sandbox_id, source_commit)` pair (`manual_verifications`) and must
+  never be treated as still valid once that source commit is no longer
+  the branch's current HEAD -- the UI recomputes staleness from git at
+  render time; nothing here stores a second "is it still valid" flag.

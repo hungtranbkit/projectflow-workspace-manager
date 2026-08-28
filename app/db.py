@@ -106,6 +106,47 @@ ALTER TABLE tasks ADD COLUMN default_sandbox_profile TEXT;
 CREATE INDEX IF NOT EXISTS idx_agent_task ON agent_workspaces(task_id);
 CREATE INDEX IF NOT EXISTS idx_integration_task_integration ON integration_workspaces(task_integration_id);
 """),
+    # V4: Verification UX. Two new, purely additive tables -- no existing
+    # column gains a second meaning. A verification_reports row is the
+    # agent's own completion report (WORK_STATUS/WHAT_CHANGED/HOW_TO_VERIFY/
+    # EXPECTED_RESULT/TEST_DATA/RISKS -- see templates/agent-completion-
+    # report.md); workspace_id NULL means it is the Task-level note,
+    # workspace_id set means a workspace-specific addition. A
+    # manual_verifications row is a human's PASS/FAIL against one exact
+    # sandbox_id at one exact source_commit -- staleness is never stored,
+    # it is recomputed by comparing source_commit to the source branch's
+    # current git HEAD at render time (the same way sandbox staleness
+    # already works), so there is no second copy of "is it still valid".
+    (4, """
+CREATE TABLE IF NOT EXISTS verification_reports(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER REFERENCES tasks(id),
+  workspace_id INTEGER REFERENCES agent_workspaces(id),
+  work_status TEXT NOT NULL DEFAULT 'READY',
+  what_changed TEXT NOT NULL DEFAULT '',
+  automated_tests TEXT NOT NULL DEFAULT '',
+  how_to_verify TEXT NOT NULL DEFAULT '',
+  expected_result TEXT NOT NULL DEFAULT '',
+  test_data TEXT NOT NULL DEFAULT '',
+  runtime_requirements TEXT NOT NULL DEFAULT 'NONE',
+  risks TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS manual_verifications(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER REFERENCES tasks(id),
+  workspace_id INTEGER REFERENCES agent_workspaces(id),
+  sandbox_id INTEGER NOT NULL REFERENCES sandboxes(id),
+  result TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  source_commit TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_verification_task ON verification_reports(task_id);
+CREATE INDEX IF NOT EXISTS idx_verification_workspace ON verification_reports(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_manual_verif_sandbox ON manual_verifications(sandbox_id);
+CREATE INDEX IF NOT EXISTS idx_manual_verif_workspace ON manual_verifications(workspace_id);
+"""),
 ]
 
 

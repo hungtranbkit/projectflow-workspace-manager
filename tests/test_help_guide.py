@@ -11,7 +11,7 @@ def register(client, repo, name="demo"):
 
 REQUIRED_SECTION_ANCHORS = [
     "quick-start", "tasks", "agent-workspaces", "open-agent", "sandbox", "sandbox-modes",
-    "sandbox-auto", "global-sandbox", "task-detail-sandbox", "agent-done", "integration",
+    "sandbox-auto", "global-sandbox", "task-detail-sandbox", "agent-done", "agent-ready-next", "integration",
     "integration-agent", "conflict", "cross-repo", "cross-repo-example", "source-stale",
     "restart-rebuild", "sandbox-status", "test-progress", "ready-for-main", "github-flow",
     "merge-cleanup", "stop-cleanup", "repositories", "no-sandbox-contract", "hardware",

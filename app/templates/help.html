@@ -18,6 +18,7 @@
 <a href="#global-sandbox">6. Xem sandbox đang chạy</a>
 <a href="#task-detail-sandbox">7. Sandbox trong Task Detail</a>
 <a href="#agent-done">8. Agent sửa xong thì sao?</a>
+<a href="#agent-ready-next">READY rồi thì làm gì?</a>
 <a href="#integration">9. Khi nào tạo Integration?</a>
 <a href="#integration-agent">10. Integration Agent làm gì?</a>
 <a href="#conflict">Nếu merge bị conflict</a>
@@ -128,6 +129,13 @@
 <p>Sau đó bạn bấm <b>Mark Ready</b>.</p>
 <div class="readybox"><b>Mark Ready có nghĩa:</b><p>Workspace này đã sẵn sàng để đưa sang bước Integration. Không có nghĩa là code đã vào main.</p></div>
 <div class="info"><b>Tiếp theo:</b> Tạo Integration để kiểm tra code đã ghép.<br><a class="button" href="/tasks">Đi tới Tasks</a></div>
+</section>
+
+<section class="guide-section" id="agent-ready-next"><span class="section-kicker">READY ≠ XONG</span><h3>Agent báo READY rồi thì làm gì?</h3>
+<div class="warning"><b>READY ≠ task hoàn tất.</b> READY chỉ có nghĩa agent coi source đã xong, sẵn sàng để verify/tích hợp — chưa test, chưa verify thủ công, chưa tích hợp, chưa sẵn sàng lên main.</div>
+<div class="flow-tree"><code>READY</code><div>→ Sandbox</div><div>→ Test</div><div>→ Manual Check</div><div>→ Integration</div><b>→ READY_FOR_MAIN</b></div>
+<p>Agent Workspace và Task Detail đều có khối trạng thái riêng cho từng bước (<b>Agent code</b> / <b>Sandbox</b> / <b>Automated tests</b> / <b>Manual verification</b> / <b>Integration</b> / <b>READY_FOR_MAIN</b>) và một khối <b>Bước tiếp theo</b> tính tự động theo trạng thái hiện tại — không đoán, không dùng AI, chỉ theo luật cố định.</p>
+<p>Nếu agent đã báo cáo theo mẫu Agent Completion Report (<code>templates/agent-completion-report.md</code>: WORK_STATUS/WHAT_CHANGED/HOW_TO_VERIFY/EXPECTED_RESULT/TEST_DATA/RISKS), phần <b>Cách kiểm tra</b> trên trang sẽ hiện đúng nội dung đó — nếu agent chưa báo cáo, trang sẽ nói thật: "Agent chưa cung cấp hướng dẫn kiểm tra." thay vì tự bịa ra các bước.</p>
 </section>
 
 <section class="guide-section" id="integration"><span class="section-kicker">TÍCH HỢP</span><h3>Create Integration dùng khi nào?</h3>
