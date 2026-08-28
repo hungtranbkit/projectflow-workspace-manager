@@ -29,45 +29,46 @@
 </section>
 
 <section class="panel" id="new"><h3>New Task</h3>
-<p><small>Task vào <b>BACKLOG</b> — chưa tạo branch/worktree/sandbox nào. Chọn <b>Select for Development</b> trong Task Detail khi sẵn sàng làm.</small></p>
-<form method="post" action="/api/tasks">
-<label>Task title<input name="title" required placeholder="Fix kiosk session scan"></label>
-<label>Description<textarea name="description" rows="2" placeholder="Ngắn gọn: cần sửa gì, ảnh hưởng repo nào"></textarea></label>
-<label>Priority<select name="priority"><option>LOW</option><option selected>NORMAL</option><option>HIGH</option></select></label>
-<label>Tags<input name="tags" placeholder="kiosk, backend, urgent"></label>
-<label>Repository scope<select name="repo_scope_id"><option value="">(chưa xác định)</option>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
-<label>Notes<textarea name="notes" rows="2" placeholder="Ghi chú thêm cho việc lên kế hoạch"></textarea></label>
-<button class="success">Add to Backlog</button>
+<p><small>Mô tả task bằng một prompt tự nhiên. Bỏ trống Repository/Agent để chỉ lưu vào <b>Backlog</b> (chưa tạo branch/worktree/sandbox nào) — điền vào để tạo &amp; bắt đầu code luôn.</small></p>
+<form method="post" action="/api/tasks/create">
+<label>Task title<input name="title" required placeholder="Update the MESFlow default password"></label>
+<label>Implementation Prompt<textarea name="implementation_prompt" rows="6" placeholder="Update the MESFlow default password.
+The seeded admin should use the new password.
+First login must still require password change.
+Do not affect existing users.
+Verify in a fresh sandbox that the new password works and old password does not.
+Run tests, commit, and report how to verify."></textarea></label>
+<label>Repository<select name="repository_id"><option value="">(chưa chọn — vào Backlog)</option>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
+<label>Agent<select name="agent"><option value="">(chưa chọn)</option>{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label>
+<label>Sandbox<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label>
+<button class="success">Create &amp; Start</button>
+<details><summary>Advanced</summary>
+<label>Base branch<input name="ws_base_branch" value="main"></label>
+<label>Role<input name="ws_role" placeholder="Backend / Firmware / Frontend"></label>
+<label>Workflow<select name="risk_profile">
+<option value="LOW">Low — code + review</option>
+<option value="NORMAL" selected>Normal — code + review + integration</option>
+<option value="HIGH">High — code + review + QA + integration</option>
+</select> <a href="/help#risk-profile">? Workflow khác nhau thế nào?</a></label>
+<h4>+ Additional repositories</h4>
+<div id="ws-rows"></div>
+<button type="button" class="ghost" id="add-ws-row">+ Add another repository</button>
+</details>
 </form>
-<details><summary>Advanced: tạo Task + Agent Workspace ngay (bỏ qua BACKLOG/PREPARE)</summary>
-<form method="post" action="/api/tasks/new-with-workspace">
-<label>Task title<input name="title" required placeholder="Fix kiosk session scan"></label>
-<label>Description<textarea name="description" rows="2"></textarea></label>
-<div id="ws-rows">
-<fieldset class="ws-row"><legend>Agent Workspace 1</legend>
-<label>Repository<select name="ws_repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
+</section>
+<template id="ws-row-template">
+<fieldset class="ws-row"><legend>Additional repository</legend>
+<label>Repository<select name="ws_repository_id">{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
 <label>Agent<select name="ws_agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label>
 <label>Role<input name="ws_role" placeholder="Backend / Firmware / Frontend"></label>
 <label>Base branch<input name="ws_base_branch" value="main"></label>
-<label>Sandbox<select name="ws_sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select><a href="/help#sandbox-modes">? Chọn Sandbox thế nào?</a></label>
+<label>Sandbox<select name="ws_sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label>
 </fieldset>
-</div>
-<button type="button" class="ghost" id="add-ws-row">+ Add another Agent Workspace</button>
-<button>Create Task &amp; Agent Workspace</button>
-</form>
-</details>
-</section>
+</template>
 <script>
 (function(){
-  var rows=document.getElementById('ws-rows'), addBtn=document.getElementById('add-ws-row'), n=1;
-  addBtn.onclick=function(){
-    n+=1;
-    var row=rows.firstElementChild.cloneNode(true);
-    row.querySelector('legend').textContent='Agent Workspace '+n;
-    row.querySelectorAll('input').forEach(function(i){i.value=i.name==='ws_base_branch'?'main':'';});
-    row.querySelectorAll('select').forEach(function(s){s.selectedIndex=0;});
-    rows.appendChild(row);
-  };
+  var rows=document.getElementById('ws-rows'), addBtn=document.getElementById('add-ws-row'), tpl=document.getElementById('ws-row-template');
+  addBtn.onclick=function(){ rows.appendChild(tpl.content.cloneNode(true)); };
 })();
 </script>
 {% endblock %}

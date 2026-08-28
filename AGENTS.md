@@ -117,6 +117,46 @@ This file and `PROJECT.yaml` are the standalone repository contract.
   the original value and `needs_reconciliation=1` flags any row whose
   remap was ambiguous, for manual review rather than a fabricated PASS.
 
+## Prompt-first Task creation UX (V1)
+
+- `tasks.implementation_prompt` is the primary way a Task's intent is
+  described now -- one free-text field, not a structured GOAL/CONTEXT/
+  REQUIREMENTS/ACCEPTANCE_CRITERIA/OUT_OF_SCOPE/TEST_PLAN form. The
+  legacy `brief_*` columns and their form (`/api/tasks/{id}/brief`) still
+  exist and still work, purely for backward compatibility with Tasks
+  created before this UX existed -- never remove or backfill them.
+  `render_agent_prompt()`/`TaskDecisionService.brief_complete()` both
+  branch on whether `implementation_prompt` is set; everything else
+  (staleness, gates, next_action) treats "the Task's intent" as whichever
+  of the two is actually populated.
+- Deliberately reuses `brief_version` as the version counter for the
+  prompt too (never a second, parallel `prompt_version` column) -- see
+  the V7 migration comment in `app/db.py`. Bump it on any actual content
+  change (`save_prompt`, mirroring `save_brief`'s own change-detection);
+  everything downstream (`TaskDecisionService.builder_view()` flipping a
+  pinned Review/QA row to STALE) already keys off this column and needs
+  no separate wiring.
+- `render_agent_prompt(t, repo_row=None)` never rewrites the user's own
+  `implementation_prompt` text -- it only wraps it with real, recorded
+  context (repo name/path, Workflow/risk_profile, this repo's own
+  `AGENTS.md` if one exists) plus the fixed completion-requirements
+  footer. If you add more auto-injected context here, keep the user's
+  own text a verbatim, uninterrupted block -- never interleave generated
+  text inside it.
+- `regenerate_agent_prompt()` is the one place that recomputes the
+  derived `agent_prompt` (from `implementation_prompt` + repo context) and
+  persists it as a new `prompts` row stamped with the current
+  `brief_version`. Call it after anything that changes what the prompt
+  should say (Task create with a repo/agent already known, prompt edit);
+  never build `agent_prompt` a second way inline in a route.
+- `POST /api/tasks/create` is the single, primary Task-create endpoint
+  behind the simplified UI (title + prompt + optional repository/agent/
+  sandbox, Advanced = base branch/role/Workflow/additional repositories).
+  It subsumes both of the older `/api/tasks` (plain BACKLOG) and
+  `/api/tasks/new-with-workspace` (BACKLOG-skip quick-start) flows in one
+  form -- those two routes are kept, unmodified, for API back-compat, but
+  are no longer linked from the primary "New Task" UI.
+
 ## Verification UX (V1)
 
 - When you consider your source change complete, report back using the

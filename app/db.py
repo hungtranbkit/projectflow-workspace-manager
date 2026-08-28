@@ -316,6 +316,22 @@ UPDATE tasks SET status='ACTIVE' WHERE status IN ('PREPARE','IN_PROGRESS','READY
 UPDATE tasks SET needs_reconciliation=1 WHERE legacy_status IN ('MERGED','CLOSED','READY_FOR_INTEGRATION','INTEGRATING','TESTING');
 -- BACKLOG/ACTIVE/CANCELLED rows were already valid values and pass through unchanged.
 """),
+    (7, """
+-- Prompt-first Task creation UX: the single Implementation Prompt field
+-- that replaces the structured Brief form as the primary way to describe
+-- a Task. Deliberately reuses `brief_version` as the version counter for
+-- this field too (bumped on every actual content change, same as the old
+-- structured brief_* fields already did) instead of adding a second,
+-- parallel "prompt_version" column -- TaskDecisionService.builder_view()
+-- already treats brief_version as "the version of whatever currently
+-- defines this Task's intent" and flips a pinned Review/QA row to STALE
+-- the moment it moves, so this staleness cascade needs no code change.
+-- Existing rows default to '' (empty), which is exactly what makes
+-- render_agent_prompt() take the legacy structured-brief rendering path
+-- for every Task that already existed before this migration -- old
+-- structured tasks keep behaving exactly as before, unchanged.
+ALTER TABLE tasks ADD COLUMN implementation_prompt TEXT NOT NULL DEFAULT '';
+"""),
 ]
 
 

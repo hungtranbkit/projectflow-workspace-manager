@@ -229,10 +229,35 @@ def create_app(settings=None):
     def requires_qa(risk_profile): return "QA" in RISK_GATES.get(risk_profile,RISK_GATES["NORMAL"])
     def latest_session_for_workspace(wid):
         return db.one("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 1",(wid,))
-    def render_agent_prompt(t):
-        """Deterministic template fill from the structured brief -- never
-        an actual model call. The user reviews/edits the result before any
-        agent is launched (section 3: never auto-start an agent)."""
+    def render_agent_prompt(t,repo_row=None):
+        """Deterministic template fill -- never an actual model call, and
+        the user's own Implementation Prompt text is NEVER rewritten, only
+        wrapped with real, recorded context (trusted Workspace Manager
+        context -> the user's prompt verbatim -> this repo's own AGENTS.md
+        rules, if a repo is already known -> completion requirements). The
+        user still reviews/edits the result before any agent is launched
+        (section 3: never auto-start an agent).
+
+        Prompt-first path (implementation_prompt set) is the primary UX.
+        Tasks created before it existed have no implementation_prompt and
+        fall through to the exact old structured GOAL/CONTEXT/.../RISKS
+        rendering, unchanged -- 'structured old tasks still load'."""
+        if (t.get("implementation_prompt") or "").strip():
+            parts=[f"# Task: {t['title']}","","## CONTEXT (Workspace Manager)"]
+            if repo_row: parts.append(f"- Repository: {repo_row['repo_name']} ({repo_row['repo_path']})")
+            parts.append(f"- Workflow: {t.get('risk_profile') or 'NORMAL'}")
+            parts += ["", "## YOUR TASK", t["implementation_prompt"].strip(), ""]
+            rules=None
+            if repo_row:
+                try:
+                    p=Path(repo_row["repo_path"])/"AGENTS.md"
+                    if p.is_file(): rules=p.read_text(errors="replace")[:6000].strip()
+                except Exception: rules=None
+            if rules: parts+=["## REPOSITORY RULES (from AGENTS.md)",rules,""]
+            parts+=["## COMPLETION REQUIREMENTS",
+                    "When your source change is complete, report back using the format in templates/agent-completion-report.md "
+                    "(WORK_STATUS / WHAT_CHANGED / FILES_CHANGED / TESTS_RUN / HOW_TO_VERIFY / EXPECTED_RESULT / RISKS)."]
+            return "\n".join(parts)
         parts=[f"# Task: {t['title']}",""]
         if t["brief_goal"]: parts+=["## GOAL",t["brief_goal"],""]
         if t["brief_context"]: parts+=["## CONTEXT",t["brief_context"],""]
@@ -243,13 +268,26 @@ def create_app(settings=None):
         if t["brief_risks"]: parts+=["## RISKS",t["brief_risks"],""]
         parts.append("When your source change is complete, report back using the format in templates/agent-completion-report.md.")
         return "\n".join(parts)
+    def regenerate_agent_prompt(tid,repo_row=None):
+        """Recompute the derived, composed agent_prompt from the Task's
+        current implementation_prompt (or legacy brief) + repo context,
+        and persist it as a new `prompts` row stamped with the exact
+        brief_version it was generated from -- same discipline
+        generate_prompt already established, just callable from anywhere
+        a Task's prompt-relevant state just changed (create, prompt edit)."""
+        t=task_row(tid); prompt=render_agent_prompt(t,repo_row)
+        db.execute("INSERT INTO prompts(task_id,prompt_type,brief_version,content) VALUES(?,?,?,?)",(tid,"BUILDER",t["brief_version"],prompt))
+        db.execute("UPDATE tasks SET agent_prompt=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(prompt,tid))
+        db.event("task",tid,"PROMPT_GENERATED",f"brief_version={t['brief_version']}")
+        return prompt
     def render_review_prompt(t,w,report):
-        """Deterministic template (section 6): brief, acceptance criteria,
+        """Deterministic template (section 6): the Task's own prompt/brief,
         source branch/commit, and the Builder's own completion report --
         never a diff computed by an LLM, only real recorded facts."""
         head=git.head(w["worktree_path"])
         parts=[f"# Review: {t['title']}",f"Branch: {w['branch']} @ {head[:12]}",""]
-        if t["brief_acceptance_criteria"]: parts+=["## ACCEPTANCE_CRITERIA",t["brief_acceptance_criteria"],""]
+        if (t.get("implementation_prompt") or "").strip(): parts+=["## TASK PROMPT",t["implementation_prompt"].strip(),""]
+        elif t["brief_acceptance_criteria"]: parts+=["## ACCEPTANCE_CRITERIA",t["brief_acceptance_criteria"],""]
         if report:
             parts+=["## Builder report","WHAT_CHANGED: "+ (report["what_changed"] or "—"),"FILES_CHANGED: "+(report["files_changed"] or "—"),
                      "TESTS_RUN: "+(report["tests_run"] or report["automated_tests"] or "—"),"RISKS: "+(report["risks"] or "—"),""]
@@ -805,16 +843,38 @@ def create_app(settings=None):
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/generate-prompt")
     def generate_prompt(tid:int):
-        """Fill AGENT PROMPT from the structured brief (deterministic
-        template, never a model call) -- the user still reviews/edits it
-        before any agent is launched (section 3). Persisted as a `prompts`
-        row stamped with the exact brief_version it was generated from
-        (section 9) -- never just overwritten text with no version
-        binding, so a stale prompt (generated before a later Brief edit)
-        is a fact you can see, not something silently reused."""
-        t=task_row(tid); prompt=render_agent_prompt(t)
-        db.execute("INSERT INTO prompts(task_id,prompt_type,brief_version,content) VALUES(?,?,?,?)",(tid,"BUILDER",t["brief_version"],prompt))
-        db.execute("UPDATE tasks SET agent_prompt=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(prompt,tid)); db.event("task",tid,"PROMPT_GENERATED",f"brief_version={t['brief_version']}")
+        """Fill AGENT PROMPT from the Task's current prompt/brief
+        (deterministic template, never a model call) -- the user still
+        reviews/edits it before any agent is launched (section 3). Kept
+        for the legacy structured-brief flow's own explicit button; the
+        new prompt-first flow calls regenerate_agent_prompt() itself on
+        create/edit instead of requiring this extra click."""
+        ws=task_workspaces(tid)
+        repo_row=repo(ws[0]["repository_id"]) if ws else None
+        regenerate_agent_prompt(tid,repo_row)
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/prompt")
+    def save_prompt(tid:int,implementation_prompt:str=Form("")):
+        """Edit the Implementation Prompt (section: 'do not rewrite the
+        user's prompt silently' -- only the user changes this text, ever).
+        Bumps brief_version on an actual content change, the exact same
+        mechanism save_brief already uses for the legacy structured
+        fields, so TaskDecisionService.builder_view() flips any Review/QA
+        pinned to the old version to STALE automatically -- no separate
+        prompt_version bookkeeping needed. Regenerates the derived
+        agent_prompt so it always reflects the latest saved intent."""
+        t=task_row(tid)
+        new_prompt=implementation_prompt.strip()
+        changed=(t.get("implementation_prompt") or "")!=new_prompt
+        sets=["implementation_prompt=?","updated_at=CURRENT_TIMESTAMP"]
+        params=[new_prompt]
+        if changed: sets.insert(-1,"brief_version=brief_version+1")
+        db.execute(f"UPDATE tasks SET {','.join(sets)} WHERE id=?",(*params,tid))
+        db.event("task",tid,"PROMPT_SAVED",f"brief_version+1={changed}")
+        if new_prompt:
+            ws=task_workspaces(tid)
+            repo_row=repo(ws[0]["repository_id"]) if ws else None
+            regenerate_agent_prompt(tid,repo_row)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/agent-prompt")
     def save_agent_prompt(tid:int,agent_prompt:str=Form("")):
@@ -850,6 +910,62 @@ def create_app(settings=None):
             profile=profiles[i] if i<len(profiles) else ""
             result=add_task_workspace(tid,int(rid_raw),agent,role,base,profile)
             if not result["ok"]: db.event("task",tid,"WORKSPACE_CREATE_FAILED",f"{agent} · repo #{rid_raw}: {result['error']}")
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/create")
+    async def create_task_unified(request:Request):
+        """The primary, simplified Task Create flow: ONE Implementation
+        Prompt instead of a structured Brief form (Task title / Prompt /
+        Repository / Agent / Sandbox, everything else tucked under
+        Advanced). Repository+Agent are optional: filled in, the Task goes
+        straight to ACTIVE with its first Builder Workspace ("Create &
+        Start"); left blank, it lands in BACKLOG with just the prompt
+        saved as intent -- the same BACKLOG contract as /api/tasks (no
+        branch/worktree/sandbox allocated at all). Advanced's "additional
+        repositories" reuses the exact ws_repository_id/ws_agent/ws_role/
+        ws_base_branch/ws_sandbox_profile array fields /new-with-workspace
+        already established, so a cross-repo Task can still be defined in
+        one submit. A failed workspace never rolls back the Task or any
+        already-created workspace, same as /new-with-workspace."""
+        form=await request.form()
+        title=str(form.get("title","")).strip()
+        if not title: raise GitSafetyError("Task title is required")
+        prompt=str(form.get("implementation_prompt","")).strip()
+        risk_profile=str(form.get("risk_profile","NORMAL")).strip().upper()
+        if risk_profile not in RISK_PROFILES: risk_profile="NORMAL"
+
+        rows=[]
+        primary_repo=str(form.get("repository_id","")).strip()
+        primary_agent=str(form.get("agent","")).strip()
+        if primary_repo and primary_agent:
+            rows.append((primary_repo,primary_agent,str(form.get("ws_role","")).strip(),
+                         str(form.get("ws_base_branch","main")).strip() or "main",
+                         str(form.get("sandbox_profile","")).strip()))
+        extra_repo=form.getlist("ws_repository_id"); extra_agent=form.getlist("ws_agent")
+        extra_role=form.getlist("ws_role"); extra_base=form.getlist("ws_base_branch"); extra_profile=form.getlist("ws_sandbox_profile")
+        for i,rid_raw in enumerate(extra_repo):
+            if not str(rid_raw).strip(): continue
+            a=extra_agent[i] if i<len(extra_agent) else ""
+            if not a: continue
+            rows.append((rid_raw,a,extra_role[i] if i<len(extra_role) else "",
+                         (extra_base[i] if i<len(extra_base) else "main") or "main",
+                         extra_profile[i] if i<len(extra_profile) else ""))
+
+        slug=slugify(title); status="ACTIVE" if rows else "BACKLOG"
+        tid=db.execute("INSERT INTO tasks(slug,title,status,risk_profile,implementation_prompt) VALUES(?,?,?,?,?)",
+                        (slug,title,status,risk_profile,prompt))
+        db.event("task",tid,"TASK_CREATED",slug)
+
+        primary_repo_row=None
+        for rid_raw,agent,role,base,profile in rows:
+            try: rid=int(rid_raw)
+            except ValueError: db.event("task",tid,"WORKSPACE_CREATE_FAILED",f"{agent} · invalid repository id {rid_raw!r}"); continue
+            result=add_task_workspace(tid,rid,agent,role,base,profile)
+            if not result["ok"]: db.event("task",tid,"WORKSPACE_CREATE_FAILED",f"{agent} · repo #{rid_raw}: {result['error']}")
+            elif primary_repo_row is None:
+                try: primary_repo_row=repo(rid)
+                except HTTPException: pass
+
+        if prompt: regenerate_agent_prompt(tid,primary_repo_row)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.get("/api/tasks")
     def api_tasks(): return db.all("SELECT * FROM tasks ORDER BY updated_at DESC")
@@ -894,7 +1010,7 @@ def create_app(settings=None):
         # Task's risk policy actually requires, ✓/○ from the same
         # decision the rest of the page reads -- explains exactly why
         # not ready, never a second ad hoc readiness calculation.
-        gates=[{"label":"Task Brief complete (GOAL + ACCEPTANCE_CRITERIA)","ok":decision.brief_complete(t)},
+        gates=[{"label":"Task Prompt written","ok":decision.brief_complete(t)},
                {"label":"At least one Builder Workspace","ok":bool(workspaces)},
                {"label":"All Builder Workspaces submitted for review","ok":bool(workspaces) and all(b["ready"] for b in workspaces)},
                {"label":"All reviews PASS (exact commit, current Brief)","ok":bool(workspaces) and all(b["review_status"]=="PASS" for b in workspaces)}]

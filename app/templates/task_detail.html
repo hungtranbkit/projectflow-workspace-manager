@@ -1,6 +1,14 @@
-{% extends 'base.html' %}{% block title %}Task · {{t.title}}{% endblock %}{% block header_action %}<span class="badge {{status|lower}}">{{status.replace('_',' ')}}</span> <span class="badge">stage: {{stage}}</span> <span class="badge">{{risk_profile}} risk</span> <a href="/help#test-progress">? Task đã xong tới đâu?</a>{% endblock %}{% block content %}
+{% extends 'base.html' %}{% block title %}Task · {{t.title}}{% endblock %}{% block header_action %}<span class="badge {{status|lower}}">{{status.replace('_',' ')}}</span> <span class="badge">stage: {{stage}}</span> <span class="badge">Workflow: {{risk_profile}}</span> <a href="/help#test-progress">? Task đã xong tới đâu?</a>{% endblock %}{% block content %}
 
 {% if status == 'BACKLOG' %}
+{% if t.implementation_prompt %}
+<section class="panel" id="prompt"><h3>Task Prompt <small>v{{t.brief_version}}</small></h3>
+<pre class="prompt-box">{{t.implementation_prompt}}</pre>
+<details><summary>+ Edit</summary>
+<form method="post" action="/api/tasks/{{t.id}}/prompt"><textarea name="implementation_prompt" rows="6">{{t.implementation_prompt}}</textarea><button>Save Prompt</button></form>
+</details>
+</section>
+{% else %}
 <section class="facts">
 <div class="wide"><small>Description</small><code>{{t.description or '—'}}</code></div>
 <div><small>Priority</small><code>{{t.priority}}</code></div>
@@ -8,6 +16,11 @@
 <div><small>Repository scope</small><code>{{t.repo_scope_id or '—'}}</code></div>
 <div class="wide"><small>Notes</small><code>{{t.notes or '—'}}</code></div>
 </section>
+<section class="panel" id="prompt"><h3>Task Prompt</h3>
+<p class="empty">Chưa có Implementation Prompt.</p>
+<form method="post" action="/api/tasks/{{t.id}}/prompt"><textarea name="implementation_prompt" rows="6" placeholder="Mô tả task bằng ngôn ngữ tự nhiên..."></textarea><button>Save Prompt</button></form>
+</section>
+{% endif %}
 <div class="readybox"><b>BACKLOG</b><p>Chưa có branch/worktree/sandbox nào được tạo. Task chỉ tồn tại như một ý định cho tới khi được chọn để làm.</p><form method="post" action="/api/tasks/{{t.id}}/select"><button class="success">Select for Development</button></form></div>
 {% else %}
 
@@ -26,8 +39,28 @@
 {% if status == 'DONE' %}<form method="post" action="/api/tasks/{{t.id}}/close" onsubmit="return confirm('Đóng task này? Sandbox sẽ vào lịch cleanup.')"><button>Close Task</button></form>{% endif %}
 </div>
 
-{% if not workspaces %}
-<h3 class="subgroup">Implementation Brief</h3>
+{% set has_legacy_brief = t.brief_goal or t.brief_context or t.brief_requirements or t.brief_acceptance_criteria or t.brief_out_of_scope or t.brief_test_plan or t.brief_risks %}
+{% if t.implementation_prompt or not has_legacy_brief %}
+<!-- Prompt-first UX (primary path): shown for every Task that either
+     already has an Implementation Prompt, or has no legacy structured
+     brief at all (a brand new Task) -- always visible/editable, not
+     gated on workspace count, since editing after work has started is
+     an explicit, supported flow (the resulting brief_version bump makes
+     any PASS'd Review/QA stale automatically, never silently kept). -->
+<h3 class="subgroup">Task Prompt</h3>
+<section class="panel" id="prompt">
+{% if t.implementation_prompt %}<pre class="prompt-box">{{t.implementation_prompt}}</pre>{% else %}<p class="empty">Chưa có Implementation Prompt.</p>{% endif %}
+<details {{'' if t.implementation_prompt else 'open'}}><summary>+ Edit Task Prompt</summary>
+<form method="post" action="/api/tasks/{{t.id}}/prompt"><textarea name="implementation_prompt" rows="6" placeholder="Mô tả task bằng ngôn ngữ tự nhiên...">{{t.implementation_prompt}}</textarea><button>Save Prompt</button></form>
+</details>
+{% if t.agent_prompt %}<details><summary>+ Generated Agent Prompt (Workspace Manager tự thêm context/rule)</summary><pre class="prompt-box">{{t.agent_prompt}}</pre></details>{% endif %}
+<div class="info">Prompt version: v{{t.brief_version}} — sửa prompt sau khi Review đã PASS sẽ làm Review đó thành STALE.</div>
+</section>
+{% elif not workspaces %}
+<!-- Legacy structured brief, same 'only before any workspace exists'
+     gate this form always had -- unchanged for Tasks created before the
+     prompt-first UX existed. -->
+<h3 class="subgroup">Implementation Brief <small>(legacy)</small></h3>
 <section class="panel">
 <form method="post" action="/api/tasks/{{t.id}}/brief">
 <label>GOAL<textarea name="goal" rows="2">{{t.brief_goal}}</textarea></label>
@@ -37,7 +70,7 @@
 <label>OUT_OF_SCOPE<textarea name="out_of_scope" rows="2">{{t.brief_out_of_scope}}</textarea></label>
 <label>TEST_PLAN<textarea name="test_plan" rows="2">{{t.brief_test_plan}}</textarea></label>
 <label>RISKS<textarea name="risks" rows="2">{{t.brief_risks}}</textarea></label>
-<label>Risk profile<select name="risk_profile"><option {{'selected' if risk_profile=='LOW' else ''}}>LOW</option><option {{'selected' if risk_profile=='NORMAL' else ''}}>NORMAL</option><option {{'selected' if risk_profile=='HIGH' else ''}}>HIGH</option></select> <a href="/help#risk-profile">? LOW/NORMAL/HIGH khác nhau thế nào?</a></label>
+<label>Workflow<select name="risk_profile"><option {{'selected' if risk_profile=='LOW' else ''}}>LOW</option><option {{'selected' if risk_profile=='NORMAL' else ''}}>NORMAL</option><option {{'selected' if risk_profile=='HIGH' else ''}}>HIGH</option></select> <a href="/help#risk-profile">? Low/Normal/High khác nhau thế nào?</a></label>
 <button>Save Brief</button>
 </form>
 <h4>AGENT PROMPT</h4>
@@ -97,7 +130,7 @@
 <!-- Review & QA -->
 <h3 class="subgroup">Review & QA</h3>
 <section class="panel">
-<p><b>Risk profile:</b> {{risk_profile}} — {% if risk_profile=='LOW' %}Review only (Integration/QA skipped).{% elif risk_profile=='NORMAL' %}Review + Integration required, QA skipped.{% else %}Review + QA + Integration all required.{% endif %} <a href="/help#risk-profile">? chi tiết</a></p>
+<p><b>Workflow:</b> {{risk_profile}} — {% if risk_profile=='LOW' %}code + review (Integration/QA skipped).{% elif risk_profile=='NORMAL' %}code + review + integration, QA skipped.{% else %}code + review + QA + integration.{% endif %} <a href="/help#risk-profile">? chi tiết</a></p>
 {% if risk_profile != 'HIGH' %}<p class="empty">QA: NOT_REQUIRED for this risk profile.</p>
 {% elif not decision.builders or decision.builders|selectattr('review_status','ne','PASS')|list %}
 <p class="empty">QA available once every Builder review is PASS.</p>
