@@ -8,6 +8,7 @@
 </section>
 <div class="actions">
 <button class="ghost" id="mode-toggle" type="button">{{ 'Switch to VIEW_ONLY' if s.mode=='INTERACTIVE' else 'Switch to INTERACTIVE' }}</button>
+<button class="ghost" id="fullscreen-toggle" type="button">Fullscreen</button>
 <form method="post" action="/api/sessions/{{s.id}}/stop" onsubmit="return confirm('Dừng session này?')"><button class="danger">Stop</button></form>
 </div>
 {% if s.status in ['EXITED','FAILED'] %}<div class="alert"><b>Session {{s.status}}</b><p>exit code: {{s.exit_code if s.exit_code is not none else '—'}}</p></div>{% endif %}
@@ -37,6 +38,13 @@
   }
   window.addEventListener('resize', sendResize);
   ws.onopen = sendResize;
+  var fsBtn = document.getElementById('fullscreen-toggle');
+  fsBtn.onclick = function(){
+    var box = document.getElementById('terminal');
+    if (document.fullscreenElement) { document.exitFullscreen(); }
+    else if (box.requestFullscreen) { box.requestFullscreen(); }
+  };
+  document.addEventListener('fullscreenchange', function(){ setTimeout(function(){ term.fit && term.fit(); sendResize(); }, 50); });
   var toggleBtn = document.getElementById('mode-toggle');
   toggleBtn.onclick = function(){
     var nextMode = interactive ? 'VIEW_ONLY' : 'INTERACTIVE';

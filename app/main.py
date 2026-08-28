@@ -321,12 +321,24 @@ def create_app(settings=None):
         computed (never stored/cached), so a role/instructions/sandbox
         edit is reflected immediately with no separate staleness to
         track. Only Review/QA evidence is version-pinned; this display
-        text is not."""
+        text is not.
+
+        Return to Builder (spec section 11): when the reviewer most
+        recently returned FIX_REQUIRED for this exact workspace, its
+        findings are appended as their own section so the next Builder
+        session's prompt is the original task intent + what the
+        reviewer asked to change -- never a bare 'resume' with no
+        context. A PASS/STALE/no-review workspace gets no such section."""
         t=t or task_row(w["task_id"])
         if repo_row is None:
             try: repo_row=repo(w["repository_id"])
             except HTTPException: repo_row=None
-        return render_agent_prompt(t,repo_row,workspace=w,sandbox_line=sandbox_summary_line(w))
+        prompt=render_agent_prompt(t,repo_row,workspace=w,sandbox_line=sandbox_summary_line(w))
+        review=decision.latest_review(w["id"])
+        if review and review["status"]=="FIX_REQUIRED":
+            findings=(review["findings"] or "").strip() or "(no written findings)"
+            prompt+="\n\n## REVIEW FINDINGS (fix required -- address these, then Submit for Review again)\n"+findings+"\n"
+        return prompt
     def render_review_prompt(t,w,report):
         """Deterministic template (section 6): the Task's own prompt/brief,
         source branch/commit, and the Builder's own completion report --
@@ -640,6 +652,7 @@ def create_app(settings=None):
                      "WHERE s.status IN ('STARTING','RUNNING','WAITING_FOR_INPUT') ORDER BY s.last_activity_at DESC")
         for row in rows:
             sb=sandbox_for_workspace(row["workspace_id"]); row["sandbox_status"]=sb["status"] if sb else None; row["sandbox_health"]=sb["health_status"] if sb else None
+            row["activity_hint"]=(row["transcript_tail"].strip().splitlines()[-1][:160] if row.get("transcript_tail") else None)
         return render(request,"agents_live.html",sessions=rows)
     @app.get("/workspaces/{wid}/sessions/{sid}",response_class=HTMLResponse)
     def session_detail(request:Request,wid:int,sid:int):
@@ -1114,11 +1127,21 @@ def create_app(settings=None):
         gates.append({"label":"No blocking findings","ok":not d["blocking_reasons"]})
         gates.append({"label":"All required repos merged to main","ok":bool(d["merge_records"]) and all(m["merge_status"]=="MERGED" for m in d["merge_records"] if m["required"])})
 
+        # Default reviewer differs from the builder's own agent when
+        # another trusted agent is configured (section 10) -- computed
+        # once per workspace, purely a UI default, never enforced.
+        for w in workspaces:
+            other=[a for a in settings.agents if a!=w["agent"]]
+            w["default_reviewer"]=other[0] if other else w["agent"]
+            w["last_activity_hint"]=(w["session"]["transcript_tail"].strip().splitlines()[-1][:200] if w["session"] and w["session"].get("transcript_tail") else None)
+
         return render(request,"task_detail.html",t=t,decision=d,workspaces=workspaces,sandboxes=sbxs,task_integration=ti,ti_repos=ti_repos,
                       integration_sandboxes=integration_sandboxes,
                       status=d["status"],stage=d["stage"],risk_profile=d["risk_profile"],next_action=d["next_action"],
                       blocking_reasons=d["blocking_reasons"],test_readiness=d["test_readiness"],ready_for_main=d["ready_for_main"],
-                      merge_records=d["merge_records"],qa=d["qa"],gates=gates,
+                      merge_records=d["merge_records"],qa=d["qa"],gates=gates,current_step=d["current_step"],
+                      prompt_source=d["prompt_source"],effective_task_prompt=d["effective_task_prompt"],
+                      qa_required=decision.requires_qa(d["risk_profile"]),
                       task_cleanup_countdown=format_countdown(earliest_cleanup),
                       blocking_workspace=blocking_workspace,not_ready_workspaces=not_ready,
                       repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=settings.agents)
@@ -1175,6 +1198,39 @@ def create_app(settings=None):
     def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):
         result=add_task_workspace(tid,repository_id,agent,role,base_branch,sandbox_profile)
         if not result["ok"]: raise GitSafetyError(result["error"])
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/setup-and-start")
+    def setup_and_start(tid:int,repository_id:str=Form(""),agent:str=Form(""),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):
+        """The Wizard's SETUP step single primary action ('Start Claude' /
+        'Start Codex', section 4): Select for Development if still in
+        BACKLOG, create the Builder Workspace if one doesn't already
+        exist for this repo+agent pairing, then immediately start its
+        AgentSession -- one click covers workspace allocation through a
+        live running agent. The user never has to separately visit Agent
+        Workspaces. With no repository/agent given, starts every
+        NOT_STARTED existing Builder Workspace instead (covers 'workspace
+        already exists, just press Start' and the multi-Builder case)."""
+        t=task_row(tid)
+        if t["status"]=="BACKLOG":
+            db.execute("UPDATE tasks SET status='ACTIVE',updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,)); db.event("task",tid,"TASK_SELECTED")
+        w=None
+        if repository_id.strip() and agent.strip():
+            rid=int(repository_id); agent_s=slugify(agent)
+            existing=[x for x in task_workspaces(tid) if x["repository_id"]==rid and x["agent"]==agent_s]
+            if existing:
+                w=existing[0]
+            else:
+                result=add_task_workspace(tid,rid,agent,role,base_branch or "main",sandbox_profile)
+                if not result["ok"]: raise GitSafetyError(result["error"])
+                w=[x for x in task_workspaces(tid) if x["repository_id"]==rid and x["agent"]==agent_s][-1]
+        if w is not None:
+            try: _start_builder_session(w)
+            except SessionError as exc: raise GitSafetyError(str(exc)) from exc
+        else:
+            for b in decision.evaluate(tid)["builders"]:
+                if b["agent_status"]=="NOT_STARTED":
+                    try: _start_builder_session(agent_row(b["id"]))
+                    except SessionError as exc: db.event("agent",b["id"],"SESSION_START_FAILED",str(exc))
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/integrations")
     def create_task_integration(tid:int):

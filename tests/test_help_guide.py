@@ -94,7 +94,7 @@ def test_contextual_help_links_from_primary_screens(client, git_repo):
     task_page = client.get(f"/tasks/{tid}").text
     assert "/help#task-detail-sandbox" in task_page
     assert "/help#sandbox-modes" in task_page  # sandbox profile selector
-    assert "/help#test-progress" in task_page
+    assert "/help#wizard" in task_page  # wizard stepper's own contextual help link
 
 
 def test_help_answers_the_manual_verification_questions(client):

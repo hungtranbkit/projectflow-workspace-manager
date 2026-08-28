@@ -1,15 +1,16 @@
 {% extends 'base.html' %}{% block title %}Live Agents{% endblock %}{% block header_action %}<a href="/help#live-agents">? Web terminal dùng thế nào?</a>{% endblock %}{% block content %}
 <div class="warning"><b>Chỉ dùng qua kết nối đã xác thực</b> (Tailscale / Cloudflare Access / SSH tunnel...). Không expose cổng này ra Internet công khai — xem <a href="/help#remote-access">Remote Access Security</a>.</div>
 <section class="panel"><h3>Active Agent Sessions</h3>
-{% if sessions %}<div class="table-scroll"><table><thead><tr><th>Task</th><th>Agent</th><th>Workspace</th><th>State</th><th>Sandbox</th><th>Last activity</th><th>Actions</th></tr></thead><tbody>
+{% if sessions %}<div class="table-scroll"><table><thead><tr><th>Task</th><th>Agent</th><th>Workspace</th><th>State</th><th>Current activity</th><th>Sandbox</th><th>Last activity</th><th>Actions</th></tr></thead><tbody>
 {% for s in sessions %}<tr>
 <td>{% if s.task_title %}<a href="/tasks/{{s.tid}}">{{s.task_title}}</a>{% else %}<small>no task</small>{% endif %}</td>
 <td class="cap">{{s.workspace_agent}}</td>
 <td>{{s.role or s.repo_name}} <small>{{s.repo_name}}</small></td>
 <td><span class="badge {{s.status|lower}}">{{s.status.replace('_',' ')}}</span></td>
+<td><code>{{s.activity_hint or '—'}}</code></td>
 <td>{% if s.sandbox_status %}<span class="badge {{s.sandbox_status|lower}}">{{s.sandbox_status}}{% if s.sandbox_health %} · {{s.sandbox_health}}{% endif %}</span>{% else %}—{% endif %}</td>
 <td><small>{{s.last_activity_at or s.started_at}}</small></td>
-<td><a class="ghost" href="/workspaces/{{s.workspace_id}}/sessions/{{s.id}}">View</a></td>
+<td><a class="ghost button" href="/workspaces/{{s.workspace_id}}/sessions/{{s.id}}">View Live</a></td>
 </tr>{% endfor %}
 </tbody></table></div>
 {% else %}<div class="empty-state"><h4>Không có agent nào đang chạy trong Web Terminal</h4><p>Mở một Agent Workspace và bấm Open in Web để bắt đầu một session.</p><a href="/tasks">Đi tới Tasks</a></div>{% endif %}
