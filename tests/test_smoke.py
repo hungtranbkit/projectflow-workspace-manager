@@ -24,3 +24,10 @@ def test_full_real_git_golden_flow_and_staleness(client,git_repo):
     client.get(f"/integrations/{iid}"); assert client.get("/api/integrations").json()[0]["ready_for_main"]==0
     client.post(f"/api/integrations/{iid}/merge-latest"); client.post(f"/api/integrations/{iid}/test"); wait_tests(client,iid)
     assert client.post(f"/api/integrations/{iid}/ready-for-main",follow_redirects=False).status_code==303
+    integration=client.get("/api/integrations").json()[0]
+    assert integration["ready_for_main"]==1 and integration["verified_commit"]==git(integration["worktree_path"],"rev-parse","HEAD")
+    assert client.post(f"/api/integrations/{iid}/close",follow_redirects=False).status_code==303
+    for workspace in (codex,claude):
+        assert client.post(f"/api/workspaces/{workspace['id']}/close",follow_redirects=False).status_code==303
+        assert not Path(workspace["worktree_path"]).exists()
+    assert not Path(integration["worktree_path"]).exists()
