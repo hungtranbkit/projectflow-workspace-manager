@@ -1,14 +1,14 @@
-{% extends 'base.html' %}{% block title %}Task · {{t.title}}{% endblock %}{% block header_action %}<span class="badge {{status|lower}}">{{status.replace('_',' ')}}</span> <span class="badge">stage: {{stage}}</span> <span class="badge">Workflow: {{risk_profile}}</span> <a href="/help#test-progress">? Task đã xong tới đâu?</a>{% endblock %}{% block content %}
+{% extends 'base.html' %}{% block title %}Task · {{t.title}}{% endblock %}{% block header_action %}<span class="badge {{status|lower}}">{{status.replace('_',' ')}}</span> <span class="badge">Workflow: {{risk_profile}}</span> <a href="/help#wizard">? Hướng dẫn</a>{% endblock %}{% block content %}
 
 {% macro prompt_source_block(t) %}
 {% if t.implementation_prompt %}
-<p><small>Source</small><b>Implementation Prompt</b></p>
+<p><small>Nguồn (Prompt source)</small><b>Detailed Prompt</b></p>
 <pre class="prompt-box">{{t.implementation_prompt}}</pre>
 <details><summary>+ Edit</summary>
 <form method="post" action="/api/tasks/{{t.id}}/prompt"><textarea name="implementation_prompt" rows="6">{{t.implementation_prompt}}</textarea><button>Save Prompt</button></form>
 </details>
 {% else %}
-<p><small>Source</small><b>Task Title</b></p>
+<p><small>Nguồn (Prompt source)</small><b>Task Title</b></p>
 <pre class="prompt-box">"{{t.title}}"</pre>
 <div class="info">Chưa có prompt chi tiết. Agent sẽ dùng tiêu đề Task làm yêu cầu chính.</div>
 <details id="prompt-edit"><summary>+ Add Detailed Prompt</summary>
@@ -17,28 +17,182 @@
 {% endif %}
 {% endmacro %}
 
-{% if status == 'BACKLOG' %}
-<section class="panel" id="prompt"><h3>Task Prompt <small>v{{t.brief_version}}</small></h3>
-{{ prompt_source_block(t) }}
-</section>
-<section class="facts">
-<div class="wide"><small>Description</small><code>{{t.description or '—'}}</code></div>
-<div><small>Priority</small><code>{{t.priority}}</code></div>
-<div><small>Tags</small><code>{{t.tags or '—'}}</code></div>
-<div><small>Repository scope</small><code>{{t.repo_scope_id or '—'}}</code></div>
-<div class="wide"><small>Notes</small><code>{{t.notes or '—'}}</code></div>
-</section>
-<div class="readybox"><b>BACKLOG</b><p>Chưa có branch/worktree/sandbox nào được tạo. Task chỉ tồn tại như một ý định cho tới khi được chọn để làm.</p><form method="post" action="/api/tasks/{{t.id}}/select"><button class="success">Select for Development</button></form></div>
-{% else %}
+<!-- ============================================================
+     WIZARD: one deterministic current_step (TaskDecisionService),
+     rendered as a progress stepper + ONE focused primary screen.
+     Every value below comes from decision.evaluate() -- no
+     template-side lifecycle logic (section 24). "Xem tất cả chi
+     tiết kỹ thuật" at the bottom still has the full technical view
+     for anyone who wants it (section 19), never removed.
+     ============================================================ -->
+{% set wizard_steps = [('TASK','Task'),('SETUP','Cấu hình'),('AGENT_RUNNING','Agent đang chạy'),('REVIEW','Review'),('TEST_QA','Kiểm tra'),('INTEGRATION','Integration'),('READY_FOR_MAIN','Sẵn sàng merge'),('DONE','Hoàn tất')] %}
+{% set step_keys = wizard_steps|map(attribute=0)|list %}
+{% set cur_idx = step_keys.index(current_step) if current_step in step_keys else -1 %}
+<div class="wizard-stepper">
+{% for key,label in wizard_steps %}
+{% set skipped = (key=='TEST_QA' and not qa_required) or (key=='INTEGRATION' and not decision.integration_eligibility.required) %}
+<span class="wz-step {{'current' if key==current_step else ('done' if loop.index0 < cur_idx else '')}} {{'skipped' if skipped else ''}}">{{label}}{% if skipped %}<small>(bỏ qua)</small>{% endif %}</span>
+{% endfor %}
+</div>
+{% if status == 'CANCELLED' %}<div class="alert"><b>Task đã huỷ (CANCELLED).</b></div>{% endif %}
+{% if blocking_reasons %}<div class="alert"><b>Đang bị chặn:</b><ul>{% for b in blocking_reasons %}<li>{{b}}</li>{% endfor %}</ul></div>{% endif %}
 
-<!-- Overview -->
+<h2>{{t.title}}</h2>
+
+{% if current_step == 'TASK' %}
+<!-- STEP 1: TASK -->
+<section class="panel wizard-panel">
+{{ prompt_source_block(t) }}
+<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/select"><button class="success big">Continue</button></form></div>
+</section>
+
+{% elif current_step == 'SETUP' %}
+<!-- STEP 2: SETUP -->
+<section class="panel wizard-panel">
+{% if not workspaces %}
+<p>Chọn repository và agent để bắt đầu. Builder Workspace <b>chưa phải "agent đang chạy"</b> — chỉ tạo source riêng (branch + worktree + sandbox nếu cần).</p>
+<form method="post" action="/api/tasks/{{t.id}}/setup-and-start">
+<label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
+<label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label>
+<details><summary>Advanced</summary>
+<label>Role<input name="role" placeholder="Backend / Firmware / Frontend"></label>
+<label>Base branch<input name="base_branch" value="main"></label>
+<label>Sandbox profile<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label>
+</details>
+<div class="primary-action"><button class="success big" type="submit">Start Claude / Codex</button></div>
+</form>
+{% else %}
+<p>Builder Workspace đã tạo — bấm Start để agent bắt đầu chạy thật.</p>
+{% for w in workspaces %}
+<div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.role or w.repo_name}}<br><small>Repository</small> <code>{{w.repo_name}}</code> · <small>Branch</small> <code>{{w.branch}}</code> · <small>Base</small> <code>{{w.branch and w.head[:8] if w.head else '—'}}</code></div>
+<span class="badge {{w.status|lower}}">Workspace: {{w.status_label}}</span></div>
+{% if w.ready %}<p class="empty">Đã Submit for Review — không cần Start lại.</p>
+{% else %}<div class="quick-actions"><form method="post" action="/api/tasks/{{t.id}}/setup-and-start"><input type="hidden" name="repository_id" value="{{w.repository_id}}"><input type="hidden" name="agent" value="{{w.agent}}"><button class="success">Start {{w.agent|capitalize}}</button></form></div>{% endif %}
+{% endfor %}
+{% if workspaces|length > 1 %}<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/setup-and-start"><button class="success big" type="submit">Start All Builders</button></form></div>{% endif %}
+<details><summary>+ Add another repository</summary>
+<form method="post" action="/api/tasks/{{t.id}}/workspaces"><label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label><label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><label>Role<input name="role" placeholder="Backend / Firmware / Frontend"></label><label>Base branch<input name="base_branch" value="main"></label><label>Sandbox<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label><button>Add Builder Workspace</button></form>
+</details>
+{% endif %}
+</section>
+
+{% elif current_step == 'AGENT_RUNNING' %}
+<!-- STEP 3: AGENT RUNNING -->
+{% for w in workspaces %}
+<section class="panel wizard-panel">
+<div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.role or w.repo_name}}</div><span class="badge {{w.agent_status|lower}}">Agent: {{w.agent_status.replace('_',' ')}}</span></div>
+<div class="facts">
+<div><small>Task</small><b>{{t.title}}</b></div>
+<div><small>Repository</small><code>{{w.repo_name}}</code></div>
+<div><small>Branch</small><code>{{w.branch}}</code></div>
+<div class="wide"><small>Worktree</small><code>{{w.worktree_path}}</code></div>
+</div>
+{% if w.sandbox %}<p><small>Sandbox</small> <span class="badge {{w.sandbox.row.status|lower}}">{{w.sandbox.row.status.replace('_',' ')}}{% if w.sandbox.row.status=='RUNNING' %} · {{w.sandbox.row.health_status}}{% endif %}</span> {% if w.sandbox.backend_url %}<a class="ghost" href="{{w.sandbox.backend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}</p>{% endif %}
+{% if w.last_activity_hint %}<p><small>Current activity</small><code>{{w.last_activity_hint}}</code></p>{% endif %}
+{% if w.session %}<p><small>Last activity</small><code>{{w.session.last_activity_at or w.session.started_at}}</code></p>{% endif %}
+{% if w.fix_required %}
+<div class="warning"><b>Cần sửa theo Review.</b><p>{{(w.review.findings if w.review else '') or 'Reviewer requested changes.'}}</p></div>
+<div class="primary-action">
+{% if w.agent in ['codex','claude'] %}<form method="post" action="/api/tasks/{{t.id}}/setup-and-start" class="inline"><input type="hidden" name="repository_id" value="{{w.repository_id}}"><input type="hidden" name="agent" value="{{w.agent}}"><button class="success">Resume Agent</button></form>{% endif %}
+<a class="ghost" href="/workspaces/{{w.id}}">Open Live</a>
+</div>
+{% elif w.agent_status in ['EXITED','FAILED'] and not w.ready %}
+<div class="warning"><b>Agent exited without completion report.</b></div>
+<div class="primary-action">
+{% if w.agent in ['codex','claude'] %}<form method="post" action="/api/tasks/{{t.id}}/setup-and-start" class="inline"><input type="hidden" name="repository_id" value="{{w.repository_id}}"><input type="hidden" name="agent" value="{{w.agent}}"><button class="success">Resume Agent</button></form>{% endif %}
+<a class="ghost" href="/workspaces/{{w.id}}">Open Live</a>
+<form method="post" action="/api/workspaces/{{w.id}}/verification-report" class="inline"><input type="hidden" name="work_status" value="FIX_REQUIRED"><input type="hidden" name="risks" value="Manually marked blocked from the wizard."><button class="danger">Mark Blocked</button></form>
+</div>
+{% else %}
+<div class="primary-action"><a class="button" href="/workspaces/{{w.id}}">View Live Terminal</a></div>
+{% endif %}
+</section>
+{% endfor %}
+
+{% elif current_step == 'REVIEW' %}
+<!-- STEP 4: REVIEW -->
+{% for w in workspaces if not w.fix_required %}
+<section class="panel wizard-panel">
+<div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.role or w.repo_name}}</div><span class="badge {{'ready' if w.review_status=='PASS' else ('failed' if w.review_status in ['FIX_REQUIRED','BLOCKED'] else '')}}">{{w.review_status}}</span></div>
+<div class="facts"><div><small>Commit</small><code>{{(w.head or '—')[:12]}}</code></div><div><small>Files changed</small><code>{{(w.report.files_changed if w.report else '') or '—'}}</code></div><div class="wide"><small>Tests</small><code>{{(w.report.tests_run if w.report else '') or '—'}}</code></div></div>
+{% if w.report %}<p><small>WHAT_CHANGED</small>{{w.report.what_changed or '—'}}</p>{% endif %}
+{% if not w.ready %}<p class="empty">Builder chưa Submit for Review.</p>
+{% elif w.review_status in ['NONE','STALE'] %}
+<form method="post" action="/api/workspaces/{{w.id}}/start-review">
+<label>Reviewer<select name="reviewer_agent">{% for a in agents %}<option {{'selected' if a==w.default_reviewer else ''}}>{{a}}</option>{% endfor %}</select></label>
+<div class="primary-action"><button class="success big" type="submit">Start Reviewer</button></div>
+</form>
+{% elif w.review_status in ['PENDING','RUNNING'] %}
+<p><small>Reviewer</small><span class="cap">{{w.review.reviewer_agent}}</span> — read-only, đúng commit {{(w.review.reviewed_commit or '')[:8]}}.</p>
+<div class="quick-actions"><a class="ghost" href="#review-detail-{{w.id}}">View Live (prompt + findings)</a></div>
+<div class="quick-actions"><form method="post" action="/api/workspaces/{{w.id}}/submit-review"><input type="hidden" name="result" value="PASS"><button class="success">PASS</button></form><form method="post" action="/api/workspaces/{{w.id}}/submit-review"><input type="hidden" name="result" value="FIX_REQUIRED"><button class="ghost">FIX_REQUIRED</button></form><form method="post" action="/api/workspaces/{{w.id}}/submit-review"><input type="hidden" name="result" value="BLOCKED"><button class="ghost">BLOCKED</button></form></div>
+{% endif %}
+</section>
+{% endfor %}
+
+{% elif current_step == 'TEST_QA' %}
+<!-- STEP 5: TEST / QA -->
+<section class="panel wizard-panel">
+{% for w in workspaces %}
+{% if w.sandbox %}<p><b>{{w.agent}} · {{w.role or w.repo_name}}</b> — Sandbox <span class="badge {{w.sandbox.row.status|lower}}">{{w.sandbox.row.status.replace('_',' ')}}{% if w.sandbox.row.status=='RUNNING' %} · {{w.sandbox.row.health_status}}{% endif %}</span>{% if w.sandbox.backend_url %} <a class="ghost" href="{{w.sandbox.backend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}</p>{% endif %}
+{% if w.report and w.report.how_to_verify %}<p><small>Manual verification instructions</small></p><ol class="steps">{% for line in w.report.how_to_verify.split('\n') %}{% if line.strip() %}<li><b>{{line.strip()}}</b></li>{% endif %}{% endfor %}</ol>{% endif %}
+{% endfor %}
+{% if not qa %}
+<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/start-qa"><label>Tester<input name="tester_agent" placeholder="qa"></label><button class="success big" type="submit">Bắt đầu Kiểm tra</button></form></div>
+{% elif qa.status in ['PENDING','RUNNING'] %}
+<p><small>Tester</small><span class="cap">{{qa.tester_agent or '—'}}</span></p>
+<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/submit-qa"><input type="hidden" name="result" value="PASS"><button class="success big" type="submit">Record PASS</button></form><form method="post" action="/api/tasks/{{t.id}}/submit-qa"><input type="hidden" name="result" value="FAIL"><button class="danger" type="submit">Record FAIL</button></form></div>
+{% else %}
+<p><small>Kết quả trước</small><span class="badge {{'ready' if qa.status=='PASS' else 'failed'}}">{{qa.status}}</span> — cần chạy lại (Brief đã đổi).</p>
+<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/start-qa"><label>Tester<input name="tester_agent" placeholder="qa"></label><button class="success big" type="submit">Kiểm tra lại</button></form></div>
+{% endif %}
+</section>
+
+{% elif current_step == 'INTEGRATION' %}
+<!-- STEP 6: INTEGRATION -->
+<section class="panel wizard-panel">
+{% if not task_integration %}
+<p>Mọi Builder đã Review PASS — sẵn sàng ghép (Integration).</p>
+<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/integrations"><button class="success big" type="submit">Start Integration</button></form></div>
+{% else %}
+<p><small>Trạng thái</small><span class="badge {{task_integration.status|lower}}">{{task_integration.status.replace('_',' ')}}</span></p>
+{% for r in ti_repos %}<div class="row"><div><strong>{{r.repo_name}}</strong><small>{{r.branch}}</small></div><span class="badge {{r.status|lower}}">{{r.status.replace('_',' ')}}</span></div>{% endfor %}
+{% if task_integration.status=='CONFLICT' %}<div class="alert"><b>Merge conflict.</b> Sửa trực tiếp trong Integrator.</div>{% endif %}
+<div class="primary-action">{% if ti_repos %}<a class="button" href="/integrations/{{ti_repos[0].id}}">Open Integrator (Live)</a>{% endif %}</div>
+{% endif %}
+</section>
+
+{% elif current_step == 'READY_FOR_MAIN' %}
+<!-- STEP 7: READY FOR MAIN -->
+<section class="panel wizard-panel">
+{% for g in gates %}<div class="check">{{'✓' if g.ok else '○'}} {{g.label}}{% if g.note %} <small>({{g.note}})</small>{% endif %}</div>{% endfor %}
+<div class="primary-action"><a class="button big" href="#merges">Prepare PR</a></div>
+<div class="warning"><b>GitHub automation chưa tự động.</b><p>Push branch và tạo Pull Request thủ công trên GitHub, sau đó đánh dấu Merged bên dưới (mục "Xem tất cả chi tiết kỹ thuật" → Merge Tracking).</p></div>
+</section>
+
+{% elif current_step == 'DONE' %}
+<!-- STEP 8: DONE -->
+<section class="panel wizard-panel">
+<div class="readybox"><b>DONE</b><p>Mọi repository bắt buộc đã Merged.</p></div>
+{% for m in merge_records if m.required %}<div class="row"><div><strong>{{m.repo_name}}</strong>{% if m.merged_commit %}<br><code>{{m.merged_commit[:12]}}</code>{% endif %}</div><span class="badge ready">{{m.merge_status.replace('_',' ')}}</span></div>{% endfor %}
+{% if task_cleanup_countdown %}<p><small>Sandbox cleanup</small><code>{{task_cleanup_countdown}}</code></p>{% endif %}
+{% if status=='DONE' and not t.closed_at %}<form method="post" action="/api/tasks/{{t.id}}/close" onsubmit="return confirm('Đóng task này?')"><button>Close Task</button></form>{% endif %}
+</section>
+{% endif %}
+
+<!-- ============================================================
+     ADVANCED: the full technical view (Overview/gates, every
+     Builder Workspace, Review & QA, Integration, Merge Tracking) --
+     always available, never removed, just not the default screen
+     (section 19). -->
+<details id="advanced-details"><summary><b>Xem tất cả chi tiết kỹ thuật (View all details)</b></summary>
+
 <h3 class="subgroup">Overview</h3>
 <div class="warning"><b>READY chỉ có nghĩa:</b> agent coi source đã xong. Không có nghĩa là đã review PASS, đã QA, đã tích hợp, hay <b>READY_FOR_MAIN</b>.</div>
-{% if blocking_reasons %}<div class="alert"><b>Task blocked by:</b><ul>{% for b in blocking_reasons %}<li>{{b}}</li>{% endfor %}</ul></div>{% endif %}
 <section class="panel">
 {% for g in gates %}<div class="check">{{'✓' if g.ok else '○'}} {{g.label}}{% if g.note %} <small>({{g.note}})</small>{% endif %}</div>{% endfor %}
 </section>
-<div class="info"><b>Bước tiếp theo</b><p>{{next_action.reason or next_action.label or '—'}}</p>{% if next_action.label %}{% if next_action.target and next_action.method=='POST' %}<form method="post" action="{{next_action.target}}"><button class="button">{{next_action.label}}</button></form>{% elif next_action.target %}<a class="button" href="{{next_action.target}}">{{next_action.label}}</a>{% endif %}{% endif %}</div>
+<div class="info"><b>Bước tiếp theo (kỹ thuật)</b><p>{{next_action.reason or next_action.label or '—'}}</p>{% if next_action.label %}{% if next_action.target and next_action.method=='POST' %}<form method="post" action="{{next_action.target}}"><button class="button">{{next_action.label}}</button></form>{% elif next_action.target %}<a class="button" href="{{next_action.target}}">{{next_action.label}}</a>{% endif %}{% endif %}</div>
 <section class="facts"><div class="wide"><small>Description</small><code>{{t.description or '—'}}</code></div><div><small>Slug</small><code>{{t.slug}}</code></div><div><small>Brief version</small><code>v{{t.brief_version}}</code></div><div><small>Builders</small><b>{{workspaces|selectattr('ready')|list|length}} / {{workspaces|length}} READY</b></div><div><small>Test Readiness</small><code>{{test_readiness}}</code></div><div><small>READY_FOR_MAIN</small><b>{{'YES' if ready_for_main else 'NO'}}</b></div></section>
 <div class="actions">
 {% if decision.integration_eligibility.required and not decision.integration_eligibility.exists %}{% if decision.integration_eligibility.eligible %}<form method="post" action="/api/tasks/{{t.id}}/integrations"><button class="success">Create Integration</button></form>{% else %}<span class="badge failed">Create Integration disabled — not all Builder reviews PASS yet</span>{% endif %}{% endif %}
@@ -48,21 +202,12 @@
 
 {% set has_legacy_brief = t.brief_goal or t.brief_context or t.brief_requirements or t.brief_acceptance_criteria or t.brief_out_of_scope or t.brief_test_plan or t.brief_risks %}
 {% if t.implementation_prompt or not has_legacy_brief %}
-<!-- Prompt-first UX (primary path): shown for every Task that either
-     already has an Implementation Prompt, or has no legacy structured
-     brief at all (a brand new Task) -- always visible/editable, not
-     gated on workspace count, since editing after work has started is
-     an explicit, supported flow (the resulting brief_version bump makes
-     any PASS'd Review/QA stale automatically, never silently kept). -->
 <h3 class="subgroup">Task Prompt <small>v{{t.brief_version}}</small></h3>
 <section class="panel" id="prompt">
 {{ prompt_source_block(t) }}
 <div class="info">Sửa prompt sau khi Review đã PASS sẽ làm Review đó thành STALE.</div>
 </section>
 {% elif not workspaces %}
-<!-- Legacy structured brief, same 'only before any workspace exists'
-     gate this form always had -- unchanged for Tasks created before the
-     prompt-first UX existed. -->
 <h3 class="subgroup">Implementation Brief <small>(legacy)</small></h3>
 <section class="panel">
 <form method="post" action="/api/tasks/{{t.id}}/brief">
@@ -83,14 +228,10 @@
 </section>
 {% endif %}
 
-<!-- Agents (Builder Workspaces) -->
 <h3 class="subgroup">Agents <a href="/help#task-detail-sandbox">? Xem hướng dẫn</a></h3>
 {% if workspaces %}<form method="post" action="/api/tasks/{{t.id}}/start-all-builders"><button class="ghost" type="submit">Start All Builders</button></form>{% endif %}
 <section class="panel">{% for w in workspaces %}
-<!-- Workspace status (allocated source) and Agent status (is the agent
-     actually running) are two separate signals -- Workspace READY must
-     never be misread as Agent RUNNING. -->
-<div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.role or w.repo_name}} <small>Builder Workspace</small><br><small>Repository</small> <code>{{w.repo_name}}</code> · <small>Branch</small> <code>{{w.branch}}</code> · <small>HEAD</small> <code>{{w.head[:8] if w.head else '—'}}</code> · <small>Git</small> {{'Clean' if w.details and not w.details.modified and not w.details.untracked else 'Modified'}}</div><span class="badge {{w.status|lower}}">Workspace: {{w.status_label}}</span></div>
+<div class="row" id="review-detail-{{w.id}}"><div><strong class="cap">{{w.agent}}</strong> · {{w.role or w.repo_name}} <small>Builder Workspace</small><br><small>Repository</small> <code>{{w.repo_name}}</code> · <small>Branch</small> <code>{{w.branch}}</code> · <small>HEAD</small> <code>{{w.head[:8] if w.head else '—'}}</code> · <small>Git</small> {{'Clean' if w.details and not w.details.modified and not w.details.untracked else 'Modified'}}</div><span class="badge {{w.status|lower}}">Workspace: {{w.status_label}}</span></div>
 <div class="row"><div><small>Agent</small></div><span class="badge {{w.agent_status|lower}}">Agent: {{w.agent_status.replace('_',' ')}}</span></div>
 <div class="quick-actions">
 {% if w.agent in ['codex','claude'] %}<button onclick="launchWorkspace({{w.id}},'agent',this)">Start {{w.agent|capitalize}}</button>{% endif %}
@@ -107,7 +248,7 @@
 <details><summary>+ Generated Builder Prompt</summary><pre class="prompt-box">{{w.live_prompt}}</pre></details>
 <div class="row"><div><small>Review</small><span class="badge {{'ready' if w.review_status=='PASS' else ('failed' if w.review_status in ['FIX_REQUIRED','BLOCKED'] else '')}}">{{w.review_status}}</span>{% if w.review %} <small>{{w.review.reviewer_agent}} @ {{(w.review.reviewed_commit or '')[:8]}}</small>{% endif %}</div>
 {% if not w.ready %}<span class="badge">not submitted for review yet</span>
-{% elif w.review_status in ['NONE','STALE'] %}<form method="post" action="/api/workspaces/{{w.id}}/start-review"><label>Reviewer<select name="reviewer_agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><button class="ghost">{{'Start Review' if w.review_status=='NONE' else 'Re-review (stale)'}}</button></form>
+{% elif w.review_status in ['NONE','STALE'] %}<form method="post" action="/api/workspaces/{{w.id}}/start-review"><label>Reviewer<select name="reviewer_agent">{% for a in agents %}<option {{'selected' if a==w.default_reviewer else ''}}>{{a}}</option>{% endfor %}</select></label><button class="ghost">{{'Start Review' if w.review_status=='NONE' else 'Re-review (stale)'}}</button></form>
 {% elif w.review_status in ['PENDING','RUNNING'] %}<div class="quick-actions"><form method="post" action="/api/workspaces/{{w.id}}/submit-review"><input type="hidden" name="result" value="PASS"><button class="ghost">PASS</button></form><form method="post" action="/api/workspaces/{{w.id}}/submit-review"><input type="hidden" name="result" value="FIX_REQUIRED"><button class="ghost">FIX_REQUIRED</button></form><form method="post" action="/api/workspaces/{{w.id}}/submit-review"><input type="hidden" name="result" value="BLOCKED"><button class="ghost">BLOCKED</button></form></div>
 {% endif %}
 </div>
@@ -139,9 +280,8 @@
 </section>
 {% if not_ready_workspaces %}<p><small>Waiting for:</small> {% for w in not_ready_workspaces %}<span class="cap">{{w.agent}} · {{w.role or w.repo_name}}</span>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
 
-<!-- Review & QA -->
 <h3 class="subgroup">Review & QA</h3>
-<section class="panel">
+<section class="panel" id="qa">
 <p><b>Workflow:</b> {{risk_profile}} — {% if risk_profile=='LOW' %}code + review (Integration/QA skipped).{% elif risk_profile=='NORMAL' %}code + review + integration, QA skipped.{% else %}code + review + QA + integration.{% endif %} <a href="/help#risk-profile">? chi tiết</a></p>
 {% if risk_profile != 'HIGH' %}<p class="empty">QA: NOT_REQUIRED for this risk profile.</p>
 {% elif not decision.builders or decision.builders|selectattr('review_status','ne','PASS')|list %}
@@ -156,9 +296,8 @@
 {% endif %}
 </section>
 
-<!-- Integration -->
 <h3 class="subgroup">Integration</h3>
-{% if task_integration %}<section class="panel"><h3>Integration <span class="badge {{task_integration.status|lower}}">{{task_integration.status.replace('_',' ')}}</span></h3>
+{% if task_integration %}<section class="panel" id="integration"><h3>Integration <span class="badge {{task_integration.status|lower}}">{{task_integration.status.replace('_',' ')}}</span></h3>
 <div class="facts">
 <div><small>Sources</small><b>{{ti_repos|length}} repo{{'s' if ti_repos|length!=1 else ''}}</b></div>
 <div><small>Sandbox</small><b>{{integration_sandboxes[0].row.status.replace('_',' ') if integration_sandboxes else 'NONE'}}</b></div>
@@ -179,11 +318,10 @@
 <p><small>Integration Sources</small></p>
 {% for s in v.sources %}<div class="row"><div><strong>{{s.role}}</strong> · {{s.repo_name}}<small>{{s.branch}}</small></div><code>{{s.commit_sha[:8]}}</code></div>{% endfor %}
 </section>{% endfor %}
-{% else %}<section class="panel"><p class="empty">{% if not decision.integration_eligibility.required %}Integration: NOT_REQUIRED for this risk profile — READY_FOR_MAIN only needs Review PASS.{% else %}No Integration yet — created once every Builder review is PASS.{% endif %}</p></section>{% endif %}
+{% else %}<section class="panel" id="integration"><p class="empty">{% if not decision.integration_eligibility.required %}Integration: NOT_REQUIRED for this risk profile — READY_FOR_MAIN only needs Review PASS.{% else %}No Integration yet — created once every Builder review is PASS.{% endif %}</p></section>{% endif %}
 
-<!-- Activity: cross-repo merge tracking (section 25) -->
 <h3 class="subgroup">Merge Tracking</h3>
-<section class="panel">
+<section class="panel" id="merges">
 {% if merge_records|length > 1 %}<div class="info">Cross-repo rollout may temporarily produce mixed versions.</div>{% endif %}
 {% for m in merge_records %}<div class="row"><div><strong>{{m.repo_name}}</strong>{% if m.pr_ref %}<small> {{m.pr_ref}}</small>{% endif %}{% if m.merged_commit %}<br><code>{{m.merged_commit[:12]}}</code>{% endif %}</div>
 <span class="badge {{'ready' if m.merge_status=='MERGED' else ('failed' if m.merge_status=='FAILED' else '')}}">{{m.merge_status.replace('_',' ')}}</span></div>
@@ -199,5 +337,5 @@
 {% if status == 'DONE' %}<section class="panel"><h3>Sandbox Retention</h3>{% if task_cleanup_countdown %}<p>Cleanup in {{task_cleanup_countdown}}</p><div class="actions"><form method="post" action="/api/tasks/{{t.id}}/extend-retention"><input type="hidden" name="hours" value="24"><button class="secondary">Extend 24h</button></form><form method="post" action="/api/tasks/{{t.id}}/cleanup-now" onsubmit="return confirm('Cleanup ngay lập tức?')"><button class="danger">Cleanup Now</button></form></div>{% else %}<p><code>{{'CLOSED' if t.closed_at else 'DONE'}}</code><br><small>{{'Runtime cleaned. Evidence retained.' if t.closed_at else 'All required repos merged.'}}</small></p>{% endif %}</section>
 {% endif %}
 
-{% endif %}
+</details>
 {% endblock %}

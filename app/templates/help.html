@@ -8,7 +8,8 @@
 </div>
 <div class="guide-layout">
 <nav class="guide-toc"><b>Trong hướng dẫn này</b>
-<a href="#quick-start">Bắt đầu nhanh</a>
+<a href="#wizard">Task Detail hoạt động như một wizard</a>
+<a href="#quick-start">Bắt đầu nhanh (chi tiết kỹ thuật)</a>
 <a href="#tasks">1. Có task mới</a>
 <a href="#task-vs-worktree">Task khác Worktree?</a>
 <a href="#agent-workspaces">2. Agent Workspace là gì?</a>
@@ -46,7 +47,23 @@
 </nav>
 <div class="guide-content">
 
-<section class="guide-section" id="quick-start"><span class="section-kicker">BẮT ĐẦU NHANH</span><h3>Bắt đầu nhanh</h3><p>Toàn bộ vòng đời một task, từ lúc tạo tới lúc sandbox được dọn dẹp. Task chỉ có <b>6 trạng thái</b> (BACKLOG/ACTIVE/BLOCKED/READY_FOR_MAIN/DONE/CANCELLED) — mọi bước bên dưới (Development/Review/QA/Integration/Merging) là <b>Task Stage</b>, tính tự động, không phải trạng thái riêng lưu trong DB:</p>
+<section class="guide-section" id="wizard"><span class="section-kicker">WIZARD</span><h3>Task Detail hoạt động như một wizard</h3>
+<p>Mở một Task, bạn luôn thấy đúng <b>một bước hiện tại</b> — không cần tự hỏi "giờ phải bấm gì tiếp". Toàn bộ chi tiết kỹ thuật (Agent Workspace, Sandbox, Review, QA, Integration...) vẫn còn nguyên, chỉ nằm trong "Xem tất cả chi tiết kỹ thuật" ở cuối trang cho ai cần.</p>
+<div class="step-flow"><span>Tạo Task</span><i>→</i><span>Cấu hình</span><i>→</i><span>Start Agent</span><i>→</i><span>xem agent chạy trên web</span><i>→</i><span>Review</span><i>→</i><span>Test</span><i>→</i><span>Integration</span><i>→</i><span>Merge</span></div>
+<table><thead><tr><th>Bước (wizard)</th><th>Ý nghĩa</th></tr></thead><tbody>
+<tr><td><b>Task</b></td><td>Nhập tên Task + (tuỳ chọn) Implementation Prompt, bấm <b>Continue</b>.</td></tr>
+<tr><td><b>Cấu hình</b> (Setup)</td><td>Chọn repository/agent, bấm <b>Start Claude</b> hoặc <b>Start Codex</b> — Workspace Manager tự tạo branch/worktree/sandbox và bật agent trong một lần bấm, bạn không cần tự vào Agent Workspaces.</td></tr>
+<tr><td><b>Agent đang chạy</b></td><td>Màn hình theo dõi trực tiếp: trạng thái Agent, hoạt động gần nhất, sandbox, nút <b>View Live Terminal</b> để xem terminal thật ngay trên trình duyệt/điện thoại.</td></tr>
+<tr><td><b>Review</b></td><td>Sau khi agent nộp báo cáo hoàn thành, bước tự chuyển sang Review — bấm <b>Start Reviewer</b>, xem kết quả PASS/FIX_REQUIRED/BLOCKED.</td></tr>
+<tr><td><b>Kiểm tra</b> (QA)</td><td>Chỉ hiện nếu Workflow yêu cầu (HIGH). Xem sandbox/app URL, làm theo hướng dẫn kiểm tra thủ công, bấm <b>Record PASS</b>/<b>Record FAIL</b>.</td></tr>
+<tr><td><b>Integration</b></td><td>Chỉ hiện nếu Workflow yêu cầu (NORMAL/HIGH). Bấm <b>Start Integration</b>, theo dõi conflict/tests.</td></tr>
+<tr><td><b>Sẵn sàng merge</b></td><td>Checklist các điều kiện đã đạt + hướng dẫn Prepare PR (GitHub thao tác thủ công).</td></tr>
+<tr><td><b>Hoàn tất</b></td><td>Mọi repository bắt buộc đã Merged — xem lịch dọn sandbox.</td></tr>
+</tbody></table>
+<div class="info">Workflow policy (Low/Normal/High) có thể bỏ qua Kiểm tra và/hoặc Integration — thanh tiến trình vẫn hiện đủ các bước nhưng bước bị bỏ qua sẽ mờ đi kèm nhãn "(bỏ qua)", không bao giờ hiện như đã hoàn thành giả.</div>
+</section>
+
+<section class="guide-section" id="quick-start"><span class="section-kicker">BẮT ĐẦU NHANH</span><h3>Bắt đầu nhanh (chi tiết kỹ thuật)</h3><p>Toàn bộ vòng đời một task, từ lúc tạo tới lúc sandbox được dọn dẹp. Task chỉ có <b>6 trạng thái</b> (BACKLOG/ACTIVE/BLOCKED/READY_FOR_MAIN/DONE/CANCELLED) — mọi bước bên dưới (Development/Review/QA/Integration/Merging) là <b>Task Stage</b>, tính tự động, không phải trạng thái riêng lưu trong DB:</p>
 <ol class="steps">
 <li><a href="/tasks#new">Add to Backlog</a><span>Một ý định công việc — <b>chưa tạo branch/worktree/sandbox nào cả</b>, kể cả khi Task đã có risk profile/brief.</span></li>
 <li><b>Select for Development</b><span>BACKLOG → ACTIVE. Stage vẫn là PLANNING, vẫn chưa cấp resource nào tới khi có Builder Workspace đầu tiên.</span></li>

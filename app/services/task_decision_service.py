@@ -196,10 +196,10 @@ class TaskDecisionService:
 
         if t["status"] == "CANCELLED":
             return self._result(t, "CANCELLED", "COMPLETE", _action("NONE", None, "Task cancelled."), [], "NO", False, False,
-                                 builders, qa, ti, ti_repos, merges, risk)
+                                 builders, qa, ti, ti_repos, merges, risk, current_step=None)
         if t["status"] == "BACKLOG":
             na = _action("SELECT_FOR_DEVELOPMENT", "Select for Development", "Task is in Backlog.", f"/api/tasks/{task_id}/select")
-            return self._result(t, "BACKLOG", "PLANNING", na, [], "NO", False, False, builders, qa, ti, ti_repos, merges, risk)
+            return self._result(t, "BACKLOG", "PLANNING", na, [], "NO", False, False, builders, qa, ti, ti_repos, merges, risk, current_step="TASK")
 
         # ACTIVE from here -- everything else is computed.
         blocking = []
@@ -239,11 +239,49 @@ class TaskDecisionService:
             "eligible": all_builders_ready and all_reviews_current_pass and not blocking,
             "exists": bool(ti),
         }
+        current_step = self._current_step(status, builders, qa, ti, ti_repos, risk, t, all_merged)
         return self._result(t, status, stage, next_action, blocking, test_readiness, integration_eligibility["eligible"],
-                             ready_for_main, builders, qa, ti, ti_repos, merges, risk, integration_eligibility)
+                             ready_for_main, builders, qa, ti, ti_repos, merges, risk, integration_eligibility, current_step)
 
     def _qa_current(self, qa, t):
         return qa.get("brief_version") in (None, t["brief_version"])
+
+    def _current_step(self, status, builders, qa, ti, ti_repos, risk, t, all_merged):
+        """The one deterministic 'current step' of the wizard
+        (TASK/SETUP/AGENT_RUNNING/REVIEW/TEST_QA/INTEGRATION/
+        READY_FOR_MAIN/DONE) -- computed from the exact same signals
+        evaluate() already derived, never a second, template-side
+        lifecycle calculation. Deliberately separate from `status`
+        (BACKLOG/ACTIVE/BLOCKED/READY_FOR_MAIN/DONE/CANCELLED stays the
+        simplified, persisted-adjacent status; the step is a UI
+        concept only, section 23)."""
+        if status == "CANCELLED":
+            return None  # not part of the 8-step wizard
+        if status == "BACKLOG":
+            return "TASK"
+        if not builders:
+            return "SETUP"
+        # A reviewer's FIX_REQUIRED sends the whole Task back to the
+        # Builder conceptually (section 11) even though the Builder
+        # Workspace's own `ready` flag never resets -- the wizard step
+        # must reflect that, not just the raw submitted/not-submitted bit.
+        if any(b["fix_required"] for b in builders):
+            return "AGENT_RUNNING"
+        if not all(b["ready"] for b in builders):
+            if any(b["agent_status"] in LIVE_SESSION_STATUSES for b in builders):
+                return "AGENT_RUNNING"
+            if any(b["agent_status"] in ("EXITED", "FAILED") for b in builders):
+                return "AGENT_RUNNING"  # exited without a completion report -- still this step, showing Resume/Open Live/Mark Blocked
+            return "SETUP"
+        if not all(b["review_status"] == "PASS" for b in builders):
+            return "REVIEW"
+        if self.requires_qa(risk) and not (qa and qa["status"] == "PASS" and self._qa_current(qa, t)):
+            return "TEST_QA"
+        if self.requires_integration(risk) and not self._integration_ok(ti, ti_repos):
+            return "INTEGRATION"
+        if all_merged:
+            return "DONE"
+        return "READY_FOR_MAIN"
 
     def _integration_ok(self, ti, ti_repos):
         """Healthy AND verified -- 'TESTING' means tests are only in
@@ -323,12 +361,12 @@ class TaskDecisionService:
         return _action("NONE", None, "Waiting on the gate above.", None)
 
     def _result(self, t, status, stage, next_action, blocking, test_readiness, integration_eligible, ready_for_main,
-                builders, qa, ti, ti_repos, merges, risk, integration_eligibility=None):
+                builders, qa, ti, ti_repos, merges, risk, integration_eligibility=None, current_step=None):
         return {
             "task": t, "status": status, "stage": stage, "risk_profile": risk, "next_action": next_action,
             "blocking_reasons": blocking, "test_readiness": test_readiness, "ready_for_main": ready_for_main,
             "builders": builders, "qa": qa, "task_integration": ti, "integration_repos": ti_repos,
-            "merge_records": merges,
+            "merge_records": merges, "current_step": current_step,
             "integration_eligibility": integration_eligibility or {"required": self.requires_integration(risk), "eligible": integration_eligible, "exists": bool(ti)},
             "effective_task_prompt": effective_task_prompt(t), "prompt_source": prompt_source(t),
         }
