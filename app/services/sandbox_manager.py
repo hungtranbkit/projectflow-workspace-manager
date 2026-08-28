@@ -258,6 +258,48 @@ class SandboxManager:
         self.db.execute("UPDATE sandboxes SET status='STOPPED',stopped_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
         self.db.event("sandbox", sandbox_id, "SANDBOX_STOPPED")
 
+    def reset_data(self, sandbox_id: int) -> None:
+        """RESET_DATA (section 7): recreate this sandbox's own mutable
+        data from scratch -- for testing default-credential/first-run/
+        seed/migration behavior, never a raw `docker compose down -v`
+        exposed to the browser. Verifies ownership (the same
+        compose_project label check cleanup() already uses) before
+        removing anything, stops+removes only the volumes docker-compose
+        associates with THIS exact compose project, then re-provisions
+        from the current exact source commit. Sandbox identity
+        (compose_project/sandbox_slug) and allocated ports are both
+        preserved: ports.allocate() is idempotent per (sandbox_id,
+        service) and is never released here, so provision() below hands
+        back the SAME host ports rather than allocating new ones."""
+        sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
+        if not sb: raise SandboxError("SANDBOX_NOT_FOUND", "sandbox not found")
+        if not self.runtime.verify_owned(sb["compose_project"], sandbox_id):
+            raise SandboxError("OWNERSHIP_UNVERIFIED", "refusing to reset unlabeled resources")
+        provider = self.db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1", (sandbox_id,))
+        if not provider: raise SandboxError("NO_SOURCE", "sandbox has no source to rebuild from")
+        contract = load_sandbox_contract(Path(provider["worktree_path"]))
+        if contract is None: raise SandboxContractError("SANDBOX_CONTRACT_REQUIRED", "sandbox: contract missing")
+        env_path = Path(sb["environment_path"]) / ".env"
+        compose_file = Path(provider["worktree_path"]) / contract["compose_file"]
+        op_id = self._op_start(sandbox_id, "RESET_DATA")
+        self.db.execute("UPDATE sandboxes SET status='RESETTING',updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
+        self.db.event("sandbox", sandbox_id, "SANDBOX_RESET_REQUESTED", provider["commit_sha"])
+        try:
+            result = self.runtime.compose_down(sb["compose_project"], compose_file, env_path, Path(provider["worktree_path"]), remove_volumes=True)
+            self._op_finish(op_id, "SUCCESS" if result.returncode == 0 else "FAILED", result.returncode, result.stdout, result.stderr)
+            if result.returncode != 0:
+                self.db.execute("UPDATE sandboxes SET status='FAILED',error_code='RESET_DATA_FAILED',error_message=? WHERE id=?", (result.stderr[-2000:], sandbox_id))
+                return
+        except SandboxRuntimeError as exc:
+            self._op_finish(op_id, "FAILED", 1, exc.stdout, exc.stderr)
+            self.db.execute("UPDATE sandboxes SET status='FAILED',error_code=?,error_message=? WHERE id=?", (exc.code, str(exc), sandbox_id))
+            return
+        # Data volumes are gone; source/branch/commit/ports are untouched.
+        # provision() re-runs `compose up` (which recreates the removed
+        # volumes fresh) against the exact same source, then the usual
+        # health check -- the same tracked path a normal Start goes through.
+        self.provision(sandbox_id)
+
     def mark_cleanup_eligible(self, sandbox_id: int, retention_hours: int | None = None) -> None:
         hours = self.default_retention_hours if retention_hours is None else retention_hours
         eligible_at = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()

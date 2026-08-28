@@ -9,6 +9,9 @@
 <div class="guide-layout">
 <nav class="guide-toc"><b>Trong hướng dẫn này</b>
 <a href="#wizard">Task Detail hoạt động như một wizard</a>
+<a href="#start-agent">Start Agent làm gì?</a>
+<a href="#reset-sandbox-data">Reset Sandbox Data dùng khi nào?</a>
+<a href="#baseline-failure">Baseline failure là gì?</a>
 <a href="#quick-start">Bắt đầu nhanh (chi tiết kỹ thuật)</a>
 <a href="#tasks">1. Có task mới</a>
 <a href="#task-vs-worktree">Task khác Worktree?</a>
@@ -52,7 +55,7 @@
 <div class="step-flow"><span>Tạo Task</span><i>→</i><span>Cấu hình</span><i>→</i><span>Start Agent</span><i>→</i><span>xem agent chạy trên web</span><i>→</i><span>Review</span><i>→</i><span>Test</span><i>→</i><span>Integration</span><i>→</i><span>Merge</span></div>
 <table><thead><tr><th>Bước (wizard)</th><th>Ý nghĩa</th></tr></thead><tbody>
 <tr><td><b>Task</b></td><td>Nhập tên Task + (tuỳ chọn) Implementation Prompt, bấm <b>Continue</b>.</td></tr>
-<tr><td><b>Cấu hình</b> (Setup)</td><td>Chọn repository/agent, bấm <b>Start Claude</b> hoặc <b>Start Codex</b> — Workspace Manager tự tạo branch/worktree/sandbox và bật agent trong một lần bấm, bạn không cần tự vào Agent Workspaces.</td></tr>
+<tr><td><b>Cấu hình</b> (Setup)</td><td>Chọn repository/agent, bấm <b>Start Claude</b> hoặc <b>Start Codex</b> — Workspace Manager tự tạo branch/worktree/sandbox, bật agent, VÀ tự gửi Task prompt vào agent trong một lần bấm (xem <a href="#start-agent">Start Agent làm gì?</a>). Bạn không cần tự vào Agent Workspaces, cũng không cần tự copy/paste prompt.</td></tr>
 <tr><td><b>Agent đang chạy</b></td><td>Màn hình theo dõi trực tiếp: trạng thái Agent, hoạt động gần nhất, sandbox, nút <b>View Live Terminal</b> để xem terminal thật ngay trên trình duyệt/điện thoại.</td></tr>
 <tr><td><b>Review</b></td><td>Sau khi agent nộp báo cáo hoàn thành, bước tự chuyển sang Review — bấm <b>Start Reviewer</b>, xem kết quả PASS/FIX_REQUIRED/BLOCKED.</td></tr>
 <tr><td><b>Kiểm tra</b> (QA)</td><td>Chỉ hiện nếu Workflow yêu cầu (HIGH). Xem sandbox/app URL, làm theo hướng dẫn kiểm tra thủ công, bấm <b>Record PASS</b>/<b>Record FAIL</b>.</td></tr>
@@ -61,6 +64,35 @@
 <tr><td><b>Hoàn tất</b></td><td>Mọi repository bắt buộc đã Merged — xem lịch dọn sandbox.</td></tr>
 </tbody></table>
 <div class="info">Workflow policy (Low/Normal/High) có thể bỏ qua Kiểm tra và/hoặc Integration — thanh tiến trình vẫn hiện đủ các bước nhưng bước bị bỏ qua sẽ mờ đi kèm nhãn "(bỏ qua)", không bao giờ hiện như đã hoàn thành giả.</div>
+</section>
+
+<section class="guide-section" id="start-agent"><span class="section-kicker">START AGENT</span><h3>Start Agent làm gì?</h3>
+<p><b>Start Agent</b> (nút Start Claude/Start Codex, hoặc Resume Agent) làm hết trong một lần bấm:</p>
+<ol class="steps">
+<li><b>Mở agent CLI</b><span>Tạo/kết nối AgentSession thật (real PTY), đúng worktree của Task.</span></li>
+<li><b>Chờ agent sẵn sàng</b><span>Đợi CLI khởi động xong (bounded wait — tối đa vài giây), không gõ mù ngay khi CLI có thể còn đang vẽ màn hình.</span></li>
+<li><b>Tự động gửi Task prompt</b><span>Prompt đã sinh sẵn (Task + role + rule repo) được gửi thẳng vào agent — bạn <b>không cần copy/paste thủ công</b>.</span></li>
+<li><b>Agent bắt đầu làm việc</b><span>Trạng thái hiển thị: Agent RUNNING + Prompt: DELIVERED.</span></li>
+</ol>
+<p>Nếu gửi prompt thất bại (CLI chưa kịp sẵn sàng, hoặc lỗi khác), màn hình hiện <b>PROMPT NOT DELIVERED</b> kèm nút <b>[Send Task to Codex/Claude]</b> để thử lại — đây là hành động khôi phục ngoại lệ, không phải luồng bình thường.</p>
+<p><b>Resume Agent</b> (khi Review yêu cầu sửa, hoặc agent thoát mà chưa báo cáo) thông minh: nếu agent đang chạy và đã nhận prompt rồi thì KHÔNG gửi lại (tránh gửi trùng); nếu Review trả FIX_REQUIRED thì gửi prompt sửa lỗi (task gốc + nhận xét review), không phải prompt cũ.</p>
+</section>
+
+<section class="guide-section" id="reset-sandbox-data"><span class="section-kicker">SANDBOX</span><h3>Reset Sandbox Data dùng khi nào?</h3>
+<p><b>Reset Sandbox Data</b> (trong Sandbox Detail → Advanced/Danger) xoá database + dữ liệu runtime riêng của sandbox đó, rồi khởi tạo lại từ đúng source hiện tại — port và identity của sandbox được giữ nguyên, source code không bị ảnh hưởng.</p>
+<p>Dùng khi cần test hành vi <b>từ trạng thái sạch</b>:</p>
+<ul>
+<li>Mật khẩu/tài khoản mặc định (default credentials)</li>
+<li>Hành vi lần chạy đầu (first-run/onboarding)</li>
+<li>Seed data, migration</li>
+</ul>
+<div class="warning">Đây là thao tác phá huỷ dữ liệu (destructive) — luôn có xác nhận trước khi chạy. Không giống <code>docker compose down -v</code> gõ tay: Workspace Manager kiểm tra ownership trước khi xoá, chỉ đụng đúng sandbox đó, không đụng sandbox khác.</div>
+</section>
+
+<section class="guide-section" id="baseline-failure"><span class="section-kicker">BASELINE WAIVER</span><h3>Baseline failure là gì?</h3>
+<p>Một <b>baseline failure</b> là lỗi test đã tồn tại từ <i>trước khi Task này thay đổi bất kỳ gì</i> — chứng minh được bằng cách chạy lại đúng test đó trên commit gốc (base commit) sạch, không phải chỉ "nhìn có vẻ không liên quan".</p>
+<p>Mỗi lỗi khi mới thấy đều mặc định là <b>UNKNOWN</b>. Chỉ khi bấm <b>Reproduce on Baseline</b> và lỗi thật sự lặp lại y hệt (cùng fingerprint) trên base commit, nó mới chuyển thành <b>VERIFIED BASELINE</b> — không bao giờ tự suy đoán.</p>
+<p>Khi đó mới có thể <b>Waive Baseline Failure</b>: waiver <b>KHÔNG</b> đánh dấu test PASS — nó chỉ ghi nhận công khai "lỗi này có từ trước, cho Task này đi tiếp" (PASS_WITH_APPROVED_BASELINE_WAIVER), có audit đầy đủ (ai duyệt, lúc nào, lý do). Nếu lỗi thay đổi (fingerprint khác) hoặc là lỗi hoàn toàn mới, waiver không áp dụng được — vẫn phải sửa.</p>
 </section>
 
 <section class="guide-section" id="quick-start"><span class="section-kicker">BẮT ĐẦU NHANH</span><h3>Bắt đầu nhanh (chi tiết kỹ thuật)</h3><p>Toàn bộ vòng đời một task, từ lúc tạo tới lúc sandbox được dọn dẹp. Task chỉ có <b>6 trạng thái</b> (BACKLOG/ACTIVE/BLOCKED/READY_FOR_MAIN/DONE/CANCELLED) — mọi bước bên dưới (Development/Review/QA/Integration/Merging) là <b>Task Stage</b>, tính tự động, không phải trạng thái riêng lưu trong DB:</p>

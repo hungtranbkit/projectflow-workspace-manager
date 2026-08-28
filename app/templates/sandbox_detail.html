@@ -17,8 +17,15 @@
 <form method="post" action="/api/sandboxes/{{sb.id}}/rebuild" onsubmit="return confirm('Rebuild sẽ dùng commit hiện tại và huỷ readiness cũ.')"><button class="secondary">Rebuild</button></form>
 <form method="post" action="/api/sandboxes/{{sb.id}}/health"><button class="secondary">Health Check</button></form>
 {% if sb.status == 'CLEANUP_ELIGIBLE' %}<form method="post" action="/api/sandboxes/{{sb.id}}/extend-retention"><input type="hidden" name="hours" value="24"><button class="secondary">Keep 24h More</button></form>{% endif %}
+</div>
+
+<details class="danger-zone"><summary>Advanced / Danger</summary>
+<p><small>Reset Sandbox Data xoá database + runtime data riêng của sandbox này (để test lại default credential/first-run/seed/migration từ trạng thái sạch). Source code không bị ảnh hưởng.</small></p>
+<div class="actions">
+<form method="post" action="/api/sandboxes/{{sb.id}}/reset-data" onsubmit="return confirm('This deletes this sandbox\'s isolated database and sandbox-owned runtime data. Source code is not affected. Continue?')"><button class="danger">Reset Sandbox Data</button></form>
 <form method="post" action="/api/sandboxes/{{sb.id}}/cleanup" onsubmit="return confirm('Cleanup ngay lập tức?')"><button class="danger">Cleanup Now</button></form>
 </div>
+</details>
 
 <section class="panel"><h3>Sources (exact commits)</h3>{% for s in sources %}<div class="row"><div><strong>{{s.role}}</strong> · {{s.repo_name}}<small>{{s.branch}} @ <code>{{s.commit_sha[:12]}}</code></small></div><span class="badge">{{s.source_type}}</span></div>{% endfor %}</section>
 

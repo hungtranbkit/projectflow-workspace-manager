@@ -342,6 +342,54 @@ ALTER TABLE tasks ADD COLUMN implementation_prompt TEXT NOT NULL DEFAULT '';
 -- its own beyond what brief_version already covers for the shared intent.
 ALTER TABLE agent_workspaces ADD COLUMN builder_instructions TEXT NOT NULL DEFAULT '';
 """),
+    # V9: real prompt delivery + evidence-backed baseline waiver model
+    # (Task #5 demo gaps). agent_sessions gains prompt_status (PENDING/
+    # DELIVERED/FAILED) so 'Agent RUNNING' is never conflated with 'prompt
+    # actually delivered' -- prompt_version/prompt_sha256/prompt_source
+    # are a point-in-time audit snapshot of exactly what was sent, never
+    # recomputed after the fact. baseline_failure_evidence is only ever
+    # written after a REAL reproduction run against the Task's own base
+    # commit (never inferred from "looks unrelated"). gate_waivers is an
+    # explicit, audited, per-failure-fingerprint exception -- never a
+    # blanket "ignore tests"; a fingerprint mismatch (source changed,
+    # failure changed) makes a stored waiver simply not match anymore,
+    # rather than needing a second "still valid?" flag to maintain.
+    (9, """
+ALTER TABLE agent_sessions ADD COLUMN prompt_status TEXT NOT NULL DEFAULT 'PENDING';
+ALTER TABLE agent_sessions ADD COLUMN prompt_version INTEGER;
+ALTER TABLE agent_sessions ADD COLUMN prompt_sha256 TEXT;
+ALTER TABLE agent_sessions ADD COLUMN prompt_source TEXT;
+ALTER TABLE agent_sessions ADD COLUMN delivered_at TEXT;
+CREATE TABLE IF NOT EXISTS baseline_failure_evidence(
+  id INTEGER PRIMARY KEY,
+  repository_id INTEGER NOT NULL REFERENCES repositories(id),
+  base_commit TEXT NOT NULL,
+  gate TEXT NOT NULL,
+  test_identifier TEXT NOT NULL,
+  failure_fingerprint TEXT NOT NULL,
+  baseline_run_id INTEGER REFERENCES test_runs(id),
+  first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  evidence TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_baseline_evidence_lookup ON baseline_failure_evidence(repository_id, base_commit, gate, test_identifier);
+CREATE TABLE IF NOT EXISTS gate_waivers(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  integration_id INTEGER REFERENCES integration_workspaces(id),
+  gate TEXT NOT NULL,
+  test_identifier TEXT NOT NULL,
+  failure_fingerprint TEXT NOT NULL,
+  baseline_commit TEXT NOT NULL,
+  baseline_run_id INTEGER REFERENCES test_runs(id),
+  integration_run_id INTEGER REFERENCES test_runs(id),
+  reason TEXT NOT NULL DEFAULT '',
+  approved_by TEXT NOT NULL DEFAULT '',
+  approved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_gate_waivers_task ON gate_waivers(task_id);
+CREATE INDEX IF NOT EXISTS idx_gate_waivers_integration ON gate_waivers(integration_id,gate,test_identifier);
+"""),
 ]
 
 

@@ -87,10 +87,17 @@
 <div><small>Branch</small><code>{{w.branch}}</code></div>
 <div class="wide"><small>Worktree</small><code>{{w.worktree_path}}</code></div>
 </div>
+{% if w.session %}<p><small>Prompt</small> <span class="badge {{w.session.prompt_status|lower}}">{{'DELIVERED' if w.session.prompt_status=='DELIVERED' else ('DELIVERY FAILED' if w.session.prompt_status=='FAILED' else 'PENDING')}}</span></p>{% endif %}
 {% if w.sandbox %}<p><small>Sandbox</small> <span class="badge {{w.sandbox.row.status|lower}}">{{w.sandbox.row.status.replace('_',' ')}}{% if w.sandbox.row.status=='RUNNING' %} · {{w.sandbox.row.health_status}}{% endif %}</span> {% if w.sandbox.backend_url %}<a class="ghost" href="{{w.sandbox.backend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}</p>{% endif %}
 {% if w.last_activity_hint %}<p><small>Current activity</small><code>{{w.last_activity_hint}}</code></p>{% endif %}
 {% if w.session %}<p><small>Last activity</small><code>{{w.session.last_activity_at or w.session.started_at}}</code></p>{% endif %}
-{% if w.fix_required %}
+{% if w.session and w.session.prompt_status in ['PENDING','FAILED'] and w.agent_status in ['STARTING','RUNNING','WAITING_FOR_INPUT'] %}
+<div class="warning"><b>{{'Prompt chưa gửi được tới agent.' if w.session.prompt_status=='FAILED' else 'Prompt chưa gửi (agent vừa mới mở, đang chờ sẵn sàng).'}}</b></div>
+<div class="primary-action">
+<form method="post" action="/api/sessions/{{w.session.id}}/deliver-prompt" class="inline"><button class="success">Send Task to {{w.agent|capitalize}}</button></form>
+<a class="ghost" href="/workspaces/{{w.id}}">Open Live</a>
+</div>
+{% elif w.fix_required %}
 <div class="warning"><b>Cần sửa theo Review.</b><p>{{(w.review.findings if w.review else '') or 'Reviewer requested changes.'}}</p></div>
 <div class="primary-action">
 {% if w.agent in ['codex','claude'] %}<form method="post" action="/api/tasks/{{t.id}}/setup-and-start" class="inline"><input type="hidden" name="repository_id" value="{{w.repository_id}}"><input type="hidden" name="agent" value="{{w.agent}}"><button class="success">Resume Agent</button></form>{% endif %}
@@ -156,9 +163,36 @@
 <div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/integrations"><button class="success big" type="submit">Start Integration</button></form></div>
 {% else %}
 <p><small>Trạng thái</small><span class="badge {{task_integration.status|lower}}">{{task_integration.status.replace('_',' ')}}</span></p>
-{% for r in ti_repos %}<div class="row"><div><strong>{{r.repo_name}}</strong><small>{{r.branch}}</small></div><span class="badge {{r.status|lower}}">{{r.status.replace('_',' ')}}</span></div>{% endfor %}
+{% for r in ti_repos %}
+<div class="row"><div><strong>{{r.repo_name}}</strong><small>{{r.branch}}</small></div><span class="badge {{(r.gate_status.tests_status if r.gate_status else r.status)|lower}}">{{r.status.replace('_',' ') if r.status!='TESTING' or not r.gate_status else r.gate_status.tests_status.replace('_',' ')}}</span></div>
+{% set gs=r.gate_status %}
+{% if gs and gs.summary %}
+<p><small>Tests</small> <code>{{gs.summary.get('passed',0)}} PASS · {{gs.summary.get('skipped',0)}} SKIPPED · {{gs.summary.get('failed',0)}} FAILED</code></p>
+{% endif %}
+{% if gs and gs.failures %}
+{% for f in gs.failures %}
+<div class="failure-row">
+<div class="row"><div><strong>{{f.test_identifier}}</strong>{% if f.reason %}<small>{{f.reason}}</small>{% endif %}</div><span class="badge {{f.classification|lower}}">{{f.classification.replace('_',' ')}}</span></div>
+{% if f.classification=='UNKNOWN' %}
+<p><small>Chưa có bằng chứng baseline cho lỗi này. Reproduce lại đúng test này trên base commit ({{r.base_commit[:12]}}) để xác định đây là lỗi mới hay lỗi có sẵn từ trước.</small></p>
+<form method="post" action="/api/integrations/{{r.id}}/reproduce-baseline" class="inline"><input type="hidden" name="gate" value="{{f.stage}}"><input type="hidden" name="test_identifier" value="{{f.test_identifier}}"><button class="secondary">Reproduce on Baseline ({{r.base_commit[:12]}})</button></form>
+{% elif f.classification=='NEW_FAILURE' %}
+<p><small>Lỗi này KHÔNG khớp với baseline evidence đã có (fingerprint khác) — coi là lỗi mới, phải sửa, không thể waive.</small></p>
+{% elif f.classification=='BASELINE_FAILURE' %}
+<p><small>✓ Verified baseline: lỗi giống hệt đã tái hiện được trên base commit {{r.base_commit[:12]}} (trước khi Task này thay đổi gì). Lỗi này có từ trước, không phải do Task gây ra.</small></p>
+<form method="post" action="/api/integrations/{{r.id}}/waive-baseline-failure" class="inline" onsubmit="return confirm('This does not mark the test PASS. It allows this Task to proceed while preserving the known baseline failure as an explicit exception.')">
+<input type="hidden" name="gate" value="{{f.stage}}"><input type="hidden" name="test_identifier" value="{{f.test_identifier}}">
+<input name="reason" placeholder="Lý do (tuỳ chọn)" style="display:inline-block;width:auto">
+<button class="success">Waive Baseline Failure</button></form>
+{% elif f.classification=='WAIVED' %}
+<p><small>Đã waive — Ready for Main dùng PASS_WITH_APPROVED_BASELINE_WAIVER, không phải PASS thật.</small></p>
+{% endif %}
+</div>
+{% endfor %}
+{% endif %}
+{% endfor %}
 {% if task_integration.status=='CONFLICT' %}<div class="alert"><b>Merge conflict.</b> Sửa trực tiếp trong Integrator.</div>{% endif %}
-<div class="primary-action">{% if ti_repos %}<a class="button" href="/integrations/{{ti_repos[0].id}}">Open Integrator (Live)</a>{% endif %}</div>
+<div class="primary-action">{% if ti_repos %}<a class="button" href="/integrations/{{ti_repos[0].id}}">Open Integrator (Live)</a>{% endif %}<form method="post" action="/api/integrations/{{ti_repos[0].id}}/test" class="inline">{% if ti_repos %}<button class="secondary">Run Integration Tests</button>{% endif %}</form></div>
 {% endif %}
 </section>
 
