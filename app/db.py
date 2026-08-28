@@ -332,6 +332,16 @@ UPDATE tasks SET needs_reconciliation=1 WHERE legacy_status IN ('MERGED','CLOSED
 -- structured tasks keep behaving exactly as before, unchanged.
 ALTER TABLE tasks ADD COLUMN implementation_prompt TEXT NOT NULL DEFAULT '';
 """),
+    (8, """
+-- Builder execution UX: optional, per-Builder-Workspace extra
+-- instructions layered on top of the Task's own effective prompt (Title
+-- fallback or Implementation Prompt) -- e.g. "Backend: add API support
+-- only." vs "Firmware: consume the new API from ESP." on the same Task.
+-- Never required; empty means "use the Task prompt alone". Not
+-- separately versioned -- it has no Review/QA staleness implications of
+-- its own beyond what brief_version already covers for the shared intent.
+ALTER TABLE agent_workspaces ADD COLUMN builder_instructions TEXT NOT NULL DEFAULT '';
+"""),
 ]
 
 

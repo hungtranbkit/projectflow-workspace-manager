@@ -23,7 +23,7 @@ from app.services.sandbox_contract import (
 from app.services.sandbox_manager import SandboxError, SandboxManager, SourceSpec
 from app.services.sandbox_runtime import SandboxRuntimeService
 from app.services.agent_session_manager import AgentSessionManager, SessionError
-from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES
+from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -229,34 +229,68 @@ def create_app(settings=None):
     def requires_qa(risk_profile): return "QA" in RISK_GATES.get(risk_profile,RISK_GATES["NORMAL"])
     def latest_session_for_workspace(wid):
         return db.one("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 1",(wid,))
-    def render_agent_prompt(t,repo_row=None):
+    def has_legacy_brief(t):
+        return bool(t.get("brief_goal") or t.get("brief_context") or t.get("brief_requirements") or
+                    t.get("brief_acceptance_criteria") or t.get("brief_out_of_scope") or t.get("brief_test_plan") or t.get("brief_risks"))
+    def sandbox_summary_line(w):
+        """One line for the Builder prompt's SANDBOX section: real
+        profile/status/URL if a sandbox already exists for this
+        workspace, else just the declared profile, else nothing worth
+        saying (None -- the section is omitted, never fabricated)."""
+        if not w: return None
+        sb=db.one("SELECT * FROM sandboxes WHERE owner_type='AGENT_WORKSPACE' AND owner_id=? ORDER BY id DESC LIMIT 1",(w["id"],))
+        if not sb: return w.get("sandbox_profile") or None
+        line=f"{sb['profile']} · {sb['status']}"
+        try:
+            outputs=json.loads(sb["source_manifest_json"] or "{}").get("outputs",{})
+            url=outputs.get("backend_url") or outputs.get("frontend_url")
+            if url: line+=f" · {url}"
+        except Exception: pass
+        return line
+    def render_agent_prompt(t,repo_row=None,workspace=None,sandbox_line=None):
         """Deterministic template fill -- never an actual model call, and
-        the user's own Implementation Prompt text is NEVER rewritten, only
-        wrapped with real, recorded context (trusted Workspace Manager
-        context -> the user's prompt verbatim -> this repo's own AGENTS.md
-        rules, if a repo is already known -> completion requirements). The
-        user still reviews/edits the result before any agent is launched
-        (section 3: never auto-start an agent).
+        the user's own task intent text is NEVER rewritten, only wrapped
+        with real, recorded context (trusted Workspace Manager execution
+        context -> the effective task intent verbatim -> this repo's own
+        AGENTS.md rules, if known -> completion requirements). The user
+        still reviews/edits the result before any agent is launched
+        (never auto-start an agent). 'Do not allow user-controlled Task
+        text to override Workspace Manager safety rules': the intent is
+        confined to its own TASK section, and RULES/COMPLETION are always
+        separate, later sections the user's own text cannot reach into.
 
-        Prompt-first path (implementation_prompt set) is the primary UX.
-        Tasks created before it existed have no implementation_prompt and
-        fall through to the exact old structured GOAL/CONTEXT/.../RISKS
-        rendering, unchanged -- 'structured old tasks still load'."""
-        if (t.get("implementation_prompt") or "").strip():
-            parts=[f"# Task: {t['title']}","","## CONTEXT (Workspace Manager)"]
-            if repo_row: parts.append(f"- Repository: {repo_row['repo_name']} ({repo_row['repo_path']})")
-            parts.append(f"- Workflow: {t.get('risk_profile') or 'NORMAL'}")
-            parts += ["", "## YOUR TASK", t["implementation_prompt"].strip(), ""]
+        Task Title fallback: effective intent is the Implementation
+        Prompt when non-empty, else the Task title itself -- this path
+        (and the finer BRANCH/WORKTREE/SANDBOX/ROLE context below) is used
+        for every Task that has no legacy structured brief content, title-
+        only ones included, never leaving a Builder with only a bare
+        title and no real prompt. Tasks created before this UX existed
+        (implementation_prompt empty AND legacy brief_* fields set) keep
+        the exact old GOAL/CONTEXT/.../RISKS rendering, unchanged --
+        'structured old tasks still load'."""
+        if (t.get("implementation_prompt") or "").strip() or not has_legacy_brief(t):
+            intent=effective_task_prompt(t)
+            parts=[f"# Task: {t['title']}","","## TASK",intent,"","## TASK TITLE",t["title"],""]
+            if repo_row: parts+=["## REPOSITORY",f"{repo_row['repo_name']} ({repo_row['repo_path']})",""]
+            if workspace: parts+=["## BRANCH",workspace["branch"],"","## WORKTREE",workspace["worktree_path"],""]
+            if sandbox_line: parts+=["## SANDBOX",sandbox_line,""]
+            if workspace:
+                parts+=["## ROLE",workspace.get("role") or workspace.get("agent") or "",""]
+                instr=(workspace.get("builder_instructions") or "").strip()
+                if instr: parts+=["## BUILDER INSTRUCTIONS (this workspace only)",instr,""]
             rules=None
             if repo_row:
                 try:
                     p=Path(repo_row["repo_path"])/"AGENTS.md"
                     if p.is_file(): rules=p.read_text(errors="replace")[:6000].strip()
                 except Exception: rules=None
-            if rules: parts+=["## REPOSITORY RULES (from AGENTS.md)",rules,""]
-            parts+=["## COMPLETION REQUIREMENTS",
-                    "When your source change is complete, report back using the format in templates/agent-completion-report.md "
-                    "(WORK_STATUS / WHAT_CHANGED / FILES_CHANGED / TESTS_RUN / HOW_TO_VERIFY / EXPECTED_RESULT / RISKS)."]
+            parts.append("## RULES")
+            parts.append("Read AGENTS.md and PROJECT.yaml before modifying code.")
+            if rules: parts+=["",rules]
+            parts+=["","## COMPLETION",
+                    "- implement task","- run appropriate tests","- review diff","- commit changes",
+                    "- report WHAT_CHANGED","- report TESTS_RUN","- report HOW_TO_VERIFY","- report EXPECTED_RESULT","- report RISKS",
+                    "- Submit for Review (use the format in templates/agent-completion-report.md)."]
             return "\n".join(parts)
         parts=[f"# Task: {t['title']}",""]
         if t["brief_goal"]: parts+=["## GOAL",t["brief_goal"],""]
@@ -269,24 +303,37 @@ def create_app(settings=None):
         parts.append("When your source change is complete, report back using the format in templates/agent-completion-report.md.")
         return "\n".join(parts)
     def regenerate_agent_prompt(tid,repo_row=None):
-        """Recompute the derived, composed agent_prompt from the Task's
-        current implementation_prompt (or legacy brief) + repo context,
-        and persist it as a new `prompts` row stamped with the exact
-        brief_version it was generated from -- same discipline
-        generate_prompt already established, just callable from anywhere
-        a Task's prompt-relevant state just changed (create, prompt edit)."""
+        """Recompute the derived, composed TASK-LEVEL agent_prompt (no
+        specific Builder Workspace yet) and persist it as a new `prompts`
+        row stamped with the exact brief_version it was generated from --
+        same discipline generate_prompt already established, just
+        callable from anywhere a Task's prompt-relevant state just
+        changed (create, prompt edit). Once a Builder Workspace exists,
+        its own live per-workspace prompt (role/instructions/sandbox
+        included) is what actually matters -- see workspace_agent_prompt()."""
         t=task_row(tid); prompt=render_agent_prompt(t,repo_row)
         db.execute("INSERT INTO prompts(task_id,prompt_type,brief_version,content) VALUES(?,?,?,?)",(tid,"BUILDER",t["brief_version"],prompt))
         db.execute("UPDATE tasks SET agent_prompt=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(prompt,tid))
         db.event("task",tid,"PROMPT_GENERATED",f"brief_version={t['brief_version']}")
         return prompt
+    def workspace_agent_prompt(w,t=None,repo_row=None):
+        """Live per-Builder-Workspace effective prompt -- always freshly
+        computed (never stored/cached), so a role/instructions/sandbox
+        edit is reflected immediately with no separate staleness to
+        track. Only Review/QA evidence is version-pinned; this display
+        text is not."""
+        t=t or task_row(w["task_id"])
+        if repo_row is None:
+            try: repo_row=repo(w["repository_id"])
+            except HTTPException: repo_row=None
+        return render_agent_prompt(t,repo_row,workspace=w,sandbox_line=sandbox_summary_line(w))
     def render_review_prompt(t,w,report):
         """Deterministic template (section 6): the Task's own prompt/brief,
         source branch/commit, and the Builder's own completion report --
         never a diff computed by an LLM, only real recorded facts."""
         head=git.head(w["worktree_path"])
         parts=[f"# Review: {t['title']}",f"Branch: {w['branch']} @ {head[:12]}",""]
-        if (t.get("implementation_prompt") or "").strip(): parts+=["## TASK PROMPT",t["implementation_prompt"].strip(),""]
+        if (t.get("implementation_prompt") or "").strip() or not has_legacy_brief(t): parts+=["## TASK PROMPT",effective_task_prompt(t),""]
         elif t["brief_acceptance_criteria"]: parts+=["## ACCEPTANCE_CRITERIA",t["brief_acceptance_criteria"],""]
         if report:
             parts+=["## Builder report","WHAT_CHANGED: "+ (report["what_changed"] or "—"),"FILES_CHANGED: "+(report["files_changed"] or "—"),
@@ -382,9 +429,10 @@ def create_app(settings=None):
         action=resolve_next_action(code,wid=wid,tid=w["task_id"],sandbox_id=readiness["sandbox"]["id"] if readiness["sandbox"] else None)
         sessions=db.all("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 10",(wid,))
         review_history=decision.review_history(wid)
+        live_prompt=workspace_agent_prompt(w,task_row(w["task_id"]),repo(w["repository_id"])) if w["task_id"] else None
         return render(request,"workspace_detail.html",w=w,details=details,runs=runs,readiness=readiness,report=report,
                       manual_history=manual_history,next_action=action,sessions=sessions,
-                      task_decision=task_decision,builder=builder,review_history=review_history)
+                      task_decision=task_decision,builder=builder,review_history=review_history,live_prompt=live_prompt)
     @app.get("/api/workspaces/{wid}")
     def api_workspace(wid:int): return agent_row(wid)
     @app.post("/api/workspaces/{wid}/ready")
@@ -524,6 +572,28 @@ def create_app(settings=None):
         row=db.one("SELECT s.*,w.worktree_path,w.agent workspace_agent FROM agent_sessions s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.id=?",(sid,))
         if not row: raise HTTPException(404,"Session not found")
         return row
+    def _start_builder_session(w,mode="INTERACTIVE"):
+        """The one place 'Start Builder' actually happens: validates
+        (Task exists, Builder Workspace exists, worktree path is the
+        trusted server-resolved one, agent is in the trusted launcher
+        registry) and starts the AgentSession -- deliberately does NOT
+        check implementation_prompt at all; Task Title fallback means
+        intent is always resolvable. Snapshots the exact effective
+        Builder prompt (Task/Title-or-Prompt + role + instructions +
+        sandbox + AGENTS.md) into `prompts` at the moment of start, for
+        audit -- never a precondition for starting."""
+        if w["agent"] not in settings.agents: raise GitSafetyError("Agent is not allowed")
+        mode="VIEW_ONLY" if mode=="VIEW_ONLY" else "INTERACTIVE"
+        sid=agent_sessions.start(task_id=w["task_id"],workspace_id=w["id"],agent=w["agent"],worktree_path=w["worktree_path"],mode=mode)
+        db.event("agent",w["id"],"SESSION_STARTED",f"session={sid} mode={mode}")
+        if w.get("task_id"):
+            try:
+                t=task_row(w["task_id"]); repo_row=repo(w["repository_id"])
+                prompt=workspace_agent_prompt(w,t,repo_row)
+                db.execute("INSERT INTO prompts(task_id,workspace_id,prompt_type,brief_version,content) VALUES(?,?,?,?,?)",
+                           (w["task_id"],w["id"],"BUILDER",t["brief_version"],prompt))
+            except Exception: pass  # snapshot is best-effort audit, never blocks starting the agent
+        return sid
     @app.post("/api/workspaces/{wid}/sessions")
     def create_session(wid:int,mode:str=Form("INTERACTIVE")):
         """Command safety (section 14): the browser supplies only
@@ -531,12 +601,26 @@ def create_app(settings=None):
         resolved server-side from the trusted workspace/launcher
         registry, never taken from the request."""
         w=agent_row(wid)
-        if w["agent"] not in settings.agents: raise GitSafetyError("Agent is not allowed")
-        mode="VIEW_ONLY" if mode=="VIEW_ONLY" else "INTERACTIVE"
-        try: sid=agent_sessions.start(task_id=w["task_id"],workspace_id=wid,agent=w["agent"],worktree_path=w["worktree_path"],mode=mode)
+        try: sid=_start_builder_session(w,mode)
         except SessionError as exc: raise GitSafetyError(str(exc)) from exc
-        db.event("agent",wid,"SESSION_STARTED",f"session={sid} mode={mode}")
         return RedirectResponse(f"/workspaces/{wid}/sessions/{sid}",303)
+    @app.post("/api/tasks/{tid}/start-all-builders")
+    def start_all_builders(tid:int):
+        """[Start All Builders]: for every valid Builder Workspace that
+        isn't already RUNNING (agent_status not in the live-session set),
+        start its AgentSession -- a missing Implementation Prompt never
+        blocks any of them (Task Title fallback), and an already-running
+        one is skipped, never restarted."""
+        task_row(tid)
+        d=decision.evaluate(tid)
+        for b in d["builders"]:
+            if b["agent_status"] in ("STARTING","RUNNING","WAITING_FOR_INPUT"): continue
+            if b["agent"] not in settings.agents: continue
+            w=agent_row(b["id"])
+            if w["status"]=="CLOSED": continue
+            try: _start_builder_session(w)
+            except SessionError as exc: db.event("agent",b["id"],"SESSION_START_FAILED",str(exc))
+        return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/sessions/{sid}/stop")
     def stop_session(sid:int):
         session_row(sid); agent_sessions.stop(sid); return RedirectResponse(f"/workspaces/{session_row(sid)['workspace_id']}",303)
@@ -937,8 +1021,8 @@ def create_app(settings=None):
         primary_repo=str(form.get("repository_id","")).strip()
         primary_agent=str(form.get("agent","")).strip()
         if primary_repo and primary_agent:
-            rows.append((primary_repo,primary_agent,str(form.get("ws_role","")).strip(),
-                         str(form.get("ws_base_branch","main")).strip() or "main",
+            rows.append((primary_repo,primary_agent,str(form.get("primary_role","")).strip(),
+                         str(form.get("primary_base_branch","main")).strip() or "main",
                          str(form.get("sandbox_profile","")).strip()))
         extra_repo=form.getlist("ws_repository_id"); extra_agent=form.getlist("ws_agent")
         extra_role=form.getlist("ws_role"); extra_base=form.getlist("ws_base_branch"); extra_profile=form.getlist("ws_sandbox_profile")
@@ -985,8 +1069,13 @@ def create_app(settings=None):
         for w in workspaces:
             w["details"]=safe_details(w["worktree_path"]); w["status_label"]=workspace_status_label(w["status"])
             session=latest_session_for_workspace(w["id"]); w["session"]=session
-            try: w["sandbox_configured"]=load_sandbox_contract(Path(repo(w["repository_id"])["repo_path"])) is not None
+            w_repo=repo(w["repository_id"])
+            try: w["sandbox_configured"]=load_sandbox_contract(Path(w_repo["repo_path"])) is not None
             except SandboxContractError: w["sandbox_configured"]=True  # misconfigured contract is not "absent"
+            # Live per-Builder Workspace prompt (Task/Title-fallback + role
+            # + Builder Instructions + sandbox + AGENTS.md) -- always
+            # freshly computed for display, never a stored/stale copy.
+            w["live_prompt"]=workspace_agent_prompt(w,t,w_repo)
             sb=next((s for s in sbxs if s["owner_type"]=="AGENT_WORKSPACE" and s["owner_id"]==w["id"]),None)
             if sb:
                 v=sandbox_view(sb); v["stale"]=sandboxes.is_stale(sb["id"],sandbox_current_commits(sb["id"]))
@@ -1010,7 +1099,7 @@ def create_app(settings=None):
         # Task's risk policy actually requires, ✓/○ from the same
         # decision the rest of the page reads -- explains exactly why
         # not ready, never a second ad hoc readiness calculation.
-        gates=[{"label":"Task Prompt written","ok":decision.brief_complete(t)},
+        gates=[{"label":"Task intent resolvable","ok":decision.brief_complete(t),"note":f"source: {d['prompt_source'].replace('_',' ').title()}"},
                {"label":"At least one Builder Workspace","ok":bool(workspaces)},
                {"label":"All Builder Workspaces submitted for review","ok":bool(workspaces) and all(b["ready"] for b in workspaces)},
                {"label":"All reviews PASS (exact commit, current Brief)","ok":bool(workspaces) and all(b["review_status"]=="PASS" for b in workspaces)}]
@@ -1043,6 +1132,17 @@ def create_app(settings=None):
         directly so automation/tests never have to re-derive status/
         stage/gates from raw child rows themselves."""
         task_row(tid); return decision.evaluate(tid)
+    @app.post("/api/workspaces/{wid}/builder-instructions")
+    def save_builder_instructions(wid:int,builder_instructions:str=Form("")):
+        """Optional, per-Builder-Workspace extra instructions layered on
+        top of the Task's own effective prompt -- e.g. distinguishing what
+        a Backend Builder should do from what a Firmware Builder on the
+        same Task should do. Never required; empty means 'use the Task
+        prompt alone'. Not separately versioned (see migration V8)."""
+        w=agent_row(wid)
+        db.execute("UPDATE agent_workspaces SET builder_instructions=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(builder_instructions.strip(),wid))
+        db.event("agent",wid,"BUILDER_INSTRUCTIONS_SAVED")
+        return RedirectResponse(f"/tasks/{w['task_id']}" if w.get("task_id") else f"/workspaces/{wid}",303)
     def add_task_workspace(tid,repository_id,agent,role,base_branch,sandbox_profile):
         """Single source for 'create one Agent Workspace inside a Task':
         used by the classic one-at-a-time /api/tasks/{tid}/workspaces route

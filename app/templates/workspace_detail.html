@@ -7,7 +7,8 @@
 <section class="cards">
 {% if task_decision %}<article><b>{{task_decision.status.replace('_',' ')}}</b><span>Task Status</span></article>{% endif %}
 <article><b>{{w.status}}</b><span>Workspace Status</span></article>
-{% if builder %}<article><b>{{builder.review_status}}</b><span>Review Status</span></article>{% endif %}
+{% if builder %}<article><b>{{builder.agent_status.replace('_',' ')}}</b><span>Agent Status</span></article>
+<article><b>{{builder.review_status}}</b><span>Review Status</span></article>{% endif %}
 <article><b>{{readiness.sandbox_status.replace('_',' ') if readiness.sandbox_configured else 'NOT CONFIGURED'}}</b><span>Sandbox Status</span></article>
 <article><b>{{readiness.automated_status.replace('_',' ')}}</b><span>Test Status (automated)</span></article>
 <article><b>{{readiness.manual.status.replace('_',' ')}}</b><span>Test Status (manual)</span></article>
@@ -33,8 +34,16 @@
 {% endif %}
 
 <h3 class="subgroup">Source</h3>
-<section class="development"><div><span class="section-kicker">DEVELOPMENT</span><h3>Mở đúng source được cấp</h3><p><b>Agent:</b> <span class="cap">{{w.agent}}</span></p><small>Worktree</small><code>{{w.worktree_path}}</code><p class="launch-feedback" data-launch-feedback="{{w.id}}"></p></div><div class="development-actions">{% if w.agent in ['codex','claude'] %}<button onclick="launchWorkspace({{w.id}},'agent',this)">Open {{w.agent|capitalize}}</button>{% endif %}<button class="secondary" onclick="launchWorkspace({{w.id}},'terminal',this)">Open Terminal</button><button class="ghost" onclick="navigator.clipboard.writeText('{{w.worktree_path}}')">Copy Path</button></div></section>
+<section class="development"><div><span class="section-kicker">DEVELOPMENT</span><h3>Mở đúng source được cấp</h3><p><b>Agent:</b> <span class="cap">{{w.agent}}</span></p><small>Worktree</small><code>{{w.worktree_path}}</code><p class="launch-feedback" data-launch-feedback="{{w.id}}"></p></div><div class="development-actions">{% if w.agent in ['codex','claude'] %}<button onclick="launchWorkspace({{w.id}},'agent',this)">Start {{w.agent|capitalize}}</button>{% endif %}<button class="secondary" onclick="launchWorkspace({{w.id}},'terminal',this)">Open Terminal</button><button class="ghost" onclick="navigator.clipboard.writeText('{{w.worktree_path}}')">Copy Path</button></div></section>
 <section class="facts"><div><small>Repository</small><b>{{w.repo_name}}</b></div><div><small>Branch</small><code>{{w.branch}}</code></div><div><small>Base</small><code>{{w.base_branch}} @ {{w.base_commit[:8]}}</code></div><div><small>Current HEAD</small><code>{{details.head[:12] if details.head else 'closed'}}</code></div><div class="wide"><small>Worktree</small><code>{{w.worktree_path}}</code></div></section>
+{% if live_prompt %}
+<section class="panel">
+<details><summary>+ Builder Instructions (optional, workspace này thôi)</summary>
+<form method="post" action="/api/workspaces/{{w.id}}/builder-instructions"><textarea name="builder_instructions" rows="2" placeholder="Ví dụ: Add API support only.">{{w.builder_instructions}}</textarea><button class="ghost">Save Instructions</button></form>
+</details>
+<details><summary>+ Generated Builder Prompt (Task/Title fallback + role + rule)</summary><pre class="prompt-box">{{live_prompt}}</pre></details>
+</section>
+{% endif %}
 <section class="panel"><h3>Git status</h3><h4>Modified</h4><pre>{{details.modified|join('\n') or 'Clean'}}</pre><h4>Untracked</h4><pre>{{details.untracked|join('\n') or 'None'}}</pre><h4>Last 10 commits</h4><pre>{{details.commits|join('\n')}}</pre></section>
 
 <h3 class="subgroup">Web Terminal <a href="/help#live-agents">? Web terminal dùng thế nào?</a></h3>

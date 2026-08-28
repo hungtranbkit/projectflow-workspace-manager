@@ -156,6 +156,79 @@ This file and `PROJECT.yaml` are the standalone repository contract.
   `/api/tasks/new-with-workspace` (BACKLOG-skip quick-start) flows in one
   form -- those two routes are kept, unmodified, for API back-compat, but
   are no longer linked from the primary "New Task" UI.
+  `/api/tasks/create`'s Advanced "additional repositories" array uses
+  `ws_repository_id`/`ws_agent`/`ws_role`/`ws_base_branch`/
+  `ws_sandbox_profile` (`getlist`) -- the *primary* row's own role/base
+  branch fields are deliberately named `primary_role`/
+  `primary_base_branch` instead, never `ws_role`/`ws_base_branch`. Reusing
+  the array's field name for the primary row was a real bug once a second
+  Builder Workspace row existed on the same form (the primary value and
+  the first array entry silently collided) -- keep the names distinct.
+
+## Builder execution UX with Task Title fallback (V1)
+
+- `effective_task_prompt(t)` / `prompt_source(t)` (module-level functions
+  in `app/services/task_decision_service.py`, the one canonical
+  implementation -- imported into `app/main.py`, never duplicated) are
+  the Task Title fallback: `implementation_prompt` when non-empty, else
+  `title` itself (mandatory at Task creation, so always resolvable).
+  `TaskDecisionService.evaluate()` exposes both (`prompt_source`,
+  `effective_task_prompt`) in its result so no route/template re-derives
+  them. Start Builder, Start All Builders, and Task creation itself are
+  never gated on `implementation_prompt` being non-empty -- only on Task
+  title being non-empty (enforced once, at Task creation).
+- `render_agent_prompt(t, repo_row=None, workspace=None, sandbox_line=None)`
+  is the one function that composes the actual Builder prompt: TASK (the
+  effective, title-or-prompt intent, verbatim) -> TASK TITLE -> REPOSITORY
+  -> BRANCH/WORKTREE (when a specific workspace is given) -> SANDBOX ->
+  ROLE + optional BUILDER INSTRUCTIONS (workspace-specific) -> RULES (a
+  fixed instruction to read AGENTS.md/PROJECT.yaml, plus an excerpt if
+  found) -> COMPLETION. The user's own text is confined to its own TASK
+  section; RULES/COMPLETION are always separate, later, Workspace-Manager-
+  owned sections a Task's text cannot reach into or override.
+- `workspace_agent_prompt(w, t=None, repo_row=None)` is the per-Builder-
+  Workspace LIVE prompt (role/instructions/sandbox included) -- always
+  freshly computed for display (Task Detail, Workspace Detail), never
+  stored/cached, so an instructions or role edit shows up immediately
+  with nothing to go stale. `regenerate_agent_prompt(tid, repo_row=None)`
+  remains the TASK-level (no specific workspace yet) variant, persisted
+  to `tasks.agent_prompt` + a `prompts` row, used before any Builder
+  Workspace exists and on every prompt edit.
+- `_start_builder_session(w, mode)` is the one place a Builder's
+  AgentSession actually starts (used by both `POST /api/workspaces/{id}/
+  sessions` and `POST /api/tasks/{id}/start-all-builders`) -- validates
+  only the trusted agent-launcher registry, never `implementation_prompt`.
+  It best-effort snapshots the exact live per-workspace prompt into
+  `prompts` (workspace_id set) at start time, purely for audit -- a
+  snapshot failure never blocks starting the agent.
+- `agent_workspaces.builder_instructions` (migration V8): optional,
+  per-Builder-Workspace extra instructions layered on top of the Task's
+  shared effective prompt (e.g. distinguishing a Backend Builder's job
+  from a Firmware Builder's on the same Task). Never required, never
+  separately versioned -- editing it does not bump `brief_version` and
+  has no Review/QA staleness implications of its own.
+- `TaskDecisionService.builder_view()` now also returns `agent_status`
+  (`NOT_STARTED` when no `agent_sessions` row exists at all for that
+  workspace, else the session's own real status) -- Workspace Status
+  (`CREATED`/`READY`/`CLOSED`) and Agent Status must never be shown or
+  reasoned about as the same signal. `_next_action`'s per-builder branch
+  now distinguishes `START_BUILDER` (no live session) / `VIEW_BUILDER`
+  (session STARTING/RUNNING/WAITING_FOR_INPUT) / `REVIEW_BUILDER_RESULT`
+  (session EXITED/FAILED, builder still hasn't submitted) where it used
+  to return one undifferentiated `OPEN_BUILDER` for all three. `NEXT_ACTIONS`
+  no longer includes `COMPLETE_BRIEF` or `OPEN_BUILDER` -- Task Title
+  fallback means "Selected + no Builder Workspace" goes straight to
+  `CREATE_BUILDER_WORKSPACE`, unconditionally.
+- Caveat: `agent_status` only reflects the web-PTY `AgentSession` path
+  (`/api/workspaces/{id}/sessions`). The separate desktop-launcher path
+  (`/api/workspaces/{id}/launch-agent`, the "Start Claude"/"Start Codex"
+  button's `launchWorkspace(...,'agent',...)` call) is fire-and-forget --
+  it records an event but creates no trackable session row, so a Builder
+  actually running via that path can still show `Agent: NOT STARTED`.
+  This is a pre-existing limitation of the desktop launcher, not
+  something this UX introduced; `Start All Builders` deliberately only
+  ever uses the trackable web-PTY path so "don't start an already-running
+  Builder" is a real check, not a guess.
 
 ## Verification UX (V1)
 

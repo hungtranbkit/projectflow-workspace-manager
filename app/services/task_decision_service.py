@@ -21,15 +21,38 @@ RISK_PROFILES = ("LOW", "NORMAL", "HIGH")
 RISK_GATES = {"LOW": ("REVIEW",), "NORMAL": ("REVIEW", "INTEGRATION"), "HIGH": ("REVIEW", "QA", "INTEGRATION")}
 
 NEXT_ACTIONS = (
-    "REVIEW_BACKLOG", "SELECT_FOR_DEVELOPMENT", "COMPLETE_BRIEF", "CREATE_BUILDER_WORKSPACE",
-    "OPEN_BUILDER", "RUN_BUILDER_TEST", "SUBMIT_FOR_REVIEW", "START_REVIEW", "RETURN_TO_BUILDER",
+    "REVIEW_BACKLOG", "SELECT_FOR_DEVELOPMENT", "CREATE_BUILDER_WORKSPACE",
+    "START_BUILDER", "VIEW_BUILDER", "REVIEW_BUILDER_RESULT", "RUN_BUILDER_TEST",
+    "SUBMIT_FOR_REVIEW", "START_REVIEW", "RETURN_TO_BUILDER",
     "START_QA", "CREATE_INTEGRATION", "OPEN_INTEGRATOR", "RUN_INTEGRATION_TEST", "RESOLVE_CONFLICT",
     "REBUILD_SANDBOX", "PREPARE_PR", "WAIT_FOR_MERGES", "CLOSE_TASK", "NONE",
 )
 
+# Session states that count as "the agent is actually running" for
+# next_action purposes -- matches agent_sessions.status values a live PTY
+# can be in (see AgentSessionManager).
+LIVE_SESSION_STATUSES = ("STARTING", "RUNNING", "WAITING_FOR_INPUT")
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def effective_task_prompt(t) -> str:
+    """Task Title fallback (Builder execution UX): the Implementation
+    Prompt is the task intent when non-empty; otherwise the Task title
+    itself is sufficient intent -- Start Builder is never blocked on an
+    empty Implementation Prompt, since a title is mandatory at Task
+    creation and therefore always resolvable."""
+    p = (t.get("implementation_prompt") or "").strip()
+    return p if p else (t.get("title") or "").strip()
+
+
+def prompt_source(t) -> str:
+    """Which of the two the effective prompt actually came from -- shown
+    in the UI so Title-fallback is never silently indistinguishable from
+    a deliberately-written Implementation Prompt."""
+    return "IMPLEMENTATION_PROMPT" if (t.get("implementation_prompt") or "").strip() else "TITLE"
 
 
 # Every next_action target is a GET page/anchor for the human to act on,
@@ -109,14 +132,15 @@ class TaskDecisionService:
         return self.db.all("SELECT m.*,r.repo_name FROM merge_records m JOIN repositories r ON r.id=m.repository_id WHERE m.task_id=? ORDER BY m.id", (task_id,))
 
     def brief_complete(self, t) -> bool:
-        """A Task's intent is 'complete' either way: the new single
-        Implementation Prompt (the primary path -- one non-empty prompt is
-        enough, nothing else required), or the legacy structured brief
-        (GOAL + ACCEPTANCE_CRITERIA, for Tasks created before the prompt-
-        first UX existed)."""
-        if (t.get("implementation_prompt") or "").strip():
-            return True
-        return bool((t.get("brief_goal") or "").strip() and (t.get("brief_acceptance_criteria") or "").strip())
+        """A Task's intent is always resolvable now: Implementation Prompt
+        if written, else the Task title (mandatory at creation) -- kept as
+        a method (rather than inlined `True`) only because the Overview
+        gate checklist and older callers still ask this question; it no
+        longer gates CREATE_BUILDER_WORKSPACE (see _next_action)."""
+        return bool(effective_task_prompt(t))
+
+    def latest_session(self, workspace_id):
+        return self.db.one("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (workspace_id,))
 
     def current_commit(self, worktree_path):
         try:
@@ -141,12 +165,19 @@ class TaskDecisionService:
             stale = (review["reviewed_commit"] and head and review["reviewed_commit"] != head) or \
                     (review.get("brief_version") not in (None, brief_version))
             review_status = "STALE" if stale and review["status"] in ("PASS", "RUNNING", "PENDING") else review["status"]
+        session = self.latest_session(w["id"])
+        # NOT_STARTED is never a stored agent_sessions.status -- it is the
+        # honest absence of any session row for this workspace (Workspace
+        # READY must never be misread as Agent RUNNING).
+        agent_status = session["status"] if session else "NOT_STARTED"
         return {
             "id": w["id"], "agent": w["agent"], "role": w["role"], "repo_name": w["repo_name"],
             "repository_id": w["repository_id"], "worktree_path": w["worktree_path"], "branch": w["branch"],
             "status": w["status"], "head": head, "ready": ready, "report": report,
             "review": review, "review_status": review_status,
             "fix_required": review_status == "FIX_REQUIRED",
+            "session": session, "agent_status": agent_status,
+            "builder_instructions": w.get("builder_instructions") or "",
         }
 
     # ---- the decision ---------------------------------------------------
@@ -252,14 +283,19 @@ class TaskDecisionService:
     def _next_action(self, t, builders, qa, ti, ti_repos, required_merges, risk, ready_for_main, blocking, status):
         tid = t["id"]
         if not builders:
-            if not self.brief_complete(t):
-                return _action("COMPLETE_BRIEF", "Write Task Prompt", "Describe the task in the Implementation Prompt.", f"/tasks/{tid}#prompt")
+            # Task Title fallback: intent is always resolvable (title is
+            # mandatory at creation), so there is nothing left to gate on
+            # here -- go straight to creating the first Builder Workspace.
             return _action("CREATE_BUILDER_WORKSPACE", "Create Builder Workspace", "No Builder Workspace yet.", f"/tasks/{tid}#new-workspace")
         for b in builders:
             if b["fix_required"]:
                 return _action("RETURN_TO_BUILDER", f"Fix required: {b['agent']}", (b["review"] or {}).get("findings") or "Reviewer requested changes.", f"/workspaces/{b['id']}")
             if not b["ready"]:
-                return _action("OPEN_BUILDER", f"Continue Builder: {b['agent']}", "Builder has not submitted for review yet.", f"/workspaces/{b['id']}")
+                if b["agent_status"] in LIVE_SESSION_STATUSES:
+                    return _action("VIEW_BUILDER", f"View: {b['agent']}", "Agent is running.", f"/workspaces/{b['id']}")
+                if b["agent_status"] in ("EXITED", "FAILED"):
+                    return _action("REVIEW_BUILDER_RESULT", f"Review result: {b['agent']}", "Agent session ended without a completion report yet.", f"/workspaces/{b['id']}")
+                return _action("START_BUILDER", f"Start {b['agent'].capitalize()}: {b['role'] or b['repo_name']}", "Builder Workspace ready, agent not started yet.", f"/workspaces/{b['id']}")
             if b["review_status"] in ("NONE",):
                 return _action("SUBMIT_FOR_REVIEW", f"Start Review: {b['agent']}", "Builder ready, no review started.", f"/workspaces/{b['id']}")
             if b["review_status"] == "STALE":
@@ -294,4 +330,5 @@ class TaskDecisionService:
             "builders": builders, "qa": qa, "task_integration": ti, "integration_repos": ti_repos,
             "merge_records": merges,
             "integration_eligibility": integration_eligibility or {"required": self.requires_integration(risk), "eligible": integration_eligible, "exists": bool(ti)},
+            "effective_task_prompt": effective_task_prompt(t), "prompt_source": prompt_source(t),
         }

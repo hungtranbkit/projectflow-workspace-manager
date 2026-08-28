@@ -1,14 +1,26 @@
 {% extends 'base.html' %}{% block title %}Task · {{t.title}}{% endblock %}{% block header_action %}<span class="badge {{status|lower}}">{{status.replace('_',' ')}}</span> <span class="badge">stage: {{stage}}</span> <span class="badge">Workflow: {{risk_profile}}</span> <a href="/help#test-progress">? Task đã xong tới đâu?</a>{% endblock %}{% block content %}
 
-{% if status == 'BACKLOG' %}
+{% macro prompt_source_block(t) %}
 {% if t.implementation_prompt %}
-<section class="panel" id="prompt"><h3>Task Prompt <small>v{{t.brief_version}}</small></h3>
+<p><small>Source</small><b>Implementation Prompt</b></p>
 <pre class="prompt-box">{{t.implementation_prompt}}</pre>
 <details><summary>+ Edit</summary>
 <form method="post" action="/api/tasks/{{t.id}}/prompt"><textarea name="implementation_prompt" rows="6">{{t.implementation_prompt}}</textarea><button>Save Prompt</button></form>
 </details>
-</section>
 {% else %}
+<p><small>Source</small><b>Task Title</b></p>
+<pre class="prompt-box">"{{t.title}}"</pre>
+<div class="info">Chưa có prompt chi tiết. Agent sẽ dùng tiêu đề Task làm yêu cầu chính.</div>
+<details id="prompt-edit"><summary>+ Add Detailed Prompt</summary>
+<form method="post" action="/api/tasks/{{t.id}}/prompt"><textarea name="implementation_prompt" rows="6" placeholder="Mô tả chi tiết nếu cần..."></textarea><button>Save Prompt</button></form>
+</details>
+{% endif %}
+{% endmacro %}
+
+{% if status == 'BACKLOG' %}
+<section class="panel" id="prompt"><h3>Task Prompt <small>v{{t.brief_version}}</small></h3>
+{{ prompt_source_block(t) }}
+</section>
 <section class="facts">
 <div class="wide"><small>Description</small><code>{{t.description or '—'}}</code></div>
 <div><small>Priority</small><code>{{t.priority}}</code></div>
@@ -16,11 +28,6 @@
 <div><small>Repository scope</small><code>{{t.repo_scope_id or '—'}}</code></div>
 <div class="wide"><small>Notes</small><code>{{t.notes or '—'}}</code></div>
 </section>
-<section class="panel" id="prompt"><h3>Task Prompt</h3>
-<p class="empty">Chưa có Implementation Prompt.</p>
-<form method="post" action="/api/tasks/{{t.id}}/prompt"><textarea name="implementation_prompt" rows="6" placeholder="Mô tả task bằng ngôn ngữ tự nhiên..."></textarea><button>Save Prompt</button></form>
-</section>
-{% endif %}
 <div class="readybox"><b>BACKLOG</b><p>Chưa có branch/worktree/sandbox nào được tạo. Task chỉ tồn tại như một ý định cho tới khi được chọn để làm.</p><form method="post" action="/api/tasks/{{t.id}}/select"><button class="success">Select for Development</button></form></div>
 {% else %}
 
@@ -47,14 +54,10 @@
      gated on workspace count, since editing after work has started is
      an explicit, supported flow (the resulting brief_version bump makes
      any PASS'd Review/QA stale automatically, never silently kept). -->
-<h3 class="subgroup">Task Prompt</h3>
+<h3 class="subgroup">Task Prompt <small>v{{t.brief_version}}</small></h3>
 <section class="panel" id="prompt">
-{% if t.implementation_prompt %}<pre class="prompt-box">{{t.implementation_prompt}}</pre>{% else %}<p class="empty">Chưa có Implementation Prompt.</p>{% endif %}
-<details {{'' if t.implementation_prompt else 'open'}}><summary>+ Edit Task Prompt</summary>
-<form method="post" action="/api/tasks/{{t.id}}/prompt"><textarea name="implementation_prompt" rows="6" placeholder="Mô tả task bằng ngôn ngữ tự nhiên...">{{t.implementation_prompt}}</textarea><button>Save Prompt</button></form>
-</details>
-{% if t.agent_prompt %}<details><summary>+ Generated Agent Prompt (Workspace Manager tự thêm context/rule)</summary><pre class="prompt-box">{{t.agent_prompt}}</pre></details>{% endif %}
-<div class="info">Prompt version: v{{t.brief_version}} — sửa prompt sau khi Review đã PASS sẽ làm Review đó thành STALE.</div>
+{{ prompt_source_block(t) }}
+<div class="info">Sửa prompt sau khi Review đã PASS sẽ làm Review đó thành STALE.</div>
 </section>
 {% elif not workspaces %}
 <!-- Legacy structured brief, same 'only before any workspace exists'
@@ -82,17 +85,26 @@
 
 <!-- Agents (Builder Workspaces) -->
 <h3 class="subgroup">Agents <a href="/help#task-detail-sandbox">? Xem hướng dẫn</a></h3>
+{% if workspaces %}<form method="post" action="/api/tasks/{{t.id}}/start-all-builders"><button class="ghost" type="submit">Start All Builders</button></form>{% endif %}
 <section class="panel">{% for w in workspaces %}
-<div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.role or w.repo_name}} <small>Builder Workspace</small><br><small>Repository</small> <code>{{w.repo_name}}</code> · <small>Branch</small> <code>{{w.branch}}</code> · <small>HEAD</small> <code>{{w.head[:8] if w.head else '—'}}</code> · <small>Git</small> {{'Clean' if w.details and not w.details.modified and not w.details.untracked else 'Modified'}}</div><span class="badge {{w.status|lower}}">{{w.status_label}}</span></div>
+<!-- Workspace status (allocated source) and Agent status (is the agent
+     actually running) are two separate signals -- Workspace READY must
+     never be misread as Agent RUNNING. -->
+<div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.role or w.repo_name}} <small>Builder Workspace</small><br><small>Repository</small> <code>{{w.repo_name}}</code> · <small>Branch</small> <code>{{w.branch}}</code> · <small>HEAD</small> <code>{{w.head[:8] if w.head else '—'}}</code> · <small>Git</small> {{'Clean' if w.details and not w.details.modified and not w.details.untracked else 'Modified'}}</div><span class="badge {{w.status|lower}}">Workspace: {{w.status_label}}</span></div>
+<div class="row"><div><small>Agent</small></div><span class="badge {{w.agent_status|lower}}">Agent: {{w.agent_status.replace('_',' ')}}</span></div>
 <div class="quick-actions">
-{% if w.agent in ['codex','claude'] %}<button onclick="launchWorkspace({{w.id}},'agent',this)">Open {{w.agent|capitalize}}</button>{% endif %}
+{% if w.agent in ['codex','claude'] %}<button onclick="launchWorkspace({{w.id}},'agent',this)">Start {{w.agent|capitalize}}</button>{% endif %}
 <button class="ghost" onclick="launchWorkspace({{w.id}},'terminal',this)">Open Terminal</button>
 <form method="post" action="/api/workspaces/{{w.id}}/test"><button class="ghost">Run Test</button></form>
 <a class="ghost" href="/workspaces/{{w.id}}">View Detail</a>
 </div>
 <div class="nested">
-{% if w.session %}<div class="quick-actions"><span class="badge {{w.session.status|lower}}">Session {{w.session.status}}</span><a class="ghost" href="/workspaces/{{w.id}}/sessions/{{w.session.id}}">View Live</a></div>
+{% if w.session %}<div class="quick-actions"><span class="badge {{w.session.status|lower}}">Web session: {{w.session.status}}</span><a class="ghost" href="/workspaces/{{w.id}}/sessions/{{w.session.id}}">View Live</a></div>
 {% else %}<form method="post" action="/api/workspaces/{{w.id}}/sessions"><input type="hidden" name="mode" value="INTERACTIVE"><button class="ghost">Open in Web</button></form>{% endif %}
+<details><summary>+ Builder Instructions (optional, this workspace only)</summary>
+<form method="post" action="/api/workspaces/{{w.id}}/builder-instructions"><textarea name="builder_instructions" rows="2" placeholder="Ví dụ: Add API support only.">{{w.builder_instructions}}</textarea><button class="ghost">Save Instructions</button></form>
+</details>
+<details><summary>+ Generated Builder Prompt</summary><pre class="prompt-box">{{w.live_prompt}}</pre></details>
 <div class="row"><div><small>Review</small><span class="badge {{'ready' if w.review_status=='PASS' else ('failed' if w.review_status in ['FIX_REQUIRED','BLOCKED'] else '')}}">{{w.review_status}}</span>{% if w.review %} <small>{{w.review.reviewer_agent}} @ {{(w.review.reviewed_commit or '')[:8]}}</small>{% endif %}</div>
 {% if not w.ready %}<span class="badge">not submitted for review yet</span>
 {% elif w.review_status in ['NONE','STALE'] %}<form method="post" action="/api/workspaces/{{w.id}}/start-review"><label>Reviewer<select name="reviewer_agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><button class="ghost">{{'Start Review' if w.review_status=='NONE' else 'Re-review (stale)'}}</button></form>

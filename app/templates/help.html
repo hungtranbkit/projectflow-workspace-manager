@@ -75,6 +75,15 @@
 <div class="info"><b>Tiếp theo:</b> Xem Task vừa tạo, mở agent để bắt đầu code.<br><a class="button" href="/tasks">Đi tới Tasks</a></div>
 </section>
 
+<section class="guide-section" id="prompt-required"><span class="section-kicker">HỎI ĐÁP</span><h3>Implementation Prompt có bắt buộc không?</h3>
+<p><b>Không.</b> Nếu bạn chỉ cần giao việc nhanh, chỉ cần nhập tên Task.</p>
+<div class="example"><small>Ví dụ</small><p><b>Task:</b> Fix lỗi kiosk không gửi sản lượng</p></div>
+<p>Nếu Prompt để trống, agent sẽ nhận chính tiêu đề này làm yêu cầu — Task Detail sẽ hiện rõ <b>Source: Task Title</b> để bạn biết agent đang chạy theo tiêu đề, không phải một prompt chi tiết bạn quên viết. Đây không phải lỗi, và <b>Start Builder không bao giờ bị chặn</b> chỉ vì Implementation Prompt trống.</p>
+<p>Với task phức tạp, nên thêm Prompt chi tiết để mô tả:</p>
+<ul class="checklist"><li>yêu cầu</li><li>giới hạn</li><li>cách test</li><li>kết quả mong đợi</li></ul>
+<p>Thêm Prompt chi tiết sau khi Builder đã chạy hoặc đã Review PASS vẫn được — Task Prompt version sẽ tăng lên và mọi Review/QA dựa trên phiên bản cũ tự động hiện <code>STALE</code>, không bao giờ âm thầm coi tiêu đề và prompt chi tiết là cùng một phiên bản.</p>
+</section>
+
 <section class="guide-section" id="task-vs-worktree"><span class="section-kicker">PHÂN BIỆT</span><h3>Task khác Worktree thế nào?</h3>
 <p>Bạn quản lý <b>Task</b> — Workspace Manager tự lo phần Git bên dưới.</p>
 <div class="sample-grid">
@@ -87,15 +96,20 @@
 </section>
 
 <section class="guide-section" id="agent-workspaces"><span class="section-kicker">AGENT WORKSPACE</span><h3>Agent Workspace là gì?</h3>
-<p>Mỗi Agent Workspace là một vùng source riêng cho một agent. Claude sửa task A sẽ không sửa trực tiếp vào source đang dùng bởi Codex hoặc main.</p>
+<p>Mỗi Agent Workspace (Builder Workspace) là một vùng source riêng cho một agent. Claude sửa task A sẽ không sửa trực tiếp vào source đang dùng bởi Codex hoặc main.</p>
 <div class="flow-tree"><code>Claude</code><div>→ branch riêng</div><div>→ worktree riêng</div><code>Codex</code><div>→ branch riêng</div><div>→ worktree riêng</div></div>
 <div class="rule">MỘT AGENT WORKSPACE = MỘT REPOSITORY + MỘT BRANCH + MỘT WORKTREE</div>
-<p>Bạn không cần tự <code>cd</code> tới thư mục worktree. Bấm <b>Open Claude</b> / <b>Open Codex</b> để Workspace Manager mở đúng nơi (xem mục kế tiếp).</p>
+<p><b>Add Builder Workspace</b> và <b>Start Builder</b> là hai bước khác nhau, đừng nhầm lẫn:</p>
+<div class="sample-grid">
+<article><b>Add Builder Workspace</b><small>= tạo source riêng. Chỉ cấp phát branch/worktree (và sandbox nếu có) — agent chưa chạy.</small></article>
+<article><b>Start Builder</b><small>= bắt đầu chạy agent. Bấm <b>Start Claude</b> / <b>Start Codex</b> để Workspace Manager thực sự mở CLI agent tại đúng worktree đó.</small></article>
+</div>
+<p>Bạn không cần tự <code>cd</code> tới thư mục worktree. Bấm <b>Start Claude</b> / <b>Start Codex</b> để Workspace Manager mở đúng nơi (xem mục kế tiếp).</p>
 </section>
 
 <section class="guide-section" id="open-agent"><span class="section-kicker">DESKTOP LAUNCHER</span><h3>Bắt đầu cho agent sửa code</h3>
 <p>Trong Agent Workspace có các nút:</p>
-<div class="sample-grid"><article><b>Open Claude / Open Codex</b><small>Mở terminal ngay tại worktree của task, chạy sẵn agent CLI.</small></article><article><b>Open Terminal</b><small>Chỉ mở terminal tại đúng worktree, không tự chạy agent.</small></article><article><b>Copy Path</b><small>Sao chép đường dẫn worktree nếu bạn muốn tự mở bằng công cụ khác.</small></article><article><b>Mark Ready</b><small>Báo workspace đã sẵn sàng để tích hợp, sau khi đã commit.</small></article></div>
+<div class="sample-grid"><article><b>Start Claude / Start Codex</b><small>Mở terminal ngay tại worktree của task, chạy sẵn agent CLI (Start Builder).</small></article><article><b>Open Terminal</b><small>Chỉ mở terminal tại đúng worktree, không tự chạy agent.</small></article><article><b>Copy Path</b><small>Sao chép đường dẫn worktree nếu bạn muốn tự mở bằng công cụ khác.</small></article><article><b>Open in Web</b><small>Chạy agent trong terminal ngay trên trình duyệt (PTY thật) thay vì mở app desktop — xem <a href="#live-agents">Web terminal</a>.</small></article></div>
 <div class="example"><small>Ví dụ</small><p>Nếu workspace thuộc Claude: bấm <b>Open Claude</b>. Terminal sẽ mở ngay tại đúng worktree của task.</p></div>
 <div class="warning"><b>Không nên</b> mở Claude/Codex ở source main/shared rồi yêu cầu sửa cùng task.</div>
 <div class="alert"><b>Cảnh báo mức quyền cao</b><p>Claude có thể được mở bằng <code>claude --dangerously-skip-permissions</code>. Codex có thể được mở bằng <code>codex --yolo</code>. Các mode này cho agent quyền thao tác mạnh trong worktree. Chỉ dùng vì source của task đã được cô lập — không dùng các mode này trên main hoặc source dùng chung.</p></div>

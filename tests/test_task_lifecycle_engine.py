@@ -66,13 +66,19 @@ def test_01_backlog_no_workspace(client, git_repo):
 
 
 def test_02_selected_no_brief_no_workspace(client, git_repo):
+    """Task Title fallback: intent is always resolvable (title is
+    mandatory at creation), so there is no COMPLETE_BRIEF gate anymore --
+    Selected + no Builder Workspace goes straight to CREATE_BUILDER_WORKSPACE
+    even with an empty Implementation Prompt."""
     root, repo = git_repo
     register(client, repo, "demo")
     tid = new_task(client, "Case 2")
     client.post(f"/api/tasks/{tid}/select")
     d = decision(client, tid)
     assert d["status"] == "ACTIVE" and d["stage"] == "PLANNING"
-    assert d["next_action"]["action"] == "COMPLETE_BRIEF"
+    assert d["next_action"]["action"] == "CREATE_BUILDER_WORKSPACE"
+    assert d["prompt_source"] == "TITLE"
+    assert d["effective_task_prompt"] == "Case 2"
 
 
 def test_03_brief_complete_no_workspace(client, git_repo):
@@ -94,8 +100,9 @@ def test_04_workspace_created_not_submitted(client, git_repo):
     w = add_workspace(client, tid, rid)
     d = decision(client, tid)
     assert d["stage"] == "DEVELOPMENT"
-    assert d["next_action"]["action"] == "OPEN_BUILDER"
+    assert d["next_action"]["action"] == "START_BUILDER"
     assert d["builders"][0]["ready"] is False
+    assert d["builders"][0]["agent_status"] == "NOT_STARTED"
 
 
 def test_05_submitted_no_review(client, git_repo):

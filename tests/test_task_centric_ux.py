@@ -263,7 +263,7 @@ def test_test_readiness_no_partial_yes(client, git_repo, sandboxable_repo_factor
 
 def test_blocking_workspace_shown_and_next_action_progresses(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
     """The Task-level next_action (TaskDecisionService) progresses through
-    OPEN_BUILDER -> SUBMIT_FOR_REVIEW -> START_REVIEW -> CREATE_INTEGRATION
+    START_BUILDER -> SUBMIT_FOR_REVIEW -> START_REVIEW -> CREATE_INTEGRATION
     as the one Builder Workspace moves through the gate model. (The
     older per-sandbox "Run Tests"/"Open App and Verify" steps still exist,
     but now live only on the Workspace's own Runtime section, a separate
@@ -283,7 +283,7 @@ def test_blocking_workspace_shown_and_next_action_progresses(client, git_repo, s
     page = client.get(f"/tasks/{tid}").text
     assert "codex" in page
     d = client.get(f"/api/tasks/{tid}/decision").json()
-    assert d["next_action"]["action"] == "OPEN_BUILDER"
+    assert d["next_action"]["action"] == "START_BUILDER"
 
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
     d = client.get(f"/api/tasks/{tid}/decision").json()
