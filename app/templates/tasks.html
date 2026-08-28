@@ -29,22 +29,18 @@
 </section>
 
 <section class="panel" id="new"><h3>New Task</h3>
-<p><small>Mô tả task bằng một prompt tự nhiên. Bỏ trống Repository/Agent để chỉ lưu vào <b>Backlog</b> (chưa tạo branch/worktree/sandbox nào) — điền vào để tạo &amp; bắt đầu code luôn.</small></p>
+<p><small>Chỉ Task title là bắt buộc. Bỏ trống Repository/Agent để chỉ lưu vào <b>Backlog</b> (chưa tạo branch/worktree/sandbox nào) — điền vào để tạo &amp; bắt đầu code luôn.</small></p>
 <form method="post" action="/api/tasks/create">
-<label>Task title<input name="title" required placeholder="Update the MESFlow default password"></label>
-<label>Implementation Prompt<textarea name="implementation_prompt" rows="6" placeholder="Update the MESFlow default password.
-The seeded admin should use the new password.
-First login must still require password change.
-Do not affect existing users.
-Verify in a fresh sandbox that the new password works and old password does not.
-Run tests, commit, and report how to verify."></textarea></label>
+<label>Task title<input name="title" required placeholder="Fix lỗi kiosk không gửi sản lượng"></label>
+<label>Implementation Prompt (không bắt buộc)<textarea name="implementation_prompt" rows="6" placeholder="Mô tả chi tiết nếu cần.
+Nếu để trống, hệ thống sẽ dùng tiêu đề Task làm prompt cho agent."></textarea></label>
 <label>Repository<select name="repository_id"><option value="">(chưa chọn — vào Backlog)</option>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
 <label>Agent<select name="agent"><option value="">(chưa chọn)</option>{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label>
 <label>Sandbox<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label>
 <button class="success">Create &amp; Start</button>
 <details><summary>Advanced</summary>
-<label>Base branch<input name="ws_base_branch" value="main"></label>
-<label>Role<input name="ws_role" placeholder="Backend / Firmware / Frontend"></label>
+<label>Base branch<input name="primary_base_branch" value="main"></label>
+<label>Role<input name="primary_role" placeholder="Backend / Firmware / Frontend"></label>
 <label>Workflow<select name="risk_profile">
 <option value="LOW">Low — code + review</option>
 <option value="NORMAL" selected>Normal — code + review + integration</option>

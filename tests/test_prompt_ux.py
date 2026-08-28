@@ -75,7 +75,7 @@ def test_create_and_start_with_repository_and_agent(client, git_repo):
     assert w["agent"] == "claude" and w["repository_id"] == rid
     d = decision(client, tid)
     assert d["stage"] == "DEVELOPMENT"
-    assert d["next_action"]["action"] == "OPEN_BUILDER"
+    assert d["next_action"]["action"] == "START_BUILDER"
 
 
 def test_advanced_fields_optional_with_correct_defaults(client, git_repo):
