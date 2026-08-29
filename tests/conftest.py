@@ -16,6 +16,22 @@ def git_repo(tmp_path):
     run(repo,"git","add","."); run(repo,"git","commit","-m","base")
     return root,repo
 
+def build_client(settings):
+    """Shared TestClient factory -- ALWAYS use this (never a bare
+    `TestClient(create_app(settings))`) so every test, including ones
+    that build a second/third app instance to simulate a process
+    restart, gets the same synchronous-spawn override below.
+    Button-state-ux: SandboxManager.provision/reset_data/cleanup run
+    their real docker work via self.spawn (a real background thread in
+    production, so a browser request never blocks on `docker compose
+    up/down`). Tests override it to run synchronously inline -- every
+    existing assertion made right after calling one of these methods
+    still sees the already-finished real result; docker itself is
+    still 100% real either way, only the thread scheduling differs."""
+    c=TestClient(create_app(settings))
+    c.app.state.sandboxes.spawn=lambda fn,args=():fn(*args)
+    return c
+
 @pytest.fixture
 def client(git_repo,tmp_path):
     root,_=git_repo
@@ -23,7 +39,7 @@ def client(git_repo,tmp_path):
     # ~/.local/state/projectflow-workspace-manager/ -- sandbox env files
     # must never leak into (or be polluted by) a real user's state dir.
     settings=Settings(root,"127.0.0.1",8765,tmp_path/"test.db",30,configured_state_dir=tmp_path/"state")
-    return TestClient(create_app(settings))
+    return build_client(settings)
 
 def make_repo(root, name, project_yaml_extra=""):
     """A disposable git repo with a minimal but real PROJECT.yaml -- shared

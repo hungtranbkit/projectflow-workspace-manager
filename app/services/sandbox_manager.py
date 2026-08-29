@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -50,6 +51,17 @@ class SandboxManager:
         self.state_dir = Path(state_dir)
         self.max_running = max_running
         self.default_retention_hours = default_retention_hours
+        # Injectable, real-by-default (matches the runner/launcher DI
+        # pattern already used elsewhere in this codebase): provision/
+        # reset_data/cleanup's slow docker work runs via self.spawn so a
+        # route can redirect immediately instead of blocking the whole
+        # request on `docker compose up/down` (button-state-ux). Tests
+        # override this to run synchronously inline (see conftest.py) so
+        # every existing assertion right after calling one of these
+        # methods keeps seeing the already-finished real result --
+        # docker itself is still 100% real either way, only the thread
+        # scheduling differs.
+        self.spawn = lambda fn, args=(): threading.Thread(target=fn, args=args, daemon=True).start()
 
     # ---- capacity -------------------------------------------------
     def running_count(self) -> int:
@@ -124,6 +136,13 @@ class SandboxManager:
 
     # ---- provisioning ---------------------------------------------------
     def provision(self, sandbox_id: int) -> None:
+        """Validates + flips the sandbox to PROVISIONING synchronously
+        (so a route that just called this can redirect immediately and
+        the very next page load, even from a different tab, already sees
+        PROVISIONING -- never the stale pre-click status), then runs the
+        actual `docker compose up` + health check in a background thread.
+        Button-feedback: this is what makes 'Provisioning...' survive a
+        refresh instead of freezing the tab for the whole docker call."""
         sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
         if not sb: raise SandboxError("SANDBOX_NOT_FOUND", "sandbox not found")
         if not self.capacity_available() and sb["status"] not in ("RUNNING", "STARTING", "PROVISIONING"):
@@ -136,6 +155,10 @@ class SandboxManager:
 
         op_id = self._op_start(sandbox_id, "PROVISION")
         self.db.execute("UPDATE sandboxes SET status='PROVISIONING',updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
+        self.spawn(self._provision_worker, (sandbox_id, op_id))
+
+    def _provision_worker(self, sandbox_id: int, op_id: int) -> None:
+        sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
         try:
             provider = self.db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1", (sandbox_id,))
             repo_path = Path(provider["worktree_path"])
@@ -180,7 +203,9 @@ class SandboxManager:
         except SandboxError as exc:
             self._op_finish(op_id, "FAILED", 1, "", str(exc))
             self.db.execute("UPDATE sandboxes SET status='FAILED',error_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (exc.code, str(exc), sandbox_id))
-            raise
+            self.db.event("sandbox", sandbox_id, "SANDBOX_PROVISION_FAILED", exc.code)
+            # running in a background thread now -- already fully recorded
+            # above; nothing left to catch a re-raise here, so don't.
 
     def _record_outputs(self, sandbox_id: int, contract: dict, port_outputs: dict[str, str]) -> None:
         sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
@@ -279,11 +304,19 @@ class SandboxManager:
         if not provider: raise SandboxError("NO_SOURCE", "sandbox has no source to rebuild from")
         contract = load_sandbox_contract(Path(provider["worktree_path"]))
         if contract is None: raise SandboxContractError("SANDBOX_CONTRACT_REQUIRED", "sandbox: contract missing")
-        env_path = Path(sb["environment_path"]) / ".env"
-        compose_file = Path(provider["worktree_path"]) / contract["compose_file"]
+        # Everything above is a fast, local, synchronous validation --
+        # everything below is the slow docker-backed part, so the status
+        # flip to RESETTING happens here, before returning to the route,
+        # exactly like provision()'s PROVISIONING flip (button-feedback:
+        # 'Resetting data...' is correct even on an immediate refresh).
         op_id = self._op_start(sandbox_id, "RESET_DATA")
         self.db.execute("UPDATE sandboxes SET status='RESETTING',updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
         self.db.event("sandbox", sandbox_id, "SANDBOX_RESET_REQUESTED", provider["commit_sha"])
+        self.spawn(self._reset_data_worker, (sandbox_id, sb, provider, contract, op_id))
+
+    def _reset_data_worker(self, sandbox_id: int, sb: dict, provider: dict, contract: dict, op_id: int) -> None:
+        env_path = Path(sb["environment_path"]) / ".env"
+        compose_file = Path(provider["worktree_path"]) / contract["compose_file"]
         try:
             result = self.runtime.compose_down(sb["compose_project"], compose_file, env_path, Path(provider["worktree_path"]), remove_volumes=True)
             self._op_finish(op_id, "SUCCESS" if result.returncode == 0 else "FAILED", result.returncode, result.stdout, result.stderr)
@@ -297,7 +330,10 @@ class SandboxManager:
         # Data volumes are gone; source/branch/commit/ports are untouched.
         # provision() re-runs `compose up` (which recreates the removed
         # volumes fresh) against the exact same source, then the usual
-        # health check -- the same tracked path a normal Start goes through.
+        # health check -- the same tracked path a normal Start goes
+        # through. provision() does its own quick sync flip + spawns its
+        # own worker thread -- calling it from inside this worker thread
+        # is fine, it never blocks the original request either way.
         self.provision(sandbox_id)
 
     def mark_cleanup_eligible(self, sandbox_id: int, retention_hours: int | None = None) -> None:
@@ -309,14 +345,24 @@ class SandboxManager:
     def cleanup(self, sandbox_id: int, force: bool = False) -> None:
         sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
         if not sb: return
-        if sb["status"] == "CLOSED": return
+        if sb["status"] in ("CLOSED", "CLEANING"): return
         if not force and sb["status"] not in ("CLEANUP_ELIGIBLE", "STOPPED", "FAILED"):
             raise SandboxError("SANDBOX_NOT_CLEANUP_ELIGIBLE", f"status={sb['status']}")
         if not self.runtime.verify_owned(sb["compose_project"], sandbox_id):
             raise SandboxError("OWNERSHIP_UNVERIFIED", "refusing to clean unlabeled resources")
 
+        # CLEANING was already a recognized transitional status elsewhere
+        # (cleanup_worker's stuck-state reconciliation, mark_cleanup_
+        # eligible's guard) but nothing ever actually set it -- a Cleanup
+        # click looked unchanged on the button/status badge for the
+        # entire compose-down. Set it synchronously here, before
+        # dispatching the real teardown to a background thread.
         op_id = self._op_start(sandbox_id, "CLEANUP")
+        self.db.execute("UPDATE sandboxes SET status='CLEANING',updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
         provider = self.db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1", (sandbox_id,))
+        self.spawn(self._cleanup_worker, (sandbox_id, sb, provider, op_id))
+
+    def _cleanup_worker(self, sandbox_id: int, sb: dict, provider: dict | None, op_id: int) -> None:
         try:
             contract = load_sandbox_contract(Path(provider["worktree_path"])) if provider else None
             if contract:

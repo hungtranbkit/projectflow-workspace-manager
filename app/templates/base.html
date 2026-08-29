@@ -21,4 +21,21 @@
 <a class="nav-item{{ ' active' if _path == '/help' else '' }}" href="/help">Hướng dẫn</a>
 </nav><footer>Local only · v0.1.0</footer></aside>
 <main><header><div><span class="eyebrow">ONE AGENT · ONE BRANCH · ONE WORKTREE</span><h2>{% block title %}{% endblock %}</h2></div>{% block header_action %}{% endblock %}</header>{% block content %}{% endblock %}</main>
-<script>async function launchWorkspace(id,kind,button){let original=button.textContent;button.disabled=true;button.textContent=kind==='agent'?'Launching agent...':'Opening terminal...';let feedback=document.querySelector(`[data-launch-feedback="${id}"]`);try{let response=await fetch(`/api/workspaces/${id}/${kind==='agent'?'launch-agent':'open-terminal'}`,{method:'POST'}),data=await response.json();if(!response.ok)throw data;if(feedback){feedback.textContent=data.message+(data.fallback?` · Fallback: ${data.fallback}`:'');feedback.className='launch-feedback error'}else alert(data.message);button.textContent=data.ok?'Launch requested':original}catch(error){let message=error.message||'Không mở được terminal';if(feedback){feedback.textContent=message+(error.fallback?` · Fallback: ${error.fallback}`:'');feedback.className='launch-feedback error'}else alert(message);button.textContent=original}finally{setTimeout(()=>{button.disabled=false;button.textContent=original},1800)}}setTimeout(()=>{if(document.querySelector('[data-running]'))location.reload()},3000)</script></body></html>
+<script>async function launchWorkspace(id,kind,button){let original=button.textContent;button.disabled=true;button.textContent=kind==='agent'?'Launching agent...':'Opening terminal...';let feedback=document.querySelector(`[data-launch-feedback="${id}"]`);try{let response=await fetch(`/api/workspaces/${id}/${kind==='agent'?'launch-agent':'open-terminal'}`,{method:'POST'}),data=await response.json();if(!response.ok)throw data;if(feedback){feedback.textContent=data.message+(data.fallback?` · Fallback: ${data.fallback}`:'');feedback.className='launch-feedback error'}else alert(data.message);button.textContent=data.ok?'Launch requested':original}catch(error){let message=error.message||'Không mở được terminal';if(feedback){feedback.textContent=message+(error.fallback?` · Fallback: ${error.fallback}`:'');feedback.className='launch-feedback error'}else alert(message);button.textContent=original}finally{setTimeout(()=>{button.disabled=false;button.textContent=original},1800)}}
+// Action-button feedback (button-state-ux): every state-changing form can
+// carry data-loading-label -- on submit, its button is disabled and
+// relabeled INSTANTLY, client-side, before the network round trip even
+// starts (works for a plain POST+redirect, no fetch/AJAX needed) and a
+// second click physically cannot fire (button.disabled). The actual
+// IDLE->RUNNING->SUCCEEDED/FAILED state is always the server-persisted
+// truth (operations/test_runs/sandbox_operations, rendered by Jinja on
+// the next page) -- this is only the instant, best-effort first frame.
+document.querySelectorAll('form[data-loading-label]').forEach(function(f){f.addEventListener('submit',function(){var b=f.querySelector('button');if(!b||b.disabled)return;b.disabled=true;b.textContent=f.getAttribute('data-loading-label');b.classList.add('is-loading')})});
+// Any element rendered with data-running means the server considers
+// something for this page still QUEUED/RUNNING right now (a test run, a
+// merge/push/PR operation, a sandbox provision/reset/cleanup) -- reload
+// once, shortly, so the page re-renders from real current state instead
+// of a click-time snapshot. Each reload re-arms this same check, so it
+// keeps polling for as long as something stays active, and stops on its
+// own the moment nothing is (no runaway timers left behind).
+setTimeout(()=>{if(document.querySelector('[data-running]'))location.reload()},1500)</script></body></html>

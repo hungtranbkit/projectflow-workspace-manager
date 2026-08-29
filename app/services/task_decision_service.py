@@ -391,6 +391,44 @@ class TaskDecisionService:
         b = next((x for x in d["builders"] if x["repository_id"] == repository_id), None)
         return (b["branch"], b["head"]) if b else (None, None)
 
+    # ---- one dominant primary action, per Integration (sections 17-20) --
+    def integration_next_action(self, ti_repo, task_id, merge_record=None):
+        """The ONE next real action for a single Integration Workspace --
+        the exact same ladder _next_action uses inside the Task wizard,
+        extracted so the Integration page itself can show one dominant
+        primary action derived from this SAME authoritative decision,
+        never a second, independently-drifting ordering (section 19).
+        `target` is always None here -- callers (Task wizard vs.
+        Integration page) fill in whatever anchor/URL makes sense for
+        where they're rendering this from."""
+        if ti_repo["status"] == "CONFLICT":
+            return _action("RESOLVE_CONFLICT", "Resolve Conflict", "Integration has a merge conflict.", None)
+        if ti_repo["status"] == "READY_FOR_MAIN":
+            # Callers inside the Task wizard's own multi-repo ladder never
+            # reach here with an already-ready repo (the blocker search
+            # only ever picks a NOT-ready one) -- this branch exists for
+            # the Integration page's own direct call, so a freshly
+            # confirmed Ready for Main never re-offers itself as if still
+            # pending (section 17: a completed action must not linger).
+            return _action("NONE", "Ready for Main", "Already confirmed Ready for Main -- waiting on the Task's Merge step.", None)
+        gs = ti_repo.get("gate_status") or {}
+        failures = gs.get("failures") or []
+        unresolved = [f for f in failures if f["classification"] != "WAIVED"]
+        if unresolved and all(f["classification"] == "BASELINE_FAILURE" for f in unresolved):
+            return _action("REVIEW_BASELINE_FAILURE", "Review Baseline Failure",
+                            f"{len(unresolved)} failure(s) match verified baseline evidence -- waive or fix the baseline.", None)
+        if unresolved:
+            return _action("FIX_INTEGRATION_FAILURE", "Fix Integration Failure",
+                            f"{len(unresolved)} new/unclassified failure(s) block Ready for Main.", None)
+        if not gs or gs.get("tests_status") in (None, "NOT_RUN"):
+            return _action("RUN_INTEGRATION_TEST", "Run Integration Tests", "Integration exists, tests not current/passing.", None)
+        if ti_repo.get("push_status") != "PUSHED" or gs.get("head") != ti_repo.get("last_pushed_head"):
+            return _action("PUSH_INTEGRATION", "Push Integration Branch",
+                            "Tests pass on this HEAD, but it has not been pushed to GitHub yet.", None)
+        if merge_record and merge_record.get("ci_status") == "PENDING":
+            return _action("WAIT_FOR_CI", "Waiting for CI", "Pushed -- waiting for GitHub CI on the updated PR.", None)
+        return _action("CONFIRM_INTEGRATION_READY", "Mark Ready for Main", "Tests pass and the branch is pushed -- confirm Ready for Main.", None)
+
     def merge_gate_status(self, d, repository_id, merge_record):
         """Every reason [Merge] must stay disabled for one repository,
         computed fresh from the Task's own live decision plus the
@@ -505,33 +543,16 @@ class TaskDecisionService:
             if not ti: return _action("CREATE_INTEGRATION", "Create Integration", "All required gates PASS -- ready to integrate.", f"/api/tasks/{tid}/integrations")
             if ti["status"] == "CONFLICT": return _action("RESOLVE_CONFLICT", "Resolve Conflict", "Integration has a merge conflict.", f"/tasks/{tid}#integration")
             if not self._integration_ok(ti, ti_repos):
-                # Section 20: distinguish "tests haven't run yet" from the
-                # two flavors of "tests ran and failed" -- a failure set
-                # that is ENTIRELY verified-baseline (and not yet waived)
-                # gets its own action rather than being lumped in with a
-                # genuinely new/unclassified failure.
+                # Section 19/20: the exact same per-repo ladder the
+                # Integration page itself uses (integration_next_action)
+                # -- one authoritative ordering, never two.
                 blocker = next((r for r in ti_repos if r["status"] != "READY_FOR_MAIN"), None)
-                gs = (blocker or {}).get("gate_status") or {}
-                failures = gs.get("failures") or []
-                unresolved = [f for f in failures if f["classification"] != "WAIVED"]
-                if unresolved and all(f["classification"] == "BASELINE_FAILURE" for f in unresolved):
-                    return _action("REVIEW_BASELINE_FAILURE", "Review Baseline Failure",
-                                    f"{len(unresolved)} failure(s) match verified baseline evidence -- waive or fix the baseline.", f"/tasks/{tid}#integration")
-                if unresolved:
-                    return _action("FIX_INTEGRATION_FAILURE", "Fix Integration Failure",
-                                    f"{len(unresolved)} new/unclassified failure(s) block Ready for Main.", f"/tasks/{tid}#integration")
-                if not gs or gs.get("tests_status") in (None, "NOT_RUN"):
+                if not blocker:
                     return _action("RUN_INTEGRATION_TEST", "Run Integration Tests", "Integration exists, tests not current/passing.", f"/tasks/{tid}#integration")
-                # Tests genuinely PASS (or PASS_WITH_APPROVED_BASELINE_WAIVER)
-                # here -- what's actually still blocking _integration_ok is
-                # push/PR state (section 12), not the test gate itself.
-                if blocker and (blocker.get("push_status") != "PUSHED" or gs.get("head") != blocker.get("last_pushed_head")):
-                    return _action("PUSH_INTEGRATION", "Push Integration Branch",
-                                    "Tests pass on this HEAD, but it has not been pushed to GitHub yet.", f"/tasks/{tid}#integration")
-                mr = next((m for m in required_merges if blocker and m["repository_id"] == blocker["repository_id"]), None) if blocker else None
-                if mr and mr.get("ci_status") == "PENDING":
-                    return _action("WAIT_FOR_CI", "Waiting for CI", "Pushed -- waiting for GitHub CI on the updated PR.", f"/tasks/{tid}#integration")
-                return _action("CONFIRM_INTEGRATION_READY", "Mark Ready for Main", "Tests pass and the branch is pushed -- confirm Ready for Main.", f"/tasks/{tid}#integration")
+                mr = next((m for m in required_merges if m["repository_id"] == blocker["repository_id"]), None)
+                action = dict(self.integration_next_action(blocker, tid, mr))
+                if action["action"] != "NONE": action["target"] = f"/tasks/{tid}#integration"
+                return action
         if status == "BLOCKED":
             return _action("NONE", "Blocked", blocking[0] if blocking else "Blocked.", None)
         if status == "DONE":

@@ -428,6 +428,35 @@ ALTER TABLE integration_workspaces ADD COLUMN push_status TEXT NOT NULL DEFAULT 
 ALTER TABLE integration_workspaces ADD COLUMN pushed_at TEXT;
 ALTER TABLE integration_workspaces ADD COLUMN push_error TEXT;
 """),
+    # V12: uniform action-button feedback (IDLE -> RUNNING -> SUCCEEDED/
+    # FAILED). One small, generic ledger for the handful of actions that
+    # had no existing job/run table of their own -- Merge Latest Changes,
+    # Push Integration Branch, Create PR, Merge PR, Mark Ready for Main.
+    # Deliberately NOT used for Run Tests (test_runs already tracks
+    # QUEUED/RUNNING/PASS/FAIL) or Sandbox provision/reset/cleanup
+    # (sandbox_operations already tracks RUNNING/SUCCESS/FAILED) -- both
+    # keep their own table as the single source of truth, per the "reuse
+    # existing job/run models" rule; `operations` never duplicates them.
+    # At most one QUEUED/RUNNING row can exist for a given
+    # (entity_type, entity_id, operation_type) at a time -- that is what
+    # makes double-click / double-submit protection possible: a second
+    # request finds the still-active row and simply reflects it back
+    # instead of launching a second real git/GitHub call.
+    (12, """
+CREATE TABLE IF NOT EXISTS operations(
+  id INTEGER PRIMARY KEY,
+  operation_type TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at TEXT,
+  completed_at TEXT,
+  error TEXT,
+  result_summary TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_operations_lookup ON operations(entity_type, entity_id, operation_type, status);
+"""),
 ]
 
 

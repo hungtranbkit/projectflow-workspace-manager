@@ -1,4 +1,6 @@
-{% extends 'base.html' %}{% block title %}Sandbox · {{sb.sandbox_slug}}{% endblock %}{% block header_action %}<span class="badge {{sb.status|lower}}">{{sb.status.replace('_',' ')}}</span>{% endblock %}{% block content %}
+{% extends 'base.html' %}{% block title %}Sandbox · {{sb.sandbox_slug}}{% endblock %}{% block header_action %}<span class="badge {{sb.status|lower}}"{% if sb.status in ['PROVISIONING','STARTING','RESETTING','CLEANING'] %} data-running{% endif %}>{{sb.status.replace('_',' ')}}</span>{% endblock %}{% block content %}
+{% set busy = sb.status in ['PROVISIONING','STARTING','RESETTING','CLEANING'] %}
+{% set busy_label = {'PROVISIONING':'Provisioning...','STARTING':'Provisioning...','RESETTING':'Resetting data...','CLEANING':'Cleaning up...'}.get(sb.status) %}
 <p><small>{% if task %}Task: <a href="/tasks/{{task.id}}">{{task.title}}</a>{% else %}No task{% endif %}</small></p>
 <section class="facts"><div><small>Profile</small><code>{{sb.profile}}</code></div><div><small>Owner</small><code>{{'Agent Workspace' if sb.owner_type=='AGENT_WORKSPACE' else 'Integration'}}</code></div><div><small>Health</small><code>{{sb.health_status}}</code></div><div><small>Cleanup eligible at</small><code>{{sb.cleanup_eligible_at or '—'}}{% if view.cleanup_countdown %} ({{view.cleanup_countdown}}){% endif %}</code></div>{% if sb.error_message %}<div class="wide"><small>Error</small><code>{{sb.error_code}}: {{sb.error_message}}</code></div>{% endif %}</section>
 
@@ -7,23 +9,32 @@
 
 {% if outputs %}<div class="readybox"><b>Sandbox Test Target</b>{% for name,url in outputs.items() %}<p>{{name}}: <a href="{{url}}" target="_blank" rel="noopener">{{url}}</a> <button class="ghost" type="button" onclick="navigator.clipboard.writeText('{{url}}')">Copy URL</button></p>{% endfor %}{% if lan_ip %}<p>LAN (dùng cho ESP/Kiosk thật): <code>http://{{lan_ip}}:{{ports[0].host_port if ports}}</code></p>{% endif %}</div>{% endif %}
 
+{% set already_running = sb.status == 'RUNNING' %}
+{# Section 17/20: once RUNNING (and especially HEALTHY), Start is a
+   completed action, not a pending one -- Open Backend/Frontend is the
+   dominant primary here, Start never lingers alongside it. #}
 <div class="actions">
 {% if view.backend_url %}<a class="button" href="{{view.backend_url}}" target="_blank" rel="noopener">Open Backend</a>{% endif %}
 {% if view.frontend_url %}<a class="button" href="{{view.frontend_url}}" target="_blank" rel="noopener">Open Frontend</a>{% endif %}
 {% if view.hardware_api_url %}<a class="button" href="{{view.hardware_api_url}}" target="_blank" rel="noopener">Open LAN</a>{% endif %}
-<form method="post" action="/api/sandboxes/{{sb.id}}/start"><button>Start</button></form>
+{% if busy %}<button disabled class="is-loading" data-running>{{busy_label}}</button>
+{% elif not already_running %}<form method="post" action="/api/sandboxes/{{sb.id}}/start" data-loading-label="Provisioning..."><button>Start</button></form>{% endif %}
 <form method="post" action="/api/sandboxes/{{sb.id}}/stop"><button class="secondary">Stop</button></form>
-<form method="post" action="/api/sandboxes/{{sb.id}}/restart"><button class="secondary">Restart</button></form>
-<form method="post" action="/api/sandboxes/{{sb.id}}/rebuild" onsubmit="return confirm('Rebuild sẽ dùng commit hiện tại và huỷ readiness cũ.')"><button class="secondary">Rebuild</button></form>
+{% if not busy %}<form method="post" action="/api/sandboxes/{{sb.id}}/restart" data-loading-label="Provisioning..."><button class="secondary">Restart</button></form>
+<form method="post" action="/api/sandboxes/{{sb.id}}/rebuild" data-loading-label="Provisioning..." onsubmit="return confirm('Rebuild sẽ dùng commit hiện tại và huỷ readiness cũ.')"><button class="secondary">Rebuild</button></form>{% endif %}
 <form method="post" action="/api/sandboxes/{{sb.id}}/health"><button class="secondary">Health Check</button></form>
 {% if sb.status == 'CLEANUP_ELIGIBLE' %}<form method="post" action="/api/sandboxes/{{sb.id}}/extend-retention"><input type="hidden" name="hours" value="24"><button class="secondary">Keep 24h More</button></form>{% endif %}
 </div>
+{% if sb.status=='FAILED' and sb.error_message %}<p class="result-note failed">{{sb.error_code}}: {{sb.error_message}}</p>{% endif %}
 
 <details class="danger-zone"><summary>Advanced / Danger</summary>
 <p><small>Reset Sandbox Data xoá database + runtime data riêng của sandbox này (để test lại default credential/first-run/seed/migration từ trạng thái sạch). Source code không bị ảnh hưởng.</small></p>
 <div class="actions">
-<form method="post" action="/api/sandboxes/{{sb.id}}/reset-data" onsubmit="return confirm('This deletes this sandbox\'s isolated database and sandbox-owned runtime data. Source code is not affected. Continue?')"><button class="danger">Reset Sandbox Data</button></form>
-<form method="post" action="/api/sandboxes/{{sb.id}}/cleanup" onsubmit="return confirm('Cleanup ngay lập tức?')"><button class="danger">Cleanup Now</button></form>
+{% if sb.status=='RESETTING' %}<button disabled class="danger is-loading" data-running>Resetting data...</button>
+{% elif busy %}<button disabled class="danger is-loading" data-running>{{busy_label}}</button>
+{% else %}<form method="post" action="/api/sandboxes/{{sb.id}}/reset-data" data-loading-label="Resetting data..." onsubmit="return confirm('This deletes this sandbox\'s isolated database and sandbox-owned runtime data. Source code is not affected. Continue?')"><button class="danger">Reset Sandbox Data</button></form>{% endif %}
+{% if sb.status=='CLEANING' %}<button disabled class="danger is-loading" data-running>Cleaning up...</button>
+{% else %}<form method="post" action="/api/sandboxes/{{sb.id}}/cleanup" data-loading-label="Cleaning up..." onsubmit="return confirm('Cleanup ngay lập tức?')"><button class="danger">Cleanup Now</button></form>{% endif %}
 </div>
 </details>
 

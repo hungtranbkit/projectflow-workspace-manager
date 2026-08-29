@@ -14,6 +14,7 @@
 <a href="#baseline-failure">Baseline failure là gì?</a>
 <a href="#real-merge">PR/Merge thật hoạt động thế nào?</a>
 <a href="#push-integration">Push Integration Branch dùng khi nào?</a>
+<a href="#action-feedback">Vì sao nút chuyển "Running..." rồi tự đổi?</a>
 <a href="#quick-start">Bắt đầu nhanh (chi tiết kỹ thuật)</a>
 <a href="#tasks">1. Có task mới</a>
 <a href="#task-vs-worktree">Task khác Worktree?</a>
@@ -113,6 +114,15 @@
 <p><b>Push ≠ Merge.</b> Push chỉ cập nhật branch/PR nguồn trên GitHub — không tự merge, không tự tạo PR mới nếu đã có PR cho branch đó (chỉ refresh PR cũ: cùng số PR, head SHA mới, CI/mergeability refresh lại).</p>
 <p>Nút bị disable kèm lý do cụ thể khi: worktree còn thay đổi chưa commit, Integration đang conflict, repo không có GitHub remote, hoặc HEAD hiện tại đã push rồi (không có gì mới để đẩy).</p>
 <p>Nếu remote đã đổi từ lần đồng bộ trước (người khác push, hoặc lịch sử phân kỳ), Workspace Manager <b>không bao giờ force-push</b> — hiện <code>PUSH_BLOCKED_REMOTE_CHANGED</code> và yêu cầu vào Integrator giải quyết trước.</p>
+</section>
+
+<section class="guide-section" id="action-feedback"><span class="section-kicker">GIAO DIỆN</span><h3>Vì sao nút chuyển "Running..." rồi tự đổi?</h3>
+<p>Mọi nút thay đổi trạng thái thật (Merge Latest Changes, Run Tests, Push Integration Branch, Create PR, Merge, Reset Sandbox Data, Provision Sandbox, Start Builder, Cleanup) đều đi qua cùng một mô hình:</p>
+<p><code>IDLE → (đang chạy: RUNNING) → SUCCEEDED / FAILED</code></p>
+<p>Bấm nút xong, nút tự đổi nhãn ngay (ví dụ "Merging latest changes...", "Pushing...") và bị khoá lại — không có nhãn cũ đứng yên như chưa bấm gì. Trạng thái này được lưu ở server (bảng <code>operations</code>, hoặc <code>test_runs</code>/<code>sandbox_operations</code> đã có sẵn), nên <b>refresh lại trang vẫn thấy đúng đang chạy</b>, không bao giờ quay về nút cũ như chưa làm gì.</p>
+<p><b>Bấm 2 lần không chạy 2 lần.</b> Nếu một hành động đang RUNNING, bấm lại chỉ quay về trang hiện tại — không mở thêm một lượt merge/push/test/PR/merge PR thật thứ hai.</p>
+<p><b>Luôn chỉ một nút chính (primary) tại một thời điểm.</b> Trang Integration và bước Integration trong Task Wizard chỉ hiện đúng MỘT hành động cần làm tiếp theo (do TaskDecisionService tính, không phải đoán ở giao diện) — ví dụ: HEAD cũ → <b>Merge Latest Changes</b>; chưa test → <b>Run Tests</b>; test PASS nhưng chưa push → <b>Push Integration Branch</b>; đã push, CI đang chạy → <i>Waiting for CI</i>; CI xong → <b>Mark Ready for Main</b>. Hành động đã xong không còn hiện lại như đang chờ; các hành động khác vẫn hợp lệ (ví dụ chạy lại Run Tests) chỉ hiện như nút phụ, không cạnh tranh với nút chính.</p>
+<p>Khi thất bại: hiện rõ lý do (ví dụ <code>PUSH_FAILED: ...</code>, <code>Merge blocked: CI_FAIL</code>) — không bao giờ tự âm thầm quay về như chưa có chuyện gì.</p>
 </section>
 
 <section class="guide-section" id="quick-start"><span class="section-kicker">BẮT ĐẦU NHANH</span><h3>Bắt đầu nhanh (chi tiết kỹ thuật)</h3><p>Toàn bộ vòng đời một task, từ lúc tạo tới lúc sandbox được dọn dẹp. Task chỉ có <b>6 trạng thái</b> (BACKLOG/ACTIVE/BLOCKED/READY_FOR_MAIN/DONE/CANCELLED) — mọi bước bên dưới (Development/Review/QA/Integration/Merging) là <b>Task Stage</b>, tính tự động, không phải trạng thái riêng lưu trong DB:</p>
