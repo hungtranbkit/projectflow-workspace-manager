@@ -29,6 +29,7 @@ from app.services.github_merge_service import GitHubIntegrationError, GitHubMerg
 from app.services.operations import OperationInProgress, OperationService
 from app.services.deployment_service import DeploymentService, DeploymentError
 from app.services.deployment_decision import deployment_view
+from app.services.completion_report_parser import parse_completion_report, strip_ansi
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -271,6 +272,17 @@ def create_app(settings=None):
     def requires_qa(risk_profile): return "QA" in RISK_GATES.get(risk_profile,RISK_GATES["NORMAL"])
     def latest_session_for_workspace(wid):
         return db.one("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 1",(wid,))
+    def activity_summary(sid, max_len=200):
+        """One clean, human-readable line of 'what is this session doing
+        right now' -- reads the LIVE in-process buffer (never the
+        possibly-stale/empty DB transcript_tail column, which is only
+        refreshed on WS disconnect) and strips ANSI/control sequences
+        before ever rendering it outside the real xterm terminal
+        (section 21). None when there is genuinely no transcript yet."""
+        text=agent_sessions.live_tail(sid)
+        if not text: return None
+        lines=[l.strip() for l in strip_ansi(text).splitlines() if l.strip()]
+        return lines[-1][:max_len] if lines else None
     def has_legacy_brief(t):
         return bool(t.get("brief_goal") or t.get("brief_context") or t.get("brief_requirements") or
                     t.get("brief_acceptance_criteria") or t.get("brief_out_of_scope") or t.get("brief_test_plan") or t.get("brief_risks"))
@@ -492,10 +504,11 @@ def create_app(settings=None):
         session=sessions[0] if sessions else None
         live_session=session if session and session["status"] in LIVE_SESSION_STATUSES else None
         agent_status=session["status"] if session else "NOT_STARTED"
+        detected_report=parse_completion_report(agent_sessions.live_tail(session["id"])) if session and w["status"]!="READY" else None
         return render(request,"workspace_detail.html",w=w,details=details,runs=runs,readiness=readiness,report=report,
                       manual_history=manual_history,next_action=action,sessions=sessions,
                       task_decision=task_decision,builder=builder,review_history=review_history,live_prompt=live_prompt,
-                      session=session,live_session=live_session,agent_status=agent_status)
+                      session=session,live_session=live_session,agent_status=agent_status,detected_report=detected_report)
     @app.get("/api/workspaces/{wid}")
     def api_workspace(wid:int): return agent_row(wid)
     @app.post("/api/workspaces/{wid}/ready")
@@ -752,7 +765,7 @@ def create_app(settings=None):
                      "WHERE s.status IN ('STARTING','RUNNING','WAITING_FOR_INPUT') ORDER BY s.last_activity_at DESC")
         for row in rows:
             sb=sandbox_for_workspace(row["workspace_id"]); row["sandbox_status"]=sb["status"] if sb else None; row["sandbox_health"]=sb["health_status"] if sb else None
-            row["activity_hint"]=(row["transcript_tail"].strip().splitlines()[-1][:160] if row.get("transcript_tail") else None)
+            row["activity_hint"]=activity_summary(row["id"], 160)
         return render(request,"agents_live.html",sessions=rows)
     @app.get("/workspaces/{wid}/sessions/{sid}",response_class=HTMLResponse)
     def session_detail(request:Request,wid:int,sid:int):
@@ -1410,6 +1423,17 @@ def create_app(settings=None):
             # must never render "Open Live Terminal" pointing at a dead
             # session's route as if it were still attachable.
             w["live_session"]=session if session and session["status"] in LIVE_SESSION_STATUSES else None
+            # Builder-completion-vs-live-session fix (section 3/4): the
+            # agent's own completion report is only ever PRINTED to its
+            # terminal -- there is no API callback wired up for it to
+            # call. Detect a well-formed report in the session's own live
+            # transcript (never auto-submitted -- section 4/13) so a
+            # human gets one clear, one-click confirm action instead of
+            # having to notice, copy and manually retype it into the
+            # Edit Agent Report form themselves.
+            w["detected_report"]=None
+            if session and not w["ready"]:
+                w["detected_report"]=parse_completion_report(agent_sessions.live_tail(session["id"]))
             w_repo=repo(w["repository_id"])
             try: w["sandbox_configured"]=load_sandbox_contract(Path(w_repo["repo_path"])) is not None
             except SandboxContractError: w["sandbox_configured"]=True  # misconfigured contract is not "absent"
@@ -1496,7 +1520,7 @@ def create_app(settings=None):
         for w in workspaces:
             other=[a for a in settings.agents if a!=w["agent"]]
             w["default_reviewer"]=other[0] if other else w["agent"]
-            w["last_activity_hint"]=(w["session"]["transcript_tail"].strip().splitlines()[-1][:200] if w["session"] and w["session"].get("transcript_tail") else None)
+            w["last_activity_hint"]=activity_summary(w["session"]["id"], 200) if w["session"] else None
 
         return render(request,"task_detail.html",t=t,decision=d,workspaces=workspaces,sandboxes=sbxs,task_integration=ti,ti_repos=ti_repos,
                       integration_sandboxes=integration_sandboxes,
