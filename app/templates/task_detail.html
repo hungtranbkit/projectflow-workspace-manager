@@ -249,12 +249,40 @@
 </section>
 
 {% elif current_step == 'DONE' %}
-<!-- STEP 8: DONE -->
+<!-- STEP 8: DONE (sections 8-13: successful actions must advance the UI --
+     no Merge/Create PR/Push/Mark Ready button lingers once every required
+     repo is genuinely MERGED; this panel reuses the SAME `gates` checklist
+     every other step already reads, never a second ad hoc summary). -->
 <section class="panel wizard-panel">
-<div class="readybox"><b>DONE</b><p>Mọi repository bắt buộc đã Merged.</p></div>
-{% for m in merge_records if m.required %}<div class="row"><div><strong>{{m.repo_name}}</strong>{% if m.merged_commit %}<br><code>{{m.merged_commit[:12]}}</code>{% endif %}</div><span class="badge ready">{{m.merge_status.replace('_',' ')}}</span></div>{% endfor %}
+<div class="readybox"><b>DONE</b><p>{{t.title}}</p></div>
+{% for g in gates %}<div class="check">{{'✓' if g.ok else '○'}} {{g.label}}{% if g.note %} <small>({{g.note}})</small>{% endif %}</div>{% endfor %}
+{% for m in merge_records if m.required %}
+<div class="row merge-card"><div><strong>{{m.repo_name}}</strong>
+{% if m.pr_number %}<small>PR <a href="{{m.pr_url}}" target="_blank" rel="noopener">#{{m.pr_number}}</a>{% if m.ci_status not in ['UNKNOWN',None] %} · CI {{m.ci_status}}{% endif %}</small>{% endif %}
+{% if m.merged_commit %}<br><small>Merge commit</small><code>{{m.merged_commit[:12]}}</code>{% endif %}
+</div>
+<span class="badge ready">{{m.merge_status.replace('_',' ')}}</span></div>
+{% endfor %}
+{# Section 11-13: prefer an existing healthy sandbox pinned to the merged
+   source; never an ambiguous "latest" with no exact commit shown. #}
+{% set verify_sb = integration_sandboxes[0] if integration_sandboxes else None %}
+<div class="primary-action">
+{% if verify_sb and verify_sb.row.status in ['RUNNING','CLEANUP_ELIGIBLE'] and verify_sb.row.health_status=='HEALTHY' and not verify_sb.stale and verify_sb.backend_url %}
+  <a class="button big" href="{{verify_sb.backend_url}}" target="_blank" rel="noopener">View Running App</a>
+{% elif verify_sb %}
+  <form method="post" action="/api/sandboxes/{{verify_sb.row.id}}/rebuild" class="inline" data-loading-label="Provisioning..."><button class="big">Create Verification Sandbox</button></form>
+{% elif task_integration %}
+  <form method="post" action="/api/tasks/{{t.id}}/verification-sandbox" class="inline" data-loading-label="Provisioning..."><button class="big">Create Verification Sandbox</button></form>
+{% endif %}
+</div>
+{% if verify_sb %}<p><small>Verified source</small><code>{{verify_sb.sources[0].commit_sha[:12] if verify_sb.sources else '—'}}</code>{% if verify_sb.stale %} <span class="badge">SOURCE UPDATED SINCE LAST BUILD</span>{% endif %}</p>{% endif %}
+{% for w in workspaces if w.report and w.report.test_data %}<p><small>Test data ({{w.agent}})</small><code>{{w.report.test_data}}</code></p>{% endfor %}
+<div class="quick-actions">
+{% for m in merge_records if m.required and m.pr_url %}<a class="ghost button" href="{{m.pr_url}}" target="_blank" rel="noopener">View PR #{{m.pr_number}}</a>{% endfor %}
+{% if verify_sb %}<a class="ghost button" href="/sandboxes/{{verify_sb.row.id}}">Open Sandbox Detail</a>{% endif %}
+</div>
 {% if task_cleanup_countdown %}<p><small>Sandbox cleanup</small><code>{{task_cleanup_countdown}}</code></p>{% endif %}
-{% if status=='DONE' and not t.closed_at %}<form method="post" action="/api/tasks/{{t.id}}/close" onsubmit="return confirm('Đóng task này?')"><button>Close Task</button></form>{% endif %}
+{% if status=='DONE' and not t.closed_at %}<form method="post" action="/api/tasks/{{t.id}}/close" onsubmit="return confirm('Đóng task này?')"><button class="ghost">Close Task</button></form>{% endif %}
 </section>
 {% endif %}
 
@@ -393,8 +421,8 @@
 {% if v.backend_url %}<p><small>Backend</small><code>{{v.backend_url}}</code></p>{% endif %}
 {% if v.frontend_url %}<p><small>Frontend</small><code>{{v.frontend_url}}</code></p>{% endif %}
 {% if v.hardware_api_url %}<p><small>Hardware Target</small><code>{{v.hardware_api_url}}</code></p>{% endif %}
-<p><small>Integration Sources</small></p>
-{% for s in v.sources %}<div class="row"><div><strong>{{s.role}}</strong> · {{s.repo_name}}<small>{{s.branch}}</small></div><code>{{s.commit_sha[:8]}}</code></div>{% endfor %}
+{% if v.sources %}<p><small>Integration Sources</small></p>
+{% for s in v.sources %}<div class="row"><div><strong>{{s.role}}</strong> · {{s.repo_name}}<small>{{s.branch}}</small></div><code>{{s.commit_sha[:8]}}</code></div>{% endfor %}{% endif %}
 </section>{% endfor %}
 {% else %}<section class="panel" id="integration"><p class="empty">{% if not decision.integration_eligibility.required %}Integration: NOT_REQUIRED for this risk profile — READY_FOR_MAIN only needs Review PASS.{% else %}No Integration yet — created once every Builder review is PASS.{% endif %}</p></section>{% endif %}
 
@@ -407,7 +435,11 @@
 {% if m.pr_number %}<small>PR <a href="{{m.pr_url}}" target="_blank" rel="noopener">#{{m.pr_number}}</a> · {{m.pr_state}}</small>{% endif %}
 </div>
 <span class="badge {{'ready' if m.merge_status=='MERGED' else ('failed' if m.merge_status in ['FAILED','CONFLICT'] else '')}}">{{m.merge_status.replace('_',' ')}}</span></div>
-{% if m.pr_number %}
+{% if m.pr_number and m.merge_status != 'MERGED' %}
+{# Section 2/9: CI/mergeability/staleness are pre-merge eligibility
+   signals -- once actually MERGED they're meaningless (GitHub itself
+   stops reporting real mergeability for a merged PR) and must not
+   linger looking like an unresolved blocker. #}
 <div class="facts">
 <div><small>CI</small><b>{{m.ci_status}}</b></div>
 <div><small>Mergeability</small><b>{{m.mergeability}}</b></div>

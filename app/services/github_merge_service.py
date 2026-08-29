@@ -14,6 +14,14 @@ Repository row + the persisted MergeRecord."""
 
 PR_FIELDS = "number,url,state,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup,mergedAt,mergeCommit,title"
 
+# gh CLI's own `state` field is already the 3-value GitHub-normalizes-it-
+# for-you vocabulary (OPEN/CLOSED/MERGED), not the raw REST/GraphQL
+# (state: OPEN|CLOSED) + separate `merged: bool` pair -- MERGED_STATES
+# names the one value that actually means "authoritatively merged"
+# throughout this module, so a caller never has to re-derive it from
+# state+merged separately.
+MERGED_STATES = {"MERGED"}
+
 FAIL_CONCLUSIONS = {"FAILURE", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
 
 STRATEGY_FLAGS = {"MERGE_COMMIT": "--merge", "SQUASH": "--squash", "REBASE": "--rebase"}
@@ -148,4 +156,5 @@ class GitHubMergeService:
             "base_branch": data.get("baseRefName"),
             "ci_status": ci_status,
             "merged_commit": (data.get("mergeCommit") or {}).get("oid"),
+            "merged_at": data.get("mergedAt"),
         }
