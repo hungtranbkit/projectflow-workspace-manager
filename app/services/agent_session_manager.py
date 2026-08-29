@@ -258,6 +258,22 @@ class AgentSessionManager:
             tail = bytes(session._buffer)[-20000:]
         self.db.execute("UPDATE agent_sessions SET transcript_tail=? WHERE id=?", (tail.decode("utf-8", "replace"), sid))
 
+    def live_tail(self, sid: int, n: int = 20000) -> str | None:
+        """The session's current transcript, read straight from the live
+        in-process PTY buffer when the session is still running --
+        transcript_tail on the DB row is only ever refreshed on WS
+        disconnect (persist_tail), so a session nobody has opened the web
+        terminal for yet would otherwise look like it has said nothing at
+        all. Falls back to the last-persisted DB tail once the process
+        (and its in-memory buffer) is gone. None only when there is
+        genuinely no transcript anywhere."""
+        session = self._live.get(sid)
+        if session:
+            with session._lock:
+                return bytes(session._buffer)[-n:].decode("utf-8", "replace")
+        row = self.db.one("SELECT transcript_tail FROM agent_sessions WHERE id=?", (sid,))
+        return row["transcript_tail"] if row and row.get("transcript_tail") else None
+
     def reconcile_on_startup(self) -> None:
         """A server restart honestly loses every in-process PTY -- any row
         still RUNNING/STARTING/WAITING_FOR_INPUT belonged to a previous

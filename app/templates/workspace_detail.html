@@ -39,8 +39,39 @@
 <p>{{w.agent|capitalize}} đang khởi động...</p>
 <button disabled class="is-loading" data-running>Starting {{w.agent|capitalize}}...</button>
 {% elif agent_status in ['RUNNING','WAITING_FOR_INPUT'] %}
+{% if detected_report %}
+{# AgentSession stays RUNNING (section 2/9): a live/interactive process
+   does not mean the assigned source work is still incomplete. The
+   agent's own report only ever gets PRINTED to its terminal -- there is
+   no API callback wired up for it to call -- so this is a detected,
+   NEVER auto-submitted, one-click confirm (section 4/13): a human must
+   still press Submit for Review, exactly like pasting the report by
+   hand, just without the copy/paste. #}
+<div class="readybox">
+<p><b>{{w.agent|capitalize}} looks done — completion report detected.</b><br><small>Session is still RUNNING · interactive session still open. Review the detected report, then confirm.</small></p>
+<p><small>WORK_STATUS</small><b>{{detected_report.WORK_STATUS}}</b></p>
+<p><small>WHAT_CHANGED</small>{{detected_report.WHAT_CHANGED}}</p>
+{% if detected_report.HOW_TO_VERIFY %}<p><small>HOW_TO_VERIFY</small><code>{{detected_report.HOW_TO_VERIFY}}</code></p>{% endif %}
+<form method="post" action="/api/workspaces/{{w.id}}/verification-report" class="inline" data-loading-label="Submitting...">
+<input type="hidden" name="work_status" value="{{detected_report.WORK_STATUS}}">
+<input type="hidden" name="what_changed" value="{{detected_report.WHAT_CHANGED}}">
+<input type="hidden" name="automated_tests" value="{{detected_report.AUTOMATED_TESTS or ''}}">
+<input type="hidden" name="how_to_verify" value="{{detected_report.HOW_TO_VERIFY or ''}}">
+<input type="hidden" name="expected_result" value="{{detected_report.EXPECTED_RESULT or ''}}">
+<input type="hidden" name="test_data" value="{{detected_report.TEST_DATA or ''}}">
+<input type="hidden" name="runtime_requirements" value="{{detected_report.RUNTIME_REQUIREMENTS or 'NONE'}}">
+<input type="hidden" name="risks" value="{{detected_report.RISKS or ''}}">
+<button class="success big">{{'Confirm & Submit for Review' if detected_report.WORK_STATUS=='READY' else 'Confirm (Fix Required)'}}</button>
+</form>
+</div>
+<div class="quick-actions">
+<a class="ghost button" href="/workspaces/{{w.id}}/sessions/{{live_session.id}}">Open Live Agent</a>
+<form method="post" action="/api/sessions/{{live_session.id}}/stop" class="inline"><button class="ghost">Stop Session</button></form>
+</div>
+{% else %}
 <p>{{w.agent|capitalize}} {{'đang chờ input.' if agent_status=='WAITING_FOR_INPUT' else 'đang làm task này.'}}</p>
 <div class="primary-action"><a class="button big" href="/workspaces/{{w.id}}/sessions/{{live_session.id}}">Open Live Agent</a></div>
+{% endif %}
 {% elif agent_status == 'FAILED' %}
 <p class="result-note failed">Session #{{session.id}} FAILED{% if session.exit_code is not none %} (exit {{session.exit_code}}){% endif %}.</p>
 <div class="primary-action"><a class="ghost button" href="/workspaces/{{w.id}}/sessions/{{session.id}}">View Failure</a></div>
