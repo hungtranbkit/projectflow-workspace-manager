@@ -1892,9 +1892,27 @@ def create_app(settings=None):
         """Integration eligibility (section 22): only once every Builder
         Workspace is READY with a current, PASS review and nothing
         unresolved -- decision.evaluate() is the one gate, never a looser
-        'has at least one READY workspace' check a route computes itself."""
+        'has at least one READY workspace' check a route computes itself.
+
+        Idempotency guard (real incident): this route was not safe to call
+        twice. It used to INSERT the parent task_integrations row, THEN
+        attempt git.create_integration() with a deterministic branch name
+        (`{task_slug}-{repo_name}`) -- a duplicate click (button lingering
+        during a slow first request, a double-tap) re-ran it while the
+        first call's branch already existed on disk, git correctly
+        refused with "branch already exists", and the already-committed
+        parent row was left orphaned with no integration_workspaces child.
+        decision.task_integration() always reads the LATEST row for the
+        task, so that empty orphan silently shadowed the real, working
+        integration until someone noticed and manually deleted it. Create
+        Integration is a one-shot creation action: once one exists for
+        this Task, this route is a no-op back to the Task page, which
+        already shows the real integration -- never a second attempt at
+        the same branch name."""
         t=task_row(tid)
         d=decision.evaluate(tid)
+        if d["task_integration"] is not None:
+            return RedirectResponse(f"/tasks/{tid}",303)
         if not d["integration_eligibility"]["eligible"]:
             raise GitSafetyError("Not eligible for Integration yet: every Builder Workspace must be READY with a current, PASS review")
         ready=[w for w in task_workspaces(tid) if w["status"]=="READY"]
