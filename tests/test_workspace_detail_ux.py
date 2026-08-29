@@ -133,13 +133,20 @@ def test_no_session_shows_start_codex(client, git_repo):
 
 # ----------------------------------------------------------------- READY
 def test_ready_shows_next_action_progression(client, git_repo):
+    """Section 18: once this workspace belongs to a Task, the Current
+    Action panel is the SAME user_task_state(decision.evaluate()) Task
+    Detail renders -- 'Sẵn sàng review' / 'Start Review' here, never the
+    old workspace-only 'Bước tiếp theo' ladder text."""
     root, repo = git_repo
     tid, w = create_task_with_workspace(client, root, repo)
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={
         "work_status": "READY", "what_changed": "x", "how_to_verify": "1. do a\n2. do b",
     }, follow_redirects=False)
     html = client.get(f"/workspaces/{w['id']}").text
-    assert "Bước tiếp theo" in html
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["next_action"]["action"] == "SUBMIT_FOR_REVIEW"
+    assert "View Task Workflow Summary" in html
+    assert d["next_action"]["label"] in html
     assert "do a" in html and "do b" in html
 
 

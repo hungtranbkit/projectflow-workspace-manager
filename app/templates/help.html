@@ -55,13 +55,14 @@
 
 <section class="guide-section" id="wizard"><span class="section-kicker">WIZARD</span><h3>Task Detail hoạt động như một wizard</h3>
 <p>Mở một Task, bạn luôn thấy đúng <b>một bước hiện tại</b> — không cần tự hỏi "giờ phải bấm gì tiếp". Toàn bộ chi tiết kỹ thuật (Agent Workspace, Sandbox, Review, QA, Integration...) vẫn còn nguyên, chỉ nằm trong "Xem tất cả chi tiết kỹ thuật" ở cuối trang cho ai cần.</p>
+<p><b>ProjectFlow luôn hiển thị bước hiện tại, những gì còn thiếu và một hành động chính để đi tiếp. Bạn không cần tự suy luận từ các trạng thái kỹ thuật.</b></p>
 <div class="step-flow"><span>Tạo Task</span><i>→</i><span>Cấu hình</span><i>→</i><span>Start Agent</span><i>→</i><span>xem agent chạy trên web</span><i>→</i><span>Review</span><i>→</i><span>Test</span><i>→</i><span>Integration</span><i>→</i><span>Merge</span></div>
 <table><thead><tr><th>Bước (wizard)</th><th>Ý nghĩa</th></tr></thead><tbody>
 <tr><td><b>Task</b></td><td>Nhập tên Task + (tuỳ chọn) Implementation Prompt, bấm <b>Continue</b>.</td></tr>
 <tr><td><b>Cấu hình</b> (Setup)</td><td>Chọn repository/agent, bấm <b>Start Claude</b> hoặc <b>Start Codex</b> — Workspace Manager tự tạo branch/worktree/sandbox, bật agent, VÀ tự gửi Task prompt vào agent trong một lần bấm (xem <a href="#start-agent">Start Agent làm gì?</a>). Bạn không cần tự vào Agent Workspaces, cũng không cần tự copy/paste prompt.</td></tr>
 <tr><td><b>Agent đang chạy</b></td><td>Màn hình theo dõi trực tiếp: trạng thái Agent, hoạt động gần nhất, sandbox, nút <b>View Live Terminal</b> để xem terminal thật ngay trên trình duyệt/điện thoại.</td></tr>
 <tr><td><b>Review</b></td><td>Sau khi agent nộp báo cáo hoàn thành, bước tự chuyển sang Review — bấm <b>Start Reviewer</b>, xem kết quả PASS/FIX_REQUIRED/BLOCKED.</td></tr>
-<tr><td><b>Kiểm tra</b> (QA)</td><td>Chỉ hiện nếu Workflow yêu cầu (HIGH). Xem sandbox/app URL, làm theo hướng dẫn kiểm tra thủ công, bấm <b>Record PASS</b>/<b>Record FAIL</b>.</td></tr>
+<tr><td><b>Kiểm tra</b> (Runtime Verification)</td><td>Bỏ qua với Workflow LOW; bắt buộc với NORMAL/HIGH. Nếu chưa có Sandbox, bấm <b>Create Sandbox</b> trước — nút này tự biến mất khi Sandbox đã sẵn sàng. Sau đó mở app, làm theo hướng dẫn kiểm tra thủ công, bấm <b>PASS</b>/<b>FAIL</b>.</td></tr>
 <tr><td><b>Integration</b></td><td>Chỉ hiện nếu Workflow yêu cầu (NORMAL/HIGH). Bấm <b>Start Integration</b>, theo dõi conflict/tests.</td></tr>
 <tr><td><b>Sẵn sàng merge</b></td><td>Với repo có GitHub remote: <b>Create PR</b> tạo Pull Request thật, <b>Merge</b> merge thật qua GitHub sau khi CI/mergeability sạch — xem <a href="#real-merge">PR/Merge thật hoạt động thế nào?</a>.</td></tr>
 <tr><td><b>Hoàn tất</b></td><td>Mọi repository bắt buộc đã Merged — xem lịch dọn sandbox.</td></tr>
@@ -135,7 +136,7 @@
 <li><b>Submit for Review</b><span>Agent Report (WHAT_CHANGED/FILES_CHANGED/TESTS_RUN/HOW_TO_VERIFY) + git worktree sạch — workspace chuyển READY_FOR_REVIEW, ghim đúng commit hiện tại.</span></li>
 <li><b>Start Review</b><span>Mặc định là READ_ONLY review session, <b>không tạo worktree mới</b>. Prompt review tự sinh từ Brief + Agent Report, ghim đúng commit đang review.</span></li>
 <li><b>PASS / FIX_REQUIRED / BLOCKED</b><span>FIX_REQUIRED trả Task về Builder (status BLOCKED). Review chỉ còn hợp lệ cho đúng commit đó — commit mới hoặc Brief đổi version sẽ làm nó tự STALE.</span></li>
-<li><b>QA</b><span>Chỉ bắt buộc khi risk profile = HIGH, và chỉ sau khi mọi Review đã PASS. LOW/NORMAL bỏ qua bước này (hiện <code>NOT_REQUIRED</code>, không phải PASS giả).</span></li>
+<li><b>Runtime Verification (QA)</b><span>Bắt buộc với NORMAL/HIGH, chỉ sau khi mọi Review đã PASS. LOW bỏ qua bước này (hiện <code>NOT_REQUIRED</code>, không phải PASS giả). Cần Sandbox trước khi kiểm tra thủ công.</span></li>
 <li><a href="#integration">Create Integration</a><span>Chỉ bắt buộc khi risk profile = NORMAL/HIGH. LOW risk đi thẳng từ Review PASS sang READY_FOR_MAIN.</span></li>
 <li><a href="#ready-for-main">READY_FOR_MAIN</a><span>Đủ điều kiện để mở Pull Request — tính tự động (TaskDecisionService), không ai gán tay.</span></li>
 <li><a href="#github-flow">PR / CI / Merge</a><span>Tạo GitHub Pull Request cho từng repo, chờ CI PASS, merge trên GitHub, rồi đánh dấu Merged trong Workspace Manager.</span></li>
@@ -247,7 +248,7 @@
 
 <section class="guide-section" id="agent-ready-next"><span class="section-kicker">READY ≠ XONG</span><h3>Agent báo READY rồi thì làm gì?</h3>
 <div class="warning"><b>READY ≠ task hoàn tất, và READY ≠ READY_FOR_MAIN.</b> READY chỉ có nghĩa agent coi source đã xong tại một commit cụ thể, sẵn sàng để Reviewer xem — chưa Review PASS, chưa QA, chưa Integration, chưa sẵn sàng lên main.</div>
-<div class="flow-tree"><code>READY (Submit for Review)</code><div>→ Review PASS</div><div>→ QA (chỉ HIGH risk)</div><div>→ Integration (chỉ NORMAL/HIGH risk)</div><b>→ READY_FOR_MAIN</b></div>
+<div class="flow-tree"><code>READY (Submit for Review)</code><div>→ Review PASS</div><div>→ Runtime Verification (NORMAL/HIGH)</div><div>→ Integration (NORMAL/HIGH)</div><b>→ READY_FOR_MAIN</b></div>
 <p>Workspace Detail và Task Detail đều tách rõ bốn giá trị khác nhau: <b>Task Status</b> (BACKLOG/ACTIVE/BLOCKED/READY_FOR_MAIN/DONE/CANCELLED), <b>Workspace Status</b> (CREATED/READY/CLOSED), <b>Sandbox Status</b>, và <b>Test Status</b> — không gộp chung thành một badge. Task Detail có thêm <b>Overview gate checklist</b> (✓/○) giải thích chính xác vì sao chưa READY_FOR_MAIN, và một khối <b>Bước tiếp theo</b> tính tự động (TaskDecisionService) — không đoán, không dùng AI, chỉ theo luật cố định, và không route/template nào khác được tự tính lại giá trị này.</p>
 <p>Nếu agent đã báo cáo theo mẫu Agent Completion Report (<code>templates/agent-completion-report.md</code>: WORK_STATUS/WHAT_CHANGED/HOW_TO_VERIFY/EXPECTED_RESULT/TEST_DATA/RISKS), phần <b>Cách kiểm tra</b> trên trang sẽ hiện đúng nội dung đó — nếu agent chưa báo cáo, trang sẽ nói thật: "Agent chưa cung cấp hướng dẫn kiểm tra." thay vì tự bịa ra các bước.</p>
 <p>Một Review PASS chỉ hợp lệ cho <b>đúng commit</b> nó review. Agent commit thêm sau khi Review PASS → review đó tự động hiện <code>STALE</code>, phải Start Review lại — không có route/nút nào "giữ" một PASS cũ qua commit mới.</p>
@@ -357,8 +358,8 @@
 <table><thead><tr><th>Cột</th><th>Ý nghĩa</th></tr></thead><tbody>
 <tr><td><span class="badge backlog">Backlog</span></td><td>Task chưa có Builder Workspace nào (status = BACKLOG)</td></tr>
 <tr><td><span class="badge development">Development</span></td><td>Đã chọn để làm, đang code hoặc chưa có Builder Workspace nào</td></tr>
-<tr><td><span class="badge review">Review / QA</span></td><td>Có Builder chưa Review PASS, hoặc đang chờ QA (HIGH risk)</td></tr>
-<tr><td><span class="badge integration">Integration</span></td><td>Mọi Review (và QA nếu cần) đã PASS, đang chờ/chạy Integration</td></tr>
+<tr><td><span class="badge review">Review / QA</span></td><td>Có Builder chưa Review PASS, hoặc đang chờ Runtime Verification (NORMAL/HIGH)</td></tr>
+<tr><td><span class="badge integration">Integration</span></td><td>Mọi Review (và Runtime Verification nếu cần) đã PASS, đang chờ/chạy Integration</td></tr>
 <tr><td><span class="badge ready_for_main">Ready for Main</span></td><td>Mọi gate cần thiết đã đạt — sẵn sàng Pull Request</td></tr>
 <tr><td><span class="badge done">Done</span></td><td>Mọi repository bắt buộc đã Merged</td></tr>
 <tr><td><span class="badge blocked">Blocked</span></td><td>FIX_REQUIRED/BLOCKED/QA FAIL/merge conflict/merge FAILED chưa xử lý</td></tr>
@@ -367,15 +368,16 @@
 </section>
 
 <section class="guide-section" id="ready-for-main"><span class="section-kicker">READINESS</span><h3>READY_FOR_MAIN nghĩa là gì?</h3>
-<p>Task đã qua mọi gate mà risk profile của nó yêu cầu (xem <a href="#risk-profile">LOW/NORMAL/HIGH</a>) và có thể đưa sang PR/CI. Cụ thể với risk NORMAL:</p>
+<p>Task đã qua mọi gate mà risk profile của nó yêu cầu (xem <a href="#risk-profile">LOW/NORMAL/HIGH</a>) và có thể đưa sang PR/CI. Cụ thể với risk NORMAL/HIGH:</p>
 <ul class="checklist">
 <li>Task Brief hợp lệ</li>
 <li>Mọi Builder Workspace bắt buộc đã hoàn thành (Submit for Review)</li>
 <li>Mọi Review PASS, đúng commit hiện tại, đúng Brief version hiện tại</li>
+<li>Runtime Verification PASS (current)</li>
 <li>Integration tồn tại, current, healthy, tests PASS</li>
 <li>Không còn conflict chưa xử lý</li>
 </ul>
-<p>HIGH risk yêu cầu thêm QA PASS (current); LOW risk bỏ qua Integration lẫn QA — chỉ cần mọi Review PASS.</p>
+<p>LOW risk bỏ qua cả Runtime Verification lẫn Integration — chỉ cần mọi Review PASS.</p>
 <div class="info">Với task nhiều repo: tất cả repository tham gia Integration phải đạt trạng thái tương ứng — xem <a href="#cross-repo">Task nhiều repository</a> cho cách theo dõi merge riêng từng repo.</div>
 <div class="readybox"><b>READY_FOR_MAIN không có nghĩa là đã merge main.</b><p>Nó chỉ có nghĩa Task đã đủ điều kiện để tạo Pull Request. Nếu bất kỳ evidence nào ở trên trở nên cũ (commit mới, Brief đổi version, source Integration di chuyển), READY_FOR_MAIN tự động biến mất và Task quay lại ACTIVE với gate tương ứng cần làm lại — không có route nào giữ nguyên giá trị này thủ công.</p></div>
 </section>
@@ -474,9 +476,9 @@
 <section class="guide-section" id="risk-profile"><span class="section-kicker">POLICY</span><h3>Workflow: Low/Normal/High khác nhau thế nào?</h3>
 <p>Trên giao diện, trường này hiện tên là <b>Workflow</b> (nằm trong <b>Advanced</b> khi tạo Task — bạn không cần hiểu chi tiết nếu không mở Advanced; mặc định <b>Normal</b>). Nó quyết định những gate nào bắt buộc trước khi Integration:</p>
 <div class="sample-grid">
-<article><b>Low</b><small>code + review. Bỏ qua cả QA lẫn Integration — Review PASS là đủ để READY_FOR_MAIN.</small></article>
-<article><b>Normal</b><small>code + review + integration. Bỏ qua QA. (mặc định)</small></article>
-<article><b>High</b><small>code + review + QA + integration. Bắt buộc QA trước khi ghép.</small></article>
+<article><b>Low</b><small>code + review. Bỏ qua cả Runtime Verification lẫn Integration — Review PASS là đủ để READY_FOR_MAIN.</small></article>
+<article><b>Normal</b><small>code + review + runtime verification + integration. (mặc định)</small></article>
+<article><b>High</b><small>code + review + runtime verification + integration, với yêu cầu kiểm tra sâu hơn.</small></article>
 </div>
 <div class="info">Không có một luồng cứng cho mọi Task — Task Detail's Overview gate checklist và Kanban tự thêm/bớt gate QA/Integration tuỳ risk profile. Một gate bị bỏ qua hiện rõ là <code>NOT_REQUIRED</code>, không bao giờ hiện như thể đã PASS.</div>
 </section>

@@ -14,14 +14,23 @@
 <article><b>{{'READY' if report and (report.how_to_verify or report.what_changed) else 'NOT READY'}}</b><span>Verify</span></article>
 </section>
 
-{# B. CURRENT ACTION -- once the Builder has actually reported READY,
-   hand off entirely to the existing, already-accurate next_action
-   progression (Create Sandbox -> Run Tests -> Open App and Verify ->
-   Create Integration -- genuinely state-driven, not what section 9
-   complains about). Only the PRE-ready case (still coding) gets the
-   new state-driven block below, replacing the old generic, session-
-   unaware "Agent chưa Mark Ready" message. #}
-{% if w.status == 'READY' %}
+{# B. CURRENT ACTION -- section 18: once this workspace belongs to a
+   Task, this is the exact same user_task_state(decision.evaluate())
+   the Task page's Workflow Summary card renders -- Task Detail and
+   Workspace Detail can never show a different "next real action"
+   for the same Task. A workspace with no Task at all (nothing for
+   TaskDecisionService to evaluate) falls back to the legacy,
+   workspace-only next_action ladder (Create Sandbox -> Run Tests ->
+   Open App and Verify -> Create Integration). #}
+{% if w.status == 'READY' and task_user_state %}
+<div class="info">
+<b>{{task_user_state.headline}}</b>
+{% if task_user_state.explanation %}<p>{{task_user_state.explanation}}</p>{% endif %}
+{% if task_user_state.missing %}<ul>{% for m in task_user_state.missing %}<li>{{m}}</li>{% endfor %}</ul>{% endif %}
+{% if task_user_state.primary_action %}{% if task_user_state.primary_action.method == 'POST' %}<form method="post" action="{{task_user_state.primary_action.target}}"><button class="button success">{{task_user_state.primary_action.label}}</button></form>{% else %}<a class="button success" href="{{task_user_state.primary_action.target}}">{{task_user_state.primary_action.label}}</a>{% endif %}{% endif %}
+<p><small><a href="/tasks/{{w.task_id}}">View Task Workflow Summary →</a></small></p>
+</div>
+{% elif w.status == 'READY' %}
 <div class="info"><b>Bước tiếp theo</b><p>{{next_action.text}}</p>{% if next_action.label %}{% if next_action.href and next_action.method=='POST' %}<form method="post" action="{{next_action.href}}"><button class="button">{{next_action.label}}</button></form>{% elif next_action.href %}<a class="button" href="{{next_action.href}}">{{next_action.label}}</a>{% endif %}{% endif %}</div>
 {% endif %}
 

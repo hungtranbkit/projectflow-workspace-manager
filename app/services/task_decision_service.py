@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.services.failure_classifier import fingerprint as fingerprint_of, parse_failures, parse_summary
 from app.services.project_contract import ContractError, load_contract
+from app.services.sandbox_contract import SandboxContractError, load_sandbox_contract
 
 # Task Lifecycle & Gate Model Refactor -- the single authoritative source
 # for Task status/stage/next-action/gate-eligibility. No route or template
@@ -22,16 +23,96 @@ DISPLAY_STATUSES = ("BACKLOG", "ACTIVE", "BLOCKED", "READY_FOR_MAIN", "DONE", "C
 STAGES = ("PLANNING", "DEVELOPMENT", "REVIEW", "QA", "INTEGRATION", "MERGING", "COMPLETE")
 
 RISK_PROFILES = ("LOW", "NORMAL", "HIGH")
-RISK_GATES = {"LOW": ("REVIEW",), "NORMAL": ("REVIEW", "INTEGRATION"), "HIGH": ("REVIEW", "QA", "INTEGRATION")}
+# Workflow-decision-UX policy change: Runtime Verification ("QA" internally
+# -- qa_runs/start-qa/submit-qa keep their existing names for backward
+# compatibility; only the user-facing label changed, see user_state_view.py)
+# is now required for NORMAL risk too, not only HIGH -- a NORMAL Task no
+# longer jumps straight from Review PASS to Integration with nobody having
+# actually run the app. LOW is the only profile that still skips straight
+# to Integration/Ready for Main on Review PASS alone. This is the single
+# place that decision changes; RISK_GATES is imported by app/main.py rather
+# than re-declared there (a second, drifted copy of this table was a real
+# bug fixed by this same change).
+RISK_GATES = {"LOW": ("REVIEW",), "NORMAL": ("REVIEW", "QA", "INTEGRATION"), "HIGH": ("REVIEW", "QA", "INTEGRATION")}
 
 NEXT_ACTIONS = (
     "REVIEW_BACKLOG", "SELECT_FOR_DEVELOPMENT", "CREATE_BUILDER_WORKSPACE",
     "START_BUILDER", "VIEW_BUILDER", "REVIEW_BUILDER_RESULT", "RUN_BUILDER_TEST",
     "SUBMIT_FOR_REVIEW", "START_REVIEW", "RETURN_TO_BUILDER",
-    "START_QA", "CREATE_INTEGRATION", "OPEN_INTEGRATOR", "RUN_INTEGRATION_TEST", "RESOLVE_CONFLICT",
+    "CREATE_SANDBOX", "SANDBOX_PROVISIONING", "START_QA", "CREATE_INTEGRATION", "OPEN_INTEGRATOR", "RUN_INTEGRATION_TEST", "RESOLVE_CONFLICT",
     "REVIEW_BASELINE_FAILURE", "FIX_INTEGRATION_FAILURE", "PUSH_INTEGRATION", "WAIT_FOR_CI", "CONFIRM_INTEGRATION_READY",
     "REBUILD_SANDBOX", "PREPARE_PR", "WAIT_FOR_MERGES", "CLOSE_TASK", "NONE",
 )
+
+# Sandbox statuses that mean "still coming up", never a second button
+# alongside Create Sandbox (section 6/13 of the workflow-decision-UX spec:
+# a successful action must advance the UI, never leave a duplicate primary
+# action behind).
+SANDBOX_PROVISIONING_STATUSES = ("CREATED", "PROVISIONING", "STARTING", "RESETTING")
+SANDBOX_READY_STATUSES = ("RUNNING", "CLEANUP_ELIGIBLE")
+
+# Human-friendly translation for the raw merge-blocker codes
+# (MERGE_BLOCKER_CODES below) -- section 10 of the workflow-decision-UX
+# spec. Never shown instead of the code (Advanced still has the raw code),
+# always shown instead of it in the normal Workflow Summary card.
+BLOCKER_MESSAGES = {
+    "NOT_READY": ("This Task is not Ready for Main yet.", "Finish the current step above."),
+    "CI_FAIL": ("GitHub CI failed on the pushed branch.", "Open the PR, fix the failure, and push again."),
+    "CI_PENDING": ("GitHub CI is still running.", "No action needed -- ProjectFlow will refresh this status."),
+    "SOURCE_STALE": ("Source changed after verification.", "Run verification again on the new commit."),
+    "REVIEW_STALE": ("Source changed after review.", "Review the latest commit again."),
+    "QA_STALE": ("Source or Brief changed after Runtime Verification.", "Run Runtime Verification again."),
+    "INTEGRATION_STALE": ("Integration source changed.", "Run integration tests again."),
+    "NO_SANDBOX": ("A runtime environment is required before verification.", "Create a Sandbox."),
+    "BASELINE_WAIVER_REQUIRED": ("An integration test failure needs a decision.", "Review the baseline failure and waive or fix it."),
+    "PR_CLOSED": ("The Pull Request was closed without merging.", "Open a new Pull Request."),
+    "TARGET_BRANCH_CHANGED": ("The target branch moved since this PR was opened.", "Merge latest changes into the branch."),
+    "UNKNOWN_MERGEABILITY": ("GitHub has not confirmed this PR can be merged yet.", "Refresh in a moment."),
+    "CONFLICT": ("The integration branch conflicts with the latest main branch.", "Resolve the conflict in the Integrator."),
+    "NO_PR": ("No Pull Request has been opened yet.", "Create a Pull Request."),
+}
+
+
+def humanize_blocker(code: str) -> dict:
+    """Never show a raw blocker code as the primary explanation (section
+    10) -- falls back to a title-cased version of the code itself for
+    anything not in the table above, so a future code never renders as a
+    literal SCREAMING_SNAKE_CASE string with no explanation at all."""
+    msg, remediation = BLOCKER_MESSAGES.get(code, (code.replace("_", " ").capitalize() + ".", None))
+    return {"code": code, "message": msg, "remediation": remediation}
+
+
+# The normalized, evidence-based checklist (section 2/19-21) -- distinct
+# from `current_step`/wizard_steps (a UI navigation concept) and from
+# `stage` (the persisted-adjacent lifecycle stage): this is only ever
+# ✓ done / ● current / ○ future / ! blocked / — skipped, one row per real
+# piece of evidence, never a raw implementation state name.
+CHECKLIST_STEPS = ("TASK", "BUILDER", "AUTOMATED_TESTS", "REVIEW", "RUNTIME_VERIFICATION", "INTEGRATION", "MERGE")
+CHECKLIST_LABELS = {
+    "TASK": "Task configured", "BUILDER": "Builder completed", "AUTOMATED_TESTS": "Automated tests PASS",
+    "REVIEW": "Review PASS", "RUNTIME_VERIFICATION": "Runtime verification", "INTEGRATION": "Integration",
+    "MERGE": "Merge to main",
+}
+
+# Section 4: plain-language "what's still missing" per next_action code,
+# shown only when there is no real blocker (a real blocker always wins --
+# see _missing_requirements). Deliberately lists the WHOLE remaining
+# requirement set for the current step, not only whichever one is stopping
+# it right this second (section 12's own worked example: Create Sandbox
+# still shows "Manual verification has not been completed" alongside it).
+MISSING_REQUIREMENTS = {
+    "CREATE_BUILDER_WORKSPACE": ["A Builder Workspace has not been created yet"],
+    "START_BUILDER": ["The agent has not been started yet"],
+    "REVIEW_BUILDER_RESULT": ["The agent session ended without a completion report"],
+    "SUBMIT_FOR_REVIEW": ["The Builder has not submitted for review yet"],
+    "START_REVIEW": ["Review has not been completed"],
+    "CREATE_SANDBOX": ["A Sandbox has not been created", "Manual verification has not been completed"],
+    "SANDBOX_PROVISIONING": ["Manual verification has not been completed"],
+    "START_QA": ["Manual verification has not been completed"],
+    "RUN_INTEGRATION_TEST": ["Integration tests have not passed yet"],
+    "PUSH_INTEGRATION": ["The integration branch has not been pushed yet"],
+    "PREPARE_PR": ["No Pull Request has been opened yet"],
+}
 
 # Session states that count as "the agent is actually running" for
 # next_action purposes -- matches agent_sessions.status values a live PTY
@@ -64,7 +145,7 @@ def prompt_source(t) -> str:
 # except these three, which are the action itself (a POST endpoint a
 # button submits to directly) -- kept as one explicit set so templates
 # never have to guess which verb an action code needs.
-POST_ACTIONS = {"SELECT_FOR_DEVELOPMENT", "CREATE_INTEGRATION", "CLOSE_TASK"}
+POST_ACTIONS = {"SELECT_FOR_DEVELOPMENT", "CREATE_INTEGRATION", "CLOSE_TASK", "CREATE_SANDBOX"}
 
 
 def _action(action, label, reason, target=None):
@@ -184,7 +265,55 @@ class TaskDecisionService:
             "fix_required": review_status == "FIX_REQUIRED",
             "session": session, "agent_status": agent_status,
             "builder_instructions": w.get("builder_instructions") or "",
+            "sandbox_state": self.builder_sandbox_state(w),
         }
+
+    # ---- Runtime Verification sandbox gating (section 12-15) ------------
+    def builder_sandbox_state(self, w):
+        """Whether THIS Builder Workspace's own sandbox -- reused as the
+        Runtime Verification environment for Tasks with one Builder, the
+        common case -- is required, absent, provisioning, or ready. Mirrors
+        the pre-existing `workspace_readiness()` rule in app/main.py
+        exactly (a repo that declares a sandbox: contract requires one
+        unless the workspace explicitly opted out with profile NONE) so
+        Task Detail and Workspace Detail can never disagree about it
+        (section 18) -- this is now the one place that rule lives; nothing
+        else recomputes it independently."""
+        try:
+            configured = load_sandbox_contract(Path(w["repo_path"])) is not None
+        except SandboxContractError:
+            configured = True  # a misconfigured contract is not "absent"
+        required = configured and w.get("sandbox_profile") != "NONE"
+        sb = self.db.one("SELECT * FROM sandboxes WHERE owner_type='AGENT_WORKSPACE' AND owner_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
+        if not required:
+            return {"required": False, "sandbox": sb, "phase": "NOT_REQUIRED"}
+        if not sb:
+            return {"required": True, "sandbox": None, "phase": "NEEDS_SANDBOX"}
+        if sb["status"] in SANDBOX_READY_STATUSES:
+            return {"required": True, "sandbox": sb, "phase": "READY"}
+        if sb["status"] == "FAILED":
+            return {"required": True, "sandbox": sb, "phase": "FAILED"}
+        return {"required": True, "sandbox": sb, "phase": "PROVISIONING"}
+
+    def qa_sandbox_state(self, builders):
+        """The Task-wide version of the same question, for the Runtime
+        Verification step: the primary (first) Builder's sandbox state
+        stands in for the whole Task in the common single-Builder case;
+        a multi-Builder Task is satisfied once at least one participating
+        Builder has a ready sandbox (Runtime Verification only needs one
+        running environment to open and check, not one per repo)."""
+        if not builders:
+            return {"required": False, "sandbox": None, "phase": "NOT_REQUIRED"}
+        states = [b["sandbox_state"] for b in builders]
+        if not any(s["required"] for s in states):
+            return {"required": False, "sandbox": None, "phase": "NOT_REQUIRED"}
+        if any(s["phase"] == "READY" for s in states):
+            return next(s for s in states if s["phase"] == "READY")
+        if any(s["phase"] == "PROVISIONING" for s in states):
+            return next(s for s in states if s["phase"] == "PROVISIONING")
+        if any(s["phase"] == "FAILED" for s in states):
+            return next(s for s in states if s["phase"] == "FAILED")
+        return next(s for s in states if s["required"])
 
     # ---- the decision ---------------------------------------------------
     def evaluate(self, task_id: int) -> dict:
@@ -571,10 +700,36 @@ class TaskDecisionService:
             if b["review_status"] in ("PENDING", "RUNNING"):
                 return _action("START_REVIEW", f"Complete Review: {b['agent']}", "Review in progress.", f"/workspaces/{b['id']}")
         if self.requires_qa(risk):
-            if not qa: return _action("START_QA", "Start QA", "All reviews PASS -- QA required for HIGH risk.", f"/tasks/{tid}#qa")
-            if qa["status"] in ("PENDING", "RUNNING"): return _action("START_QA", "Complete QA", "QA in progress.", f"/tasks/{tid}#qa")
-            if qa["status"] in ("FAIL", "BLOCKED"): return _action("RETURN_TO_BUILDER", "QA failed", qa.get("notes") or "QA reported a failure.", f"/tasks/{tid}#qa")
-            if not self._qa_current(qa, t): return _action("START_QA", "Re-run QA (Brief changed)", "Brief version changed since QA PASS.", f"/tasks/{tid}#qa")
+            needs_fresh_run = (not qa) or (qa["status"] == "PASS" and not self._qa_current(qa, t))
+            if needs_fresh_run:
+                # Runtime Verification needs a real running environment
+                # before there is anything to open and check (section
+                # 12-15) -- Create Sandbox / wait for it to finish
+                # provisioning are real prerequisite steps of STARTING a
+                # fresh run, not folded silently into "Start QA". An
+                # in-flight or already-failed run (below) already has
+                # whatever sandbox it had at start time -- no second gate.
+                sbx = self.qa_sandbox_state(builders)
+                if sbx["required"] and sbx["phase"] == "NEEDS_SANDBOX":
+                    primary = next(b for b in builders if b["sandbox_state"]["phase"] == "NEEDS_SANDBOX")
+                    return _action("CREATE_SANDBOX", "Create Sandbox", "Runtime verification needs a sandbox to open and check.", f"/api/tasks/{tid}/workspaces/{primary['id']}/create-sandbox")
+                if sbx["required"] and sbx["phase"] == "PROVISIONING":
+                    return _action("SANDBOX_PROVISIONING", None, "Sandbox is being created...", None)
+                if sbx["required"] and sbx["phase"] == "FAILED":
+                    sandbox_id = sbx["sandbox"]["id"] if sbx["sandbox"] else None
+                    return _action("REBUILD_SANDBOX", "Sandbox failed -- Rebuild", "Sandbox creation failed.", f"/sandboxes/{sandbox_id}" if sandbox_id else f"/tasks/{tid}#qa")
+                label = "Start Runtime Verification" if not qa else "Re-run Runtime Verification (Brief changed)"
+                reason = "All reviews PASS -- runtime verification required." if not qa else "Brief version changed since the last PASS."
+                return _action("START_QA", label, reason, f"/tasks/{tid}#qa")
+            if qa["status"] in ("PENDING", "RUNNING"): return _action("START_QA", "Complete Runtime Verification", "Runtime verification in progress.", f"/tasks/{tid}#qa")
+            if qa["status"] in ("FAIL", "BLOCKED"):
+                # Section 8/14: the button does the next real thing --
+                # straight to the Builder Workspace to resume, the same
+                # target a Review FIX_REQUIRED already uses above, not
+                # just an anchor back onto this same page.
+                primary = builders[0] if builders else None
+                target = f"/workspaces/{primary['id']}" if primary else f"/tasks/{tid}#qa"
+                return _action("RETURN_TO_BUILDER", "Runtime verification failed", qa.get("notes") or "Runtime verification reported a failure.", target)
         if self.requires_integration(risk):
             if not ti: return _action("CREATE_INTEGRATION", "Create Integration", "All required gates PASS -- ready to integrate.", f"/api/tasks/{tid}/integrations")
             if ti["status"] == "CONFLICT": return _action("RESOLVE_CONFLICT", "Resolve Conflict", "Integration has a merge conflict.", f"/tasks/{tid}#integration")
@@ -600,8 +755,98 @@ class TaskDecisionService:
             return _action("WAIT_FOR_MERGES", "Waiting for merges", f"{len(pending)} repo(s) still not merged.", f"/tasks/{tid}#merges")
         return _action("NONE", None, "Waiting on the gate above.", None)
 
+    # ---- Workflow Summary: checklist / missing requirements / previous
+    # step (sections 2/4/11/19-21 of the workflow-decision-UX spec) -------
+    def builder_tests_status(self, b):
+        """Evidence-based, never inferred from work_status alone (section
+        20): PASS only if every automated test stage run FOR THE BUILDER'S
+        EXACT CURRENT HEAD passed -- a test run against an older commit
+        proves nothing about the current one."""
+        head = b.get("head")
+        if not head:
+            return "NOT_RUN"
+        rows = self.db.all("SELECT * FROM test_runs WHERE workspace_type='agent' AND workspace_id=? AND tested_commit=? ORDER BY id DESC", (b["id"], head))
+        if not rows:
+            return "NOT_RUN"
+        latest = {}
+        for r in rows:
+            latest.setdefault(r["stage"], r)
+        if any(r["status"] == "FAIL" for r in latest.values()):
+            return "FAIL"
+        if all(r["status"] == "PASS" for r in latest.values()):
+            return "PASS"
+        return "NOT_RUN"
+
+    def _checklist(self, status, builders, risk, current_step, all_builders_ready, all_reviews_current_pass, qa_ok, integration_ok, all_merged):
+        if status == "CANCELLED":
+            return []
+
+        def item(key, state, note=None):
+            return {"key": key, "label": CHECKLIST_LABELS[key], "state": state, "note": note}
+
+        if status == "BACKLOG":
+            return [item("TASK", "current")] + [item(k, "future") for k in CHECKLIST_STEPS[1:]]
+        items = [item("TASK", "done")]
+        items.append(item("BUILDER", "done" if all_builders_ready else ("current" if current_step in ("SETUP", "AGENT_RUNNING") else "future")))
+        test_states = [self.builder_tests_status(b) for b in builders] if builders else []
+        if builders and all(s == "PASS" for s in test_states):
+            items.append(item("AUTOMATED_TESTS", "done"))
+        elif any(s == "FAIL" for s in test_states):
+            items.append(item("AUTOMATED_TESTS", "blocked", "Automated tests are failing."))
+        else:
+            items.append(item("AUTOMATED_TESTS", "current" if current_step == "AGENT_RUNNING" and all_builders_ready else "future"))
+        review_blocked = any(b["fix_required"] for b in builders)
+        items.append(item("REVIEW", "done" if all_reviews_current_pass else ("blocked" if review_blocked else ("current" if current_step == "REVIEW" else "future"))))
+        if not self.requires_qa(risk):
+            items.append(item("RUNTIME_VERIFICATION", "skipped", "Not required for this Workflow."))
+        else:
+            items.append(item("RUNTIME_VERIFICATION", "done" if qa_ok else ("current" if current_step == "TEST_QA" else "future")))
+        if not self.requires_integration(risk):
+            items.append(item("INTEGRATION", "skipped", "Not required for this Workflow."))
+        else:
+            items.append(item("INTEGRATION", "done" if integration_ok else ("current" if current_step == "INTEGRATION" else "future")))
+        items.append(item("MERGE", "done" if all_merged else ("current" if current_step in ("READY_FOR_MAIN", "DONE") else "future")))
+        return items
+
+    def _missing_requirements(self, next_action, blocking):
+        """Plain-language bullets for what is stopping the current step
+        (section 4) -- a real blocker always wins (it is the actual
+        reason), otherwise the fixed per-action checklist of what the
+        step still needs (section 12-15: e.g. Create Sandbox still shows
+        'Manual verification has not been completed' as a second, not-yet-
+        reached requirement, not just the one blocking right now)."""
+        if blocking:
+            return list(blocking)
+        return list(MISSING_REQUIREMENTS.get(next_action["action"], []))
+
+    def _previous_step_summary(self, builders, current_step):
+        """Section 11: a short completion summary of the step just
+        finished, never the full Agent Report -- only ever real, recorded
+        fields (commit/what_changed/tests/review), no invented text. Keyed
+        off the first Builder Workspace -- the common single-Builder case
+        this spec's own worked example is -- a multi-Builder Task can
+        still see every Builder's own detail in Advanced."""
+        if not builders or current_step in (None, "TASK", "SETUP", "AGENT_RUNNING"):
+            return None
+        b = builders[0]
+        if not b.get("ready"):
+            return None
+        report = b.get("report") or {}
+        return {
+            "agent": b["agent"], "commit": (b.get("head") or "")[:8] or None,
+            "what_changed": report.get("what_changed") or None,
+            "tests_status": self.builder_tests_status(b),
+            "review_status": b["review_status"] if current_step != "REVIEW" else None,
+        }
+
     def _result(self, t, status, stage, next_action, blocking, test_readiness, integration_eligible, ready_for_main,
                 builders, qa, ti, ti_repos, merges, risk, integration_eligibility=None, current_step=None):
+        all_builders_ready = bool(builders) and all(b["ready"] for b in builders)
+        all_reviews_current_pass = bool(builders) and all(b["review_status"] == "PASS" for b in builders)
+        qa_ok = (not self.requires_qa(risk)) or (qa is not None and qa["status"] == "PASS" and self._qa_current(qa, t))
+        integration_ok = (not self.requires_integration(risk)) or self._integration_ok(ti, ti_repos)
+        required_merges = [m for m in merges if m["required"]]
+        all_merged = bool(required_merges) and all(m["merge_status"] == "MERGED" for m in required_merges)
         return {
             "task": t, "status": status, "stage": stage, "risk_profile": risk, "next_action": next_action,
             "blocking_reasons": blocking, "test_readiness": test_readiness, "ready_for_main": ready_for_main,
@@ -609,4 +854,7 @@ class TaskDecisionService:
             "merge_records": merges, "current_step": current_step,
             "integration_eligibility": integration_eligibility or {"required": self.requires_integration(risk), "eligible": integration_eligible, "exists": bool(ti)},
             "effective_task_prompt": effective_task_prompt(t), "prompt_source": prompt_source(t),
+            "checklist": self._checklist(status, builders, risk, current_step, all_builders_ready, all_reviews_current_pass, qa_ok, integration_ok, all_merged),
+            "missing_requirements": self._missing_requirements(next_action, blocking),
+            "previous_step_summary": self._previous_step_summary(builders, current_step),
         }

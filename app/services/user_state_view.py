@@ -28,6 +28,9 @@ ACTION_STATE_CLASS: dict[str, str] = {
     "RETURN_TO_BUILDER": "ACTION_REQUIRED",
     "SUBMIT_FOR_REVIEW": "ACTION_REQUIRED",
     "START_REVIEW": "ACTION_REQUIRED",
+    "CREATE_SANDBOX": "ACTION_REQUIRED",
+    "SANDBOX_PROVISIONING": "WORKING",
+    "REBUILD_SANDBOX": "ACTION_REQUIRED",
     "START_QA": "ACTION_REQUIRED",
     "CREATE_INTEGRATION": "ACTION_REQUIRED",
     "RESOLVE_CONFLICT": "ACTION_REQUIRED",
@@ -55,7 +58,10 @@ _ACTION_COPY: dict[str, tuple[str, str]] = {
     "RETURN_TO_BUILDER": ("Cần sửa lại", "Reviewer yêu cầu chỉnh sửa."),
     "SUBMIT_FOR_REVIEW": ("Sẵn sàng review", "Builder đã xong, chưa bắt đầu review."),
     "START_REVIEW": ("Cần review lại", "Source hoặc yêu cầu đã thay đổi kể từ lần review trước."),
-    "START_QA": ("Cần chạy QA", "Mọi review đã PASS -- QA bắt buộc với mức rủi ro này."),
+    "CREATE_SANDBOX": ("Cần tạo Sandbox", "Review đã PASS -- cần môi trường chạy thật để kiểm tra."),
+    "SANDBOX_PROVISIONING": ("Đang chuẩn bị môi trường kiểm tra", "Không cần thao tác gì lúc này."),
+    "REBUILD_SANDBOX": ("Sandbox tạo thất bại", "Cần tạo lại Sandbox."),
+    "START_QA": ("Cần kiểm tra trên môi trường thật", "Mọi review đã PASS -- cần mở app và xác nhận PASS/FAIL."),
     "CREATE_INTEGRATION": ("Sẵn sàng tích hợp", "Mọi điều kiện đã PASS -- có thể tạo Integration."),
     "RESOLVE_CONFLICT": ("Có xung đột merge", "Integration đang có conflict chưa resolve."),
     "RUN_INTEGRATION_TEST": ("Cần chạy test tích hợp", "Integration đã có, chưa test hoặc test chưa current."),
@@ -177,6 +183,12 @@ def user_task_state(decision: dict) -> dict:
         "primary_action": primary_action,
         "secondary_actions": recovery_extra_secondary + _secondary_actions(decision, live_builder),
         "current_step": decision.get("current_step"),
+        # Sections 2/4/11: the Workflow Summary card's other three
+        # ingredients, straight from decision.evaluate() -- never
+        # recomputed here or in a template.
+        "checklist": decision.get("checklist") or [],
+        "missing": decision.get("missing_requirements") or [],
+        "previous_step_summary": decision.get("previous_step_summary"),
     }
 
 

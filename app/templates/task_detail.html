@@ -27,10 +27,27 @@
      ============================================================ -->
 <section class="status-hero state-{{user_state.state_class|lower}}" aria-label="Trạng thái Task hiện tại">
 <div class="hero-kicker">{{{'WORKING':'ĐANG XỬ LÝ','WAITING':'ĐANG CHỜ','ACTION_REQUIRED':'CẦN THAO TÁC','COMPLETE':'HOÀN TẤT'}[user_state.state_class]}}</div>
+<!-- Progress checklist (section 2/19-21): evidence-based, exactly what
+     TaskDecisionService._checklist() computed -- never a template-side
+     re-derivation. -->
+{% if user_state.checklist %}
+<div class="wf-checklist" aria-label="Progress">
+{% for item in user_state.checklist %}
+<div class="wf-check wf-{{item.state|lower}}">
+<span class="wf-mark">{{{'done':'✓','current':'●','future':'○','blocked':'!','skipped':'—'}[item.state]}}</span>
+<span class="wf-label">{{item.label}}</span>{% if item.note %}<small> — {{item.note}}</small>{% endif %}
+</div>
+{% endfor %}
+</div>
+{% endif %}
 <h3>{{user_state.headline}}</h3>
 {% if user_state.explanation %}<p class="explanation">{{user_state.explanation}}</p>{% endif %}
 {% if user_state.blocker %}
 <div class="hero-blocker"><b>Vấn đề</b>{{user_state.blocker}}{% if user_state.extra_blocker_count %}<br><small>+ {{user_state.extra_blocker_count}} vấn đề kỹ thuật khác — xem Chi tiết kỹ thuật</small>{% endif %}</div>
+{% elif user_state.missing %}
+<!-- Missing requirements (section 4): plain-language, never a raw
+     technical-state dump. -->
+<div class="hero-missing"><b>Missing</b><ul>{% for m in user_state.missing %}<li>{{m}}</li>{% endfor %}</ul></div>
 {% endif %}
 <div class="hero-actions">
 {% if user_state.primary_action %}
@@ -39,6 +56,21 @@
 {% endif %}
 {% if user_state.secondary_actions %}<div class="hero-secondary">{% for a in user_state.secondary_actions %}<a href="{{a.target}}">{{a.label}}</a>{% endfor %}</div>{% endif %}
 </div>
+{% if user_state.previous_step_summary %}
+<!-- Previous step summary (section 11): short, real evidence only --
+     full Agent Report stays one click away, never dumped here. -->
+{% set p = user_state.previous_step_summary %}
+<div class="hero-previous">
+<b>{{p.agent|capitalize}} completed</b>
+<div class="facts">
+{% if p.commit %}<div><small>Commit</small><code>{{p.commit}}</code></div>{% endif %}
+<div><small>Tests</small><b>{{p.tests_status|humanize}}</b></div>
+{% if p.review_status %}<div><small>Review</small><b>{{p.review_status|humanize}}</b></div>{% endif %}
+</div>
+{% if p.what_changed %}<p>{{p.what_changed}}</p>{% endif %}
+{% if workspaces %}<a class="ghost" href="/workspaces/{{workspaces[0].id}}">View Agent Report</a>{% endif %}
+</div>
+{% endif %}
 </section>
 
 <!-- Compact mobile stepper (section 10/11) -- current/previous/next
@@ -223,17 +255,37 @@
 {% endfor %}
 
 {% elif current_step == 'TEST_QA' %}
-<!-- STEP 5: TEST / QA -->
+<!-- STEP 5: RUNTIME VERIFICATION (sections 12-15): Create Sandbox ->
+     Preparing environment (no duplicate button) -> Open App & Verify ->
+     PASS/FAIL, all driven by next_action.action -- never a second,
+     template-side sandbox-readiness check. -->
 <section class="panel wizard-panel">
 {% for w in workspaces %}
 {% if w.sandbox %}<p><b>{{w.agent}} · {{w.role or w.repo_name}}</b> — Sandbox <span class="badge {{w.sandbox.row.status|lower}}">{{w.sandbox.row.status.replace('_',' ')}}{% if w.sandbox.row.status=='RUNNING' %} · {{w.sandbox.row.health_status}}{% endif %}</span>{% if w.sandbox.backend_url %} <a class="ghost" href="{{w.sandbox.backend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}</p>{% endif %}
 {% if w.report and w.report.how_to_verify %}<p><small>Manual verification instructions</small></p><ol class="steps">{% for line in w.report.how_to_verify.split('\n') %}{% if line.strip() %}<li><b>{{line.strip()}}</b></li>{% endif %}{% endfor %}</ol>{% endif %}
 {% endfor %}
-{% if not qa %}
-<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/start-qa"><label>Tester<input name="tester_agent" placeholder="qa"></label><button class="success big" type="submit">Bắt đầu Kiểm tra</button></form></div>
+{% if next_action.action == 'CREATE_SANDBOX' %}
+<p>Review has passed. A running environment is required before this can be checked.</p>
+<div class="primary-action"><form method="post" action="{{next_action.target}}" data-loading-label="Creating Sandbox..."><button class="success big">Create Sandbox</button></form></div>
+{% elif next_action.action == 'SANDBOX_PROVISIONING' %}
+<p>Preparing test environment…</p>
+<div class="primary-action"><button disabled class="big is-loading" data-running>Creating Sandbox...</button></div>
+{% elif next_action.action == 'REBUILD_SANDBOX' %}
+<div class="warning"><b>Sandbox creation failed.</b></div>
+<div class="primary-action"><a class="button danger" href="{{next_action.target}}">View Sandbox &amp; Rebuild</a></div>
+{% elif not qa %}
+<div class="checklist-hint"><div>○ Open the requested screen</div><div>○ Check the expected UI</div><div>○ Confirm the result</div></div>
+<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/start-qa"><label>Tester<input name="tester_agent" placeholder="qa"></label><button class="success big" type="submit">Open App &amp; Verify</button></form></div>
 {% elif qa.status in ['PENDING','RUNNING'] %}
 <p><small>Tester</small><span class="cap">{{qa.tester_agent or '—'}}</span></p>
-<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/submit-qa"><input type="hidden" name="result" value="PASS"><button class="success big" type="submit">Record PASS</button></form><form method="post" action="/api/tasks/{{t.id}}/submit-qa"><input type="hidden" name="result" value="FAIL"><button class="danger" type="submit">Record FAIL</button></form></div>
+<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/submit-qa"><input type="hidden" name="result" value="PASS"><button class="success big" type="submit">PASS — Looks correct</button></form></div>
+<details><summary>FAIL — Needs changes</summary>
+<form method="post" action="/api/tasks/{{t.id}}/submit-qa">
+<input type="hidden" name="result" value="FAIL">
+<label>What is wrong? *<textarea name="notes" required placeholder="Short reason a Builder can act on."></textarea></label>
+<button class="danger" type="submit">Send Back to Builder</button>
+</form>
+</details>
 {% else %}
 <p><small>Kết quả trước</small><span class="badge {{'ready' if qa.status=='PASS' else 'failed'}}">{{qa.status}}</span> — cần chạy lại (Brief đã đổi).</p>
 <div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/start-qa"><label>Tester<input name="tester_agent" placeholder="qa"></label><button class="success big" type="submit">Kiểm tra lại</button></form></div>
@@ -323,7 +375,10 @@
   <form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/merge" class="inline" data-loading-label="Revalidating..." onsubmit="return confirm('Merge PR #{{m.pr_number}} ({{m.source_branch}} → {{m.base_branch}})?\nStrategy: {{m.merge_strategy}}\nVerified: {{(m.verified_commit or '')[:12]}}\nCI: {{m.ci_status}}')"><button class="success big">Merge</button></form>
   <form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/refresh" class="inline"><button class="ghost">Refresh</button></form>
 {% else %}
-  <span class="badge failed">{{m.gate.blockers|join(', ')}}</span><form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/refresh" class="inline"><button class="ghost">Refresh</button></form>
+  {# Section 9/10: CANNOT MERGE is translated, never a raw joined code
+     list -- the raw code stays one click away via title="". #}
+  <div class="hero-missing"><b>CANNOT MERGE</b><ul>{% for code in m.gate.blockers %}{% set hb=code|humanize_blocker %}<li title="{{code}}">{{hb.message}}{% if hb.remediation %} <small>— {{hb.remediation}}</small>{% endif %}</li>{% endfor %}</ul></div>
+  <form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/refresh" class="inline"><button class="ghost">Refresh</button></form>
 {% endif %}
 </div>
 {% if m.merge_pr_op and m.merge_pr_op.status=='FAILED' and not merge_pr_running %}<p class="result-note failed">Merge blocked: {{m.merge_pr_op.error}}</p>{% endif %}
