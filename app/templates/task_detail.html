@@ -18,12 +18,45 @@
 {% endmacro %}
 
 <!-- ============================================================
-     WIZARD: one deterministic current_step (TaskDecisionService),
-     rendered as a progress stepper + ONE focused primary screen.
-     Every value below comes from decision.evaluate() -- no
-     template-side lifecycle logic (section 24). "Xem tất cả chi
-     tiết kỹ thuật" at the bottom still has the full technical view
-     for anyone who wants it (section 19), never removed.
+     MOBILE-FIRST STATUS HERO (section 2/16): the ONE thing a user
+     reading this page on a 390px screen needs first -- state class,
+     plain-language headline, primary blocker (if any), and at most
+     ONE primary action. Everything here comes from user_task_state()
+     which itself only wraps decision.evaluate()'s own fields -- never
+     a second, template-side decision (section 16/37).
+     ============================================================ -->
+<section class="status-hero state-{{user_state.state_class|lower}}" aria-label="Trạng thái Task hiện tại">
+<div class="hero-kicker">{{{'WORKING':'ĐANG XỬ LÝ','WAITING':'ĐANG CHỜ','ACTION_REQUIRED':'CẦN THAO TÁC','COMPLETE':'HOÀN TẤT'}[user_state.state_class]}}</div>
+<h3>{{user_state.headline}}</h3>
+{% if user_state.explanation %}<p class="explanation">{{user_state.explanation}}</p>{% endif %}
+{% if user_state.blocker %}
+<div class="hero-blocker"><b>Vấn đề</b>{{user_state.blocker}}{% if user_state.extra_blocker_count %}<br><small>+ {{user_state.extra_blocker_count}} vấn đề kỹ thuật khác — xem Chi tiết kỹ thuật</small>{% endif %}</div>
+{% endif %}
+<div class="hero-actions">
+{% if user_state.primary_action %}
+{% if user_state.primary_action.method == 'POST' %}<form method="post" action="{{user_state.primary_action.target}}" data-loading-label="Đang xử lý..."><button class="hero-primary success big">{{user_state.primary_action.label}}</button></form>
+{% else %}<a class="hero-primary button success big" href="{{user_state.primary_action.target}}">{{user_state.primary_action.label}}</a>{% endif %}
+{% endif %}
+{% if user_state.secondary_actions %}<div class="hero-secondary">{% for a in user_state.secondary_actions %}<a href="{{a.target}}">{{a.label}}</a>{% endfor %}</div>{% endif %}
+</div>
+</section>
+
+<!-- Compact mobile stepper (section 10/11) -- current/previous/next
+     only. Full 8-step row stays for desktop below. -->
+<div class="progress-compact mobile-only">
+{% if progress.previous %}<span class="step-done">✓ {{progress.previous}}</span><span class="step-arrow">→</span>{% endif %}
+<span class="step-current">{{progress.current or '—'}}</span>
+{% if progress.next %}<span class="step-arrow">→</span><span>{{progress.next}}</span>{% endif %}
+</div>
+
+<!-- ============================================================
+     WIZARD (desktop): one deterministic current_step
+     (TaskDecisionService), rendered as a progress stepper + ONE
+     focused primary screen. Every value below comes from
+     decision.evaluate() -- no template-side lifecycle logic
+     (section 24). "Xem tất cả chi tiết kỹ thuật" at the bottom
+     still has the full technical view for anyone who wants it
+     (section 19), never removed.
      ============================================================ -->
 {% set wizard_steps = [('TASK','Task'),('SETUP','Cấu hình'),('AGENT_RUNNING','Agent đang chạy'),('REVIEW','Review'),('TEST_QA','Kiểm tra'),('INTEGRATION','Integration'),('READY_FOR_MAIN','Sẵn sàng merge'),('DONE','Hoàn tất')] %}
 {% set step_keys = wizard_steps|map(attribute=0)|list %}
@@ -35,7 +68,7 @@
 {% endfor %}
 </div>
 {% if status == 'CANCELLED' %}<div class="alert"><b>Task đã huỷ (CANCELLED).</b></div>{% endif %}
-{% if blocking_reasons %}<div class="alert"><b>Đang bị chặn:</b><ul>{% for b in blocking_reasons %}<li>{{b}}</li>{% endfor %}</ul></div>{% endif %}
+{% if blocking_reasons|length > 1 %}<details><summary>{{blocking_reasons|length}} vấn đề kỹ thuật (xem chi tiết)</summary><div class="alert"><ul>{% for b in blocking_reasons %}<li>{{b}}</li>{% endfor %}</ul></div></details>{% endif %}
 
 <h2>{{t.title}}</h2>
 
@@ -80,7 +113,7 @@
 {% elif current_step == 'AGENT_RUNNING' %}
 <!-- STEP 3: AGENT RUNNING -->
 {% for w in workspaces %}
-<section class="panel wizard-panel">
+<section class="panel wizard-panel" id="agent-panel-{{w.id}}">
 <div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.role or w.repo_name}}</div><span class="badge {{w.agent_status|lower}}">Agent: {{w.agent_status.replace('_',' ')}}</span></div>
 <div class="facts">
 <div><small>Task</small><b>{{t.title}}</b></div>
