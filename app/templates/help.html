@@ -13,6 +13,7 @@
 <a href="#reset-sandbox-data">Reset Sandbox Data dùng khi nào?</a>
 <a href="#baseline-failure">Baseline failure là gì?</a>
 <a href="#real-merge">PR/Merge thật hoạt động thế nào?</a>
+<a href="#push-integration">Push Integration Branch dùng khi nào?</a>
 <a href="#quick-start">Bắt đầu nhanh (chi tiết kỹ thuật)</a>
 <a href="#tasks">1. Có task mới</a>
 <a href="#task-vs-worktree">Task khác Worktree?</a>
@@ -105,6 +106,13 @@
 <li><b>Repo không có GitHub remote</b>: dùng <b>Confirm External Merge</b> (mục "Xem tất cả chi tiết kỹ thuật" → Merge Tracking) — hệ thống kiểm tra thật commit đã verify có nằm trong target branch không trước khi ghi nhận MERGED, bắt buộc nhập lý do, có audit.</li>
 </ul>
 <p><b>Task chỉ DONE khi mọi repository bắt buộc đều MERGED thật</b> — không có nút "Mark All Merged" giả trạng thái nữa.</p>
+</section>
+
+<section class="guide-section" id="push-integration"><span class="section-kicker">INTEGRATION</span><h3>Push Integration Branch dùng khi nào?</h3>
+<p>Sau khi Integration <b>Merge Latest Changes</b> hoặc resolve conflict, HEAD local của Integration branch thay đổi. Nút <b>Push Integration Branch</b> đẩy đúng branch đó lên GitHub (không force, không branch khác, không remote khác) để cập nhật PR hiện có và kích hoạt CI chạy lại.</p>
+<p><b>Push ≠ Merge.</b> Push chỉ cập nhật branch/PR nguồn trên GitHub — không tự merge, không tự tạo PR mới nếu đã có PR cho branch đó (chỉ refresh PR cũ: cùng số PR, head SHA mới, CI/mergeability refresh lại).</p>
+<p>Nút bị disable kèm lý do cụ thể khi: worktree còn thay đổi chưa commit, Integration đang conflict, repo không có GitHub remote, hoặc HEAD hiện tại đã push rồi (không có gì mới để đẩy).</p>
+<p>Nếu remote đã đổi từ lần đồng bộ trước (người khác push, hoặc lịch sử phân kỳ), Workspace Manager <b>không bao giờ force-push</b> — hiện <code>PUSH_BLOCKED_REMOTE_CHANGED</code> và yêu cầu vào Integrator giải quyết trước.</p>
 </section>
 
 <section class="guide-section" id="quick-start"><span class="section-kicker">BẮT ĐẦU NHANH</span><h3>Bắt đầu nhanh (chi tiết kỹ thuật)</h3><p>Toàn bộ vòng đời một task, từ lúc tạo tới lúc sandbox được dọn dẹp. Task chỉ có <b>6 trạng thái</b> (BACKLOG/ACTIVE/BLOCKED/READY_FOR_MAIN/DONE/CANCELLED) — mọi bước bên dưới (Development/Review/QA/Integration/Merging) là <b>Task Stage</b>, tính tự động, không phải trạng thái riêng lưu trong DB:</p>
