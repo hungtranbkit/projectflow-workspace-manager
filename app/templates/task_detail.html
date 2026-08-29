@@ -262,6 +262,35 @@
 {% if m.merged_commit %}<br><small>Merge commit</small><code>{{m.merged_commit[:12]}}</code>{% endif %}
 </div>
 <span class="badge ready">{{m.merge_status.replace('_',' ')}}</span></div>
+{% if m.deployment_dev is not none %}
+{% set dv = m.deployment_dev %}
+{% set dep = dv.deployment %}
+<div class="merge-card">
+<div class="row"><div><strong>Deployment</strong><small>DEV · {{m.repo_name}}</small></div>
+<span class="badge {{'ready' if dv.state=='VERIFIED' else ('failed' if dv.state=='FAILED' else '')}}"{% if dv.running %} data-running{% endif %}>{{dv.label}}</span></div>
+{% if dv.state == 'NOT_CONFIGURED' %}
+  <div class="quick-actions"><a class="ghost button" href="/help#dev-deployment">Configure DEV Target</a></div>
+{% elif dv.state == 'NOT_DEPLOYED' %}
+  <div class="quick-actions"><form method="post" action="/api/tasks/{{t.id}}/deployments" class="inline" data-loading-label="Preparing..."><input type="hidden" name="repository_id" value="{{m.repository_id}}"><input type="hidden" name="environment" value="DEV"><button class="success">Deploy to DEV</button></form></div>
+{% elif dv.running %}
+  <button disabled class="is-loading" data-running>{{dv.label}}</button>
+{% elif dv.state == 'VERIFIED' %}
+  <p><small>Commit</small><code>{{dep.source_commit[:12]}}</code></p>
+  <p><small>Health</small><b>{{dep.health_status}}</b> &nbsp; <small>Smoke</small><b>{{dep.smoke_status}}</b></p>
+  <div class="quick-actions">
+  {% if dep.deployed_url %}<a class="button" href="{{dep.deployed_url}}" target="_blank" rel="noopener">Open DEV</a>{% endif %}
+  <a class="ghost button" href="/deployments/{{dep.id}}">View Deploy Log</a>
+  <form method="post" action="/api/deployments/{{dep.id}}/redeploy" class="inline" data-loading-label="Preparing..."><button class="ghost">Redeploy</button></form>
+  </div>
+{% elif dv.state == 'FAILED' %}
+  <p class="result-note failed">{{dep.error}}</p>
+  <div class="quick-actions">
+  <form method="post" action="/api/deployments/{{dep.id}}/redeploy" class="inline" data-loading-label="Preparing..."><button class="danger">Retry Deploy</button></form>
+  <a class="ghost button" href="/deployments/{{dep.id}}">View Deploy Log</a>
+  </div>
+{% endif %}
+</div>
+{% endif %}
 {% endfor %}
 {# Section 11-13: prefer an existing healthy sandbox pinned to the merged
    source; never an ambiguous "latest" with no exact commit shown. #}

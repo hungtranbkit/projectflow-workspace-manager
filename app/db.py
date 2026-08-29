@@ -457,6 +457,56 @@ CREATE TABLE IF NOT EXISTS operations(
 );
 CREATE INDEX IF NOT EXISTS idx_operations_lookup ON operations(entity_type, entity_id, operation_type, status);
 """),
+    # V13: Post-Merge DEV Deployment. A Deployment is a genuinely separate
+    # aggregate from Task/MergeRecord (section 23) -- Task lifecycle
+    # (DONE) and Deployment lifecycle (NOT_DEPLOYED/.../VERIFIED/FAILED)
+    # never share a status column, and a FAILED deployment must never be
+    # able to move a Task back out of DONE. `deployments` is append-only
+    # evidence: a Redeploy/Retry always INSERTs a new row (rollback_of/
+    # redeploy chains via that column), never UPDATEs a finished row's
+    # historical result out from under it -- only a still-in-flight row
+    # (status not yet terminal) is ever updated, exactly like test_runs/
+    # sandbox_operations/operations already do. source_commit is always
+    # the exact MergeRecord.merged_commit (section 3/24), never an
+    # integration/agent branch -- enforced by the route that creates a
+    # row, not by a constraint here (SQLite has no enum type).
+    (13, """
+CREATE TABLE IF NOT EXISTS deployments(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER REFERENCES tasks(id),
+  repository_id INTEGER NOT NULL REFERENCES repositories(id),
+  environment TEXT NOT NULL DEFAULT 'DEV',
+  target_name TEXT,
+  source_branch TEXT NOT NULL,
+  source_commit TEXT NOT NULL,
+  artifact_version TEXT,
+  artifact_image TEXT,
+  artifact_digest TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  health_status TEXT,
+  health_checked_at TEXT,
+  smoke_status TEXT,
+  deployed_url TEXT,
+  error TEXT,
+  rollback_of INTEGER REFERENCES deployments(id),
+  requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_deployments_lookup ON deployments(task_id, repository_id, environment);
+CREATE TABLE IF NOT EXISTS deployment_phases(
+  id INTEGER PRIMARY KEY,
+  deployment_id INTEGER NOT NULL REFERENCES deployments(id),
+  phase TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'RUNNING',
+  stdout_tail TEXT NOT NULL DEFAULT '',
+  stderr_tail TEXT NOT NULL DEFAULT '',
+  exit_code INTEGER,
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_deployment_phases_deployment ON deployment_phases(deployment_id);
+"""),
 ]
 
 

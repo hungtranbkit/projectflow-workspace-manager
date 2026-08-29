@@ -1,0 +1,25 @@
+{% extends 'base.html' %}{% block title %}Deployment · {{d.repo_name}} · {{d.environment}}{% endblock %}{% block header_action %}<span class="badge {{'ready' if d.status=='VERIFIED' else ('failed' if d.status=='FAILED' else '')}}"{% if d.status in ['PENDING','PREPARING','BUILDING','DEPLOYING','VERIFYING'] %} data-running{% endif %}>{{d.status}}</span>{% endblock %}{% block content %}
+<section class="facts">
+<div><small>Repository</small><code>{{d.repo_name}}</code></div>
+<div><small>Environment</small><code>{{d.environment}}</code></div>
+<div><small>Source commit</small><code>{{d.source_commit[:12]}}</code></div>
+<div><small>Source branch</small><code>{{d.source_branch}}</code></div>
+<div><small>Artifact</small><code>{{d.artifact_image or '—'}}</code></div>
+<div><small>Health</small><code>{{d.health_status or 'PENDING'}}</code></div>
+<div><small>Smoke</small><code>{{d.smoke_status or 'PENDING'}}</code></div>
+<div><small>Requested</small><code>{{d.requested_at}}</code></div>
+</section>
+{% if d.error %}<div class="alert"><b>Error</b><p>{{d.error}}</p></div>{% endif %}
+{% if d.deployed_url and d.status=='VERIFIED' %}<div class="actions"><a class="button" href="{{d.deployed_url}}" target="_blank" rel="noopener">Open DEV</a></div>{% endif %}
+<section class="panel"><h3>Deploy Log</h3>
+{% for p in phases %}<details class="timeline"><summary><small>{{p.started_at}}</small> <b>{{p.phase}}</b> <span class="badge {{p.status|lower}}">{{p.status}}</span></summary>
+{% if p.stdout_tail %}<pre>{{p.stdout_tail}}</pre>{% endif %}
+{% if p.stderr_tail %}<pre>{{p.stderr_tail}}</pre>{% endif %}
+{% if not p.stdout_tail and not p.stderr_tail %}<p class="empty">No output captured.</p>{% endif %}
+</details>{% else %}<p class="empty">No phases recorded yet.</p>{% endfor %}
+</section>
+{% if history|length > 1 %}<section class="panel"><h3>History (this repo · {{d.environment}})</h3>
+{% for h in history %}<a class="row" href="/deployments/{{h.id}}"><div><small>{{h.requested_at}}</small><br><code>{{h.source_commit[:12]}}</code></div><span class="badge {{'ready' if h.status=='VERIFIED' else ('failed' if h.status=='FAILED' else '')}}">{{h.status}}</span></a>{% endfor %}
+</section>{% endif %}
+{% if d.task_id %}<p><a href="/tasks/{{d.task_id}}">← Back to Task</a></p>{% endif %}
+{% endblock %}

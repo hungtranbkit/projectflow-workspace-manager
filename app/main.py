@@ -27,6 +27,8 @@ from app.services.task_decision_service import TaskDecisionService, RISK_PROFILE
 from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
 from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES
 from app.services.operations import OperationInProgress, OperationService
+from app.services.deployment_service import DeploymentService, DeploymentError
+from app.services.deployment_decision import deployment_view
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -39,6 +41,7 @@ def create_app(settings=None):
     gate_waivers = GateWaiverService(db, git)
     github_merge = GitHubMergeService()
     ops = OperationService(db)
+    deployer = DeploymentService(db, git)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
@@ -48,6 +51,7 @@ def create_app(settings=None):
     app.state.decision = decision
     app.state.gate_waivers = gate_waivers
     app.state.github_merge = github_merge
+    app.state.deployer = deployer
     app.state.ops = ops
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
@@ -1415,6 +1419,16 @@ def create_app(settings=None):
             # the same repo can have a MergeRecord per Task).
             m["create_pr_op"]=ops.latest("merge_record",m["id"],"CREATE_PR")
             m["merge_pr_op"]=ops.latest("merge_record",m["id"],"MERGE_PR")
+            # Deployment (section 6/23): only ever meaningful once this
+            # repo is actually MERGED -- computed for every repo anyway
+            # (cheap, no real command execution) so a repo that merges
+            # AFTER Task DONE also gets its own Deployment section
+            # without a second code path.
+            if m["merge_status"]=="MERGED":
+                dep_target=deployer.target(m_repo["repo_path"],"DEV") if m_repo else None
+                m["deployment_dev"]=deployment_view(latest_deployment(tid,m["repository_id"],"DEV"),bool(dep_target))
+            else:
+                m["deployment_dev"]=None
 
         # Overview gate checklist (section 38): one row per gate this
         # Task's risk policy actually requires, ✓/○ from the same
@@ -1871,6 +1885,83 @@ def create_app(settings=None):
         db.event("task",tid,"EXTERNAL_MERGE_CONFIRMED",f"repo={repository_id} commit={final_commit} reason={reason.strip()[:200]}")
         _schedule_cleanup_if_done(tid)
         return RedirectResponse(f"/tasks/{tid}",303)
+
+    # ------------------------------------------------------------ Deployment
+    # Section 23: a genuinely separate lifecycle from Task/MergeRecord --
+    # never folded into TaskDecisionService. A Task stays DONE regardless
+    # of what happens here; a Deployment row is never the thing that
+    # decides Task status.
+    DEPLOY_ENVIRONMENTS=("DEV",)
+    def latest_deployment(task_id,repository_id,environment):
+        return db.one("SELECT * FROM deployments WHERE task_id=? AND repository_id=? AND environment=? ORDER BY id DESC LIMIT 1",(task_id,repository_id,environment))
+    def deployment_source(tid,repository_id):
+        """Section 3/24: the ONLY authoritative source for a post-merge
+        deployment is the exact GitHub merge commit already recorded on
+        this repo's own MergeRecord -- never the integration/agent
+        branch (those may have moved on, or been cleaned up, since
+        merge), never a guess. Refuses if the repo isn't actually
+        MERGED yet."""
+        mr=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
+        if not mr or mr["merge_status"]!="MERGED" or not mr.get("merged_commit"):
+            raise GitSafetyError("This repository is not MERGED yet -- nothing to deploy")
+        return mr["merged_commit"], mr.get("base_branch") or "main"
+    @app.post("/api/tasks/{tid}/deployments")
+    def create_deployment(tid:int,repository_id:int=Form(...),environment:str=Form("DEV")):
+        """[Deploy to DEV]: only reachable once the repo is actually
+        MERGED (section 1/25) -- never the old workflow's Merge/Create
+        PR/Push/Mark Ready actions, and never re-merges or re-touches
+        PR state. Duplicate-click protection (section 22): a second
+        click while a deployment for this exact task/repo/environment
+        is still in flight just redirects back to it, never starts a
+        second real build/deploy."""
+        t=task_row(tid); r=repo(repository_id)
+        environment=environment.strip().upper()
+        if environment not in DEPLOY_ENVIRONMENTS: raise GitSafetyError(f"Unknown environment: {environment}")
+        d=decision.evaluate(tid)
+        if d["status"]!="DONE": raise GitSafetyError("Task is not DONE yet -- nothing to deploy")
+        target=deployer.target(r["repo_path"],environment)
+        if not target: raise GitSafetyError(f"{environment} target not configured for this repository")
+        existing=latest_deployment(tid,repository_id,environment)
+        if existing and existing["status"] in ("PENDING","PREPARING","BUILDING","DEPLOYING","VERIFYING"):
+            return RedirectResponse(f"/tasks/{tid}",303)
+        source_commit,source_branch=deployment_source(tid,repository_id)
+        did=db.execute(
+            "INSERT INTO deployments(task_id,repository_id,environment,target_name,source_branch,source_commit,status) VALUES(?,?,?,?,?,?,'PENDING')",
+            (tid,repository_id,environment,target.get("target"),source_branch,source_commit))
+        db.event("task",tid,"DEPLOYMENT_REQUESTED",f"repo={repository_id} env={environment} commit={source_commit[:12]} deployment={did}")
+        deployer.deploy(did)
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/deployments/{did}/redeploy")
+    def redeploy(did:int):
+        """[Redeploy] (section 19): always the SAME exact source_commit
+        as the deployment being redeployed -- never silently deploys
+        whatever main/HEAD currently is. A genuinely newer merged
+        source requires going back through create_deployment (a fresh
+        Task/repo lookup), never this shortcut."""
+        prev=db.one("SELECT * FROM deployments WHERE id=?",(did,))
+        if not prev: raise HTTPException(404)
+        existing=latest_deployment(prev["task_id"],prev["repository_id"],prev["environment"])
+        if existing and existing["status"] in ("PENDING","PREPARING","BUILDING","DEPLOYING","VERIFYING"):
+            return RedirectResponse(f"/tasks/{prev['task_id']}",303)
+        did2=db.execute(
+            "INSERT INTO deployments(task_id,repository_id,environment,target_name,source_branch,source_commit,status) VALUES(?,?,?,?,?,?,'PENDING')",
+            (prev["task_id"],prev["repository_id"],prev["environment"],prev["target_name"],prev["source_branch"],prev["source_commit"]))
+        db.event("task",prev["task_id"],"DEPLOYMENT_REQUESTED",f"repo={prev['repository_id']} env={prev['environment']} commit={prev['source_commit'][:12]} deployment={did2} redeploy_of={did}")
+        deployer.deploy(did2)
+        return RedirectResponse(f"/tasks/{prev['task_id']}",303)
+    @app.get("/api/deployments/{did}")
+    def api_deployment(did:int):
+        row=db.one("SELECT * FROM deployments WHERE id=?",(did,))
+        if not row: raise HTTPException(404)
+        return row
+    @app.get("/deployments/{did}",response_class=HTMLResponse)
+    def deployment_detail(request:Request,did:int):
+        row=db.one("SELECT d.*,r.repo_name FROM deployments d JOIN repositories r ON r.id=d.repository_id WHERE d.id=?",(did,))
+        if not row: raise HTTPException(404)
+        phases=db.all("SELECT * FROM deployment_phases WHERE deployment_id=? ORDER BY id",(did,))
+        history=db.all("SELECT * FROM deployments WHERE task_id=? AND repository_id=? AND environment=? ORDER BY id DESC",(row["task_id"],row["repository_id"],row["environment"]))
+        return render(request,"deployment_detail.html",d=row,phases=phases,history=history)
+
     @app.post("/api/tasks/{tid}/mark-merged")
     def mark_task_merged(tid:int):
         """Bulk convenience for the common single-repo Task (or "I already

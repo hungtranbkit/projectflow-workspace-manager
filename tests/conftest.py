@@ -30,6 +30,7 @@ def build_client(settings):
     still 100% real either way, only the thread scheduling differs."""
     c=TestClient(create_app(settings))
     c.app.state.sandboxes.spawn=lambda fn,args=():fn(*args)
+    c.app.state.deployer.spawn=lambda fn,args=():fn(*args)
     return c
 
 @pytest.fixture

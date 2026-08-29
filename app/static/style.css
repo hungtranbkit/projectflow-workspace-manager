@@ -45,3 +45,4 @@ button.is-loading::before,.button.is-loading::before{content:'';position:absolut
 .current-action.succeeded .label{color:var(--green)}
 .result-note{font-size:12px;color:var(--muted);margin:4px 0 0}
 .result-note.failed{color:var(--red)}.result-note.succeeded{color:#08734a}
+.badge.success{background:#dff4ea;color:#08734a}
