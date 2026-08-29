@@ -233,7 +233,10 @@ def create_app(settings=None):
         if st=="NOT_CREATED": return "CREATE_SANDBOX"
         if st=="FAILED": return "SANDBOX_FAILED"
         if st in ("CREATED","PROVISIONING","STARTING"): return "SANDBOX_STARTING"
-        if st!="RUNNING": return "SANDBOX_NOT_RUNNING"
+        # CLEANUP_ELIGIBLE is a retention countdown, not a runtime state --
+        # the real container is still up and usable for the whole grace
+        # window (state-consistency audit finding: never conflate the two).
+        if st not in ("RUNNING","CLEANUP_ELIGIBLE"): return "SANDBOX_NOT_RUNNING"
         if r["automated_status"]=="NOT_RUN": return "RUN_TESTS"
         if r["automated_status"]=="FAIL": return "TESTS_FAILING"
         if r["manual"]["status"] in ("NOT_RUN","STALE"): return "OPEN_APP_VERIFY"
@@ -597,7 +600,7 @@ def create_app(settings=None):
         t=task_row(tid); d=decision.evaluate(tid)
         if d["stage"] not in ("QA","INTEGRATION","MERGING","COMPLETE") or any(b["review_status"]!="PASS" for b in d["builders"]):
             raise GitSafetyError("QA requires every required Builder's review to be PASS and current")
-        sbxs=task_sandboxes(tid); sandbox_id=next((s["id"] for s in sbxs if s["status"]=="RUNNING"),None)
+        sbxs=task_sandboxes(tid); sandbox_id=next((s["id"] for s in sbxs if s["status"] in ("RUNNING","CLEANUP_ELIGIBLE")),None)
         manifest=db.one("SELECT source_manifest_json FROM sandboxes WHERE id=?",(sandbox_id,))["source_manifest_json"] if sandbox_id else "{}"
         qid=db.execute("INSERT INTO qa_runs(task_id,brief_version,source_manifest,sandbox_id,tester_agent,status) VALUES(?,?,?,?,?,?)",
                         (tid,t["brief_version"],manifest,sandbox_id,slugify(tester_agent) if tester_agent else "qa","RUNNING"))
@@ -1126,8 +1129,11 @@ def create_app(settings=None):
         d=decision.evaluate(t["id"])
         ws=d["builders"]
         sbxs=task_sandboxes(t["id"])
-        sandbox={"total":len(sbxs),"running":sum(1 for s in sbxs if s["status"]=="RUNNING"),
-                 "unhealthy":sum(1 for s in sbxs if s["status"]=="RUNNING" and s["health_status"]!="HEALTHY")}
+        # CLEANUP_ELIGIBLE is a retention countdown, not a runtime state --
+        # counted as running here too so a just-completed Task's card
+        # doesn't misreport its still-live sandbox as not running.
+        sandbox={"total":len(sbxs),"running":sum(1 for s in sbxs if s["status"] in ("RUNNING","CLEANUP_ELIGIBLE")),
+                 "unhealthy":sum(1 for s in sbxs if s["status"] in ("RUNNING","CLEANUP_ELIGIBLE") and s["health_status"]!="HEALTHY")}
         tests={"passed":sum(1 for w in ws if w["ready"]),"total":len(ws)}
         agents={"total":len(ws),"ready":sum(1 for w in ws if w["ready"]),
                 "coding":sum(1 for w in ws if not w["ready"]),"failed":sum(1 for w in ws if w["fix_required"])}
@@ -1714,10 +1720,16 @@ def create_app(settings=None):
         was_merged=row["merge_status"]=="MERGED"
         new_status="MERGED" if status["pr_state"] in MERGED_STATES else ("CONFLICT" if status["mergeability"]=="CONFLICTING" else "PR_OPEN")
         if new_status=="MERGED":
+            # State-consistency invariant: merge_status=='MERGED' must
+            # never persist with merged_commit NULL -- GitHub always
+            # returns a real merge commit for an actually-merged PR, but
+            # fall back to the PR's own last-known head_sha rather than
+            # ever writing MERGED with no commit to point to at all.
+            merged_commit=status.get("merged_commit") or status.get("head_sha") or row.get("merged_commit")
             db.execute(
                 "UPDATE merge_records SET merge_status='MERGED',pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,merged_commit=?,merged_at=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (status["pr_state"],status["ci_status"],status["mergeability"],status["merge_state_status"],status["head_sha"],
-                 status.get("merged_commit"),status.get("merged_at") or row.get("merged_at"),row["id"]))
+                 merged_commit,status.get("merged_at") or row.get("merged_at"),row["id"]))
         else:
             db.execute(
                 "UPDATE merge_records SET merge_status=?,pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",

@@ -491,10 +491,32 @@ class TaskDecisionService:
         flight, not proof of anything yet, so only an explicit
         READY_FOR_MAIN on every participating repo's Integration
         Workspace counts (the same gate /api/integrations/{iid}/
-        ready-for-main itself enforces before setting it)."""
+        ready-for-main itself enforces before setting it).
+
+        State-consistency audit finding: a persisted status=='READY_FOR_
+        MAIN' row does NOT by itself prove verified_commit still equals
+        the branch's real current HEAD -- that reconciliation
+        (`invalidate()`) was previously only ever triggered as a side
+        effect of a human loading /integrations/{iid} directly. Any
+        OTHER route reading this decision (task_detail, /decision API,
+        merge routes) would keep seeing a stale READY_FOR_MAIN --
+        'Integration healthy' checked ✓ -- even after new, never-tested
+        commits landed on the source branch. gate_status['head'] is
+        always computed fresh (real git read, every call), so comparing
+        it against the persisted verified_commit here makes the
+        decision layer itself self-healing: the invariant 'Integration
+        READY_FOR_MAIN implies current HEAD == verified HEAD' now holds
+        no matter which route asks, never only the one that happens to
+        also run the DB-write side effect."""
         if not ti or ti["status"] == "CONFLICT": return False
         if not ti_repos: return False
-        return all(r["status"] == "READY_FOR_MAIN" for r in ti_repos)
+        for r in ti_repos:
+            if r["status"] != "READY_FOR_MAIN":
+                return False
+            gs = r.get("gate_status") or {}
+            if r.get("verified_commit") and gs.get("head") and r["verified_commit"] != gs["head"]:
+                return False  # HEAD moved since Ready for Main was confirmed; DB flag not yet reconciled
+        return True
 
     # ---- public wrappers for gate-checklist rendering (section 38) -----
     # Same checks evaluate() uses internally, exposed so a template's gate
