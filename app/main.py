@@ -24,6 +24,7 @@ from app.services.sandbox_manager import SandboxError, SandboxManager, SourceSpe
 from app.services.sandbox_runtime import SandboxRuntimeService
 from app.services.agent_session_manager import AgentSessionManager, SessionError
 from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source, LIVE_SESSION_STATUSES
+from app.services.user_state_view import user_task_state, progress_summary, humanize_enum
 from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
 from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES
 from app.services.operations import OperationInProgress, OperationService
@@ -47,6 +48,7 @@ def create_app(settings=None):
     contract_editor = RepositoryContractEditor(git)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
+    templates.env.filters["humanize"] = humanize_enum
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
     app.state.settings, app.state.db, app.state.git, app.state.runner, app.state.launcher = settings, db, git, runner, launcher
     app.state.sandboxes, app.state.ports, app.state.sandbox_runtime, app.state.cleanup_worker = sandboxes, ports, sandbox_runtime, cleanup_worker
@@ -1772,16 +1774,18 @@ def create_app(settings=None):
             w["default_reviewer"]=other[0] if other else w["agent"]
             w["last_activity_hint"]=activity_summary(w["session"]["id"], 200) if w["session"] else None
 
+        qa_required=decision.requires_qa(d["risk_profile"]); integration_required=decision.requires_integration(d["risk_profile"])
         return render(request,"task_detail.html",t=t,decision=d,workspaces=workspaces,sandboxes=sbxs,task_integration=ti,ti_repos=ti_repos,
                       integration_sandboxes=integration_sandboxes,
                       status=d["status"],stage=d["stage"],risk_profile=d["risk_profile"],next_action=d["next_action"],
                       blocking_reasons=d["blocking_reasons"],test_readiness=d["test_readiness"],ready_for_main=d["ready_for_main"],
                       merge_records=d["merge_records"],qa=d["qa"],gates=gates,current_step=d["current_step"],
                       prompt_source=d["prompt_source"],effective_task_prompt=d["effective_task_prompt"],
-                      qa_required=decision.requires_qa(d["risk_profile"]),
+                      qa_required=qa_required,
                       task_cleanup_countdown=format_countdown(earliest_cleanup),
                       blocking_workspace=blocking_workspace,not_ready_workspaces=not_ready,
-                      repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=settings.agents)
+                      repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=settings.agents,
+                      user_state=user_task_state(d),progress=progress_summary(d["current_step"],qa_required,integration_required))
     @app.get("/api/tasks/{tid}")
     def api_task(tid:int):
         t=task_row(tid); return {**t,"workspaces":task_workspaces(tid),"sandboxes":task_sandboxes(tid),"task_integration":task_integration_row(tid)}

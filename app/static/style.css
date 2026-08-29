@@ -46,3 +46,101 @@ button.is-loading::before,.button.is-loading::before{content:'';position:absolut
 .result-note{font-size:12px;color:var(--muted);margin:4px 0 0}
 .result-note.failed{color:var(--red)}.result-note.succeeded{color:#08734a}
 .badge.success{background:#dff4ea;color:#08734a}
+
+/* ================= Mobile-first operational UX (redesign) =================
+   Breakpoints tested: 390px / 430px / 768px / 1440px. Desktop (>900px)
+   keeps the existing sidebar-always-visible layout unchanged (section 32:
+   mobile-first is not a separate weaker desktop) -- everything below only
+   takes effect at <=900px unless noted. */
+
+/* -- Touch targets (section 24): every primary/important action >=44px. */
+.button,button,.badge-action{min-height:44px;display:inline-flex;align-items:center;justify-content:center;padding:10px 18px}
+.quick-actions a,.quick-actions button{min-height:40px}
+
+/* -- Mobile nav drawer (section 26) -- hidden entirely on desktop. */
+.nav-drawer-toggle{display:none}
+.topbar-mobile{display:none}
+.nav-drawer-scrim{display:none}
+@media(max-width:900px){
+  .nav-drawer-toggle{position:absolute;top:-999px}
+  .topbar-mobile{display:flex;align-items:center;gap:12px;background:var(--nav);color:#fff;padding:12px 16px;position:sticky;top:0;z-index:30}
+  .nav-hamburger{font-size:22px;line-height:1;cursor:pointer;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;border-radius:7px}
+  .nav-hamburger:hover{background:#253945}
+  .topbar-mobile-title{font-weight:700;font-size:16px}
+  aside{position:fixed;top:0;left:0;bottom:0;width:78vw;max-width:300px;z-index:40;transform:translateX(-100%);transition:transform .2s ease;box-shadow:2px 0 18px rgba(0,0,0,.25)}
+  .nav-drawer-toggle:checked ~ aside{transform:translateX(0)}
+  .nav-drawer-scrim{display:block;position:fixed;inset:0;background:rgba(0,0,0,0);pointer-events:none;transition:background .2s ease;z-index:35}
+  .nav-drawer-toggle:checked ~ .nav-drawer-scrim{background:rgba(0,0,0,.4);pointer-events:auto}
+  main{padding-top:16px}
+}
+
+/* -- Status Hero (section 2): the dominant element on every Task page.
+   One of four state-class palettes -- color + icon + label together,
+   never color alone (section 33). */
+.status-hero{border-radius:12px;padding:20px 22px;margin-bottom:18px;border:1px solid transparent}
+.status-hero .hero-kicker{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:800;display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.status-hero .hero-kicker::before{content:'';width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+.status-hero h3{margin:0 0 8px;font-size:22px;line-height:1.25}
+.status-hero p.explanation{margin:0 0 14px;color:inherit;opacity:.9}
+.status-hero .hero-blocker{background:rgba(255,255,255,.55);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px}
+.status-hero .hero-blocker b{display:block;margin-bottom:2px}
+.status-hero .hero-actions{display:flex;flex-direction:column;gap:8px}
+.status-hero .hero-actions form{display:block}
+.status-hero .hero-primary{width:100%}
+.status-hero .hero-secondary{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px}
+.status-hero .hero-secondary a,.status-hero .hero-secondary button{background:transparent;color:inherit;text-decoration:underline;padding:6px 2px;min-height:32px;font-weight:600}
+
+.status-hero.state-working{background:#e8f0fd;border-color:#c3d7f7;color:#12335e}
+.status-hero.state-working .hero-kicker::before{background:var(--blue)}
+.status-hero.state-waiting{background:#f3f2ef;border-color:#e2ded6;color:#4a463d}
+.status-hero.state-waiting .hero-kicker::before{background:#9c9484}
+.status-hero.state-action_required{background:#fff2d9;border-color:#f3d996;color:#6b4a06}
+.status-hero.state-action_required .hero-kicker::before{background:var(--amber)}
+.status-hero.state-complete{background:#ddf4e9;border-color:#a9e3c6;color:#095a3a}
+.status-hero.state-complete .hero-kicker::before{background:var(--green)}
+
+/* -- Compact progress stepper (section 10/11): current/previous/next,
+   never the full 8-label row squeezed onto a narrow screen. */
+.progress-compact{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted);margin-bottom:16px;flex-wrap:wrap}
+.progress-compact .step-current{font-weight:800;color:var(--ink);background:#e2edff;padding:3px 10px;border-radius:20px}
+.progress-compact .step-done{color:#08734a}
+.progress-compact .step-arrow{opacity:.5}
+@media(max-width:900px){.wizard-stepper{display:none}}
+@media(min-width:901px){.progress-compact.mobile-only{display:none}}
+
+/* -- Sticky bottom action bar (section 8) -- mobile only, ACTION_REQUIRED
+   states only (templates gate this, not CSS alone: WAITING must never
+   get a sticky bar with nothing to press). */
+@media(max-width:900px){
+  .sticky-action-bar{position:sticky;bottom:0;left:0;right:0;background:var(--panel);border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom));box-shadow:0 -4px 14px rgba(0,0,0,.06);z-index:20;margin:0 -16px -16px}
+  .sticky-action-bar .sticky-label{font-size:12px;color:var(--muted);margin-bottom:6px}
+  .sticky-action-bar form,.sticky-action-bar .button{width:100%}
+}
+@media(min-width:901px){.sticky-action-bar{display:none}}
+
+/* -- Reusable Error / Waiting / Success card standard (section 12/13/14),
+   built on the existing .warning/.readybox/.alert tokens so it never
+   diverges from them. */
+.state-card{border-radius:9px;padding:16px 18px;margin:14px 0}
+.state-card h4{margin:0 0 8px;font-size:15px}
+.state-card .card-section{margin:8px 0}
+.state-card .card-section small{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.state-card.card-error{background:#f9e3e5;color:#7e2731}
+.state-card.card-waiting{background:#f3f2ef;color:#4a463d}
+.state-card.card-success{background:#ddf4e9;color:#096842}
+
+/* -- Cards instead of wide tables on narrow screens (section 27). -- */
+@media(max-width:700px){
+  table.to-cards,table.to-cards thead{display:none}
+  table.to-cards tbody,table.to-cards tr{display:block;width:100%}
+  table.to-cards tr{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:10px}
+  table.to-cards td{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border:0}
+  table.to-cards td::before{content:attr(data-label);color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+}
+
+/* -- Humanized activity time (section 29) -- raw ISO timestamps move
+   under .tech-detail, this is what's shown in normal flow. */
+.activity-time{color:var(--muted);font-size:12px}
+
+/* -- Connection-lost banner (section 31). -- */
+.connection-lost{background:#fff2d9;color:#6b4a06;border-radius:8px;padding:10px 14px;margin:10px 0;font-size:13px}
