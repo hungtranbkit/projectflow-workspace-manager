@@ -62,7 +62,7 @@
 <div class="primary-action"><button class="success big" type="submit">Start Claude / Codex</button></div>
 </form>
 {% else %}
-<p>Builder Workspace đã tạo — bấm Start để agent bắt đầu chạy thật.</p>
+<p>Builder đã sẵn sàng. Bấm Start {{workspaces[0].agent|capitalize}} để bắt đầu làm Task.<br><small>Chỉ thêm Builder khác nếu Task này cần thêm agent hoặc repository.</small></p>
 {% for w in workspaces %}
 <div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.role or w.repo_name}}<br><small>Repository</small> <code>{{w.repo_name}}</code> · <small>Branch</small> <code>{{w.branch}}</code> · <small>Base</small> <code>{{w.branch and w.head[:8] if w.head else '—'}}</code></div>
 <span class="badge {{w.status|lower}}">Workspace: {{w.status_label}}</span></div>
@@ -70,8 +70,9 @@
 {% else %}<div class="quick-actions"><form method="post" action="/api/tasks/{{t.id}}/setup-and-start"><input type="hidden" name="repository_id" value="{{w.repository_id}}"><input type="hidden" name="agent" value="{{w.agent}}"><button class="success">Start {{w.agent|capitalize}}</button></form></div>{% endif %}
 {% endfor %}
 {% if workspaces|length > 1 %}<div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/setup-and-start"><button class="success big" type="submit">Start All Builders</button></form></div>{% endif %}
-<details><summary>+ Add another repository</summary>
-<form method="post" action="/api/tasks/{{t.id}}/workspaces"><label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label><label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><label>Role<input name="role" placeholder="Backend / Firmware / Frontend"></label><label>Base branch<input name="base_branch" value="main"></label><label>Sandbox<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label><button>Add Builder Workspace</button></form>
+<details><summary>+ Add Another Builder</summary>
+<p class="empty">Optional — use this only when the Task needs another agent or repository.</p>
+<form method="post" action="/api/tasks/{{t.id}}/workspaces"><label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label><label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><label>Role<input name="role" placeholder="Backend / Firmware / Frontend"></label><label>Base branch<input name="base_branch" value="main"></label><label>Sandbox<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select></label><button>Create Builder</button></form>
 </details>
 {% endif %}
 </section>
@@ -432,8 +433,15 @@
 {% endif %}
 </div>
 {% else %}<p class="empty">Chưa có Builder Workspace nào trong Task này.</p>{% endfor %}
-<h4>+ Add Builder Workspace</h4>
-<form method="post" action="/api/tasks/{{t.id}}/workspaces"><label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label><label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><label>Task role<input name="role" placeholder="Backend / Firmware / Frontend"></label><label>Base branch<input name="base_branch" value="main"></label><label>Sandbox profile<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select><a href="/help#sandbox-modes">? Chọn Sandbox thế nào?</a></label><button>Add Builder Workspace</button></form>
+{% if workspaces %}
+<details><summary>+ Add Another Builder</summary>
+<p class="empty">Optional — use this only when the Task needs another agent or repository.</p>
+<form method="post" action="/api/tasks/{{t.id}}/workspaces"><label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label><label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><label>Task role<input name="role" placeholder="Backend / Firmware / Frontend"></label><label>Base branch<input name="base_branch" value="main"></label><label>Sandbox profile<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select><a href="/help#sandbox-modes">? Chọn Sandbox thế nào?</a></label><button>Create Builder</button></form>
+</details>
+{% else %}
+<h4>+ Create First Builder</h4>
+<form method="post" action="/api/tasks/{{t.id}}/workspaces"><label>Repository<select name="repository_id" required>{% for r in repositories %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label><label>Agent<select name="agent">{% for a in agents %}<option>{{a}}</option>{% endfor %}</select></label><label>Task role<input name="role" placeholder="Backend / Firmware / Frontend"></label><label>Base branch<input name="base_branch" value="main"></label><label>Sandbox profile<select name="sandbox_profile"><option value="">AUTO</option><option>NONE</option><option>SHARED_DEV</option><option>BACKEND</option><option>FULL</option><option>HARDWARE</option></select><a href="/help#sandbox-modes">? Chọn Sandbox thế nào?</a></label><button>Create Builder</button></form>
+{% endif %}
 </section>
 {% if not_ready_workspaces %}<p><small>Waiting for:</small> {% for w in not_ready_workspaces %}<span class="cap">{{w.agent}} · {{w.role or w.repo_name}}</span>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
 
