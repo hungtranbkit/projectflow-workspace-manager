@@ -26,6 +26,7 @@ from app.services.agent_session_manager import AgentSessionManager, SessionError
 from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source
 from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
 from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService
+from app.services.operations import OperationInProgress, OperationService
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -37,6 +38,7 @@ def create_app(settings=None):
     decision = TaskDecisionService(db, git)
     gate_waivers = GateWaiverService(db, git)
     github_merge = GitHubMergeService()
+    ops = OperationService(db)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
@@ -46,6 +48,7 @@ def create_app(settings=None):
     app.state.decision = decision
     app.state.gate_waivers = gate_waivers
     app.state.github_merge = github_merge
+    app.state.ops = ops
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -61,6 +64,31 @@ def create_app(settings=None):
         if not row: raise HTTPException(404)
         return row
     def invalidate(iid): db.execute("UPDATE integration_workspaces SET ready_for_main=0,verified_commit=NULL,verified_at=NULL,status='TESTING',updated_at=CURRENT_TIMESTAMP WHERE id=?",(iid,))
+    TEST_RUN_LABELS={"QUEUED":"Starting tests...","RUNNING":"Running tests...","PASS":"Tests PASS","FAIL":"Tests FAILED","TIMEOUT":"Tests timed out","SKIPPED":"Tests skipped"}
+    OPERATION_RUNNING_LABELS={"MERGE_LATEST":"Merging latest changes...","PUSH_INTEGRATION":"Pushing...","MARK_READY_FOR_MAIN":"Validating readiness...","CREATE_PR":"Creating PR...","MERGE_PR":"Merging..."}
+    def integration_current_action(iid):
+        """Button-state-ux section 6: whichever action on this Integration
+        is most worth surfacing right now -- a currently RUNNING one if
+        any (test run and/or a tracked Operation), else the most recent
+        terminal result of any kind. Never a client-side guess: every
+        field here comes straight from test_runs/operations."""
+        candidates=[]
+        tr=db.one("SELECT * FROM test_runs WHERE workspace_type='integration' AND workspace_id=? ORDER BY id DESC LIMIT 1",(iid,))
+        if tr:
+            running=tr["status"] in ("QUEUED","RUNNING")
+            candidates.append({"kind":"Run Tests","started_at":tr["started_at"] or tr["finished_at"] or "","is_running":running,
+                                "label":TEST_RUN_LABELS.get(tr["status"],tr["status"]),"is_failed":tr["status"] in ("FAIL","TIMEOUT"),
+                                "is_succeeded":tr["status"]=="PASS","url":f"/test-runs/{tr['id']}/log"})
+        for optype,kind in (("MERGE_LATEST","Merge Latest Changes"),("PUSH_INTEGRATION","Push Integration Branch"),("MARK_READY_FOR_MAIN","Mark Ready for Main")):
+            op=ops.latest("integration",iid,optype)
+            if not op: continue
+            running=op["status"] in ("QUEUED","RUNNING")
+            label=OPERATION_RUNNING_LABELS[optype] if running else (op["result_summary"] if op["status"]=="SUCCEEDED" else (op["error"] or "Failed"))
+            candidates.append({"kind":kind,"started_at":op["started_at"] or "","is_running":running,"label":label,
+                                "is_failed":op["status"]=="FAILED","is_succeeded":op["status"]=="SUCCEEDED","url":None})
+        if not candidates: return None
+        running=[c for c in candidates if c["is_running"]]
+        return max(running or candidates,key=lambda c:c["started_at"])
     def safe_details(worktree_path):
         path=Path(worktree_path)
         empty={"head":None,"status":[],"modified":[],"untracked":[],"commits":[]}
@@ -653,9 +681,14 @@ def create_app(settings=None):
         """Command safety (section 14): the browser supplies only
         workspace_id + (fixed) mode -- agent name and cwd are both
         resolved server-side from the trusted workspace/launcher
-        registry, never taken from the request."""
+        registry, never taken from the request. Duplicate-click
+        protection (button-feedback section 4/8): a second 'Start
+        Builder' click while a session is already STARTING/RUNNING/
+        WAITING_FOR_INPUT reuses that live session (via
+        _resume_builder_session's own guard) instead of forking a second
+        real pty process for the same workspace."""
         w=agent_row(wid)
-        try: sid=_start_builder_session(w,mode)
+        try: sid=_resume_builder_session(w) if mode=="INTERACTIVE" else _start_builder_session(w,mode)
         except SessionError as exc: raise GitSafetyError(str(exc)) from exc
         return RedirectResponse(f"/workspaces/{wid}/sessions/{sid}",303)
     @app.post("/api/sessions/{sid}/deliver-prompt")
@@ -804,41 +837,104 @@ def create_app(settings=None):
         elif conflicts: push_disabled_reason="Integration is still in conflict."
         elif dirty: push_disabled_reason="Commit or resolve local changes first."
         elif pushed: push_disabled_reason="Already pushed at this exact HEAD."
-        pr=None; gate_status=None
+        pr=None
         ti_row=db.one("SELECT task_id FROM task_integrations WHERE id=?",(i["task_integration_id"],)) if i["task_integration_id"] else None
+        task_id=ti_row["task_id"] if ti_row else None
         if ti_row:
-            pr=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(ti_row["task_id"],i["repository_id"]))
-            gate_status=decision.integration_gate_status(i,ti_row["task_id"])
+            pr=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(task_id,i["repository_id"]))
+        gate_status=decision.integration_gate_status(i,task_id)
+        # Sections 17-20: exactly one dominant primary action, derived
+        # from the SAME authoritative ladder the Task wizard uses
+        # (TaskDecisionService.integration_next_action) -- never a
+        # separately-hardcoded ordering here. A stale/unmerged source
+        # branch is checked first since the decision-engine ladder itself
+        # has no notion of `integration_sources` (that table is purely a
+        # git-worktree/Integration-page concern, section 1's Merge Latest
+        # Changes), and an in-progress conflict always wins outright.
+        i["gate_status"]=gate_status
+        if any(s["stale"] for s in sources) and i["status"]!="CONFLICT":
+            primary_action={"action":"MERGE_LATEST"}
+        else:
+            primary_action=decision.integration_next_action(i,task_id,pr)
+            # Section 19: never present PUSH_INTEGRATION as the dominant
+            # action when it is not actually reachable (no GitHub remote
+            # configured at all) -- ready-for-main itself never requires
+            # push_status (only clean/no-conflicts/sources-current/tests-
+            # pass), so once tests pass a GitHub-less repo's real next
+            # step is Confirm Ready for Main, not a Push button that
+            # would just 409 if clicked.
+            if primary_action["action"]=="PUSH_INTEGRATION" and not github_available:
+                primary_action=dict(primary_action,action="CONFIRM_INTEGRATION_READY")
         return render(request,"integration_detail.html",i=i,sources=sources,conflicts=conflicts,head=head,stale=readiness_stale,
                       runs=db.all("SELECT * FROM test_runs WHERE workspace_type='integration' AND workspace_id=? ORDER BY id DESC",(iid,)),
                       events=db.all("SELECT * FROM workspace_events WHERE entity_type='integration' AND entity_id=? ORDER BY id",(iid,)),
-                      pushed=pushed,push_disabled_reason=push_disabled_reason,pr=pr,gate_status=gate_status)
+                      pushed=pushed,push_disabled_reason=push_disabled_reason,pr=pr,gate_status=gate_status,
+                      primary_action=primary_action["action"],primary_action_label=primary_action.get("label"),
+                      current_action=integration_current_action(iid),
+                      merge_latest_op=ops.latest("integration",iid,"MERGE_LATEST"),
+                      push_op=ops.latest("integration",iid,"PUSH_INTEGRATION"),
+                      ready_op=ops.latest("integration",iid,"MARK_READY_FOR_MAIN"))
     @app.post("/api/integrations/{iid}/merge-latest")
     def merge_latest(iid:int):
+        """[Merge Latest Changes]: tracked as one MERGE_LATEST Operation
+        (button-feedback section 8) -- a second click while one is still
+        RUNNING is reflected back, never launches a second real git merge
+        (section 4)."""
         i=integration_row(iid)
         if git.conflict_files(i["worktree_path"]): raise GitSafetyError("Resolve current conflicts before merging latest")
-        sources=db.all("SELECT s.*,w.branch FROM integration_sources s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.integration_id=?",(iid,)); invalidate(iid)
-        for s in sources:
-            current=git.head(i["repo_path"],s["branch"])
-            if current==s["merged_commit"]: continue
-            result=git.merge(i["worktree_path"],s["branch"])
-            if result.returncode:
-                db.execute("UPDATE integration_workspaces SET status='CONFLICT' WHERE id=?",(iid,)); db.event("integration",iid,"MERGE_CONFLICT",s["branch"]); break
-            db.execute("UPDATE integration_sources SET merged_commit=?,merged_at=CURRENT_TIMESTAMP WHERE integration_id=? AND workspace_id=?",(current,iid,s["workspace_id"])); db.event("integration",iid,"BRANCH_MERGED",s["branch"])
+        try: op_id=ops.begin("integration",iid,"MERGE_LATEST")
+        except OperationInProgress: return RedirectResponse(f"/integrations/{iid}",303)
+        try:
+            sources=db.all("SELECT s.*,w.branch FROM integration_sources s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.integration_id=?",(iid,)); invalidate(iid)
+            merged_any=False; conflict_branch=None
+            for s in sources:
+                current=git.head(i["repo_path"],s["branch"])
+                if current==s["merged_commit"]: continue
+                result=git.merge(i["worktree_path"],s["branch"])
+                if result.returncode:
+                    db.execute("UPDATE integration_workspaces SET status='CONFLICT' WHERE id=?",(iid,)); db.event("integration",iid,"MERGE_CONFLICT",s["branch"])
+                    conflict_branch=s["branch"]; break
+                db.execute("UPDATE integration_sources SET merged_commit=?,merged_at=CURRENT_TIMESTAMP WHERE integration_id=? AND workspace_id=?",(current,iid,s["workspace_id"])); db.event("integration",iid,"BRANCH_MERGED",s["branch"])
+                merged_any=True
+            if conflict_branch: ops.fail(op_id,f"Conflict detected in {conflict_branch}")
+            else: ops.succeed(op_id,"Merged latest changes" if merged_any else "Already up to date")
+        except Exception as exc:
+            ops.fail(op_id,exc); raise
         return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/test")
     def test_integration(iid:int):
+        """[Run Tests]: test_runs already tracks QUEUED/RUNNING/PASS/FAIL
+        (TestRunner runs it in a background thread) -- reused as-is
+        rather than a second `operations` row (db.py V12 comment). The
+        only gap closed here is duplicate-click protection: a click while
+        the current run for this Integration is still QUEUED/RUNNING is
+        a no-op, never a second concurrent TestRun (section 4)."""
         i=integration_row(iid)
         if git.conflict_files(i["worktree_path"]): raise GitSafetyError("Cannot test unresolved conflicts")
+        active=db.one("SELECT id FROM test_runs WHERE workspace_type='integration' AND workspace_id=? AND status IN ('QUEUED','RUNNING') ORDER BY id DESC LIMIT 1",(iid,))
+        if active: return RedirectResponse(f"/integrations/{iid}",303)
         invalidate(iid); runner.start("integration",iid,Path(i["worktree_path"])); return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/ready-for-main")
     def ready_main(iid:int):
-        r=integration_readiness(iid)
-        if not r["clean"]: raise GitSafetyError("Integration worktree must be clean")
-        if not r["no_conflicts"]: raise GitSafetyError("Merge conflict exists")
-        if not r["sources_current"]: raise GitSafetyError("Source not current")
-        if not r["tests_pass"]: raise GitSafetyError("All required tests must PASS at current HEAD")
-        db.execute("UPDATE integration_workspaces SET status='READY_FOR_MAIN',ready_for_main=1,verified_commit=?,verified_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(r["head"],iid)); db.event("integration",iid,"READY_FOR_MAIN",r["head"]); return RedirectResponse(f"/integrations/{iid}",303)
+        """[Mark Ready for Main] (section 15): tracked as one
+        MARK_READY_FOR_MAIN Operation so the button never looks unchanged
+        after a click -- 'Validating readiness...' while RUNNING (this
+        check is local/fast, so in practice RUNNING is only ever visible
+        to a concurrent second click or a very unlucky refresh), then
+        'Ready for Main' or 'Blocked: <exact reason>'."""
+        try: op_id=ops.begin("integration",iid,"MARK_READY_FOR_MAIN")
+        except OperationInProgress: return RedirectResponse(f"/integrations/{iid}",303)
+        try:
+            r=integration_readiness(iid)
+            if not r["clean"]: raise GitSafetyError("Integration worktree must be clean")
+            if not r["no_conflicts"]: raise GitSafetyError("Merge conflict exists")
+            if not r["sources_current"]: raise GitSafetyError("Source not current")
+            if not r["tests_pass"]: raise GitSafetyError("All required tests must PASS at current HEAD")
+            db.execute("UPDATE integration_workspaces SET status='READY_FOR_MAIN',ready_for_main=1,verified_commit=?,verified_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(r["head"],iid)); db.event("integration",iid,"READY_FOR_MAIN",r["head"])
+            ops.succeed(op_id,f"Ready for Main at {r['head'][:8]}")
+        except Exception as exc:
+            ops.fail(op_id,exc); raise
+        return RedirectResponse(f"/integrations/{iid}",303)
     INTEGRATION_PUSH_BRANCH_DENYLIST={"main","master","production"}
     @app.post("/api/integrations/{iid}/push")
     def push_integration(iid:int):
@@ -866,6 +962,8 @@ def create_app(settings=None):
             raise GitSafetyError(f"INTEGRATION_BRANCH_MISMATCH: worktree is on '{current_branch}', expected '{i['branch']}'")
         if not github_merge.available(i["repo_path"]):
             raise GitSafetyError("REMOTE_NOT_CONFIGURED: repository has no GitHub remote")
+        try: op_id=ops.begin("integration",iid,"PUSH_INTEGRATION")
+        except OperationInProgress: return RedirectResponse(f"/integrations/{iid}",303)
         db.event("integration",iid,"INTEGRATION_PUSH_STARTED",f"branch={i['branch']} local_head={head}")
         try:
             github_merge.push_branch(i["repo_path"],i["branch"])
@@ -875,9 +973,11 @@ def create_app(settings=None):
             db.execute("UPDATE integration_workspaces SET push_status=?,push_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                        ("PUSH_BLOCKED_REMOTE_CHANGED" if blocked else "PUSH_FAILED",str(exc)[:2000],iid))
             db.event("integration",iid,"INTEGRATION_PUSH_FAILED",f"branch={i['branch']} error={exc}")
+            ops.fail(op_id,exc)
             raise GitSafetyError(f"{'PUSH_BLOCKED_REMOTE_CHANGED' if blocked else 'PUSH_FAILED'}: {exc}") from exc
         db.execute("UPDATE integration_workspaces SET last_pushed_head=?,push_status='PUSHED',pushed_at=CURRENT_TIMESTAMP,push_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,iid))
         db.event("integration",iid,"INTEGRATION_PUSH_SUCCEEDED",f"branch={i['branch']} head={head}")
+        pr_note=""
         # Section 9/10: refresh the SAME existing PR if one exists for
         # this repo on this Task -- NEVER create a new one from here.
         ti=db.one("SELECT task_id FROM task_integrations WHERE id=?",(i["task_integration_id"],)) if i["task_integration_id"] else None
@@ -897,8 +997,10 @@ def create_app(settings=None):
                     db.execute(
                         "UPDATE merge_records SET pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                         (status["pr_state"],status["ci_status"],status["mergeability"],status["merge_state_status"],status["head_sha"],mr["id"]))
+                    pr_note=f" -- PR #{mr['pr_number']} updated"
                 except GitHubIntegrationError:
                     pass  # the push itself already succeeded; PR-status refresh is best-effort
+        ops.succeed(op_id,f"Pushed {head[:8]}{pr_note}")
         return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/reproduce-baseline")
     def reproduce_baseline_failure(iid:int,gate:str=Form(...),test_identifier:str=Form(...)):
@@ -949,6 +1051,17 @@ def create_app(settings=None):
     @app.get("/api/test-runs/{rid}")
     def api_run(rid:int):
         row=db.one("SELECT * FROM test_runs WHERE id=?",(rid,));
+        if not row: raise HTTPException(404)
+        return row
+    @app.get("/api/operations/{op_id}")
+    def api_operation(op_id:int):
+        """Polling endpoint for the generic action-button feedback model
+        (Merge Latest Changes / Push Integration Branch / Create PR /
+        Merge PR / Mark Ready for Main). The button-feedback JS polls
+        this while status is QUEUED/RUNNING and reloads the page once it
+        reaches a terminal state, so the page always re-renders from the
+        real persisted result -- never a client-side guess."""
+        row=db.one("SELECT * FROM operations WHERE id=?",(op_id,))
         if not row: raise HTTPException(404)
         return row
     @app.get("/test-runs/{rid}/log",response_class=PlainTextResponse)
@@ -1291,6 +1404,11 @@ def create_app(settings=None):
             m["gate"]=decision.merge_gate_status(d,m["repository_id"],m)
             repo_ti=next((x for x in ti_repos if x["repository_id"]==m["repository_id"]),None)
             m["integration_id"]=repo_ti["id"] if repo_ti else None
+            # Button-state-ux: Create PR / Merge PR feedback, keyed by
+            # this exact MergeRecord row (never repository_id alone --
+            # the same repo can have a MergeRecord per Task).
+            m["create_pr_op"]=ops.latest("merge_record",m["id"],"CREATE_PR")
+            m["merge_pr_op"]=ops.latest("merge_record",m["id"],"MERGE_PR")
 
         # Overview gate checklist (section 38): one row per gate this
         # Task's risk policy actually requires, ✓/○ from the same
@@ -1548,6 +1666,8 @@ def create_app(settings=None):
         if not branch or not commit: raise GitSafetyError("No verified source branch/commit for this repository")
         if not github_merge.available(r["repo_path"]): raise GitSafetyError("Repository has no GitHub remote -- use Confirm External Merge instead")
         base_branch=r["default_branch"] or "main"
+        try: op_id=ops.begin("merge_record",row["id"],"CREATE_PR")
+        except OperationInProgress: return RedirectResponse(f"/tasks/{tid}",303)
         try:
             # Neither a Builder Workspace branch nor a Task Integration
             # branch is ever pushed anywhere automatically before this
@@ -1558,18 +1678,22 @@ def create_app(settings=None):
             # gets synced too, not just the first push).
             github_merge.push_branch(r["repo_path"],branch)
             existing=github_merge.find_existing_pr(r["repo_path"],branch,base_branch)
-            if existing and existing["state"]!="CLOSED":
+            reused=bool(existing and existing["state"]!="CLOSED")
+            if reused:
                 status=github_merge.pr_status(r["repo_path"],existing["number"])
             else:
                 title,body=t["title"],f"Automated PR for Task #{t['id']}: {t['title']}\n\nGenerated by ProjectFlow Workspace Manager."
                 status=github_merge.create_pr(r["repo_path"],branch,base_branch,title,body)
                 db.event("task",tid,"PR_CREATED",f"repo={repository_id} pr={status['pr_number']} head={status['head_sha']}")
-        except GitHubIntegrationError as exc: raise GitSafetyError(f"{exc.code}: {exc}") from exc
+        except GitHubIntegrationError as exc:
+            ops.fail(op_id,f"{exc.code}: {exc}")
+            raise GitSafetyError(f"{exc.code}: {exc}") from exc
         db.execute(
             "UPDATE merge_records SET merge_status=?,pr_number=?,pr_url=?,pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,base_branch=?,source_branch=?,verified_commit=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
             ("MERGED" if status["pr_state"]=="MERGED" else ("CONFLICT" if status["mergeability"]=="CONFLICTING" else "PR_OPEN"),
              status["pr_number"],status["pr_url"],status["pr_state"],status["ci_status"],status["mergeability"],
              status["merge_state_status"],status["head_sha"],base_branch,branch,commit,row["id"]))
+        ops.succeed(op_id,f"PR #{status['pr_number']} already open" if reused else f"PR #{status['pr_number']} created")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/refresh")
     def refresh_merge_pr(tid:int,repository_id:int):
@@ -1596,8 +1720,12 @@ def create_app(settings=None):
         t=task_row(tid); r=repo(repository_id)
         row=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
         if not row or not row["pr_number"]: raise GitSafetyError("No open PR for this repository")
+        try: op_id=ops.begin("merge_record",row["id"],"MERGE_PR")
+        except OperationInProgress: return RedirectResponse(f"/tasks/{tid}",303)
         try: status=github_merge.pr_status(r["repo_path"],row["pr_number"])
-        except GitHubIntegrationError as exc: raise GitSafetyError(f"{exc.code}: {exc}") from exc
+        except GitHubIntegrationError as exc:
+            ops.fail(op_id,f"{exc.code}: {exc}")
+            raise GitSafetyError(f"{exc.code}: {exc}") from exc
         db.execute(
             "UPDATE merge_records SET pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
             (status["pr_state"],status["ci_status"],status["mergeability"],status["merge_state_status"],status["head_sha"],row["id"]))
@@ -1606,16 +1734,19 @@ def create_app(settings=None):
         gate=decision.merge_gate_status(d,repository_id,row)
         if not gate["eligible"]:
             db.event("task",tid,"MERGE_BLOCKED",f"repo={repository_id} blockers={','.join(gate['blockers'])}")
+            ops.fail(op_id,f"Merge blocked: {', '.join(gate['blockers'])}")
             raise GitSafetyError(f"Merge blocked: {', '.join(gate['blockers'])}")
         db.event("task",tid,"MERGE_REQUESTED",f"repo={repository_id} pr={row['pr_number']} head={row['head_sha']}")
         try: merged=github_merge.merge_pr(r["repo_path"],row["pr_number"],row["merge_strategy"] or "MERGE_COMMIT")
         except GitHubIntegrationError as exc:
             db.event("task",tid,"MERGE_BLOCKED",f"repo={repository_id} error={exc.code}")
+            ops.fail(op_id,f"{exc.code}: {exc}")
             raise GitSafetyError(f"{exc.code}: {exc}") from exc
         db.execute(
             "UPDATE merge_records SET merge_status='MERGED',merged_commit=?,pr_state=?,pr_ref=?,merged_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,last_synced_at=CURRENT_TIMESTAMP WHERE id=?",
             (merged["merged_commit"],merged["pr_state"],merged["pr_url"],row["id"]))
         db.event("task",tid,"MERGE_SUCCEEDED",f"repo={repository_id} pr={row['pr_number']} merge_sha={merged['merged_commit']}")
+        ops.succeed(op_id,f"Merged {(merged['merged_commit'] or '')[:8]}")
         _schedule_cleanup_if_done(tid)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/confirm-external-merge")
@@ -1733,15 +1864,32 @@ def create_app(settings=None):
                       task=task,stale=stale,view=sandbox_view(sb),manual=manual,manual_history=manual_history)
     @app.get("/api/sandboxes/{sid}")
     def api_sandbox(sid:int): return sandbox_row(sid)
+    @app.get("/api/sandboxes/{sid}/status")
+    def api_sandbox_status(sid:int):
+        """Small polling endpoint for the Provision/Reset Data/Cleanup
+        button-feedback JS: sandbox.status + its own most recent
+        sandbox_operations row (already the real source of truth --
+        never a second ledger, per db.py V12's comment)."""
+        sb=sandbox_row(sid)
+        op=db.one("SELECT * FROM sandbox_operations WHERE sandbox_id=? ORDER BY id DESC LIMIT 1",(sid,))
+        return {"status":sb["status"],"health_status":sb["health_status"],"error_code":sb["error_code"],"error_message":sb["error_message"],"latest_operation":op}
+    SANDBOX_BUSY_STATUSES=("PROVISIONING","STARTING","RESETTING","CLEANING")
     @app.post("/api/sandboxes/{sid}/start")
-    def start_sandbox(sid:int): sandbox_row(sid); sandboxes.provision(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
+    def start_sandbox(sid:int):
+        sb=sandbox_row(sid)
+        if sb["status"] in SANDBOX_BUSY_STATUSES: return RedirectResponse(f"/sandboxes/{sid}",303)
+        sandboxes.provision(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/stop")
     def stop_sandbox(sid:int): sandbox_row(sid); sandboxes.stop(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/restart")
-    def restart_sandbox(sid:int): sandbox_row(sid); sandboxes.stop(sid); sandboxes.provision(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
+    def restart_sandbox(sid:int):
+        sb=sandbox_row(sid)
+        if sb["status"] in SANDBOX_BUSY_STATUSES: return RedirectResponse(f"/sandboxes/{sid}",303)
+        sandboxes.stop(sid); sandboxes.provision(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/rebuild")
     def rebuild_sandbox(sid:int):
-        sandbox_row(sid)
+        sb=sandbox_row(sid)
+        if sb["status"] in SANDBOX_BUSY_STATUSES: return RedirectResponse(f"/sandboxes/{sid}",303)
         for src in db.all("SELECT * FROM sandbox_sources WHERE sandbox_id=?",(sid,)):
             db.execute("UPDATE sandbox_sources SET commit_sha=? WHERE id=?",(git.head(src["worktree_path"]),src["id"]))
         sandboxes._write_manifest(sid); db.execute("UPDATE sandboxes SET status='CREATED',health_status='UNKNOWN' WHERE id=?",(sid,)); db.event("sandbox",sid,"SANDBOX_REBUILD_REQUESTED")
@@ -1753,12 +1901,21 @@ def create_app(settings=None):
         from a genuinely clean state -- never a raw docker compose down
         -v exposed to the browser. Real ownership check + volume removal
         + re-provision from the exact current source, all through
-        SandboxManager, all recorded as a RESET_DATA SandboxOperation."""
-        sandbox_row(sid); sandboxes.reset_data(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
+        SandboxManager, all recorded as a RESET_DATA SandboxOperation.
+        Runs in a background thread (SandboxManager.reset_data) so the
+        button-feedback state (RESETTING -> PROVISIONING -> RUNNING)
+        survives a refresh instead of freezing the tab; a click while
+        already busy is a no-op, never a second concurrent reset."""
+        sb=sandbox_row(sid)
+        if sb["status"] in SANDBOX_BUSY_STATUSES: return RedirectResponse(f"/sandboxes/{sid}",303)
+        sandboxes.reset_data(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/health")
     def health_sandbox(sid:int): sandbox_row(sid); sandboxes.health_check(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/cleanup")
-    def cleanup_sandbox_now(sid:int): sandbox_row(sid); sandboxes.cleanup(sid,force=True); return RedirectResponse(f"/sandboxes/{sid}",303)
+    def cleanup_sandbox_now(sid:int):
+        sb=sandbox_row(sid)
+        if sb["status"] in SANDBOX_BUSY_STATUSES: return RedirectResponse(f"/sandboxes/{sid}",303)
+        sandboxes.cleanup(sid,force=True); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/extend-retention")
     def extend_retention(sid:int,hours:int=Form(24)): sandbox_row(sid); sandboxes.mark_cleanup_eligible(sid,hours); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/hardware-test")

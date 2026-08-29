@@ -271,11 +271,31 @@ def test_pty_session_lifecycle_and_ownership(client, git_repo):
     assert client.app.state.db.one("SELECT status FROM agent_sessions WHERE id=?", (sid,))["status"] == "EXITED"
 
 
-def test_multiple_agent_sessions_are_independent(client, git_repo):
+def test_second_interactive_start_click_reuses_the_live_session(client, git_repo):
+    """Button-state-ux (section 4/8/13): a second 'Start Builder' click
+    while a session is already STARTING/RUNNING/WAITING_FOR_INPUT must
+    never fork a second real pty for the same workspace -- it reuses the
+    live one (via _resume_builder_session's own guard), the same way a
+    duplicate Run Tests/Push/Merge click is a no-op, never a second real
+    job."""
     w = make_workspace(client, git_repo)
     client.app.state.agent_sessions.launchers = {"codex": AgentLauncher("Codex", "bash", ("-c", "sleep 5"))}
     r1 = client.post(f"/api/workspaces/{w['id']}/sessions", follow_redirects=False)
     r2 = client.post(f"/api/workspaces/{w['id']}/sessions", follow_redirects=False)
+    sid1 = int(r1.headers["location"].split("/")[-1]); sid2 = int(r2.headers["location"].split("/")[-1])
+    assert sid1 == sid2
+    client.post(f"/api/sessions/{sid1}/stop")
+
+
+def test_independent_view_only_session_gets_its_own_pty(client, git_repo):
+    """VIEW_ONLY sessions bypass the INTERACTIVE reuse guard on purpose
+    (they never deliver a prompt or drive the agent) -- a genuinely
+    separate session with its own real pid alongside a live INTERACTIVE
+    one, never conflated with it."""
+    w = make_workspace(client, git_repo)
+    client.app.state.agent_sessions.launchers = {"codex": AgentLauncher("Codex", "bash", ("-c", "sleep 5"))}
+    r1 = client.post(f"/api/workspaces/{w['id']}/sessions", data={"mode": "INTERACTIVE"}, follow_redirects=False)
+    r2 = client.post(f"/api/workspaces/{w['id']}/sessions", data={"mode": "VIEW_ONLY"}, follow_redirects=False)
     sid1 = int(r1.headers["location"].split("/")[-1]); sid2 = int(r2.headers["location"].split("/")[-1])
     assert sid1 != sid2
     live1 = client.app.state.agent_sessions.get(sid1); live2 = client.app.state.agent_sessions.get(sid2)

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from tests.conftest import build_client
 
 pytestmark = pytest.mark.skipif(shutil.which("docker") is None, reason="docker CLI not on PATH")
 
@@ -111,7 +112,7 @@ def test_server_restart_preserves_source_manifest_and_cleanup_eligibility(git_re
     state_dir = tmp_path / "state"
     settings = Settings(root, "127.0.0.1", 8765, db_path, 30, configured_state_dir=state_dir)
 
-    client_a = TestClient(create_app(settings))
+    client_a = build_client(settings)
     sb = _provision_one(client_a, root, repo)
     assert sb["status"] == "RUNNING"
     manifest_before = client_a.app.state.sandboxes.outputs(sb["id"])
@@ -120,7 +121,7 @@ def test_server_restart_preserves_source_manifest_and_cleanup_eligibility(git_re
 
     # --- simulate a full process restart: brand new Settings/Database/app,
     # same underlying SQLite file and state dir.
-    client_b = TestClient(create_app(settings))
+    client_b = build_client(settings)
     try:
         sb_after_restart = client_b.get(f"/api/sandboxes/{sb['id']}").json()
         assert sb_after_restart["status"] == "CLEANUP_ELIGIBLE"  # eligibility survived
