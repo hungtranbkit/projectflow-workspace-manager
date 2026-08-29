@@ -1762,7 +1762,15 @@ def create_app(settings=None):
             # + Builder Instructions + sandbox + AGENTS.md) -- always
             # freshly computed for display, never a stored/stale copy.
             w["live_prompt"]=workspace_agent_prompt(w,t,w_repo)
-            sb=next((s for s in sbxs if s["owner_type"]=="AGENT_WORKSPACE" and s["owner_id"]==w["id"]),None)
+            # Real incident (Task #6): sbxs is ORDER BY id ASC -- a plain
+            # next() here picked this workspace's OLDEST sandbox (already
+            # CLOSED) instead of its current one, so the wizard's Runtime
+            # Verification panel showed a dead port while
+            # TaskDecisionService (which already correctly orders DESC)
+            # showed the real, RUNNING one. Two places computing "this
+            # workspace's sandbox" must never disagree -- search latest
+            # first here too.
+            sb=next((s for s in reversed(sbxs) if s["owner_type"]=="AGENT_WORKSPACE" and s["owner_id"]==w["id"]),None)
             if sb:
                 v=sandbox_view(sb); v["stale"]=sandboxes.is_stale(sb["id"],sandbox_current_commits(sb["id"]))
                 w["sandbox"]=v
