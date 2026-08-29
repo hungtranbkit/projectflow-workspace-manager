@@ -373,7 +373,7 @@ def create_app(settings=None):
         db.execute("UPDATE tasks SET agent_prompt=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(prompt,tid))
         db.event("task",tid,"PROMPT_GENERATED",f"brief_version={t['brief_version']}")
         return prompt
-    def workspace_agent_prompt(w,t=None,repo_row=None):
+    def workspace_agent_prompt(w,t=None,repo_row=None,note_exited_without_report=False):
         """Live per-Builder-Workspace effective prompt -- always freshly
         computed (never stored/cached), so a role/instructions/sandbox
         edit is reflected immediately with no separate staleness to
@@ -385,7 +385,13 @@ def create_app(settings=None):
         findings are appended as their own section so the next Builder
         session's prompt is the original task intent + what the
         reviewer asked to change -- never a bare 'resume' with no
-        context. A PASS/STALE/no-review workspace gets no such section."""
+        context. A PASS/STALE/no-review workspace gets no such section.
+
+        `note_exited_without_report` (section 6) is decided by the
+        caller, not re-derived here -- by the time a resumed session's
+        prompt is being computed, a brand-new AgentSession row already
+        exists and is "the latest session", so re-querying it here would
+        always see the wrong (new) one."""
         t=t or task_row(w["task_id"])
         if repo_row is None:
             try: repo_row=repo(w["repository_id"])
@@ -395,6 +401,17 @@ def create_app(settings=None):
         if review and review["status"]=="FIX_REQUIRED":
             findings=(review["findings"] or "").strip() or "(no written findings)"
             prompt+="\n\n## REVIEW FINDINGS (fix required -- address these, then Submit for Review again)\n"+findings+"\n"
+        # EXITED-without-report resume (section 6): the previous process
+        # ended without ever getting a completion report into
+        # verification_reports -- tell the freshly-resumed agent exactly
+        # that, so it inspects what's already there instead of quietly
+        # redoing finished work or re-reading the whole task as if this
+        # were a first attempt.
+        if note_exited_without_report and not (review and review["status"]=="FIX_REQUIRED"):
+            prompt+=("\n\n## PREVIOUS SESSION ENDED WITHOUT A COMPLETION REPORT\n"
+                      "Your previous session exited without a persisted completion report.\n"
+                      "Please inspect the existing workspace state and submit the required completion report for the current HEAD.\n"
+                      "Do not redo completed work unnecessarily.\n")
         return prompt
     def render_review_prompt(t,w,report):
         """Deterministic template (section 6): the Task's own prompt/brief,
@@ -637,10 +654,13 @@ def create_app(settings=None):
         live_session=session if session and session["status"] in LIVE_SESSION_STATUSES else None
         agent_status=session["status"] if session else "NOT_STARTED"
         detected_report=parse_completion_report(agent_sessions.live_tail(session["id"])) if session and w["status"]!="READY" else None
+        recovery_state="COMPLETION_REQUIRED" if agent_status in ("EXITED","FAILED") and w["status"]!="READY" and not detected_report else None
+        manual_ready_check=validate_manual_ready(w) if recovery_state else None
         return render(request,"workspace_detail.html",w=w,details=details,runs=runs,readiness=readiness,report=report,
                       manual_history=manual_history,next_action=action,sessions=sessions,
                       task_decision=task_decision,builder=builder,review_history=review_history,live_prompt=live_prompt,
-                      session=session,live_session=live_session,agent_status=agent_status,detected_report=detected_report)
+                      session=session,live_session=live_session,agent_status=agent_status,detected_report=detected_report,
+                      recovery_state=recovery_state,manual_ready_check=manual_ready_check)
     @app.get("/api/workspaces/{wid}")
     def api_workspace(wid:int): return agent_row(wid)
     @app.post("/api/workspaces/{wid}/ready")
@@ -659,6 +679,20 @@ def create_app(settings=None):
         sid=auto_create_sandbox(w["task_id"],w["repository_id"],w["repo_path"],"AGENT_WORKSPACE",wid,w["role"] or w["agent"],w["branch"],w["last_commit"],w["worktree_path"],profile.strip().upper() or None,task_default)
         if sid: db.execute("UPDATE agent_workspaces SET sandbox_profile=(SELECT profile FROM sandboxes WHERE id=?) WHERE id=?",(sid,wid))
         return RedirectResponse(f"/workspaces/{wid}",303)
+    def _insert_verification_report(w,t,status_upper,head,*,what_changed="",files_changed="",tests_run="",automated_tests="",how_to_verify="",expected_result="",test_data="",runtime_requirements="NONE",risks="",ready_source="AGENT_SUBMITTED",operator=None):
+        """Shared by the normal Submit-for-Review path and the manual
+        EXITED-without-report recovery fallback -- one insert, one
+        status-transition, one audit shape, regardless of which UI action
+        produced the report. `ready_source` records which path it was
+        (never changes what READY itself requires: commit_sha is always
+        the exact pinned HEAD, still validated clean by the caller)."""
+        wid=w["id"]
+        db.execute("INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,files_changed,tests_run,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks,commit_sha,brief_version,ready_source,operator) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (w["task_id"],wid,status_upper,what_changed.strip(),files_changed.strip(),tests_run.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip(),head,t["brief_version"] if t else None,ready_source,operator))
+        db.event("agent",wid,"VERIFICATION_REPORT_ADDED",f"{status_upper} source={ready_source}")
+        if status_upper=="READY" and w["status"]!="READY":
+            db.execute("UPDATE agent_workspaces SET status='READY',ready_for_integration=1,last_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,wid))
+            db.event("agent",wid,"SUBMITTED_FOR_REVIEW",f"{head} source={ready_source}"); recompute_task_status(w.get("task_id"))
     @app.post("/api/workspaces/{wid}/verification-report")
     def submit_workspace_report(wid:int,work_status:str=Form("READY"),what_changed:str=Form(""),files_changed:str=Form(""),tests_run:str=Form(""),automated_tests:str=Form(""),how_to_verify:str=Form(""),expected_result:str=Form(""),test_data:str=Form(""),runtime_requirements:str=Form("NONE"),risks:str=Form("")):
         """Submit for Review (section 14/15): the Builder completion
@@ -675,13 +709,78 @@ def create_app(settings=None):
         if status_upper=="READY" and git.status(w["worktree_path"]).strip():
             raise GitSafetyError("Git worktree must be clean before submitting for review (uncommitted changes present)")
         head=git.head(w["worktree_path"])
-        db.execute("INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,files_changed,tests_run,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks,commit_sha,brief_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                   (w["task_id"],wid,status_upper,what_changed.strip(),files_changed.strip(),tests_run.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip(),head,t["brief_version"] if t else None))
-        db.event("agent",wid,"VERIFICATION_REPORT_ADDED",work_status)
-        if status_upper=="READY" and w["status"]!="READY":
-            db.execute("UPDATE agent_workspaces SET status='READY',ready_for_integration=1,last_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,wid))
-            db.event("agent",wid,"SUBMITTED_FOR_REVIEW",head); recompute_task_status(w.get("task_id"))
+        _insert_verification_report(w,t,status_upper,head,what_changed=what_changed,files_changed=files_changed,tests_run=tests_run,automated_tests=automated_tests,how_to_verify=how_to_verify,expected_result=expected_result,test_data=test_data,runtime_requirements=runtime_requirements,risks=risks,ready_source="AGENT_SUBMITTED")
         return RedirectResponse(f"/workspaces/{wid}",303)
+
+    MANUAL_READY_BLOCKERS={
+        "WORKTREE_MISSING":"Worktree không còn tồn tại trên máy này.",
+        "HEAD_UNRESOLVED":"Không đọc được HEAD hiện tại của worktree.",
+        "BRANCH_MISMATCH":"Worktree đang ở branch khác với branch của Builder này.",
+        "MERGE_CONFLICT":"Worktree đang có merge conflict chưa resolve.",
+        "UNCOMMITTED_CHANGES":"Worktree có thay đổi chưa commit.",
+        "NO_SOURCE_CHANGES":"Chưa có commit nào mới so với base -- chưa có gì để Submit for Review.",
+    }
+    def validate_manual_ready(w):
+        """Section 2 (EXITED-without-report manual fallback): everything
+        that must be true about the real git worktree before a human can
+        stand in for a missing agent completion report. Never trusts the
+        UI state that got the user here -- re-derives every check from
+        the actual worktree on disk, in the same order the blockers are
+        documented, first failure wins. Returns {"ok","blocker","detail","head"}."""
+        path=Path(w["worktree_path"])
+        if not path.is_dir():
+            return {"ok":False,"blocker":"WORKTREE_MISSING","detail":MANUAL_READY_BLOCKERS["WORKTREE_MISSING"],"head":None}
+        try:
+            branch_result=git.git(path,"rev-parse","--abbrev-ref","HEAD",check=False)
+            current_branch=branch_result.stdout.strip()
+        except GitCommandError:
+            current_branch=""
+        if not current_branch or branch_result.returncode:
+            return {"ok":False,"blocker":"HEAD_UNRESOLVED","detail":MANUAL_READY_BLOCKERS["HEAD_UNRESOLVED"],"head":None}
+        if current_branch!=w["branch"]:
+            return {"ok":False,"blocker":"BRANCH_MISMATCH","detail":f"{MANUAL_READY_BLOCKERS['BRANCH_MISMATCH']} (worktree={current_branch}, builder={w['branch']})","head":None}
+        if git.conflict_files(path):
+            return {"ok":False,"blocker":"MERGE_CONFLICT","detail":MANUAL_READY_BLOCKERS["MERGE_CONFLICT"],"head":None}
+        if git.status(path).strip():
+            return {"ok":False,"blocker":"UNCOMMITTED_CHANGES","detail":MANUAL_READY_BLOCKERS["UNCOMMITTED_CHANGES"],"head":None}
+        try:
+            head=git.head(path)
+        except GitCommandError:
+            return {"ok":False,"blocker":"HEAD_UNRESOLVED","detail":MANUAL_READY_BLOCKERS["HEAD_UNRESOLVED"],"head":None}
+        if head==w["base_commit"]:
+            return {"ok":False,"blocker":"NO_SOURCE_CHANGES","detail":MANUAL_READY_BLOCKERS["NO_SOURCE_CHANGES"],"head":head}
+        return {"ok":True,"blocker":None,"detail":"","head":head}
+
+    @app.post("/api/workspaces/{wid}/mark-ready-manual")
+    def mark_ready_manual(wid:int,what_changed:str=Form(...),how_to_verify:str=Form(...),tests_run:str=Form("Not run"),expected_result:str=Form(""),risks:str=Form("None known")):
+        """[Mark Ready for Review] manual fallback (section 1/2/12): shown
+        only when AgentSession EXITED (or FAILED) without a persisted or
+        detected completion report and the Builder isn't already READY --
+        a recovery path for real, already-complete source work, never a
+        force-pass button. Re-validates the real worktree from scratch
+        server-side regardless of what the page showed (section 12) --
+        the same checks that decide whether the button is even shown are
+        run again here, because client state is never trusted for
+        something this consequential. What changed / How to verify are
+        the only two required fields (section 3); Tests run defaults to
+        'Not run', Risks to 'None known' so a genuinely simple, already-
+        complete change never needs a user to invent boilerplate."""
+        w=agent_row(wid); t=task_row(w["task_id"]) if w["task_id"] else None
+        session=decision.latest_session(wid)
+        db.event("agent",wid,"BUILDER_MANUAL_READY_REQUESTED",f"task={w.get('task_id')} session={session['id'] if session else None} operator=ui")
+        if w["status"]=="READY":
+            raise GitSafetyError("Builder is already Submitted for Review")
+        check=validate_manual_ready(w)
+        if not check["ok"]:
+            db.event("agent",wid,"BUILDER_MANUAL_READY_BLOCKED",f"task={w.get('task_id')} session={session['id'] if session else None} blocker={check['blocker']} operator=ui")
+            raise GitSafetyError(f"Cannot mark ready: {check['detail']}")
+        if not what_changed.strip() or not how_to_verify.strip():
+            db.event("agent",wid,"BUILDER_MANUAL_READY_BLOCKED",f"task={w.get('task_id')} session={session['id'] if session else None} blocker=MISSING_SUMMARY operator=ui")
+            raise GitSafetyError("What changed and How to verify are required")
+        head=check["head"]
+        _insert_verification_report(w,t,"READY",head,what_changed=what_changed,tests_run=tests_run or "Not run",how_to_verify=how_to_verify,expected_result=expected_result,risks=risks or "None known",ready_source="MANUAL_CONFIRMATION",operator="ui")
+        db.event("agent",wid,"BUILDER_MANUAL_READY_SUCCEEDED",f"task={w.get('task_id')} session={session['id'] if session else None} commit={head} operator=ui")
+        return RedirectResponse(f"/tasks/{w['task_id']}" if w.get("task_id") else f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/close")
     def close_agent(wid:int): w=agent_row(wid); git.close(w["repo_path"],w["worktree_path"]); db.execute("UPDATE agent_workspaces SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(wid,)); db.event("agent",wid,"WORKSPACE_CLOSED"); return RedirectResponse("/workspaces",303)
     @app.post("/api/workspaces/{wid}/create-task")
@@ -780,7 +879,7 @@ def create_app(settings=None):
         row=db.one("SELECT s.*,w.worktree_path,w.agent workspace_agent FROM agent_sessions s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.id=?",(sid,))
         if not row: raise HTTPException(404,"Session not found")
         return row
-    def _deliver_to_session(w,sid):
+    def _deliver_to_session(w,sid,note_exited_without_report=False):
         """Compute the current effective Builder prompt -- the Task's
         intent as usual, or, if the latest review for this workspace is
         FIX_REQUIRED, the repair prompt with findings appended (exactly
@@ -788,11 +887,16 @@ def create_app(settings=None):
         and deliver it into a LIVE session's stdin. Always snapshots a
         `prompts` audit row first, regardless of whether delivery itself
         succeeds, so the exact text that was (attempted to be) sent is
-        always recoverable. Returns True only on confirmed delivery."""
+        always recoverable. Returns True only on confirmed delivery.
+        `note_exited_without_report` is decided by the CALLER before this
+        new session ever existed (section 6) -- workspace_agent_prompt()
+        must never re-derive it from "the latest session", because by the
+        time this prompt is being computed the new session already is
+        the latest one."""
         if not w.get("task_id"): return False
         try:
             t=task_row(w["task_id"]); repo_row=repo(w["repository_id"])
-            prompt=workspace_agent_prompt(w,t,repo_row)
+            prompt=workspace_agent_prompt(w,t,repo_row,note_exited_without_report=note_exited_without_report)
             review=decision.latest_review(w["id"])
             source="REPAIR" if review and review["status"]=="FIX_REQUIRED" else "TASK"
             db.execute("INSERT INTO prompts(task_id,workspace_id,prompt_type,brief_version,content) VALUES(?,?,?,?,?)",
@@ -800,7 +904,7 @@ def create_app(settings=None):
             return agent_sessions.deliver_prompt(sid,prompt,source,t["brief_version"])
         except Exception:
             return False  # snapshot/delivery is best-effort audit, never raises into the caller
-    def _start_builder_session(w,mode="INTERACTIVE"):
+    def _start_builder_session(w,mode="INTERACTIVE",note_exited_without_report=False):
         """The one place 'Start Builder' actually happens: validates
         (Task exists, Builder Workspace exists, worktree path is the
         trusted server-resolved one, agent is in the trusted launcher
@@ -815,7 +919,7 @@ def create_app(settings=None):
         mode="VIEW_ONLY" if mode=="VIEW_ONLY" else "INTERACTIVE"
         sid=agent_sessions.start(task_id=w["task_id"],workspace_id=w["id"],agent=w["agent"],worktree_path=w["worktree_path"],mode=mode)
         db.event("agent",w["id"],"SESSION_STARTED",f"session={sid} mode={mode}")
-        delivered=_deliver_to_session(w,sid)
+        delivered=_deliver_to_session(w,sid,note_exited_without_report=note_exited_without_report)
         db.event("agent",w["id"],"PROMPT_DELIVERED" if delivered else "PROMPT_DELIVERY_FAILED",f"session={sid}")
         return sid
     def _resume_builder_session(w):
@@ -823,7 +927,12 @@ def create_app(settings=None):
         session on top of one already doing real work.
         A. no live session, or one that already exited -- start a fresh
            one (this doubles as the FIX_REQUIRED repair path, since
-           _deliver_to_session already appends review findings then).
+           _deliver_to_session already appends review findings then). If
+           the prior session EXITED without ever producing a report at
+           the current HEAD (section 6/8: EXITED is not itself failure),
+           the fresh session's prompt gets a focused note about that --
+           decided HERE, before the new session exists, never re-derived
+           from "the latest session" downstream.
         B. a live session whose prompt was already DELIVERED -- the
            agent is presumably still working; no-op, never resend the
            original task a second time.
@@ -836,7 +945,8 @@ def create_app(settings=None):
                 delivered=_deliver_to_session(w,session["id"])
                 db.event("agent",w["id"],"PROMPT_DELIVERED" if delivered else "PROMPT_DELIVERY_FAILED",f"session={session['id']} (retry)")
             return session["id"]
-        return _start_builder_session(w)
+        note_exited=bool(session and session["status"] in ("EXITED","FAILED") and w["status"]!="READY")
+        return _start_builder_session(w,note_exited_without_report=note_exited)
     @app.post("/api/workspaces/{wid}/sessions")
     def create_session(wid:int,mode:str=Form("INTERACTIVE")):
         """Command safety (section 14): the browser supplies only
@@ -1566,6 +1676,14 @@ def create_app(settings=None):
             w["detected_report"]=None
             if session and not w["ready"]:
                 w["detected_report"]=parse_completion_report(agent_sessions.live_tail(session["id"]))
+            # EXITED-without-report dead-end fix: AgentSession EXITED never
+            # by itself means the Builder failed (section 8) -- it can just
+            # as easily mean the source work finished but the process
+            # exited before/without a report ever getting persisted. Only
+            # compute the real-worktree validation (never a guess) when
+            # there is genuinely no other evidence of completion yet.
+            w["recovery_state"]="COMPLETION_REQUIRED" if w["agent_status"] in ("EXITED","FAILED") and not w["ready"] and not w["detected_report"] else None
+            w["manual_ready_check"]=validate_manual_ready(w) if w["recovery_state"] else None
             w_repo=repo(w["repository_id"])
             try: w["sandbox_configured"]=load_sandbox_contract(Path(w_repo["repo_path"])) is not None
             except SandboxContractError: w["sandbox_configured"]=True  # misconfigured contract is not "absent"

@@ -77,10 +77,34 @@
 <div class="primary-action"><a class="ghost button" href="/workspaces/{{w.id}}/sessions/{{session.id}}">View Failure</a></div>
 <div class="quick-actions"><form method="post" action="/api/workspaces/{{w.id}}/sessions" class="inline" data-loading-label="Retrying..."><input type="hidden" name="mode" value="INTERACTIVE"><button class="ghost">Retry</button></form></div>
 {% else %}
-{# EXITED, no report yet -- resumable. #}
-<p>Session trước đã thoát, chưa có Agent Report.</p>
-<div class="primary-action"><form method="post" action="/api/workspaces/{{w.id}}/sessions" class="inline" data-loading-label="Resuming..."><input type="hidden" name="mode" value="INTERACTIVE"><button class="success big">Resume {{w.agent|capitalize}}</button></form></div>
-<div class="quick-actions"><a class="ghost" href="/workspaces/{{w.id}}/sessions/{{session.id}}">View Session</a></div>
+{# EXITED, no report yet -- recoverable, never treated as failure by
+   itself (section 8): either resume the agent to have it write the
+   missing report, or -- if the source is already clean and committed --
+   confirm readiness manually instead of forcing a resume every time. #}
+{% set resume_form %}<form method="post" action="/api/workspaces/{{w.id}}/sessions" class="inline" data-loading-label="Resuming..."><input type="hidden" name="mode" value="INTERACTIVE"><button class="{{'success big' if not manual_ready_check.ok else ''}}">Resume {{w.agent|capitalize}}</button></form>{% endset %}
+{% set block_form %}<form method="post" action="/api/workspaces/{{w.id}}/verification-report" class="inline"><input type="hidden" name="work_status" value="FIX_REQUIRED"><input type="hidden" name="risks" value="Manually marked blocked from the workspace page."><button class="danger">Mark Blocked</button></form>{% endset %}
+<div class="readybox">
+<p><b>{{w.agent|capitalize}} session has ended, but ProjectFlow did not receive a completion report.</b></p>
+<p>If the work is complete, validate the current commit and mark it ready for review. If more work is needed, resume {{w.agent|capitalize}}.</p>
+<p><small>Source status</small> <b>{{'clean, committed' if manual_ready_check.ok else manual_ready_check.detail}}</b></p>
+{% if manual_ready_check.head %}<p><small>Current commit</small> <code>{{manual_ready_check.head[:12]}}</code></p>{% endif %}
+</div>
+{% if manual_ready_check.ok %}
+<details class="mark-ready-form"><summary class="button success big">Mark Ready for Review</summary>
+<form method="post" action="/api/workspaces/{{w.id}}/mark-ready-manual">
+<label>What changed *<textarea name="what_changed" required placeholder="One or two sentences a non-technical reviewer can use as the verification goal."></textarea></label>
+<label>How to verify *<textarea name="how_to_verify" required placeholder="1. ...&#10;2. ..."></textarea></label>
+<label>Tests run<input name="tests_run" value="Not run"></label>
+<label>Expected result<textarea name="expected_result"></textarea></label>
+<label>Risks<input name="risks" value="None known"></label>
+<button class="success" type="submit">Confirm &amp; Submit for Review</button>
+</form>
+</details>
+<div class="quick-actions">{{resume_form|safe}}<a class="ghost" href="/workspaces/{{w.id}}/sessions/{{session.id}}">View Session</a>{{block_form|safe}}</div>
+{% else %}
+<div class="primary-action">{{resume_form|safe}}</div>
+<div class="quick-actions"><a class="ghost" href="/workspaces/{{w.id}}/sessions/{{session.id}}">View Session</a>{{block_form|safe}}</div>
+{% endif %}
 {% endif %}
 <div class="quick-actions">
 <button class="ghost" onclick="launchWorkspace({{w.id}},'terminal',this)">Open Worktree Terminal</button>

@@ -135,13 +135,30 @@
 <a class="ghost" href="/workspaces/{{w.id}}">View Workspace Details</a>
 </div>
 {% elif w.agent_status in ['EXITED','FAILED'] and not w.ready %}
-<div class="warning"><b>Agent exited without completion report.</b></div>
-<div class="primary-action">
-{% if w.agent in ['codex','claude'] %}<form method="post" action="/api/tasks/{{t.id}}/setup-and-start" class="inline"><input type="hidden" name="repository_id" value="{{w.repository_id}}"><input type="hidden" name="agent" value="{{w.agent}}"><button class="success">Resume Agent</button></form>{% endif %}
-{% if w.session %}<a class="ghost" href="/workspaces/{{w.id}}/sessions/{{w.session.id}}">View Session</a>{% endif %}
-<a class="ghost" href="/workspaces/{{w.id}}">View Workspace Details</a>
-<form method="post" action="/api/workspaces/{{w.id}}/verification-report" class="inline"><input type="hidden" name="work_status" value="FIX_REQUIRED"><input type="hidden" name="risks" value="Manually marked blocked from the wizard."><button class="danger">Mark Blocked</button></form>
+{% set resume_form %}{% if w.agent in ['codex','claude'] %}<form method="post" action="/api/tasks/{{t.id}}/setup-and-start" class="inline"><input type="hidden" name="repository_id" value="{{w.repository_id}}"><input type="hidden" name="agent" value="{{w.agent}}"><button class="{{'success' if not w.manual_ready_check.ok else ''}}">Resume {{w.agent|capitalize}}</button></form>{% endif %}{% endset %}
+{% set block_form %}<form method="post" action="/api/workspaces/{{w.id}}/verification-report" class="inline"><input type="hidden" name="work_status" value="FIX_REQUIRED"><input type="hidden" name="risks" value="Manually marked blocked from the wizard."><button class="danger">Mark Blocked</button></form>{% endset %}
+<div class="readybox">
+<p><b>{{w.agent|capitalize}} session has ended, but ProjectFlow did not receive a completion report.</b></p>
+<p>If the work is complete, validate the current commit and mark it ready for review. If more work is needed, resume {{w.agent|capitalize}}.</p>
+<p><small>Source status</small> <b>{{'clean, committed' if w.manual_ready_check.ok else w.manual_ready_check.detail}}</b></p>
+{% if w.manual_ready_check.head %}<p><small>Current commit</small> <code>{{w.manual_ready_check.head[:12]}}</code></p>{% endif %}
 </div>
+{% if w.manual_ready_check.ok %}
+<details class="mark-ready-form"><summary class="button success">Mark Ready for Review</summary>
+<form method="post" action="/api/workspaces/{{w.id}}/mark-ready-manual">
+<label>What changed *<textarea name="what_changed" required placeholder="One or two sentences a non-technical reviewer can use as the verification goal."></textarea></label>
+<label>How to verify *<textarea name="how_to_verify" required placeholder="1. ...&#10;2. ..."></textarea></label>
+<label>Tests run<input name="tests_run" value="Not run"></label>
+<label>Expected result<textarea name="expected_result"></textarea></label>
+<label>Risks<input name="risks" value="None known"></label>
+<button class="success" type="submit">Confirm &amp; Submit for Review</button>
+</form>
+</details>
+<div class="quick-actions">{{resume_form|safe}}{% if w.session %}<a class="ghost" href="/workspaces/{{w.id}}/sessions/{{w.session.id}}">View Session</a>{% endif %}<a class="ghost" href="/workspaces/{{w.id}}">View Workspace Details</a>{{block_form|safe}}</div>
+{% else %}
+<div class="primary-action">{{resume_form|safe}}</div>
+<div class="quick-actions">{% if w.session %}<a class="ghost" href="/workspaces/{{w.id}}/sessions/{{w.session.id}}">View Session</a>{% endif %}<a class="ghost" href="/workspaces/{{w.id}}">View Workspace Details</a>{{block_form|safe}}</div>
+{% endif %}
 {% else %}
 <div class="primary-action">
 {% if w.live_session %}<a class="button" href="/workspaces/{{w.id}}/sessions/{{w.live_session.id}}">Open Live Terminal</a>{% endif %}
