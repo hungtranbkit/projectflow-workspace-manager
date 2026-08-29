@@ -39,7 +39,7 @@ NEXT_ACTIONS = (
     "REVIEW_BACKLOG", "SELECT_FOR_DEVELOPMENT", "CREATE_BUILDER_WORKSPACE",
     "START_BUILDER", "VIEW_BUILDER", "REVIEW_BUILDER_RESULT", "RUN_BUILDER_TEST",
     "SUBMIT_FOR_REVIEW", "START_REVIEW", "RETURN_TO_BUILDER",
-    "CREATE_SANDBOX", "SANDBOX_PROVISIONING", "SANDBOX_SETUP_REQUIRED", "START_QA", "CREATE_INTEGRATION", "OPEN_INTEGRATOR", "RUN_INTEGRATION_TEST", "RESOLVE_CONFLICT",
+    "CREATE_SANDBOX", "SANDBOX_PROVISIONING", "SANDBOX_SETUP_REQUIRED", "RESTART_SANDBOX", "START_QA", "CREATE_INTEGRATION", "OPEN_INTEGRATOR", "RUN_INTEGRATION_TEST", "RESOLVE_CONFLICT",
     "REVIEW_BASELINE_FAILURE", "FIX_INTEGRATION_FAILURE", "PUSH_INTEGRATION", "WAIT_FOR_CI", "CONFIRM_INTEGRATION_READY",
     "REBUILD_SANDBOX", "PREPARE_PR", "WAIT_FOR_MERGES", "CLOSE_TASK", "NONE",
 )
@@ -118,8 +118,10 @@ MISSING_REQUIREMENTS = {
     "CREATE_SANDBOX": ["A Sandbox has not been created", "Manual verification has not been completed"],
     "SANDBOX_PROVISIONING": ["Manual verification has not been completed"],
     "SANDBOX_SETUP_REQUIRED": ["This repository has no sandbox: contract configured yet", "Manual verification has not been completed"],
+    "RESTART_SANDBOX": ["Sandbox has stopped and needs restarting", "Manual verification has not been completed"],
+    "REBUILD_SANDBOX": ["Sandbox needs to be rebuilt", "Manual verification has not been completed"],
     "START_QA": ["Manual verification has not been completed"],
-    "RUN_INTEGRATION_TEST": ["Integration tests have not passed yet"],
+    "RUN_INTEGRATION_TEST": ["Integration tests are not current"],
     "PUSH_INTEGRATION": ["The integration branch has not been pushed yet"],
     "PREPARE_PR": ["No Pull Request has been opened yet"],
 }
@@ -155,7 +157,11 @@ def prompt_source(t) -> str:
 # except these three, which are the action itself (a POST endpoint a
 # button submits to directly) -- kept as one explicit set so templates
 # never have to guess which verb an action code needs.
-POST_ACTIONS = {"SELECT_FOR_DEVELOPMENT", "CREATE_INTEGRATION", "CLOSE_TASK", "CREATE_SANDBOX"}
+POST_ACTIONS = {
+    "SELECT_FOR_DEVELOPMENT", "CREATE_INTEGRATION", "CLOSE_TASK", "CREATE_SANDBOX",
+    "START_QA", "RUN_INTEGRATION_TEST", "PUSH_INTEGRATION", "CONFIRM_INTEGRATION_READY", "PREPARE_PR",
+    "REBUILD_SANDBOX", "RESTART_SANDBOX",
+}
 
 
 def _action(action, label, reason, target=None):
@@ -275,11 +281,11 @@ class TaskDecisionService:
             "fix_required": review_status == "FIX_REQUIRED",
             "session": session, "agent_status": agent_status,
             "builder_instructions": w.get("builder_instructions") or "",
-            "sandbox_state": self.builder_sandbox_state(w),
+            "sandbox_state": self.builder_sandbox_state(w, head),
         }
 
     # ---- Runtime Verification sandbox gating (section 12-15) ------------
-    def builder_sandbox_state(self, w):
+    def builder_sandbox_state(self, w, head=None):
         """Whether THIS Builder Workspace's own sandbox -- reused as the
         Runtime Verification environment for Tasks with one Builder, the
         common case -- is required, absent, provisioning, or ready. Mirrors
@@ -288,7 +294,16 @@ class TaskDecisionService:
         unless the workspace explicitly opted out with profile NONE) so
         Task Detail and Workspace Detail can never disagree about it
         (section 18) -- this is now the one place that rule lives; nothing
-        else recomputes it independently."""
+        else recomputes it independently.
+
+        Real incident (Task #6 dead-anchor audit): a CLOSED/STOPPED
+        sandbox (a previous execution's, fully cleaned up or manually
+        stopped) used to fall through to the generic "else" branch and
+        get misread as PROVISIONING -- the UI showed an indefinite
+        'Sandbox is being created...' spinner with no real action ever
+        available. It is neither in flight nor gone: restart the SAME
+        row (never a duplicate) if its pinned source is still current,
+        or rebuild it if the source has moved since it was built."""
         try:
             configured = load_sandbox_contract(Path(w["repo_path"])) is not None
         except SandboxContractError:
@@ -303,6 +318,10 @@ class TaskDecisionService:
             return {"required": True, "sandbox": sb, "phase": "READY"}
         if sb["status"] == "FAILED":
             return {"required": True, "sandbox": sb, "phase": "FAILED"}
+        if sb["status"] in ("CLOSED", "STOPPED"):
+            pinned = self.db.one("SELECT commit_sha FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1", (sb["id"],))
+            stale = bool(pinned and head and pinned["commit_sha"] != head)
+            return {"required": True, "sandbox": sb, "phase": "NEEDS_REBUILD" if stale else "NEEDS_RESTART"}
         return {"required": True, "sandbox": sb, "phase": "PROVISIONING"}
 
     def qa_sandbox_state(self, builders):
@@ -689,7 +708,12 @@ class TaskDecisionService:
             # Task Title fallback: intent is always resolvable (title is
             # mandatory at creation), so there is nothing left to gate on
             # here -- go straight to creating the first Builder Workspace.
-            return _action("CREATE_BUILDER_WORKSPACE", "Create Builder Workspace", "No Builder Workspace yet.", f"/tasks/{tid}#new-workspace")
+            # Real incident (Task #6 dead-anchor audit): "#new-workspace"
+            # was never a real element id anywhere on the page -- clicking
+            # this did nothing. current_step is SETUP here, whose own
+            # wizard panel (already visible, no click needed) has the real
+            # Create Builder Workspace form -- no hero button needed.
+            return _action("CREATE_BUILDER_WORKSPACE", "Create Builder Workspace", "No Builder Workspace yet.", None)
         for b in builders:
             if b["fix_required"]:
                 return _action("RETURN_TO_BUILDER", f"Fix required: {b['agent']}", (b["review"] or {}).get("findings") or "Reviewer requested changes.", f"/workspaces/{b['id']}")
@@ -737,11 +761,37 @@ class TaskDecisionService:
                         repo_id = primary["repository_id"] if primary else None
                         target = f"/repositories/{repo_id}/runtime" if repo_id else (f"/sandboxes/{sandbox_id}" if sandbox_id else f"/tasks/{tid}#qa")
                         return _action("SANDBOX_SETUP_REQUIRED", "Sandbox configuration missing", "This repository does not yet define a runtime sandbox contract.", target)
-                    return _action("REBUILD_SANDBOX", "Sandbox failed -- Rebuild", "Sandbox creation failed.", f"/sandboxes/{sandbox_id}" if sandbox_id else f"/tasks/{tid}#qa")
+                    return _action("REBUILD_SANDBOX", "Sandbox failed -- Rebuild", "Sandbox creation failed.", f"/api/sandboxes/{sandbox_id}/rebuild" if sandbox_id else f"/tasks/{tid}#qa")
+                if sbx["required"] and sbx["phase"] == "NEEDS_REBUILD":
+                    # CLOSED/STOPPED from a previous execution, but its
+                    # pinned source has since moved (section 4: "If stale:
+                    # rebuild from exact current source") -- rebuild the
+                    # SAME row (refreshes commit_sha + re-provisions),
+                    # never a new duplicate sandbox.
+                    sandbox_id = sbx["sandbox"]["id"]
+                    return _action("REBUILD_SANDBOX", "Sandbox out of date -- Rebuild", "This sandbox's source has changed since it was built.", f"/api/sandboxes/{sandbox_id}/rebuild")
+                if sbx["required"] and sbx["phase"] == "NEEDS_RESTART":
+                    # CLOSED/STOPPED but still built from the exact
+                    # current source (section 4: "If runtime verification
+                    # starts and that sandbox is valid/current: restart
+                    # it. Do not create unnecessary duplicate sandboxes.")
+                    sandbox_id = sbx["sandbox"]["id"]
+                    return _action("RESTART_SANDBOX", "Restart Sandbox", "A sandbox already exists for this source -- restarting it.", f"/api/sandboxes/{sandbox_id}/start")
+                # Real incident (Task #6): this used to target "#qa", an
+                # anchor into the Advanced/legacy "Review & QA" panel --
+                # never the actual action, and it silently forced Advanced
+                # open. Sandbox is confirmed ready (or not required) at
+                # this point, so there is nothing left to gather -- start
+                # it for real, right from the hero card.
                 label = "Start Runtime Verification" if not qa else "Re-run Runtime Verification (Brief changed)"
                 reason = "All reviews PASS -- runtime verification required." if not qa else "Brief version changed since the last PASS."
-                return _action("START_QA", label, reason, f"/tasks/{tid}#qa")
-            if qa["status"] in ("PENDING", "RUNNING"): return _action("START_QA", "Complete Runtime Verification", "Runtime verification in progress.", f"/tasks/{tid}#qa")
+                return _action("START_QA", label, reason, f"/api/tasks/{tid}/start-qa")
+            if qa["status"] in ("PENDING", "RUNNING"):
+                # The real PASS/FAIL actions live in the wizard's own
+                # Runtime Verification panel, already visible on this same
+                # page (current_step is TEST_QA here) -- no redundant/dead
+                # hero button pointing at Advanced.
+                return _action("START_QA", "Complete Runtime Verification", "Runtime verification in progress -- record PASS or FAIL below.", None)
             if qa["status"] in ("FAIL", "BLOCKED"):
                 # Section 8/14: the button does the next real thing --
                 # straight to the Builder Workspace to resume, the same
@@ -752,17 +802,46 @@ class TaskDecisionService:
                 return _action("RETURN_TO_BUILDER", "Runtime verification failed", qa.get("notes") or "Runtime verification reported a failure.", target)
         if self.requires_integration(risk):
             if not ti: return _action("CREATE_INTEGRATION", "Create Integration", "All required gates PASS -- ready to integrate.", f"/api/tasks/{tid}/integrations")
-            if ti["status"] == "CONFLICT": return _action("RESOLVE_CONFLICT", "Resolve Conflict", "Integration has a merge conflict.", f"/tasks/{tid}#integration")
+            if ti["status"] == "CONFLICT":
+                # Real incident: "#integration" is an anchor into the
+                # Advanced/legacy panel -- resolving a conflict needs the
+                # actual Integrator page, never a scroll-and-guess.
+                conflict_target = f"/integrations/{ti_repos[0]['id']}" if ti_repos else f"/tasks/{tid}#integration"
+                return _action("RESOLVE_CONFLICT", "Resolve Conflict", "Integration has a merge conflict.", conflict_target)
             if not self._integration_ok(ti, ti_repos):
                 # Section 19/20: the exact same per-repo ladder the
                 # Integration page itself uses (integration_next_action)
                 # -- one authoritative ordering, never two.
                 blocker = next((r for r in ti_repos if r["status"] != "READY_FOR_MAIN"), None)
                 if not blocker:
-                    return _action("RUN_INTEGRATION_TEST", "Run Integration Tests", "Integration exists, tests not current/passing.", f"/tasks/{tid}#integration")
+                    # Every repo still says READY_FOR_MAIN, yet overall
+                    # not ok -- the only way that happens is
+                    # verified_commit no longer matching the worktree's
+                    # real current HEAD (section 7/8: "Integration needs
+                    # refresh", not "never tested"). Re-running tests
+                    # against the exact current integration source is the
+                    # real refresh action -- a real POST, not an anchor.
+                    stale_repo = ti_repos[0] if ti_repos else None
+                    target = f"/api/integrations/{stale_repo['id']}/test" if stale_repo else f"/tasks/{tid}#integration"
+                    return _action("RUN_INTEGRATION_TEST", "Refresh Integration", "Integration source changed after verification -- run integration tests again.", target)
                 mr = next((m for m in required_merges if m["repository_id"] == blocker["repository_id"]), None)
                 action = dict(self.integration_next_action(blocker, tid, mr))
-                if action["action"] != "NONE": action["target"] = f"/tasks/{tid}#integration"
+                # Real incident: every one of these used to get its target
+                # blindly overwritten to "#integration" (Advanced anchor),
+                # discarding whatever real action integration_next_action()
+                # already knew about. Actions with a real one-click POST
+                # route get that; everything else (needs a human to look
+                # at failure/conflict detail) goes to the real Integrator
+                # page, never Advanced.
+                post_routes = {
+                    "RUN_INTEGRATION_TEST": f"/api/integrations/{blocker['id']}/test",
+                    "PUSH_INTEGRATION": f"/api/integrations/{blocker['id']}/push",
+                    "CONFIRM_INTEGRATION_READY": f"/api/integrations/{blocker['id']}/ready-for-main",
+                }
+                if action["action"] in post_routes:
+                    action["target"] = post_routes[action["action"]]
+                elif action["action"] != "NONE":
+                    action["target"] = f"/integrations/{blocker['id']}"
                 return action
         if status == "BLOCKED":
             return _action("NONE", "Blocked", blocking[0] if blocking else "Blocked.", None)
@@ -771,8 +850,12 @@ class TaskDecisionService:
         if ready_for_main:
             pending = [m for m in required_merges if m["merge_status"] != "MERGED"]
             not_started = [m for m in pending if m["merge_status"] == "NOT_STARTED"]
-            if not_started: return _action("PREPARE_PR", f"Prepare PR: {not_started[0]['repo_name']}", "Ready for main -- push and open a Pull Request.", f"/tasks/{tid}#merges")
-            return _action("WAIT_FOR_MERGES", "Waiting for merges", f"{len(pending)} repo(s) still not merged.", f"/tasks/{tid}#merges")
+            if not_started:
+                # Real incident: "#merges" -> Advanced anchor. The real
+                # action is one specific repo's Create PR POST, already
+                # known right here.
+                return _action("PREPARE_PR", f"Prepare PR: {not_started[0]['repo_name']}", "Ready for main -- push and open a Pull Request.", f"/api/tasks/{tid}/merges/{not_started[0]['repository_id']}/create-pr")
+            return _action("WAIT_FOR_MERGES", "Waiting for merges", f"{len(pending)} repo(s) still not merged.", None)
         return _action("NONE", None, "Waiting on the gate above.", None)
 
     # ---- Workflow Summary: checklist / missing requirements / previous

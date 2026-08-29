@@ -271,8 +271,14 @@
 <p>Preparing test environment…</p>
 <div class="primary-action"><button disabled class="big is-loading" data-running>Creating Sandbox...</button></div>
 {% elif next_action.action == 'REBUILD_SANDBOX' %}
-<div class="warning"><b>Sandbox creation failed.</b></div>
-<div class="primary-action"><a class="button danger" href="{{next_action.target}}">View Sandbox &amp; Rebuild</a></div>
+<p>{{next_action.reason}}</p>
+<div class="primary-action"><form method="post" action="{{next_action.target}}" data-loading-label="Rebuilding..."><button class="danger big">{{next_action.label}}</button></form></div>
+{% elif next_action.action == 'RESTART_SANDBOX' %}
+{# Section 4: a CLOSED/STOPPED sandbox from a previous execution, still
+   built from the current source -- restart the SAME row, never a
+   duplicate "Create Sandbox". #}
+<p>{{next_action.reason}}</p>
+<div class="primary-action"><form method="post" action="{{next_action.target}}" data-loading-label="Restarting..."><button class="success big">Restart Sandbox</button></form></div>
 {% elif next_action.action == 'SANDBOX_SETUP_REQUIRED' %}
 {# Sections 13/14: a missing sandbox: contract cannot be fixed by
    retrying -- point at the real next step (repo config), never a raw
@@ -584,10 +590,17 @@
 </section>
 {% if not_ready_workspaces %}<p><small>Waiting for:</small> {% for w in not_ready_workspaces %}<span class="cap">{{w.agent}} · {{w.role or w.repo_name}}</span>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
 
-<h3 class="subgroup">Review & QA</h3>
+<h3 class="subgroup">Review & QA (Runtime Verification)</h3>
 <section class="panel" id="qa">
-<p><b>Workflow:</b> {{risk_profile}} — {% if risk_profile=='LOW' %}code + review (Integration/QA skipped).{% elif risk_profile=='NORMAL' %}code + review + integration, QA skipped.{% else %}code + review + QA + integration.{% endif %} <a href="/help#risk-profile">? chi tiết</a></p>
-{% if risk_profile != 'HIGH' %}<p class="empty">QA: NOT_REQUIRED for this risk profile.</p>
+{# Section-2 policy bug: this line and the gate below used to hardcode
+   "NORMAL skips QA" -- stale since RISK_GATES changed to require Runtime
+   Verification for NORMAL too (only LOW skips it). qa_required/
+   integration_required (computed once by the route from
+   decision.requires_qa()/requires_integration(), the one source of
+   truth) are the only things checked now, never a second hand-typed
+   copy of the policy table here. #}
+<p><b>Workflow:</b> {{risk_profile}} — {% if not qa_required and not integration_required %}code + review (Integration/Runtime Verification skipped).{% elif qa_required and not integration_required %}code + review + runtime verification.{% else %}code + review + runtime verification + integration.{% endif %} <a href="/help#risk-profile">? chi tiết</a></p>
+{% if not qa_required %}<p class="empty">Runtime Verification: NOT_REQUIRED for this risk profile.</p>
 {% elif not decision.builders or decision.builders|selectattr('review_status','ne','PASS')|list %}
 <p class="empty">QA available once every Builder review is PASS.</p>
 {% elif not qa %}
@@ -652,11 +665,16 @@
 {% if create_pr_running %}<button disabled class="ghost is-loading" data-running>Creating PR...</button>
 {% elif merge_pr_running %}<button disabled class="success is-loading" data-running>Merging...</button>
 {% elif not m.pr_number %}
-  {% if m.github_available %}<form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/create-pr" data-loading-label="Creating PR..."><button class="ghost">Create PR</button></form>{% endif %}
+  {# Section 9: the backend already refuses Create PR unless the Task is
+     genuinely ready_for_main (GitSafetyError "Task is not READY_FOR_MAIN
+     yet") -- this button must not even be offered while that would fail,
+     never rely on the click-time error alone. #}
+  {% if not ready_for_main %}<span class="badge" title="Task is not Ready for Main yet -- finish the current step above.">Not ready for main yet</span>
+  {% elif m.github_available %}<form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/create-pr" data-loading-label="Creating PR..."><button class="ghost">Create PR</button></form>{% endif %}
 {% else %}
   <form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/refresh"><button class="ghost">Refresh</button></form>
   {% if m.gate.eligible %}<form method="post" action="/api/tasks/{{t.id}}/merges/{{m.repository_id}}/merge" data-loading-label="Revalidating..." onsubmit="return confirm('Merge PR #{{m.pr_number}}? Strategy: {{m.merge_strategy}}')"><button class="success">Merge</button></form>
-  {% else %}<span class="badge failed">{{m.gate.blockers|join(', ')}}</span>{% endif %}
+  {% else %}<span class="badge failed">{% for code in m.gate.blockers %}{{(code|humanize_blocker).message}}{% if not loop.last %} · {% endif %}{% endfor %}</span>{% endif %}
 {% endif %}
 </div>{% endif %}
 {% if m.merge_pr_op and m.merge_pr_op.status=='FAILED' and not merge_pr_running %}<p class="result-note failed">Merge blocked: {{m.merge_pr_op.error}}</p>{% endif %}
