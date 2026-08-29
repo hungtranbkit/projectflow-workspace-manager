@@ -45,8 +45,24 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _default_runner(argv: list[str], cwd, timeout: int) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, cwd=str(cwd), shell=isinstance(argv, str), text=True, capture_output=True, timeout=timeout)
+def _default_runner(argv: list[str], cwd, timeout: int, env: dict | None = None) -> subprocess.CompletedProcess:
+    """`env`, when given, is layered ON TOP of this process's own
+    environment (never a replacement) -- used only for rollback's
+    MESFLOW_IMAGE=<exact prior image> override (section 5), so the
+    command still gets everything else (PATH, DOCKER_HOST, ...) it
+    would normally see."""
+    run_env = None
+    if env:
+        import os
+        run_env = {**os.environ, **env}
+    return subprocess.run(argv, cwd=str(cwd), shell=isinstance(argv, str), text=True, capture_output=True, timeout=timeout, env=run_env)
+
+
+def _default_image_exists(image_ref: str) -> bool:
+    try:
+        return subprocess.run(["docker", "image", "inspect", image_ref], capture_output=True, timeout=15).returncode == 0
+    except Exception:
+        return False
 
 
 # Never let a command's own output leak a credential into a persisted
@@ -79,6 +95,7 @@ class DeploymentService:
         self.http_get = urllib.request.urlopen
         self.health_attempts = 20
         self.health_delay = 3.0
+        self.image_exists = _default_image_exists
 
     # ---- target resolution (section 8) -----------------------------------
     def target(self, repo_path: str, environment: str) -> dict | None:
@@ -149,36 +166,35 @@ class DeploymentService:
                 self._run_command(deployment_id, "BUILDING", build_cmd, repo_path)
             artifact = self._read_artifact_metadata(repo_path)
             if artifact:
-                self._set(deployment_id, artifact_version=artifact.get("version"),
-                          artifact_image=artifact.get("artifact"), artifact_digest=artifact.get("image_digest"))
+                # section 4: an artifact metadata file exists (either just
+                # built, or reused because it already matched -- see
+                # _needs_build) but its OWN recorded source_commit must
+                # still equal what THIS deployment was asked to deploy.
+                # A mismatch here means either a build silently produced
+                # evidence for the wrong commit, or a concurrent build for
+                # a different commit clobbered the shared "latest"
+                # metadata pointer after this one's own build finished --
+                # never deploy an artifact whose evidence contradicts the
+                # commit we were told to deploy.
+                artifact_commit = artifact.get("source_commit")
+                if artifact_commit and artifact_commit != d["source_commit"]:
+                    raise DeploymentError(
+                        "ARTIFACT_SOURCE_MISMATCH",
+                        f"artifact metadata source_commit {artifact_commit[:12]} != requested {d['source_commit'][:12]}")
+                self._set(deployment_id,
+                          artifact_version=artifact.get("version"),
+                          artifact_image=artifact.get("image"),
+                          artifact_digest=artifact.get("image_digest"),
+                          artifact_filename=artifact.get("package_filename"),
+                          artifact_sha256=artifact.get("package_sha256"))
 
             deploy_cmd = load_command(Path(repo_path), "local_deploy")
             if not deploy_cmd:
                 raise DeploymentError("NO_DEPLOY_COMMAND", "PROJECT.yaml declares no local_deploy command")
             self._set(deployment_id, status="DEPLOYING")
             self._run_command(deployment_id, "DEPLOYING", deploy_cmd, repo_path)
-
-            self._set(deployment_id, status="VERIFYING")
-            health_url = self.health_url(repo_path)
-            healthy = self._check_health(deployment_id, health_url)
-            self._set(deployment_id, health_status="PASS" if healthy else "FAIL", health_checked_at=now())
-            if not healthy:
-                raise DeploymentError("HEALTH_FAILED", f"Health check did not pass: {health_url}")
-
-            smoke_cmd = load_command(Path(repo_path), "smoke")
-            smoke_ok = True
-            if smoke_cmd:
-                smoke_ok = self._run_command(deployment_id, "SMOKE", smoke_cmd, repo_path, raise_on_fail=False)
-            self._set(deployment_id, smoke_status="PASS" if smoke_ok else "FAIL")
-            if not smoke_ok:
-                raise DeploymentError("SMOKE_FAILED", "Smoke verification failed")
-
-            status_cmd = load_command(Path(repo_path), "local_status")
-            url = None
-            if status_cmd:
-                r = self.runner(["bash", "-lc", status_cmd[0]], Path(repo_path) / status_cmd[1], status_cmd[2])
-                m = re.search(r"^URL=(\S+)$", r.stdout or "", re.MULTILINE)
-                if m: url = m.group(1)
+            self._verify_health_and_smoke(deployment_id, repo_path)
+            url = self._read_deployed_url(repo_path)
             self._set(deployment_id, status="VERIFIED", deployed_url=url, finished_at=now(), error=None)
         except DeploymentError as exc:
             self._set(deployment_id, status="FAILED", error=f"{exc.code}: {exc}"[:2000], finished_at=now())
@@ -186,6 +202,34 @@ class DeploymentService:
             self._set(deployment_id, status="FAILED", error=str(exc)[:2000], finished_at=now())
         finally:
             self._restore_source(repo_path)
+
+    def _verify_health_and_smoke(self, deployment_id: int, repo_path: str) -> None:
+        """Shared by a normal deploy and a rollback -- both must pass the
+        exact same real health+smoke bar before being called VERIFIED /
+        ROLLED_BACK (section 8: 'not successful merely because docker
+        compose starts')."""
+        self._set(deployment_id, status="VERIFYING")
+        health_url = self.health_url(repo_path)
+        healthy = self._check_health(deployment_id, health_url)
+        self._set(deployment_id, health_status="PASS" if healthy else "FAIL", health_checked_at=now())
+        if not healthy:
+            raise DeploymentError("HEALTH_FAILED", f"Health check did not pass: {health_url}")
+
+        smoke_cmd = load_command(Path(repo_path), "smoke")
+        smoke_ok = True
+        if smoke_cmd:
+            smoke_ok = self._run_command(deployment_id, "SMOKE", smoke_cmd, repo_path, raise_on_fail=False)
+        self._set(deployment_id, smoke_status="PASS" if smoke_ok else "FAIL")
+        if not smoke_ok:
+            raise DeploymentError("SMOKE_FAILED", "Smoke verification failed")
+
+    def _read_deployed_url(self, repo_path: str) -> str | None:
+        status_cmd = load_command(Path(repo_path), "local_status")
+        if not status_cmd:
+            return None
+        r = self.runner(["bash", "-lc", status_cmd[0]], Path(repo_path) / status_cmd[1], status_cmd[2])
+        m = re.search(r"^URL=(\S+)$", r.stdout or "", re.MULTILINE)
+        return m.group(1) if m else None
 
     # ---- source pinning (section 3/24) -------------------------------------
     def _prepare_source(self, deployment_id: int, repo_path: str, source_commit: str) -> None:
@@ -238,19 +282,19 @@ class DeploymentService:
         different artifact between verification and deploy without a
         new identity (section 10)."""
         meta = self._read_artifact_metadata(repo_path)
-        return not (meta and meta.get("commit") == source_commit)
+        return not (meta and meta.get("source_commit") == source_commit)
 
     def _read_repo_yaml(self, repo_path: str) -> dict:
         import yaml
         return yaml.safe_load((Path(repo_path) / "PROJECT.yaml").read_text()) or {}
 
     # ---- command execution --------------------------------------------------
-    def _run_command(self, deployment_id: int, phase: str, cmd: tuple, repo_path: str, raise_on_fail: bool = True) -> bool:
+    def _run_command(self, deployment_id: int, phase: str, cmd: tuple, repo_path: str, raise_on_fail: bool = True, env: dict | None = None) -> bool:
         command, working_directory, timeout = cmd
         phase_id = self._phase(deployment_id, phase)
         cwd = (Path(repo_path) / working_directory).resolve()
         try:
-            r = self.runner(["bash", "-lc", command], cwd, timeout)
+            r = self.runner(["bash", "-lc", command], cwd, timeout, env=env) if env else self.runner(["bash", "-lc", command], cwd, timeout)
         except subprocess.TimeoutExpired as exc:
             self._phase_done(phase_id, "TIMEOUT")
             if raise_on_fail: raise DeploymentError(f"{phase}_TIMEOUT", f"{phase} timed out after {timeout}s") from exc
@@ -278,3 +322,87 @@ class DeploymentService:
                 time.sleep(self.health_delay)
         self._phase_done(phase_id, "FAILED")
         return False
+
+    # ---- rollback (section 5/6/7/8) ----------------------------------------
+    # Audit finding this whole capability is built on: mesflow's own
+    # scripts/projectflow/deploy-local.sh already supports an explicit
+    # MESFLOW_IMAGE=<image ref> environment override, checked BEFORE it
+    # falls back to reading the "latest" artifact metadata or VERSION.txt
+    # -- and it refuses to run at all ("image ... not found locally") if
+    # that exact image isn't already present. That means a real rollback
+    # is provably safe with zero new deploy machinery: run the exact same
+    # local_deploy command, with MESFLOW_IMAGE pinned to a previous
+    # VERIFIED deployment's own recorded artifact_image, and let that
+    # existing script's own "must already exist" guard be the proof this
+    # never silently rebuilds or deploys the wrong thing. No `build`
+    # phase is ever run for a rollback.
+
+    def rollback_target(self, deployment: dict) -> dict | None:
+        """The previous VERIFIED deployment `deployment` could roll back
+        to, or None if rollback genuinely isn't available right now --
+        section 7: never show a fake/disabled rollback affordance. Real
+        requirements: a strictly earlier VERIFIED deployment exists for
+        the exact same task+repo+environment, it recorded an artifact
+        image, and that image still exists on this host's docker."""
+        target = self.db.one(
+            "SELECT * FROM deployments WHERE task_id=? AND repository_id=? AND environment=? AND status='VERIFIED' AND id<? ORDER BY id DESC LIMIT 1",
+            (deployment["task_id"], deployment["repository_id"], deployment["environment"], deployment["id"]))
+        if not target or not target.get("artifact_image"):
+            return None
+        if not self.image_exists(target["artifact_image"]):
+            return None
+        return target
+
+    def rollback(self, deployment_id: int) -> tuple[bool, str, int | None]:
+        """Creates a new, append-only Deployment row recording the
+        rollback attempt (never mutates the historical VERIFIED row --
+        section 6) and dispatches it. Returns (ok, error, new_id)."""
+        d = self.db.one("SELECT * FROM deployments WHERE id=?", (deployment_id,))
+        if not d:
+            return False, "Deployment not found", None
+        target = self.rollback_target(d)
+        if not target:
+            return False, "No previous VERIFIED deployment available to roll back to", None
+        new_id = self.db.execute(
+            "INSERT INTO deployments(task_id,repository_id,environment,target_name,source_branch,source_commit,"
+            "artifact_version,artifact_image,artifact_digest,artifact_filename,artifact_sha256,status,rollback_of,rollback_to_deployment_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,'PENDING',?,?)",
+            (d["task_id"], d["repository_id"], d["environment"], d["target_name"], target["source_branch"], target["source_commit"],
+             target["artifact_version"], target["artifact_image"], target["artifact_digest"], target["artifact_filename"], target["artifact_sha256"],
+             deployment_id, target["id"]))
+        self.spawn(self._run_rollback, (new_id,))
+        return True, "", new_id
+
+    def _run_rollback(self, deployment_id: int) -> None:
+        d = self.db.one("SELECT * FROM deployments WHERE id=?", (deployment_id,))
+        repo = self.db.one("SELECT * FROM repositories WHERE id=?", (d["repository_id"],))
+        repo_path = repo["repo_path"]
+        started = now()
+        self._set(deployment_id, status="PREPARING", started_at=started, rollback_started_at=started)
+        try:
+            deploy_cmd = load_command(Path(repo_path), "local_deploy")
+            if not deploy_cmd:
+                raise DeploymentError("NO_DEPLOY_COMMAND", "PROJECT.yaml declares no local_deploy command")
+            self._set(deployment_id, status="DEPLOYING")
+            # The one line that makes this a rollback rather than a
+            # normal redeploy: force the exact previous artifact image,
+            # never whatever "latest" happens to resolve to right now.
+            self._run_command(deployment_id, "DEPLOYING", deploy_cmd, repo_path, env={"MESFLOW_IMAGE": d["artifact_image"]})
+            self._verify_health_and_smoke(deployment_id, repo_path)
+            url = self._read_deployed_url(repo_path)
+            finished = now()
+            self._set(deployment_id, status="ROLLED_BACK", rollback_status="VERIFIED", deployed_url=url,
+                      finished_at=finished, rollback_finished_at=finished, error=None)
+        except DeploymentError as exc:
+            finished = now()
+            msg = f"{exc.code}: {exc}"[:2000]
+            self._set(deployment_id, status="ROLLBACK_FAILED", rollback_status="FAILED", rollback_error=msg, error=msg,
+                      finished_at=finished, rollback_finished_at=finished)
+        except Exception as exc:
+            finished = now()
+            msg = str(exc)[:2000]
+            self._set(deployment_id, status="ROLLBACK_FAILED", rollback_status="FAILED", rollback_error=msg, error=msg,
+                      finished_at=finished, rollback_finished_at=finished)
+        # No _restore_source here: rollback never touches git / the shared
+        # checkout at all -- it only ever redeploys an already-built,
+        # already-tagged image that exists independently of any worktree.

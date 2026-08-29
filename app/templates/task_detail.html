@@ -266,8 +266,13 @@
 {% set dv = m.deployment_dev %}
 {% set dep = dv.deployment %}
 <div class="merge-card">
-<div class="row"><div><strong>Deployment</strong><small>DEV · {{m.repo_name}}</small></div>
-<span class="badge {{'ready' if dv.state=='VERIFIED' else ('failed' if dv.state=='FAILED' else '')}}"{% if dv.running %} data-running{% endif %}>{{dv.label}}</span></div>
+<div class="row"><div><strong>DEV Deployment</strong><small>Persistent environment · {{m.repo_name}}</small></div>
+<span class="badge {{'ready' if dv.state=='VERIFIED' else ('failed' if dv.state in ['FAILED','ROLLBACK_FAILED'] else '')}}"{% if dv.running %} data-running{% endif %}>{{dv.label}}</span></div>
+{# Section 1: this is NOT the ephemeral Verification Sandbox below --
+   different runtime, different DB lifecycle. Say so explicitly whenever
+   a real deployment exists, so nobody reads "DEV VERIFIED" as "the
+   admin password changed on this environment". #}
+{% if dv.state != 'NOT_CONFIGURED' %}<p><small>Deployment does not reset existing application data or user passwords.</small></p>{% endif %}
 {% if dv.state == 'NOT_CONFIGURED' %}
   <div class="quick-actions"><a class="ghost button" href="/help#dev-deployment">Configure DEV Target</a></div>
 {% elif dv.state == 'NOT_DEPLOYED' %}
@@ -275,17 +280,25 @@
 {% elif dv.running %}
   <button disabled class="is-loading" data-running>{{dv.label}}</button>
 {% elif dv.state == 'VERIFIED' %}
-  <p><small>Commit</small><code>{{dep.source_commit[:12]}}</code></p>
+  <p><small>Source commit</small><code>{{dep.source_commit[:12]}}</code></p>
   <p><small>Health</small><b>{{dep.health_status}}</b> &nbsp; <small>Smoke</small><b>{{dep.smoke_status}}</b></p>
+  {% if dep.artifact_image %}<p><small>Version</small><code>{{dep.artifact_version or '—'}}</code> &nbsp; <small>Image</small><code>{{dep.artifact_image}}</code></p>{% endif %}
   <div class="quick-actions">
   {% if dep.deployed_url %}<a class="button" href="{{dep.deployed_url}}" target="_blank" rel="noopener">Open DEV</a>{% endif %}
   <a class="ghost button" href="/deployments/{{dep.id}}">View Deploy Log</a>
   <form method="post" action="/api/deployments/{{dep.id}}/redeploy" class="inline" data-loading-label="Preparing..."><button class="ghost">Redeploy</button></form>
   </div>
-{% elif dv.state == 'FAILED' %}
+{% elif dv.state in ['FAILED','ROLLBACK_FAILED'] %}
   <p class="result-note failed">{{dep.error}}</p>
   <div class="quick-actions">
   <form method="post" action="/api/deployments/{{dep.id}}/redeploy" class="inline" data-loading-label="Preparing..."><button class="danger">Retry Deploy</button></form>
+  {% if dv.rollback_target %}<form method="post" action="/api/deployments/{{dep.id}}/rollback" class="inline" data-loading-label="Rolling back..."><button class="ghost" title="Redeploy {{dv.rollback_target.artifact_image}} (verified, still present)">Rollback</button></form>{% endif %}
+  <a class="ghost button" href="/deployments/{{dep.id}}">View Deploy Log</a>
+  </div>
+{% elif dv.state == 'ROLLED_BACK' %}
+  <p><small>Rolled back to</small><code>{{dep.artifact_image}}</code></p>
+  <div class="quick-actions">
+  {% if dep.deployed_url %}<a class="button" href="{{dep.deployed_url}}" target="_blank" rel="noopener">Open DEV</a>{% endif %}
   <a class="ghost button" href="/deployments/{{dep.id}}">View Deploy Log</a>
   </div>
 {% endif %}
@@ -295,6 +308,9 @@
 {# Section 11-13: prefer an existing healthy sandbox pinned to the merged
    source; never an ambiguous "latest" with no exact commit shown. #}
 {% set verify_sb = integration_sandboxes[0] if integration_sandboxes else None %}
+{% if verify_sb or task_integration %}
+<p><strong>Verification Sandbox</strong><br><small>Ephemeral · Fresh isolated data — for verifying this Task's own behavior, not a deployment.</small></p>
+{% endif %}
 <div class="primary-action">
 {% if verify_sb and verify_sb.row.status in ['RUNNING','CLEANUP_ELIGIBLE'] and verify_sb.row.health_status=='HEALTHY' and not verify_sb.stale and verify_sb.backend_url %}
   <a class="button big" href="{{verify_sb.backend_url}}" target="_blank" rel="noopener">View Running App</a>
