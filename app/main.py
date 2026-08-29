@@ -1508,7 +1508,15 @@ def create_app(settings=None):
         except HTTPException as exc: return {"ok":False,"error":str(exc.detail)}
         agent_s=slugify(agent)
         if agent_s not in settings.agents: return {"ok":False,"error":f"Agent not allowed: {agent}"}
-        try: branch,path,commit=git.create_agent(r["repo_path"],agent_s,t["slug"],base_branch)
+        # Branch/worktree name must include the repo, not just the task slug
+        # (matches the same qualification already used for Integration
+        # Workspaces below) -- agent_workspaces.branch is UNIQUE across the
+        # WHOLE table, not scoped per repository_id, so a multi-repo Task
+        # using the same agent for a second repo would otherwise compute
+        # the identical branch string and fail with a raw
+        # "UNIQUE constraint failed: agent_workspaces.branch" at INSERT
+        # time even though each repo's own git history has no collision.
+        try: branch,path,commit=git.create_agent(r["repo_path"],agent_s,f"{t['slug']}-{r['repo_name']}",base_branch)
         except (GitSafetyError,GitCommandError) as exc: return {"ok":False,"error":str(exc)}
         role_clean=role.strip()[:80]; profile_clean=sandbox_profile.strip().upper() or None
         try:
@@ -1516,7 +1524,13 @@ def create_app(settings=None):
                             (repository_id,agent_s,t["slug"],branch,str(path),base_branch,commit,commit,"CREATED",tid,role_clean,profile_clean))
         except Exception as exc:
             if not git.status(path).strip(): git.close(r["repo_path"],path)
-            return {"ok":False,"error":str(exc)}
+            # Never surface a raw SQLite message (e.g. "UNIQUE constraint
+            # failed: agent_workspaces.branch") to the browser -- the repo
+            # qualification above already prevents the known cross-repo
+            # collision; this is a last-resort, honest but readable
+            # fallback for anything else that still hits the constraint.
+            msg = "A workspace with this exact branch/worktree already exists for this task." if "UNIQUE constraint failed" in str(exc) else str(exc)
+            return {"ok":False,"error":msg}
         db.event("agent",wid,"WORKSPACE_CREATED",branch)
         db.execute("UPDATE tasks SET updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,))
         sid=auto_create_sandbox(tid,repository_id,r["repo_path"],"AGENT_WORKSPACE",wid,role_clean or agent_s,branch,commit,path,profile_clean,t.get("default_sandbox_profile"))
