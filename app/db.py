@@ -507,6 +507,15 @@ CREATE TABLE IF NOT EXISTS deployment_phases(
 );
 CREATE INDEX IF NOT EXISTS idx_deployment_phases_deployment ON deployment_phases(deployment_id);
 """),
+    (14, """
+ALTER TABLE deployments ADD COLUMN artifact_filename TEXT;
+ALTER TABLE deployments ADD COLUMN artifact_sha256 TEXT;
+ALTER TABLE deployments ADD COLUMN rollback_to_deployment_id INTEGER REFERENCES deployments(id);
+ALTER TABLE deployments ADD COLUMN rollback_started_at TEXT;
+ALTER TABLE deployments ADD COLUMN rollback_finished_at TEXT;
+ALTER TABLE deployments ADD COLUMN rollback_status TEXT;
+ALTER TABLE deployments ADD COLUMN rollback_error TEXT;
+"""),
 ]
 
 

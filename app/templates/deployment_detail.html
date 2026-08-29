@@ -1,16 +1,29 @@
-{% extends 'base.html' %}{% block title %}Deployment · {{d.repo_name}} · {{d.environment}}{% endblock %}{% block header_action %}<span class="badge {{'ready' if d.status=='VERIFIED' else ('failed' if d.status=='FAILED' else '')}}"{% if d.status in ['PENDING','PREPARING','BUILDING','DEPLOYING','VERIFYING'] %} data-running{% endif %}>{{d.status}}</span>{% endblock %}{% block content %}
+{% extends 'base.html' %}{% block title %}Deployment · {{d.repo_name}} · {{d.environment}}{% endblock %}{% block header_action %}<span class="badge {{'ready' if d.status=='VERIFIED' else ('failed' if d.status in ['FAILED','ROLLBACK_FAILED'] else '')}}"{% if d.status in ['PENDING','PREPARING','BUILDING','DEPLOYING','VERIFYING'] %} data-running{% endif %}>{{d.status.replace('_',' ')}}</span>{% endblock %}{% block content %}
+<p><small>{{d.environment}} Deployment · Persistent environment — deployment does not reset existing application data or user passwords.</small></p>
+{% if d.rollback_of %}<p><small>This is a rollback attempt for deployment #{{d.rollback_of}}, restoring deployment #{{d.rollback_to_deployment_id}}'s exact artifact.</small></p>{% endif %}
 <section class="facts">
 <div><small>Repository</small><code>{{d.repo_name}}</code></div>
 <div><small>Environment</small><code>{{d.environment}}</code></div>
 <div><small>Source commit</small><code>{{d.source_commit[:12]}}</code></div>
 <div><small>Source branch</small><code>{{d.source_branch}}</code></div>
-<div><small>Artifact</small><code>{{d.artifact_image or '—'}}</code></div>
+<div><small>Version</small><code>{{d.artifact_version or '—'}}</code></div>
+<div><small>Image</small><code>{{d.artifact_image or '—'}}</code></div>
+<div class="wide"><small>Image digest</small><code>{{d.artifact_digest or '—'}}</code></div>
+<div><small>Package</small><code>{{d.artifact_filename or '—'}}</code></div>
+<div class="wide"><small>Package SHA256</small><code>{{d.artifact_sha256 or '—'}}</code></div>
 <div><small>Health</small><code>{{d.health_status or 'PENDING'}}</code></div>
 <div><small>Smoke</small><code>{{d.smoke_status or 'PENDING'}}</code></div>
 <div><small>Requested</small><code>{{d.requested_at}}</code></div>
 </section>
 {% if d.error %}<div class="alert"><b>Error</b><p>{{d.error}}</p></div>{% endif %}
-{% if d.deployed_url and d.status=='VERIFIED' %}<div class="actions"><a class="button" href="{{d.deployed_url}}" target="_blank" rel="noopener">Open DEV</a></div>{% endif %}
+<div class="actions">
+{% if d.deployed_url and d.status in ['VERIFIED','ROLLED_BACK'] %}<a class="button" href="{{d.deployed_url}}" target="_blank" rel="noopener">Open DEV</a>{% endif %}
+{% if d.status in ['VERIFIED','ROLLED_BACK'] %}<form method="post" action="/api/deployments/{{d.id}}/redeploy" class="inline" data-loading-label="Preparing..."><button class="ghost">Redeploy</button></form>{% endif %}
+{% if d.status in ['FAILED','ROLLBACK_FAILED'] %}
+  <form method="post" action="/api/deployments/{{d.id}}/redeploy" class="inline" data-loading-label="Preparing..."><button class="danger">Retry Deploy</button></form>
+  {% if view.rollback_target %}<form method="post" action="/api/deployments/{{d.id}}/rollback" class="inline" data-loading-label="Rolling back..."><button class="ghost" title="Redeploy {{view.rollback_target.artifact_image}} (verified, still present)">Rollback to #{{view.rollback_target.id}}</button></form>{% endif %}
+{% endif %}
+</div>
 <section class="panel"><h3>Deploy Log</h3>
 {% for p in phases %}<details class="timeline"><summary><small>{{p.started_at}}</small> <b>{{p.phase}}</b> <span class="badge {{p.status|lower}}">{{p.status}}</span></summary>
 {% if p.stdout_tail %}<pre>{{p.stdout_tail}}</pre>{% endif %}
@@ -18,8 +31,8 @@
 {% if not p.stdout_tail and not p.stderr_tail %}<p class="empty">No output captured.</p>{% endif %}
 </details>{% else %}<p class="empty">No phases recorded yet.</p>{% endfor %}
 </section>
-{% if history|length > 1 %}<section class="panel"><h3>History (this repo · {{d.environment}})</h3>
-{% for h in history %}<a class="row" href="/deployments/{{h.id}}"><div><small>{{h.requested_at}}</small><br><code>{{h.source_commit[:12]}}</code></div><span class="badge {{'ready' if h.status=='VERIFIED' else ('failed' if h.status=='FAILED' else '')}}">{{h.status}}</span></a>{% endfor %}
+{% if history|length > 1 %}<section class="panel"><h3>DEV Deployment History ({{d.repo_name}})</h3>
+{% for h in history %}<a class="row" href="/deployments/{{h.id}}"><div><small>#{{h.id}} · {{h.requested_at}}</small><br><code>{{h.source_commit[:12]}}</code>{% if h.artifact_version %} <small>v{{h.artifact_version}}</small>{% endif %}</div><span class="badge {{'ready' if h.status=='VERIFIED' else ('failed' if h.status in ['FAILED','ROLLBACK_FAILED'] else '')}}">{{h.status.replace('_',' ')}}</span></a>{% endfor %}
 </section>{% endif %}
 {% if d.task_id %}<p><a href="/tasks/{{d.task_id}}">← Back to Task</a></p>{% endif %}
 {% endblock %}

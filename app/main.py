@@ -1426,7 +1426,9 @@ def create_app(settings=None):
             # without a second code path.
             if m["merge_status"]=="MERGED":
                 dep_target=deployer.target(m_repo["repo_path"],"DEV") if m_repo else None
-                m["deployment_dev"]=deployment_view(latest_deployment(tid,m["repository_id"],"DEV"),bool(dep_target))
+                dep_row=latest_deployment(tid,m["repository_id"],"DEV")
+                rb_target=deployer.rollback_target(dep_row) if dep_row else None
+                m["deployment_dev"]=deployment_view(dep_row,bool(dep_target),rb_target)
             else:
                 m["deployment_dev"]=None
 
@@ -1963,6 +1965,22 @@ def create_app(settings=None):
         db.event("task",prev["task_id"],"DEPLOYMENT_REQUESTED",f"repo={prev['repository_id']} env={prev['environment']} commit={prev['source_commit'][:12]} deployment={did2} redeploy_of={did}")
         deployer.deploy(did2)
         return RedirectResponse(f"/tasks/{prev['task_id']}",303)
+    @app.post("/api/deployments/{did}/rollback")
+    def rollback_deployment(did:int):
+        """[Rollback] (section 5/6/7): only ever reachable from a FAILED
+        or ROLLBACK_FAILED deployment with a still-eligible prior
+        VERIFIED deployment -- DeploymentService.rollback() re-checks
+        this itself (never trusts the button having been rendered) and
+        refuses honestly rather than faking success."""
+        prev=db.one("SELECT * FROM deployments WHERE id=?",(did,))
+        if not prev: raise HTTPException(404)
+        existing=latest_deployment(prev["task_id"],prev["repository_id"],prev["environment"])
+        if existing and existing["status"] in ("PENDING","PREPARING","BUILDING","DEPLOYING","VERIFYING"):
+            return RedirectResponse(f"/tasks/{prev['task_id']}",303)
+        ok,error,new_id=deployer.rollback(did)
+        if not ok: raise GitSafetyError(error)
+        db.event("task",prev["task_id"],"ROLLBACK_REQUESTED",f"repo={prev['repository_id']} env={prev['environment']} rollback_of={did} deployment={new_id}")
+        return RedirectResponse(f"/tasks/{prev['task_id']}",303)
     @app.get("/api/deployments/{did}")
     def api_deployment(did:int):
         row=db.one("SELECT * FROM deployments WHERE id=?",(did,))
@@ -1974,7 +1992,8 @@ def create_app(settings=None):
         if not row: raise HTTPException(404)
         phases=db.all("SELECT * FROM deployment_phases WHERE deployment_id=? ORDER BY id",(did,))
         history=db.all("SELECT * FROM deployments WHERE task_id=? AND repository_id=? AND environment=? ORDER BY id DESC",(row["task_id"],row["repository_id"],row["environment"]))
-        return render(request,"deployment_detail.html",d=row,phases=phases,history=history)
+        view=deployment_view(row,True,deployer.rollback_target(row))
+        return render(request,"deployment_detail.html",d=row,phases=phases,history=history,view=view)
 
     @app.post("/api/tasks/{tid}/mark-merged")
     def mark_task_merged(tid:int):
