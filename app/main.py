@@ -1429,6 +1429,18 @@ def create_app(settings=None):
             sources.append(SourceSpec(repository_id=row["id"],role=name,branch=branch,commit_sha=commit_sha,worktree_path=row["repo_path"],repo_path=row["repo_path"],source_type="RUNTIME_DEPENDENCY"))
         return sources
     def auto_create_sandbox(task_id,repository_id,repo_path,owner_type,owner_id,role,branch,commit,worktree_path,explicit_profile,task_default_profile):
+        # Idempotency guard (real incident, same class as the Create
+        # Integration duplicate-click bug fixed in #30): a workspace's
+        # sandbox is already auto-created at workspace-creation time
+        # (add_task_workspace -> here); a Create Sandbox click afterward
+        # -- or a second click while the first request is still in
+        # flight -- must never create a SECOND sandbox for the same
+        # owner. CLOSED (fully torn down) is the only status a fresh one
+        # is actually warranted for; TaskDecisionService.
+        # builder_sandbox_state() already knows how to route a
+        # CLOSED/STOPPED sandbox to Restart/Rebuild instead of Create.
+        existing=db.one("SELECT id FROM sandboxes WHERE owner_type=? AND owner_id=? AND status!='CLOSED' ORDER BY id DESC LIMIT 1",(owner_type,owner_id))
+        if existing: return existing["id"]
         try: contract=load_sandbox_contract(Path(repo_path))
         except SandboxContractError as exc:
             db.event(owner_type.lower(),owner_id,"SANDBOX_CONTRACT_INVALID",str(exc)); return None
