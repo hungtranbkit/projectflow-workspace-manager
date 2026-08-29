@@ -102,7 +102,7 @@ def test_how_to_verify_renders_and_missing_report_is_honest(client, git_repo, sa
 
     empty_page = client.get(f"/workspaces/{w['id']}").text
     assert "Agent chưa cung cấp hướng dẫn kiểm tra." in empty_page
-    assert "Add Verification Instructions" in empty_page
+    assert "Add Manual Verification Steps" in empty_page
     # never invent a rendered step for a report that doesn't exist (the
     # phrase only appears as a form placeholder, never as a real <li>)
     assert '<li><b>Login using' not in empty_page
@@ -158,8 +158,11 @@ def test_next_action_progresses_through_every_state(client, git_repo, sandboxabl
     client.post("/api/workspaces", data={"repository_id": rid, "agent": "codex", "task_name": "verif-e", "base_branch": "main"})
     w = client.get("/api/workspaces").json()[0]
 
-    # not READY yet
-    assert "Agent chưa Mark Ready" in _code(client, w["id"])
+    # not READY yet -- Workspace Detail UX redesign (section 9): the
+    # generic, session-unaware "Agent chưa Mark Ready" message is
+    # replaced by a state-driven Current Action block reading the real
+    # AgentSession (here: none started yet at all).
+    assert "Start Codex" in _code(client, w["id"])
 
     client.post(f"/api/workspaces/{w['id']}/ready")
     assert "Create Sandbox" in client.get(f"/workspaces/{w['id']}").text

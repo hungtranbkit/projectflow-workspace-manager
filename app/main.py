@@ -484,9 +484,18 @@ def create_app(settings=None):
         sessions=db.all("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 10",(wid,))
         review_history=decision.review_history(wid)
         live_prompt=workspace_agent_prompt(w,task_row(w["task_id"]),repo(w["repository_id"])) if w["task_id"] else None
+        # One authoritative session-state computation for this page,
+        # whether or not the workspace belongs to a Task (builder.session/
+        # agent_status only exist in the task-scoped case) -- Workspace
+        # Detail UX audit section 1/4: the whole "Current Action" block
+        # reads only this, never re-derives session state itself.
+        session=sessions[0] if sessions else None
+        live_session=session if session and session["status"] in LIVE_SESSION_STATUSES else None
+        agent_status=session["status"] if session else "NOT_STARTED"
         return render(request,"workspace_detail.html",w=w,details=details,runs=runs,readiness=readiness,report=report,
                       manual_history=manual_history,next_action=action,sessions=sessions,
-                      task_decision=task_decision,builder=builder,review_history=review_history,live_prompt=live_prompt)
+                      task_decision=task_decision,builder=builder,review_history=review_history,live_prompt=live_prompt,
+                      session=session,live_session=live_session,agent_status=agent_status)
     @app.get("/api/workspaces/{wid}")
     def api_workspace(wid:int): return agent_row(wid)
     @app.post("/api/workspaces/{wid}/ready")
@@ -798,7 +807,21 @@ def create_app(settings=None):
             return JSONResponse({"ok":False,"code":exc.code,"message":str(exc),"fallback":f"cd {w['worktree_path']}"},status_code=409)
     @app.post("/api/workspaces/{wid}/launch-agent")
     def launch_agent(wid:int):
+        """This spawns a REAL, independent codex/claude process in a
+        desktop terminal window on THIS HOST's own graphical session
+        (TerminalLauncherService, entirely separate from AgentSession's
+        browser/PTY mechanism) -- invisible to the app's own state
+        tracking (agent_status, review readiness, ...) once running.
+        Workspace Detail UX audit (section 3): no longer exposed as a
+        page button -- the one real live-agent flow is AgentSession
+        (Open Live Agent / Start Codex in the Current Action block).
+        The route stays for API compatibility, but the SAME concurrency
+        guard applies: never spawn a second, untracked agent process on
+        top of one already doing real, tracked work."""
         w=agent_row(wid)
+        live=latest_session_for_workspace(wid)
+        if live and live["status"] in LIVE_SESSION_STATUSES:
+            return JSONResponse({"ok":False,"code":"ACTIVE_SESSION_EXISTS","message":f"An AgentSession is already {live['status']} for this workspace -- open it instead of starting a second, untracked agent process.","session_id":live["id"]},status_code=409)
         try:
             result=launcher.launch_agent(w["worktree_path"],w["agent"]); db.event("agent",wid,"AGENT_LAUNCHED",f"agent={w['agent']} path={result['worktree']} terminal={result['terminal']} result=requested")
             return {"ok":True,"message":f"{result['agent']} terminal đã được yêu cầu mở.",**result}
