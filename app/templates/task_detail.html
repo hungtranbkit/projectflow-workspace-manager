@@ -154,7 +154,7 @@
 <div class="wide"><small>Worktree</small><code>{{w.worktree_path}}</code></div>
 </div>
 {% if w.session %}<p><small>Prompt</small> <span class="badge {{w.session.prompt_status|lower}}"{% if w.session.prompt_status=='PENDING' and w.agent_status in ['STARTING','RUNNING','WAITING_FOR_INPUT'] %} data-running{% endif %}>{{'DELIVERED' if w.session.prompt_status=='DELIVERED' else ('DELIVERY FAILED' if w.session.prompt_status=='FAILED' else 'PENDING')}}</span></p>{% endif %}
-{% if w.sandbox %}<p><small>Sandbox</small> <span class="badge {{w.sandbox.row.status|lower}}">{{w.sandbox.row.status.replace('_',' ')}}{% if w.sandbox.row.status=='RUNNING' %} · {{w.sandbox.row.health_status}}{% endif %}</span> {% if w.sandbox.backend_url %}<a class="ghost" href="{{w.sandbox.backend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}</p>{% endif %}
+{% if w.sandbox %}<p><small>Sandbox</small> <span class="badge {{w.sandbox.row.status|lower}}">{{w.sandbox.row.status.replace('_',' ')}}{% if w.sandbox.row.status=='RUNNING' %} · {{w.sandbox.row.health_status}}{% endif %}</span> {% if w.sandbox.backend_url or w.sandbox.frontend_url %}<a class="ghost" href="{{w.sandbox.backend_url or w.sandbox.frontend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}</p>{% endif %}
 {% if w.last_activity_hint %}<p><small>Current activity</small><code>{{w.last_activity_hint}}</code></p>{% endif %}
 {% if w.session %}<p><small>Last activity</small><code>{{w.session.last_activity_at or w.session.started_at}}</code></p>{% endif %}
 {% if w.detected_report %}
@@ -261,7 +261,7 @@
      template-side sandbox-readiness check. -->
 <section class="panel wizard-panel">
 {% for w in workspaces %}
-{% if w.sandbox %}<p><b>{{w.agent}} · {{w.role or w.repo_name}}</b> — Sandbox <span class="badge {{w.sandbox.row.status|lower}}">{{w.sandbox.row.status.replace('_',' ')}}{% if w.sandbox.row.status=='RUNNING' %} · {{w.sandbox.row.health_status}}{% endif %}</span>{% if w.sandbox.backend_url %} <a class="ghost" href="{{w.sandbox.backend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}</p>{% endif %}
+{% if w.sandbox %}<p><b>{{w.agent}} · {{w.role or w.repo_name}}</b> — Sandbox <span class="badge {{w.sandbox.row.status|lower}}">{{w.sandbox.row.status.replace('_',' ')}}{% if w.sandbox.row.status=='RUNNING' %} · {{w.sandbox.row.health_status}}{% endif %}</span>{% if w.sandbox.backend_url or w.sandbox.frontend_url %} <a class="ghost" href="{{w.sandbox.backend_url or w.sandbox.frontend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}</p>{% endif %}
 {% if w.report and w.report.how_to_verify %}<p><small>Manual verification instructions</small></p><ol class="steps">{% for line in w.report.how_to_verify.split('\n') %}{% if line.strip() %}<li><b>{{line.strip()}}</b></li>{% endif %}{% endfor %}</ol>{% endif %}
 {% endfor %}
 {% if next_action.action == 'CREATE_SANDBOX' %}
@@ -273,6 +273,12 @@
 {% elif next_action.action == 'REBUILD_SANDBOX' %}
 <div class="warning"><b>Sandbox creation failed.</b></div>
 <div class="primary-action"><a class="button danger" href="{{next_action.target}}">View Sandbox &amp; Rebuild</a></div>
+{% elif next_action.action == 'SANDBOX_SETUP_REQUIRED' %}
+{# Sections 13/14: a missing sandbox: contract cannot be fixed by
+   retrying -- point at the real next step (repo config), never a raw
+   error code. #}
+<div class="warning"><b>Cannot create test environment</b><p>{{next_action.reason}}</p></div>
+<div class="primary-action"><a class="button" href="{{next_action.target}}">View Setup Guidance</a></div>
 {% elif not qa %}
 <div class="checklist-hint"><div>○ Open the requested screen</div><div>○ Check the expected UI</div><div>○ Confirm the result</div></div>
 <div class="primary-action"><form method="post" action="/api/tasks/{{t.id}}/start-qa"><label>Tester<input name="tester_agent" placeholder="qa"></label><button class="success big" type="submit">Open App &amp; Verify</button></form></div>

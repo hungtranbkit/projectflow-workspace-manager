@@ -63,6 +63,28 @@ class SandboxManager:
         # scheduling differs.
         self.spawn = lambda fn, args=(): threading.Thread(target=fn, args=args, daemon=True).start()
 
+    # ---- contract resolution -----------------------------------------
+    def _canonical_repo_root(self, repository_id: int) -> Path | None:
+        """Real incident (QA Center Task #6): the sandbox: contract's
+        EXISTENCE and its compose FILE's own content must always be read
+        from the repository's trusted, canonical checkout
+        (`repositories.repo_path`) -- never a specific Task's own
+        worktree. create() already established this convention (it
+        checks `provider.repo_path`); every lifecycle method below
+        (provision/health_check/stop/reset_data/cleanup) used to read the
+        pinned WORKTREE instead, so a Task branch older than when a
+        contract was added to the project's main branch saw
+        SANDBOX_CONTRACT_REQUIRED even though the project genuinely has
+        one -- the same contract create()'s own gate had just accepted.
+        The exact pinned WORKTREE is still what --project-directory below
+        points `docker compose` at, so a profile that builds its `app`
+        FROM SOURCE (e.g. mesflow-app's BACKEND/FULL) still builds the
+        exact commit under test, never main's -- only the compose FILE
+        DEFINITION and contract metadata are read from the trusted repo
+        root now, matching create()."""
+        row = self.db.one("SELECT repo_path FROM repositories WHERE id=?", (repository_id,))
+        return Path(row["repo_path"]) if row else None
+
     # ---- capacity -------------------------------------------------
     def running_count(self) -> int:
         """State-consistency audit finding: CLEANUP_ELIGIBLE is a
@@ -168,8 +190,9 @@ class SandboxManager:
         sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
         try:
             provider = self.db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1", (sandbox_id,))
-            repo_path = Path(provider["worktree_path"])
-            contract = load_sandbox_contract(repo_path)
+            worktree_path = Path(provider["worktree_path"])
+            contract_root = self._canonical_repo_root(provider["repository_id"]) or worktree_path
+            contract = load_sandbox_contract(contract_root)
             if contract is None: raise SandboxError("SANDBOX_CONTRACT_REQUIRED", "sandbox: contract missing")
             services = profile_services(contract, sb["profile"])
             specs = port_specs(contract)
@@ -195,8 +218,8 @@ class SandboxManager:
 
             self._op_update(op_id, "RUNNING")
             self.db.execute("UPDATE sandboxes SET status='STARTING',updated_at=CURRENT_TIMESTAMP,started_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
-            compose_file = repo_path / contract["compose_file"]
-            result = self.runtime.compose_up(sb["compose_project"], compose_file, env_path, repo_path, services, sandbox_id)
+            compose_file = contract_root / contract["compose_file"]
+            result = self.runtime.compose_up(sb["compose_project"], compose_file, env_path, worktree_path, services, sandbox_id, project_directory=worktree_path)
             self._op_finish(op_id, "SUCCESS", 0, result.stdout, result.stderr)
 
             self._write_manifest(sandbox_id)
@@ -255,7 +278,7 @@ class SandboxManager:
         flow (a container that is merely "Up" is not sufficient on its own)."""
         sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
         provider = self.db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1", (sandbox_id,))
-        contract = load_sandbox_contract(Path(provider["worktree_path"]))
+        contract = load_sandbox_contract(self._canonical_repo_root(provider["repository_id"]) or Path(provider["worktree_path"]))
         urls = self.service_urls(sandbox_id)
         health_specs = (contract.get("health") or {}).items()
         healthy = True
@@ -269,23 +292,74 @@ class SandboxManager:
                 if ok or attempt == attempts - 1: break
                 time.sleep(delay_seconds)
             healthy = healthy and ok
+        dep_ok, dep_reason = self._runtime_dependency_health(sandbox_id)
+        healthy = healthy and dep_ok
         status = "RUNNING" if healthy else "UNHEALTHY"
-        self.db.execute(
-            "UPDATE sandboxes SET status=?,health_status=?,last_health_check=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-            (status, "HEALTHY" if healthy else "UNHEALTHY", sandbox_id),
-        )
-        self.db.event("sandbox", sandbox_id, "HEALTH_CHECK", status)
+        if healthy:
+            # Genuinely healthy now -- clear any stale error from a
+            # previous failed check, never leave one dangling.
+            self.db.execute(
+                "UPDATE sandboxes SET status=?,health_status='HEALTHY',last_health_check=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,error_code=NULL,error_message=NULL WHERE id=?",
+                (status, sandbox_id),
+            )
+        elif not dep_ok:
+            # Own services may be fine -- it's specifically the declared
+            # runtime dependency that isn't reachable; record that as the
+            # actual reason, not a generic "unhealthy".
+            self.db.execute(
+                "UPDATE sandboxes SET status=?,health_status='UNHEALTHY',last_health_check=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,error_code='RUNTIME_DEPENDENCY_UNREACHABLE',error_message=? WHERE id=?",
+                (status, dep_reason, sandbox_id),
+            )
+        else:
+            # The sandbox's own declared service(s) failed their health
+            # check -- leave whatever error_code/message already exist
+            # untouched (this method has no per-service failure detail
+            # to record), just reflect the honest status/health_status.
+            self.db.execute(
+                "UPDATE sandboxes SET status=?,health_status='UNHEALTHY',last_health_check=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (status, sandbox_id),
+            )
+        self.db.event("sandbox", sandbox_id, "HEALTH_CHECK", status if dep_ok else f"UNHEALTHY: {dep_reason}")
         return healthy
+
+    def _runtime_dependency_health(self, sandbox_id: int) -> tuple[bool, str | None]:
+        """Section 10 of the QA Center sandbox spec: 'do not mark HEALTHY
+        merely because containers exist' -- a sandbox whose contract
+        declares a RUNTIME_DEPENDENCY (see main.py's
+        resolve_runtime_dependency_sources) is only genuinely healthy if
+        that dependency is actually reachable right now, not just
+        recorded. Reads the dependency repo's own latest tracked DEV
+        deployment (deployments table -- never a second, sandbox-owned
+        copy of that state) and does a real HTTP check against its
+        deployed_url. No tracked DEV deployment at all, or one that
+        never became reachable, is a genuine health failure with a clear
+        reason -- never silently ignored."""
+        deps = self.db.all("SELECT * FROM sandbox_sources WHERE sandbox_id=? AND source_type='RUNTIME_DEPENDENCY'", (sandbox_id,))
+        for dep in deps:
+            row = self.db.one("SELECT r.repo_name FROM repositories r WHERE r.id=?", (dep["repository_id"],))
+            name = row["repo_name"] if row else dep["role"]
+            deployment = self.db.one(
+                "SELECT * FROM deployments WHERE repository_id=? AND environment='DEV' ORDER BY id DESC LIMIT 1",
+                (dep["repository_id"],),
+            )
+            if not deployment or not deployment.get("deployed_url"):
+                return False, f"Runtime dependency {name} has no DEV deployment to check"
+            ok, detail = self.runtime.health_check(deployment["deployed_url"])
+            if not ok:
+                return False, f"Runtime dependency {name} is not reachable at {deployment['deployed_url']} ({detail})"
+        return True, None
 
     # ---- lifecycle -----------------------------------------------------
     def stop(self, sandbox_id: int) -> None:
         sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
         provider = self.db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1", (sandbox_id,))
-        contract = load_sandbox_contract(Path(provider["worktree_path"]))
+        worktree_path = Path(provider["worktree_path"])
+        contract_root = self._canonical_repo_root(provider["repository_id"]) or worktree_path
+        contract = load_sandbox_contract(contract_root)
         env_path = Path(sb["environment_path"]) / ".env"
-        compose_file = Path(provider["worktree_path"]) / contract["compose_file"]
+        compose_file = contract_root / contract["compose_file"]
         op_id = self._op_start(sandbox_id, "STOP")
-        result = self.runtime.compose_stop(sb["compose_project"], compose_file, env_path, Path(provider["worktree_path"]))
+        result = self.runtime.compose_stop(sb["compose_project"], compose_file, env_path, worktree_path, project_directory=worktree_path)
         self._op_finish(op_id, "SUCCESS" if result.returncode == 0 else "FAILED", result.returncode, result.stdout, result.stderr)
         self.db.execute("UPDATE sandboxes SET status='STOPPED',stopped_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
         self.db.event("sandbox", sandbox_id, "SANDBOX_STOPPED")
@@ -309,7 +383,7 @@ class SandboxManager:
             raise SandboxError("OWNERSHIP_UNVERIFIED", "refusing to reset unlabeled resources")
         provider = self.db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1", (sandbox_id,))
         if not provider: raise SandboxError("NO_SOURCE", "sandbox has no source to rebuild from")
-        contract = load_sandbox_contract(Path(provider["worktree_path"]))
+        contract = load_sandbox_contract(self._canonical_repo_root(provider["repository_id"]) or Path(provider["worktree_path"]))
         if contract is None: raise SandboxContractError("SANDBOX_CONTRACT_REQUIRED", "sandbox: contract missing")
         # Everything above is a fast, local, synchronous validation --
         # everything below is the slow docker-backed part, so the status
@@ -322,10 +396,12 @@ class SandboxManager:
         self.spawn(self._reset_data_worker, (sandbox_id, sb, provider, contract, op_id))
 
     def _reset_data_worker(self, sandbox_id: int, sb: dict, provider: dict, contract: dict, op_id: int) -> None:
+        worktree_path = Path(provider["worktree_path"])
+        contract_root = self._canonical_repo_root(provider["repository_id"]) or worktree_path
         env_path = Path(sb["environment_path"]) / ".env"
-        compose_file = Path(provider["worktree_path"]) / contract["compose_file"]
+        compose_file = contract_root / contract["compose_file"]
         try:
-            result = self.runtime.compose_down(sb["compose_project"], compose_file, env_path, Path(provider["worktree_path"]), remove_volumes=True)
+            result = self.runtime.compose_down(sb["compose_project"], compose_file, env_path, worktree_path, remove_volumes=True, project_directory=worktree_path)
             self._op_finish(op_id, "SUCCESS" if result.returncode == 0 else "FAILED", result.returncode, result.stdout, result.stderr)
             if result.returncode != 0:
                 self.db.execute("UPDATE sandboxes SET status='FAILED',error_code='RESET_DATA_FAILED',error_message=? WHERE id=?", (result.stderr[-2000:], sandbox_id))
@@ -371,11 +447,13 @@ class SandboxManager:
 
     def _cleanup_worker(self, sandbox_id: int, sb: dict, provider: dict | None, op_id: int) -> None:
         try:
-            contract = load_sandbox_contract(Path(provider["worktree_path"])) if provider else None
+            worktree_path = Path(provider["worktree_path"]) if provider else None
+            contract_root = (self._canonical_repo_root(provider["repository_id"]) or worktree_path) if provider else None
+            contract = load_sandbox_contract(contract_root) if contract_root else None
             if contract:
                 env_path = Path(sb["environment_path"]) / ".env"
-                compose_file = Path(provider["worktree_path"]) / contract["compose_file"]
-                result = self.runtime.compose_down(sb["compose_project"], compose_file, env_path, Path(provider["worktree_path"]))
+                compose_file = contract_root / contract["compose_file"]
+                result = self.runtime.compose_down(sb["compose_project"], compose_file, env_path, worktree_path, project_directory=worktree_path)
                 self._op_finish(op_id, "SUCCESS" if result.returncode == 0 else "FAILED", result.returncode, result.stdout, result.stderr)
             else:
                 self._op_finish(op_id, "SUCCESS", 0, "", "no provider contract; nothing to tear down")
