@@ -527,6 +527,18 @@ ALTER TABLE deployments ADD COLUMN rollback_error TEXT;
 ALTER TABLE verification_reports ADD COLUMN ready_source TEXT NOT NULL DEFAULT 'AGENT_SUBMITTED';
 ALTER TABLE verification_reports ADD COLUMN operator TEXT;
 """),
+    (16, """
+-- QA Center sandbox spec section 16: a recorded manual verification
+-- must pin exactly who recorded it, matching verification_reports'
+-- existing `operator` column (this app is single-operator/local-only --
+-- 'ui' means "recorded through the web UI", same convention V15 already
+-- established; never a real multi-user identity system). Runtime
+-- dependency source commit(s) are NOT duplicated onto this row -- they
+-- stay queryable from sandbox_sources(sandbox_id) via the same sandbox_id
+-- already recorded here, one source of truth, never a second copy that
+-- could drift.
+ALTER TABLE manual_verifications ADD COLUMN operator TEXT;
+"""),
 ]
 
 

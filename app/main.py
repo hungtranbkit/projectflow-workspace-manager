@@ -134,9 +134,19 @@ def create_app(settings=None):
         views read the exact same Sandbox/SandboxPort/output state."""
         outputs=sandboxes.outputs(sb["id"]); ports_=ports.ports_for(sb["id"])
         primary=db.one("SELECT s.*,r.repo_name FROM sandbox_sources s JOIN repositories r ON r.id=s.repository_id WHERE s.sandbox_id=? ORDER BY s.id LIMIT 1",(sb["id"],))
+        # A sandbox contract can name its single "open this" output
+        # anything (qa_center_url, backend_url, frontend_url, ...) --
+        # never require it be literally named frontend_url to be openable
+        # (QA Center sandbox incident, section 9/11: "the button must use
+        # the sandbox's trusted output, never require inspecting Advanced
+        # for the port"). frontend_url wins when declared; otherwise the
+        # first declared *_url output that isn't backend/hardware-only
+        # stands in.
+        frontend_url=outputs.get("frontend_url") or next(
+            (v for k,v in outputs.items() if k.endswith("_url") and k not in ("backend_url","hardware_api_url","lan_url")), None)
         return {"row":sb,"outputs":outputs,"ports":ports_,"primary_source":primary,
                 "cleanup_countdown":format_countdown(sb["cleanup_eligible_at"]),
-                "backend_url":outputs.get("backend_url"),"frontend_url":outputs.get("frontend_url"),
+                "backend_url":outputs.get("backend_url"),"frontend_url":frontend_url,
                 "hardware_api_url":outputs.get("hardware_api_url") or outputs.get("lan_url")}
     def sandbox_current_commits(sandbox_id):
         cur={}
@@ -1386,6 +1396,38 @@ def create_app(settings=None):
         change."""
         return
 
+    def resolve_runtime_dependency_sources(contract):
+        """Section 4/5 of the QA Center sandbox spec: a sandbox: contract
+        can declare `runtime_dependencies` (e.g. qa-center -> mesflow-app,
+        mode KNOWN_GOOD_MAIN) -- modeled as real, separately-labeled
+        RUNTIME_DEPENDENCY sandbox_sources rows, never a second Builder
+        Workspace and never a browser-supplied path. The dependency's
+        repo/path always comes from ProjectFlow's own trusted
+        `repositories` registry (the exact same resolution
+        check_dependency_cycle()/repository_contract_editor already use
+        for this same field) -- an undeclared/unregistered repo name is
+        silently skipped, never guessed. KNOWN_GOOD_MAIN prefers that
+        repo's latest DEV deployment's exact pinned commit (what a human
+        would mean by 'known good') and falls back to the repo's own
+        current registered HEAD if no DEV deployment is tracked yet --
+        never PRODUCTION, never a secret, never mesflow.net (section 19)."""
+        sources=[]
+        for dep in (contract.get("runtime_dependencies") or []):
+            name=(dep.get("repo") or "").strip()
+            if not name: continue
+            row=db.one("SELECT * FROM repositories WHERE repo_name=? AND enabled=1",(name,))
+            if not row: continue
+            mode=(dep.get("mode") or "KNOWN_GOOD_MAIN").strip()
+            dep_deployment=None
+            if mode=="KNOWN_GOOD_MAIN":
+                dep_deployment=db.one("SELECT * FROM deployments WHERE repository_id=? AND environment='DEV' AND status='VERIFIED' ORDER BY id DESC LIMIT 1",(row["id"],))
+            if dep_deployment:
+                branch=dep_deployment["source_branch"]; commit_sha=dep_deployment["source_commit"]
+            else:
+                try: branch="main"; commit_sha=git.head(row["repo_path"])
+                except Exception: continue  # repo unreachable -- never fabricate a commit
+            sources.append(SourceSpec(repository_id=row["id"],role=name,branch=branch,commit_sha=commit_sha,worktree_path=row["repo_path"],repo_path=row["repo_path"],source_type="RUNTIME_DEPENDENCY"))
+        return sources
     def auto_create_sandbox(task_id,repository_id,repo_path,owner_type,owner_id,role,branch,commit,worktree_path,explicit_profile,task_default_profile):
         try: contract=load_sandbox_contract(Path(repo_path))
         except SandboxContractError as exc:
@@ -1394,8 +1436,9 @@ def create_app(settings=None):
         profile=resolve_profile(contract,explicit_profile,task_default_profile)
         if profile=="NONE": return None
         source=SourceSpec(repository_id=repository_id,role=role,branch=branch,commit_sha=commit,worktree_path=str(worktree_path),repo_path=str(repo_path),source_type=owner_type)
+        extra_sources=resolve_runtime_dependency_sources(contract)
         try:
-            sid=sandboxes.create(task_id=task_id,owner_type=owner_type,owner_id=owner_id,profile=profile,provider=source)
+            sid=sandboxes.create(task_id=task_id,owner_type=owner_type,owner_id=owner_id,profile=profile,provider=source,extra_sources=extra_sources or None)
         except SandboxError as exc:
             db.event(owner_type.lower(),owner_id,"SANDBOX_CREATE_FAILED",str(exc)); return None
         if sid is None: return None
@@ -2491,15 +2534,34 @@ def create_app(settings=None):
         return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/manual-verification")
     def record_manual_verification(sid:int,result:str=Form(...),note:str=Form("")):
+        """Verification guard (QA Center sandbox spec section 15): a
+        sandbox that was never HEALTHY is a setup/runtime problem, not a
+        QA finding -- neither PASS nor FAIL means anything recorded
+        against it (status stays RUNNING only once health_check() last
+        confirmed it, never a stale/optimistic flag). PASS additionally
+        requires the sandbox to be HEALTHY *right now* and not stale
+        (its pinned source is still the branch's real current HEAD) --
+        never a PASS confirming a build that's already out of date.
+        Enforced server-side, never only a disabled button client-side."""
         sb=sandbox_row(sid)
         if result not in ("PASS","FAIL"): raise GitSafetyError("Invalid manual verification result")
+        if sb["status"]!="RUNNING":
+            raise GitSafetyError(f"Cannot record verification: sandbox is {sb['status']}, not RUNNING -- this is a setup problem, not a QA result")
+        if result=="PASS":
+            if sb["health_status"]!="HEALTHY":
+                raise GitSafetyError("Cannot record PASS: sandbox health check is not HEALTHY")
+            if sandboxes.is_stale(sid,sandbox_current_commits(sid)):
+                raise GitSafetyError("Cannot record PASS: sandbox source is stale (a participating branch moved since this sandbox was built) -- Rebuild first")
+        # Section 16: pin the sandbox's OWN actual built commit, never a
+        # live re-read of the worktree's current HEAD -- the branch may
+        # have moved since this exact sandbox was built, and a
+        # verification is only ever evidence for the commit that was
+        # actually running, not whatever HEAD happens to be right now.
         primary=db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1",(sid,))
-        worktree_path=primary["worktree_path"] if primary else sb["worktree_path"]
-        try: source_commit=git.head(worktree_path)
-        except Exception: source_commit=primary["commit_sha"] if primary else ""
+        source_commit=primary["commit_sha"] if primary else ""
         workspace_id=sb["owner_id"] if sb["owner_type"]=="AGENT_WORKSPACE" else None
-        db.execute("INSERT INTO manual_verifications(task_id,workspace_id,sandbox_id,result,note,source_commit) VALUES(?,?,?,?,?,?)",
-                   (sb["task_id"],workspace_id,sid,result,note.strip()[:2000],source_commit))
+        db.execute("INSERT INTO manual_verifications(task_id,workspace_id,sandbox_id,result,note,source_commit,operator) VALUES(?,?,?,?,?,?,?)",
+                   (sb["task_id"],workspace_id,sid,result,note.strip()[:2000],source_commit,"ui"))
         db.event("sandbox",sid,"MANUAL_VERIFICATION_RECORDED",result)
         return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/build-firmware")

@@ -39,7 +39,7 @@ NEXT_ACTIONS = (
     "REVIEW_BACKLOG", "SELECT_FOR_DEVELOPMENT", "CREATE_BUILDER_WORKSPACE",
     "START_BUILDER", "VIEW_BUILDER", "REVIEW_BUILDER_RESULT", "RUN_BUILDER_TEST",
     "SUBMIT_FOR_REVIEW", "START_REVIEW", "RETURN_TO_BUILDER",
-    "CREATE_SANDBOX", "SANDBOX_PROVISIONING", "START_QA", "CREATE_INTEGRATION", "OPEN_INTEGRATOR", "RUN_INTEGRATION_TEST", "RESOLVE_CONFLICT",
+    "CREATE_SANDBOX", "SANDBOX_PROVISIONING", "SANDBOX_SETUP_REQUIRED", "START_QA", "CREATE_INTEGRATION", "OPEN_INTEGRATOR", "RUN_INTEGRATION_TEST", "RESOLVE_CONFLICT",
     "REVIEW_BASELINE_FAILURE", "FIX_INTEGRATION_FAILURE", "PUSH_INTEGRATION", "WAIT_FOR_CI", "CONFIRM_INTEGRATION_READY",
     "REBUILD_SANDBOX", "PREPARE_PR", "WAIT_FOR_MERGES", "CLOSE_TASK", "NONE",
 )
@@ -70,14 +70,23 @@ BLOCKER_MESSAGES = {
     "UNKNOWN_MERGEABILITY": ("GitHub has not confirmed this PR can be merged yet.", "Refresh in a moment."),
     "CONFLICT": ("The integration branch conflicts with the latest main branch.", "Resolve the conflict in the Integrator."),
     "NO_PR": ("No Pull Request has been opened yet.", "Create a Pull Request."),
+    "SANDBOX_CONTRACT_REQUIRED": ("This repository does not yet define a runtime sandbox contract.", "Configure a sandbox: block in PROJECT.yaml, or contact an admin."),
+    "SANDBOX_CREATE_FAILED": ("Could not create the sandbox.", "Check the sandbox's Logs / Operations for the real error."),
+    "SANDBOX_CAPACITY_FULL": ("Too many sandboxes are already running.", "Wait for one to finish, or stop one you no longer need."),
+    "RUNTIME_DEPENDENCY_UNREACHABLE": ("A runtime dependency this sandbox needs is not reachable.", "Start that dependency's DEV Deployment, then Restart this sandbox."),
 }
 
 
-def humanize_blocker(code: str) -> dict:
+def humanize_blocker(code: str | None) -> dict:
     """Never show a raw blocker code as the primary explanation (section
     10) -- falls back to a title-cased version of the code itself for
     anything not in the table above, so a future code never renders as a
-    literal SCREAMING_SNAKE_CASE string with no explanation at all."""
+    literal SCREAMING_SNAKE_CASE string with no explanation at all. A
+    missing/empty code (e.g. an UNHEALTHY sandbox with a free-text
+    error_message but no error_code) is its own honest fallback, never a
+    crash."""
+    if not code:
+        return {"code": None, "message": "An unspecified problem occurred.", "remediation": None}
     msg, remediation = BLOCKER_MESSAGES.get(code, (code.replace("_", " ").capitalize() + ".", None))
     return {"code": code, "message": msg, "remediation": remediation}
 
@@ -108,6 +117,7 @@ MISSING_REQUIREMENTS = {
     "START_REVIEW": ["Review has not been completed"],
     "CREATE_SANDBOX": ["A Sandbox has not been created", "Manual verification has not been completed"],
     "SANDBOX_PROVISIONING": ["Manual verification has not been completed"],
+    "SANDBOX_SETUP_REQUIRED": ["This repository has no sandbox: contract configured yet", "Manual verification has not been completed"],
     "START_QA": ["Manual verification has not been completed"],
     "RUN_INTEGRATION_TEST": ["Integration tests have not passed yet"],
     "PUSH_INTEGRATION": ["The integration branch has not been pushed yet"],
@@ -716,7 +726,17 @@ class TaskDecisionService:
                 if sbx["required"] and sbx["phase"] == "PROVISIONING":
                     return _action("SANDBOX_PROVISIONING", None, "Sandbox is being created...", None)
                 if sbx["required"] and sbx["phase"] == "FAILED":
-                    sandbox_id = sbx["sandbox"]["id"] if sbx["sandbox"] else None
+                    sb_row = sbx["sandbox"] or {}
+                    sandbox_id = sb_row.get("id")
+                    if sb_row.get("error_code") == "SANDBOX_CONTRACT_REQUIRED":
+                        # Sections 13/14: retrying Start/Restart/Rebuild
+                        # cannot succeed until the repo actually declares
+                        # a sandbox: contract -- the real next step is
+                        # config, not another provisioning attempt.
+                        primary = next((b for b in builders if (b["sandbox_state"].get("sandbox") or {}).get("id") == sandbox_id), None)
+                        repo_id = primary["repository_id"] if primary else None
+                        target = f"/repositories/{repo_id}/runtime" if repo_id else (f"/sandboxes/{sandbox_id}" if sandbox_id else f"/tasks/{tid}#qa")
+                        return _action("SANDBOX_SETUP_REQUIRED", "Sandbox configuration missing", "This repository does not yet define a runtime sandbox contract.", target)
                     return _action("REBUILD_SANDBOX", "Sandbox failed -- Rebuild", "Sandbox creation failed.", f"/sandboxes/{sandbox_id}" if sandbox_id else f"/tasks/{tid}#qa")
                 label = "Start Runtime Verification" if not qa else "Re-run Runtime Verification (Brief changed)"
                 reason = "All reviews PASS -- runtime verification required." if not qa else "Brief version changed since the last PASS."

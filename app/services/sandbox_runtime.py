@@ -39,7 +39,7 @@ class SandboxRuntimeService:
         except SandboxRuntimeError:
             return False
 
-    def compose_up(self, compose_project: str, compose_file: Path, env_file: Path, cwd: Path, services: list[str], sandbox_id: int) -> subprocess.CompletedProcess:
+    def compose_up(self, compose_project: str, compose_file: Path, env_file: Path, cwd: Path, services: list[str], sandbox_id: int, project_directory: Path | None = None) -> subprocess.CompletedProcess:
         # `docker compose up` has no --label flag (unlike `docker run`) --
         # ownership is established generically instead, via the unique
         # compose project name itself: Docker Compose automatically labels
@@ -48,8 +48,22 @@ class SandboxRuntimeService:
         # compose_project values are always the unique "wm-<repo>-<owner>-
         # <suffix>" scheme (docs section 15/66's "OR exact compose
         # namespace" ownership check) -- verify_owned() checks that label.
+        #
+        # --project-directory is explicit, always (QA Center sandbox
+        # incident): without it, Compose resolves every relative
+        # build.context/volume path in the compose FILE relative to that
+        # FILE's own directory. SandboxManager now reads the compose file
+        # itself from a repo's trusted canonical checkout (never a Task's
+        # own worktree -- see SandboxManager._canonical_repo_root), while
+        # still needing relative paths (a from-source build context, a
+        # ./runtime-<x> bind mount) to resolve against the exact pinned
+        # WORKTREE -- project_directory carries that split. Every existing
+        # caller still passes the same path for both cwd and
+        # project_directory (compose_file's own directory), so this is a
+        # no-op for them.
         argv = [
             self.docker_bin, "compose", "-p", compose_project,
+            "--project-directory", str(project_directory or cwd),
             "--env-file", str(env_file), "-f", str(compose_file),
             "up", "-d",
             *services,
@@ -59,14 +73,14 @@ class SandboxRuntimeService:
             raise SandboxRuntimeError("COMPOSE_UP_FAILED", "docker compose up failed", result.stdout, result.stderr)
         return result
 
-    def compose_down(self, compose_project: str, compose_file: Path, env_file: Path, cwd: Path, remove_volumes: bool = True) -> subprocess.CompletedProcess:
-        argv = [self.docker_bin, "compose", "-p", compose_project, "--env-file", str(env_file), "-f", str(compose_file), "down"]
+    def compose_down(self, compose_project: str, compose_file: Path, env_file: Path, cwd: Path, remove_volumes: bool = True, project_directory: Path | None = None) -> subprocess.CompletedProcess:
+        argv = [self.docker_bin, "compose", "-p", compose_project, "--project-directory", str(project_directory or cwd), "--env-file", str(env_file), "-f", str(compose_file), "down"]
         if remove_volumes: argv.append("-v")
         argv.append("--remove-orphans")
         return self._run(argv, cwd)
 
-    def compose_stop(self, compose_project: str, compose_file: Path, env_file: Path, cwd: Path) -> subprocess.CompletedProcess:
-        argv = [self.docker_bin, "compose", "-p", compose_project, "--env-file", str(env_file), "-f", str(compose_file), "stop"]
+    def compose_stop(self, compose_project: str, compose_file: Path, env_file: Path, cwd: Path, project_directory: Path | None = None) -> subprocess.CompletedProcess:
+        argv = [self.docker_bin, "compose", "-p", compose_project, "--project-directory", str(project_directory or cwd), "--env-file", str(env_file), "-f", str(compose_file), "stop"]
         return self._run(argv, cwd)
 
     def compose_ps(self, compose_project: str) -> list[str]:
