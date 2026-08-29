@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
@@ -791,7 +792,27 @@ def create_app(settings=None):
             current=git.head(i["repo_path"],s["branch"]); s["current_commit"]=current; s["stale"]=current!=s["merged_commit"]; stale.append(s["stale"])
         head=git.head(i["worktree_path"]); readiness_stale=bool(i["verified_commit"] and i["verified_commit"]!=head) or any(stale)
         if readiness_stale and i["ready_for_main"]: invalidate(iid); i=integration_row(iid)
-        return render(request,"integration_detail.html",i=i,sources=sources,conflicts=git.conflict_files(i["worktree_path"]),head=head,stale=readiness_stale,runs=db.all("SELECT * FROM test_runs WHERE workspace_type='integration' AND workspace_id=? ORDER BY id DESC",(iid,)),events=db.all("SELECT * FROM workspace_events WHERE entity_type='integration' AND entity_id=? ORDER BY id",(iid,)))
+        # Push state (section 5/6/11): local HEAD is always read live
+        # above; "actually pushed" means the LAST successful push's HEAD
+        # still matches it -- a stale push_status='PUSHED' from before a
+        # later local commit is treated as not-pushed, never trusted.
+        conflicts=git.conflict_files(i["worktree_path"]); dirty=bool(git.status(i["worktree_path"]).strip())
+        pushed=bool(i["last_pushed_head"]) and i["last_pushed_head"]==head and i["push_status"]=="PUSHED"
+        github_available=github_merge.available(i["repo_path"])
+        push_disabled_reason=None
+        if not github_available: push_disabled_reason="Repository has no GitHub remote."
+        elif conflicts: push_disabled_reason="Integration is still in conflict."
+        elif dirty: push_disabled_reason="Commit or resolve local changes first."
+        elif pushed: push_disabled_reason="Already pushed at this exact HEAD."
+        pr=None; gate_status=None
+        ti_row=db.one("SELECT task_id FROM task_integrations WHERE id=?",(i["task_integration_id"],)) if i["task_integration_id"] else None
+        if ti_row:
+            pr=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(ti_row["task_id"],i["repository_id"]))
+            gate_status=decision.integration_gate_status(i,ti_row["task_id"])
+        return render(request,"integration_detail.html",i=i,sources=sources,conflicts=conflicts,head=head,stale=readiness_stale,
+                      runs=db.all("SELECT * FROM test_runs WHERE workspace_type='integration' AND workspace_id=? ORDER BY id DESC",(iid,)),
+                      events=db.all("SELECT * FROM workspace_events WHERE entity_type='integration' AND entity_id=? ORDER BY id",(iid,)),
+                      pushed=pushed,push_disabled_reason=push_disabled_reason,pr=pr,gate_status=gate_status)
     @app.post("/api/integrations/{iid}/merge-latest")
     def merge_latest(iid:int):
         i=integration_row(iid)
@@ -818,6 +839,67 @@ def create_app(settings=None):
         if not r["sources_current"]: raise GitSafetyError("Source not current")
         if not r["tests_pass"]: raise GitSafetyError("All required tests must PASS at current HEAD")
         db.execute("UPDATE integration_workspaces SET status='READY_FOR_MAIN',ready_for_main=1,verified_commit=?,verified_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(r["head"],iid)); db.event("integration",iid,"READY_FOR_MAIN",r["head"]); return RedirectResponse(f"/integrations/{iid}",303)
+    INTEGRATION_PUSH_BRANCH_DENYLIST={"main","master","production"}
+    @app.post("/api/integrations/{iid}/push")
+    def push_integration(iid:int):
+        """[Push Integration Branch] (section 1-3): the ONLY way an
+        Integration branch's local HEAD reaches GitHub -- a real,
+        non-force `git push origin <branch>:<branch>`, derived entirely
+        from the registered Integration record (repo path, worktree,
+        branch) -- never a branch/remote/cwd typed in the browser.
+        Reuses GitHubMergeService.push_branch(), the same primitive
+        Create PR already uses, rather than a second ad-hoc subprocess
+        call (section 2). Refuses on a dirty worktree, an unresolved
+        conflict, the worktree somehow not being on the integration
+        branch, or the branch being main/master/production."""
+        i=integration_row(iid)
+        if i["branch"] in INTEGRATION_PUSH_BRANCH_DENYLIST:
+            raise GitSafetyError("Refusing to push a main/master/production branch as an Integration branch")
+        if git.conflict_files(i["worktree_path"]):
+            raise GitSafetyError("INTEGRATION_WORKTREE_DIRTY: unresolved merge conflict -- resolve before pushing")
+        if git.status(i["worktree_path"]).strip():
+            raise GitSafetyError("INTEGRATION_WORKTREE_DIRTY: worktree has uncommitted changes")
+        try: head=git.head(i["worktree_path"])
+        except Exception as exc: raise GitSafetyError(f"HEAD does not resolve: {exc}") from exc
+        current_branch=git.git(i["worktree_path"],"rev-parse","--abbrev-ref","HEAD",check=False).stdout.strip()
+        if current_branch!=i["branch"]:
+            raise GitSafetyError(f"INTEGRATION_BRANCH_MISMATCH: worktree is on '{current_branch}', expected '{i['branch']}'")
+        if not github_merge.available(i["repo_path"]):
+            raise GitSafetyError("REMOTE_NOT_CONFIGURED: repository has no GitHub remote")
+        db.event("integration",iid,"INTEGRATION_PUSH_STARTED",f"branch={i['branch']} local_head={head}")
+        try:
+            github_merge.push_branch(i["repo_path"],i["branch"])
+        except GitHubIntegrationError as exc:
+            msg=str(exc).lower()
+            blocked=any(s in msg for s in ("non-fast-forward","fetch first","rejected","stale info"))
+            db.execute("UPDATE integration_workspaces SET push_status=?,push_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                       ("PUSH_BLOCKED_REMOTE_CHANGED" if blocked else "PUSH_FAILED",str(exc)[:2000],iid))
+            db.event("integration",iid,"INTEGRATION_PUSH_FAILED",f"branch={i['branch']} error={exc}")
+            raise GitSafetyError(f"{'PUSH_BLOCKED_REMOTE_CHANGED' if blocked else 'PUSH_FAILED'}: {exc}") from exc
+        db.execute("UPDATE integration_workspaces SET last_pushed_head=?,push_status='PUSHED',pushed_at=CURRENT_TIMESTAMP,push_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,iid))
+        db.event("integration",iid,"INTEGRATION_PUSH_SUCCEEDED",f"branch={i['branch']} head={head}")
+        # Section 9/10: refresh the SAME existing PR if one exists for
+        # this repo on this Task -- NEVER create a new one from here.
+        ti=db.one("SELECT task_id FROM task_integrations WHERE id=?",(i["task_integration_id"],)) if i["task_integration_id"] else None
+        if ti:
+            mr=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(ti["task_id"],i["repository_id"]))
+            if mr and mr["pr_number"]:
+                try:
+                    # Real, observed behavior: GitHub's PR headRefOid can
+                    # very briefly lag right after a push completes --
+                    # a small bounded retry (never indefinite) so "push
+                    # refreshes the PR" is actually reliable, not racy.
+                    status=github_merge.pr_status(i["repo_path"],mr["pr_number"])
+                    for _ in range(4):
+                        if status["head_sha"]==head: break
+                        time.sleep(0.5)
+                        status=github_merge.pr_status(i["repo_path"],mr["pr_number"])
+                    db.execute(
+                        "UPDATE merge_records SET pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (status["pr_state"],status["ci_status"],status["mergeability"],status["merge_state_status"],status["head_sha"],mr["id"]))
+                except GitHubIntegrationError:
+                    pass  # the push itself already succeeded; PR-status refresh is best-effort
+        return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/reproduce-baseline")
     def reproduce_baseline_failure(iid:int,gate:str=Form(...),test_identifier:str=Form(...)):
         """[View Baseline Evidence] step 1 (section 12/22): actually

@@ -416,6 +416,18 @@ ALTER TABLE merge_records ADD COLUMN merge_strategy TEXT NOT NULL DEFAULT 'MERGE
 ALTER TABLE merge_records ADD COLUMN last_synced_at TEXT;
 ALTER TABLE merge_records ADD COLUMN external_merge_reason TEXT;
 """),
+    # V11: real "Push Integration Branch" action. integration_workspaces
+    # gains its own small, integration-scoped push state -- deliberately
+    # NOT a new Task lifecycle status (section 5): local HEAD is always
+    # read live via git, never stored; last_pushed_head/push_status/
+    # pushed_at/push_error are the only new persisted facts, purely
+    # answering "did the CURRENT local HEAD actually reach GitHub yet".
+    (11, """
+ALTER TABLE integration_workspaces ADD COLUMN last_pushed_head TEXT;
+ALTER TABLE integration_workspaces ADD COLUMN push_status TEXT NOT NULL DEFAULT 'NOT_PUSHED';
+ALTER TABLE integration_workspaces ADD COLUMN pushed_at TEXT;
+ALTER TABLE integration_workspaces ADD COLUMN push_error TEXT;
+"""),
 ]
 
 

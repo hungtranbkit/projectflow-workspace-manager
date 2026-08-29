@@ -29,7 +29,7 @@ NEXT_ACTIONS = (
     "START_BUILDER", "VIEW_BUILDER", "REVIEW_BUILDER_RESULT", "RUN_BUILDER_TEST",
     "SUBMIT_FOR_REVIEW", "START_REVIEW", "RETURN_TO_BUILDER",
     "START_QA", "CREATE_INTEGRATION", "OPEN_INTEGRATOR", "RUN_INTEGRATION_TEST", "RESOLVE_CONFLICT",
-    "REVIEW_BASELINE_FAILURE", "FIX_INTEGRATION_FAILURE",
+    "REVIEW_BASELINE_FAILURE", "FIX_INTEGRATION_FAILURE", "PUSH_INTEGRATION", "WAIT_FOR_CI", "CONFIRM_INTEGRATION_READY",
     "REBUILD_SANDBOX", "PREPARE_PR", "WAIT_FOR_MERGES", "CLOSE_TASK", "NONE",
 )
 
@@ -520,7 +520,18 @@ class TaskDecisionService:
                 if unresolved:
                     return _action("FIX_INTEGRATION_FAILURE", "Fix Integration Failure",
                                     f"{len(unresolved)} new/unclassified failure(s) block Ready for Main.", f"/tasks/{tid}#integration")
-                return _action("RUN_INTEGRATION_TEST", "Run Integration Tests", "Integration exists, tests not current/passing.", f"/tasks/{tid}#integration")
+                if not gs or gs.get("tests_status") in (None, "NOT_RUN"):
+                    return _action("RUN_INTEGRATION_TEST", "Run Integration Tests", "Integration exists, tests not current/passing.", f"/tasks/{tid}#integration")
+                # Tests genuinely PASS (or PASS_WITH_APPROVED_BASELINE_WAIVER)
+                # here -- what's actually still blocking _integration_ok is
+                # push/PR state (section 12), not the test gate itself.
+                if blocker and (blocker.get("push_status") != "PUSHED" or gs.get("head") != blocker.get("last_pushed_head")):
+                    return _action("PUSH_INTEGRATION", "Push Integration Branch",
+                                    "Tests pass on this HEAD, but it has not been pushed to GitHub yet.", f"/tasks/{tid}#integration")
+                mr = next((m for m in required_merges if blocker and m["repository_id"] == blocker["repository_id"]), None) if blocker else None
+                if mr and mr.get("ci_status") == "PENDING":
+                    return _action("WAIT_FOR_CI", "Waiting for CI", "Pushed -- waiting for GitHub CI on the updated PR.", f"/tasks/{tid}#integration")
+                return _action("CONFIRM_INTEGRATION_READY", "Mark Ready for Main", "Tests pass and the branch is pushed -- confirm Ready for Main.", f"/tasks/{tid}#integration")
         if status == "BLOCKED":
             return _action("NONE", "Blocked", blocking[0] if blocking else "Blocked.", None)
         if status == "DONE":
