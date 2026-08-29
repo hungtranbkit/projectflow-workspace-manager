@@ -96,7 +96,7 @@ def test_a_low_risk_full_flow_task_setup_builder_review_ready(client, git_repo):
 
 
 def test_b_normal_risk_flow_includes_integration_step(client, git_repo):
-    """B. NORMAL Task: Builder -> Review -> Integration -> Ready."""
+    """B. NORMAL Task: Builder -> Review -> Runtime Verification -> Integration -> Ready."""
     root, repo = git_repo
     register(client, repo, "demo")
     rid = client.get("/api/repositories").json()[0]["id"]
@@ -108,7 +108,12 @@ def test_b_normal_risk_flow_includes_integration_step(client, git_repo):
 
     submit_and_review(client, w, "PASS")
     d = decision(client, tid)
-    assert d["current_step"] == "INTEGRATION"  # NORMAL requires Integration, skips QA
+    assert d["current_step"] == "TEST_QA"  # NORMAL now requires Runtime Verification too
+
+    client.post(f"/api/tasks/{tid}/start-qa", data={"tester_agent": "qa"})
+    client.post(f"/api/tasks/{tid}/submit-qa", data={"result": "PASS"})
+    d = decision(client, tid)
+    assert d["current_step"] == "INTEGRATION"
 
     r = client.post(f"/api/tasks/{tid}/integrations", follow_redirects=False)
     assert r.status_code == 303

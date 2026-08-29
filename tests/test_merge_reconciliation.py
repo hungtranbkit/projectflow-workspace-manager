@@ -318,6 +318,8 @@ def test_done_ui_shows_verification_sandbox_action_when_supported(client, sandbo
     tid = int(r.headers["location"].split("/")[-1])
     w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
     submit_and_review(client, w, "PASS")
+    client.post(f"/api/tasks/{tid}/start-qa", data={"tester_agent": "qa"})  # NORMAL now also requires Runtime Verification
+    client.post(f"/api/tasks/{tid}/submit-qa", data={"result": "PASS"})
     client.post(f"/api/tasks/{tid}/integrations", follow_redirects=False)
     client.post(f"/api/integrations/1/test", follow_redirects=False)
     import time

@@ -375,7 +375,10 @@ def test_full_lifecycle_backlog_to_closed(client, git_repo, sandboxable_repo_fac
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY", "what_changed": "shipped it"})
     client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
     client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
-    assert client.get(f"/api/tasks/{tid}/decision").json()["stage"] == "INTEGRATION"  # NORMAL risk requires it
+    assert client.get(f"/api/tasks/{tid}/decision").json()["stage"] == "QA"  # NORMAL risk now also requires Runtime Verification
+    client.post(f"/api/tasks/{tid}/start-qa", data={"tester_agent": "qa"})
+    client.post(f"/api/tasks/{tid}/submit-qa", data={"result": "PASS"})
+    assert client.get(f"/api/tasks/{tid}/decision").json()["stage"] == "INTEGRATION"
 
     r = client.post(f"/api/tasks/{tid}/integrations", follow_redirects=False)
     assert r.status_code == 303

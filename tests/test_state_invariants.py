@@ -104,6 +104,8 @@ def ready_normal_risk_task_with_integration(client, git_repo, title, repo_name="
     tid = int(r.headers["location"].split("/")[-1])
     w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
     submit_and_review(client, w, "PASS")
+    client.post(f"/api/tasks/{tid}/start-qa", data={"tester_agent": "qa"})  # NORMAL now also requires Runtime Verification
+    client.post(f"/api/tasks/{tid}/submit-qa", data={"result": "PASS"})
     r2 = client.post(f"/api/tasks/{tid}/integrations", follow_redirects=False)
     assert r2.status_code == 303
     iid = client.get("/api/integrations").json()[0]["id"]

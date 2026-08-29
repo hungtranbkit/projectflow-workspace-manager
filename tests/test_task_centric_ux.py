@@ -295,7 +295,11 @@ def test_blocking_workspace_shown_and_next_action_progresses(client, git_repo, s
 
     client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
     d = client.get(f"/api/tasks/{tid}/decision").json()
-    assert d["next_action"]["action"] == "CREATE_INTEGRATION"  # NORMAL risk, review PASS -- ready to integrate
+    assert d["next_action"]["action"] == "START_QA"  # NORMAL risk, review PASS -- Runtime Verification next (sandbox already auto-created)
+    client.post(f"/api/tasks/{tid}/start-qa", data={"tester_agent": "qa"})
+    client.post(f"/api/tasks/{tid}/submit-qa", data={"result": "PASS"})
+    d = client.get(f"/api/tasks/{tid}/decision").json()
+    assert d["next_action"]["action"] == "CREATE_INTEGRATION"
     page = client.get(f"/tasks/{tid}").text
     assert "Create Integration" in page
 
@@ -373,6 +377,8 @@ def test_ready_for_main_task_enters_ready_for_main_column(client, git_repo, sand
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
     client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
     client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
+    client.post(f"/api/tasks/{tid}/start-qa", data={"tester_agent": "qa"})  # NORMAL now also requires Runtime Verification
+    client.post(f"/api/tasks/{tid}/submit-qa", data={"result": "PASS"})
     client.post(f"/api/tasks/{tid}/integrations")
     for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
     iid = client.get("/api/integrations").json()[0]["id"]

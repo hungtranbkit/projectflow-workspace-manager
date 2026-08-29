@@ -68,9 +68,11 @@ This file and `PROJECT.yaml` are the standalone repository contract.
   worktree/sandbox may only be created after Select, and even then a
   Builder Workspace is created one at a time, explicitly.
 - Risk profile (`LOW` / `NORMAL` / `HIGH`, default `NORMAL`) decides
-  which gates are required (`RISK_GATES` in `task_decision_service.py`):
-  LOW = Review only; NORMAL = Review + Integration; HIGH = Review + QA +
-  Integration. A gate the current risk profile does not require must
+  which gates are required (`RISK_GATES` in `task_decision_service.py`,
+  the ONLY copy of this table -- never re-declare it in `app/main.py`,
+  see Workflow Summary UX (V3) below): LOW = Review only; NORMAL = Review
+  + Runtime Verification (QA) + Integration; HIGH = the same three, with
+  a deeper QA bar. A gate the current risk profile does not require must
   render as `NOT_REQUIRED`, never as a silent/implied PASS.
 - Review and QA are real history tables (`review_runs`, `qa_runs`), not
   mutable columns on `agent_workspaces`. "Start Review"/"Start QA" always
@@ -287,3 +289,66 @@ This file and `PROJECT.yaml` are the standalone repository contract.
   `127.0.0.1` only; remote access must go through something that
   authenticates first (Tailscale, Cloudflare Access, an SSH tunnel) --
   never a public unauthenticated port.
+
+## Workflow Summary UX (V3)
+
+- Every workflow page (Task Detail, Workspace Detail) leads with a
+  Workflow Summary: an evidence-based checklist, exactly one current
+  step, missing requirements as plain language, and at most one primary
+  action -- never a technical-status dump the user has to interpret
+  themselves. Raw implementation state (Workspace Status/Agent
+  Status/Sandbox Status/blocker codes/etc.) stays real and available, but
+  only under "Xem tất cả chi tiết kỹ thuật" (Advanced), never the default
+  screen. `TaskDecisionService.evaluate()`'s result carries this UI's
+  three extra ingredients on top of the existing status/stage/
+  next_action/blocking_reasons: `checklist` (`_checklist()`),
+  `missing_requirements` (`_missing_requirements()`), and
+  `previous_step_summary` (`_previous_step_summary()`). `user_task_state()`
+  (`app/services/user_state_view.py`) is still the one place that turns
+  all of `evaluate()`'s fields into what a template renders (headline/
+  explanation/blocker/primary_action, now plus `checklist`/`missing`/
+  `previous_step_summary` verbatim) -- templates render this object, they
+  never recompute workflow meaning themselves.
+- RISK_GATES policy change: Runtime Verification (the `QA`/`qa_runs`
+  gate internally -- user-facing label changed, the DB/route/action names
+  did not, see below) is now required for `NORMAL` risk too, not only
+  `HIGH` -- LOW is the only profile that still skips straight from Review
+  PASS to Integration/Ready for Main. `RISK_GATES` in
+  `task_decision_service.py` is the only copy of this table now;
+  `app/main.py` previously hand-declared a second, already-drifted copy
+  (it said NORMAL excluded QA) -- never re-add one, always read through
+  `decision.requires_qa()`/`decision.requires_integration()`.
+- Runtime Verification is Sandbox-gated (sections 12-15 of the redesign
+  spec): starting a fresh QA run when the risk profile requires one and
+  the relevant Builder Workspace's own sandbox is actually required
+  (`TaskDecisionService.builder_sandbox_state()` -- a repo that declares
+  a `sandbox:` contract, unless the workspace explicitly opted out with
+  `sandbox_profile=NONE`, mirroring `workspace_readiness()`'s existing
+  rule in `app/main.py` exactly) now surfaces `CREATE_SANDBOX` /
+  `SANDBOX_PROVISIONING` / `REBUILD_SANDBOX` as real next_action steps
+  before `START_QA`, reusing the Builder's own per-workspace sandbox
+  (`/api/tasks/{tid}/workspaces/{wid}/create-sandbox`, already existed)
+  rather than a second Task-level sandbox concept. An in-flight or
+  already-completed QA run (`PENDING`/`RUNNING`/`FAIL`/`BLOCKED`) is never
+  re-gated on the sandbox a second time -- only *starting a fresh run*
+  checks it (`needs_fresh_run` in `_next_action`).
+- Human blocker translation lives in one table,
+  `BLOCKER_MESSAGES`/`humanize_blocker()` in `task_decision_service.py`
+  (registered as the `humanize_blocker` Jinja filter in `app/main.py`) --
+  never show a raw code (`CI_PENDING`, `SOURCE_STALE`, ...) as the primary
+  explanation in the normal workflow view; the raw code stays available
+  in Advanced/`title=""` only. Extend this one table for any new blocker
+  code, never inline a second translation at a call site.
+- Section 18 (Task Detail and Workspace Detail must never disagree on the
+  one primary action): once a Workspace belongs to a Task, Workspace
+  Detail's Current Action panel renders the SAME
+  `user_task_state(decision.evaluate())` Task Detail renders (`main.py`'s
+  `workspace_detail()` route computes `task_user_state` once, alongside
+  the pre-existing task-less `next_action` ladder that still exists only
+  for workspaces with no Task at all). Do not let Workspace Detail
+  recompute its own opinion about the Task's next real action ever again.
+- Checklist completion is evidence-based only (never "the user navigated
+  past it"): `AUTOMATED_TESTS` in the checklist is PASS only when a real
+  `test_runs` row exists at the Builder's *exact current HEAD*
+  (`builder_tests_status()`) -- an agent's own WORK_STATUS=READY claim is
+  not evidence of tests passing.

@@ -90,6 +90,30 @@ button.is-loading::before,.button.is-loading::before{content:'';position:absolut
 .status-hero .hero-secondary{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px}
 .status-hero .hero-secondary a,.status-hero .hero-secondary button{background:transparent;color:inherit;text-decoration:underline;padding:6px 2px;min-height:32px;font-weight:600}
 
+/* Workflow Summary checklist (section 2/19-21): ✓ done / ● current /
+   ○ future / ! blocked / — skipped, one evidence-based row -- never raw
+   implementation-state names. */
+.wf-checklist{display:flex;flex-direction:column;gap:3px;margin-bottom:14px;font-size:13px}
+.wf-check{display:flex;align-items:baseline;gap:8px}
+.wf-check .wf-mark{width:1.2em;flex:none;font-weight:800;text-align:center}
+.wf-check .wf-label{font-weight:600}
+.wf-check small{opacity:.75;font-weight:400}
+.wf-check.wf-done .wf-mark{color:#08734a}
+.wf-check.wf-current{font-weight:800}
+.wf-check.wf-current .wf-mark{color:var(--blue)}
+.wf-check.wf-future{opacity:.55}
+.wf-check.wf-future .wf-mark{color:var(--muted)}
+.wf-check.wf-blocked .wf-mark{color:var(--red,#b3261e)}
+.wf-check.wf-skipped{opacity:.5}
+.wf-check.wf-skipped .wf-mark{color:var(--muted)}
+/* Missing requirements + previous-step summary, inside the hero card. */
+.hero-missing{background:rgba(255,255,255,.55);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px}
+.hero-missing b{display:block;margin-bottom:4px}
+.hero-missing ul{margin:0;padding-left:18px}
+.hero-previous{background:rgba(255,255,255,.4);border-radius:8px;padding:10px 12px;margin-top:14px;font-size:13px}
+.hero-previous b{display:block;margin-bottom:4px}
+.hero-previous .facts{margin:0}
+
 .status-hero.state-working{background:#e8f0fd;border-color:#c3d7f7;color:#12335e}
 .status-hero.state-working .hero-kicker::before{background:var(--blue)}
 .status-hero.state-waiting{background:#f3f2ef;border-color:#e2ded6;color:#4a463d}

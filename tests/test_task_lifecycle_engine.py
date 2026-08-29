@@ -148,6 +148,9 @@ def test_07_low_risk_review_pass_is_ready_for_main(client, git_repo):
 
 
 def test_08_normal_risk_review_pass_needs_integration(client, git_repo):
+    """NORMAL now also requires Runtime Verification (workflow-decision-UX
+    policy change): Review PASS -> QA (sandbox_profile=NONE here, so no
+    Sandbox gate) -> QA PASS -> Integration."""
     root, repo = git_repo
     register(client, repo, "demo")
     rid = client.get("/api/repositories").json()[0]["id"]
@@ -156,6 +159,11 @@ def test_08_normal_risk_review_pass_needs_integration(client, git_repo):
     w = add_workspace(client, tid, rid)
     submit_for_review(client, w)
     review(client, w, "PASS")
+    d = decision(client, tid)
+    assert d["stage"] == "QA"
+    assert d["next_action"]["action"] == "START_QA"
+    client.post(f"/api/tasks/{tid}/start-qa", data={"tester_agent": "qa"})
+    client.post(f"/api/tasks/{tid}/submit-qa", data={"result": "PASS"})
     d = decision(client, tid)
     assert d["stage"] == "INTEGRATION"
     assert d["next_action"]["action"] == "CREATE_INTEGRATION"
@@ -265,7 +273,7 @@ def test_14_cancelled_task(client, git_repo):
 # Risk/gate policy: LOW/NORMAL/HIGH, and NOT_REQUIRED gates never read as
 # a false PASS.
 
-@pytest.mark.parametrize("risk,expects_qa,expects_integration", [("LOW", False, False), ("NORMAL", False, True), ("HIGH", True, True)])
+@pytest.mark.parametrize("risk,expects_qa,expects_integration", [("LOW", False, False), ("NORMAL", True, True), ("HIGH", True, True)])
 def test_risk_policy_gate_requirements(client, git_repo, risk, expects_qa, expects_integration):
     root, repo = git_repo
     register(client, repo, "demo")

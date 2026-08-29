@@ -57,6 +57,8 @@ def build_task_with_integration(client, root, name, broken=True, second_broken=F
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
     client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
     client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
+    client.post(f"/api/tasks/{tid}/start-qa", data={"tester_agent": "qa"})  # NORMAL now also requires Runtime Verification
+    client.post(f"/api/tasks/{tid}/submit-qa", data={"result": "PASS"})
     assert client.post(f"/api/tasks/{tid}/integrations", follow_redirects=False).status_code == 303
     iid = client.get("/api/integrations").json()[0]["id"]
     return tid, iid

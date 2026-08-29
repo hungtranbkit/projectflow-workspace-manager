@@ -23,7 +23,7 @@ from app.services.sandbox_contract import (
 from app.services.sandbox_manager import SandboxError, SandboxManager, SourceSpec
 from app.services.sandbox_runtime import SandboxRuntimeService
 from app.services.agent_session_manager import AgentSessionManager, SessionError
-from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source, LIVE_SESSION_STATUSES
+from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source, LIVE_SESSION_STATUSES, humanize_blocker
 from app.services.user_state_view import user_task_state, progress_summary, humanize_enum
 from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
 from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES
@@ -49,6 +49,7 @@ def create_app(settings=None):
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
+    templates.env.filters["humanize_blocker"] = humanize_blocker
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
     app.state.settings, app.state.db, app.state.git, app.state.runner, app.state.launcher = settings, db, git, runner, launcher
     app.state.sandboxes, app.state.ports, app.state.sandbox_runtime, app.state.cleanup_worker = sandboxes, ports, sandbox_runtime, cleanup_worker
@@ -272,9 +273,13 @@ def create_app(settings=None):
         return {"code":code,"text":text,"label":label,"href":href,"method":method}
 
     # ---------------------------------------------------- Control plane
+    # RISK_PROFILES is just the tuple of valid names for form validation --
+    # the actual LOW/NORMAL/HIGH -> required-gates policy lives only in
+    # TaskDecisionService.RISK_GATES now (decision.requires_qa/
+    # requires_integration below); a second, hand-typed copy of that table
+    # here had already drifted from it once (workflow-decision-UX audit)
+    # before this fix -- never re-add one.
     RISK_PROFILES=("LOW","NORMAL","HIGH")
-    RISK_GATES={"LOW":("REVIEW",),"NORMAL":("REVIEW","INTEGRATION"),"HIGH":("REVIEW","QA","INTEGRATION")}
-    def requires_qa(risk_profile): return "QA" in RISK_GATES.get(risk_profile,RISK_GATES["NORMAL"])
     def latest_session_for_workspace(wid):
         return db.one("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 1",(wid,))
     def activity_summary(sid, max_len=200):
@@ -658,9 +663,18 @@ def create_app(settings=None):
         detected_report=parse_completion_report(agent_sessions.live_tail(session["id"])) if session and w["status"]!="READY" else None
         recovery_state="COMPLETION_REQUIRED" if agent_status in ("EXITED","FAILED") and w["status"]!="READY" and not detected_report else None
         manual_ready_check=validate_manual_ready(w) if recovery_state else None
+        # Section 18: Task Detail and Workspace Detail must never disagree
+        # about the one authoritative primary action -- once this
+        # workspace belongs to a Task, `user_state` (the exact same
+        # user_task_state(decision.evaluate()) the Task page renders) is
+        # what the Current Action panel shows, not a second,
+        # independently-computed opinion. Only a workspace with no Task at
+        # all (nothing for TaskDecisionService to evaluate) still falls
+        # back to the legacy per-workspace `next_action` ladder below.
+        task_user_state=user_task_state(task_decision) if task_decision else None
         return render(request,"workspace_detail.html",w=w,details=details,runs=runs,readiness=readiness,report=report,
                       manual_history=manual_history,next_action=action,sessions=sessions,
-                      task_decision=task_decision,builder=builder,review_history=review_history,live_prompt=live_prompt,
+                      task_decision=task_decision,task_user_state=task_user_state,builder=builder,review_history=review_history,live_prompt=live_prompt,
                       session=session,live_session=live_session,agent_status=agent_status,detected_report=detected_report,
                       recovery_state=recovery_state,manual_ready_check=manual_ready_check)
     @app.get("/api/workspaces/{wid}")
@@ -1894,21 +1908,21 @@ def create_app(settings=None):
         unresolved -- decision.evaluate() is the one gate, never a looser
         'has at least one READY workspace' check a route computes itself.
 
-        Idempotency guard (real incident): this route was not safe to call
-        twice. It used to INSERT the parent task_integrations row, THEN
-        attempt git.create_integration() with a deterministic branch name
-        (`{task_slug}-{repo_name}`) -- a duplicate click (button lingering
-        during a slow first request, a double-tap) re-ran it while the
-        first call's branch already existed on disk, git correctly
-        refused with "branch already exists", and the already-committed
-        parent row was left orphaned with no integration_workspaces child.
-        decision.task_integration() always reads the LATEST row for the
-        task, so that empty orphan silently shadowed the real, working
-        integration until someone noticed and manually deleted it. Create
-        Integration is a one-shot creation action: once one exists for
-        this Task, this route is a no-op back to the Task page, which
-        already shows the real integration -- never a second attempt at
-        the same branch name."""
+        Idempotency guard (real incident, PR #30): this route was not
+        safe to call twice. It used to INSERT the parent task_integrations
+        row, THEN attempt git.create_integration() with a deterministic
+        branch name (`{task_slug}-{repo_name}`) -- a duplicate click
+        (button lingering during a slow first request, a double-tap)
+        re-ran it while the first call's branch already existed on disk,
+        git correctly refused with "branch already exists", and the
+        already-committed parent row was left orphaned with no
+        integration_workspaces child. decision.task_integration() always
+        reads the LATEST row for the task, so that empty orphan silently
+        shadowed the real, working integration until someone noticed and
+        manually deleted it. Create Integration is a one-shot creation
+        action: once one exists for this Task, this route is a no-op back
+        to the Task page, which already shows the real integration --
+        never a second attempt at the same branch name."""
         t=task_row(tid)
         d=decision.evaluate(tid)
         if d["task_integration"] is not None:
