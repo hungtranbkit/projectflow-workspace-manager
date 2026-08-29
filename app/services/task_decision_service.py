@@ -178,6 +178,7 @@ class TaskDecisionService:
         return {
             "id": w["id"], "agent": w["agent"], "role": w["role"], "repo_name": w["repo_name"],
             "repository_id": w["repository_id"], "worktree_path": w["worktree_path"], "branch": w["branch"],
+            "base_commit": w["base_commit"], "task_id": w["task_id"],
             "status": w["status"], "head": head, "ready": ready, "report": report,
             "review": review, "review_status": review_status,
             "fix_required": review_status == "FIX_REQUIRED",

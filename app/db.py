@@ -516,6 +516,17 @@ ALTER TABLE deployments ADD COLUMN rollback_finished_at TEXT;
 ALTER TABLE deployments ADD COLUMN rollback_status TEXT;
 ALTER TABLE deployments ADD COLUMN rollback_error TEXT;
 """),
+    (15, """
+-- EXITED-without-report recovery: distinguishes a report that came from
+-- the agent itself (detected/confirmed from its own terminal, or the old
+-- manual paste form) from one a human wrote from scratch as a recovery
+-- fallback after the agent process is gone and cannot be asked again.
+-- Never changes what READY means -- both still require the exact same
+-- clean-worktree + exact-commit-pinning discipline commit_sha already
+-- enforces; this only records which path produced the report.
+ALTER TABLE verification_reports ADD COLUMN ready_source TEXT NOT NULL DEFAULT 'AGENT_SUBMITTED';
+ALTER TABLE verification_reports ADD COLUMN operator TEXT;
+"""),
 ]
 
 
