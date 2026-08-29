@@ -1,0 +1,44 @@
+# Shared vocabulary for the spec tree -- kept short deliberately (S2:
+# "do not over-engineer"). Extend only when a term is genuinely ambiguous
+# across more than one feature file.
+schema_version: 1
+terms:
+  FeatureSpec:
+    definition: >
+      One approved (or draft/deprecated) unit of externally observable
+      product behavior, identified by a stable id (FEAT-xxx), carrying
+      Requirements, AcceptanceCriteria, and Invariants. One file under
+      features/ per FeatureSpec.
+  Requirement:
+    definition: >
+      A single, testable statement of what the feature must do.
+      Stable id REQ-xxx, scoped to its owning feature file.
+  AcceptanceCriterion:
+    definition: >
+      A concrete, checkable condition that demonstrates a Requirement is
+      met. Stable id AC-xxx.
+  Invariant:
+    definition: >
+      A property that must hold at all times the feature is active, not
+      just at task completion (e.g. "never expose a raw blocker code as
+      the primary explanation"). Stable id INV-xxx.
+  SpecRevision:
+    definition: >
+      The `version` field on a FeatureSpec -- bumped whenever its
+      Requirements/AcceptanceCriteria/Invariants change meaningfully. A
+      Task's spec.spec_version pins which revision it was built against.
+  TraceLink:
+    definition: >
+      The recorded association from a Task (and the Evidence it
+      produces) to the exact feature_id/spec_version/requirement_ids/
+      acceptance_ids/invariant_ids it implements.
+  SpecComplianceResult:
+    definition: >
+      The machine-readable output of SpecComplianceVerifier for one
+      Task: verdict (PASS/FAIL/INCOMPLETE/SPEC_DRIFT) plus the evidence
+      that produced it.
+  SPEC_DRIFT:
+    definition: >
+      A first-class failure condition: the Task, its evidence, or its
+      declared compliance disagrees with the approved specification.
+      Never auto-resolved by rewriting the spec or weakening a test.

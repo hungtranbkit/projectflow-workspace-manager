@@ -31,7 +31,12 @@ from app.services.operations import OperationInProgress, OperationService
 from app.services.deployment_service import DeploymentService, DeploymentError
 from app.services.deployment_decision import deployment_view
 from app.services.repository_contract_editor import RepositoryContractEditor, ContractEditError
+from app.services.project_contract import ContractError
 from app.services.completion_report_parser import parse_completion_report, strip_ansi
+from app.services.spec_registry import SpecRegistry, SpecError
+from app.services.spec_gate import SpecGate, spec_id_list, ALL_CLASSIFICATIONS
+from app.services.spec_compliance import SpecComplianceVerifier
+from app.services.evidence_store import EvidenceStore
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -46,6 +51,15 @@ def create_app(settings=None):
     ops = OperationService(db)
     deployer = DeploymentService(db, git)
     contract_editor = RepositoryContractEditor(git)
+    # Spec Layer V1 (S1-S10): specs/ lives in THIS repo (the ProjectFlow
+    # tool's own source), never settings.root (the managed-repos
+    # workspace root) -- Path(__file__).parent is app/, its parent is
+    # the project root, matching app/config.py's own project_root
+    # resolution.
+    specs_root = Path(__file__).resolve().parent.parent / "specs"
+    spec_gate = SpecGate(specs_root)
+    spec_compliance = SpecComplianceVerifier(db, decision, specs_root)
+    evidence_store = EvidenceStore(db)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
@@ -60,6 +74,10 @@ def create_app(settings=None):
     app.state.deployer = deployer
     app.state.ops = ops
     app.state.contract_editor = contract_editor
+    app.state.specs_root = specs_root
+    app.state.spec_gate = spec_gate
+    app.state.spec_compliance = spec_compliance
+    app.state.evidence_store = evidence_store
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -321,6 +339,42 @@ def create_app(settings=None):
             if url: line+=f" · {url}"
         except Exception: pass
         return line
+    def _spec_context_section(t):
+        """Spec Layer (S6): only the relevant slice for THIS Task's
+        linked feature -- never the whole specs/ tree. Empty for the
+        common case of a Task with no spec linkage at all (never an
+        empty/confusing section). The trailing SPEC RULES block is
+        fixed, Workspace-Manager-owned text the user's own Task intent
+        (confined to its own TASK section above) can never reach into or
+        override, same discipline as RULES/COMPLETION already use."""
+        feature_id=(t.get("spec_feature_id") or "").strip()
+        if not feature_id: return []
+        try:
+            registry=SpecRegistry(specs_root).load()
+        except SpecError as exc:
+            return ["## SPEC",f"(spec registry failed to load: {exc} -- proceed with caution, report SPEC_DRIFT if behavior is unclear)",""]
+        feature=registry.feature(feature_id)
+        if not feature:
+            return ["## SPEC",f"(unknown feature id {feature_id} -- report SPEC_DRIFT, do not invent behavior)",""]
+        req_ids=spec_id_list(t.get("spec_requirement_ids")); acc_ids=spec_id_list(t.get("spec_acceptance_ids")); inv_ids=spec_id_list(t.get("spec_invariant_ids"))
+        lines=["## SPEC",f"Feature: {feature_id} -- {feature.get('title','')} (v{feature.get('version')}, {feature.get('status')})"]
+        if feature.get("summary"): lines.append(str(feature["summary"]).strip())
+        scope=feature.get("scope") or {}
+        if scope.get("includes"): lines+=["Allowed scope (includes):",*[f"- {x}" for x in scope["includes"]]]
+        if scope.get("excludes"): lines+=["Out of scope (excludes):",*[f"- {x}" for x in scope["excludes"]]]
+        reqs=[(rid,registry.requirement(rid)) for rid in req_ids]
+        if reqs: lines+=["Requirements:",*[f"- {rid}: {r['text'].strip()}" for rid,r in reqs if r]]
+        accs=[(aid,registry.acceptance_criterion(aid)) for aid in acc_ids]
+        if accs: lines+=["Acceptance Criteria:",*[f"- {aid}: {a['text'].strip()}" for aid,a in accs if a]]
+        invs=[(iid,registry.invariant(iid)) for iid in inv_ids]
+        if invs: lines+=["Invariants (must hold at all times):",*[f"- {iid}: {i['text'].strip()}" for iid,i in invs if i]]
+        lines+=["","SPEC RULES (mandatory):",
+                "- Do not invent unspecified behavior.",
+                "- Do not weaken acceptance criteria or invariants.",
+                "- Do not silently expand scope beyond what is listed above.",
+                "- Do not modify unrelated behavior.",
+                "- If the implementation and this approved spec disagree, report SPEC_DRIFT instead of guessing.",""]
+        return lines
     def render_agent_prompt(t,repo_row=None,workspace=None,sandbox_line=None):
         """Deterministic template fill -- never an actual model call, and
         the user's own task intent text is NEVER rewritten, only wrapped
@@ -352,6 +406,7 @@ def create_app(settings=None):
                 parts+=["## ROLE",workspace.get("role") or workspace.get("agent") or "",""]
                 instr=(workspace.get("builder_instructions") or "").strip()
                 if instr: parts+=["## BUILDER INSTRUCTIONS (this workspace only)",instr,""]
+            parts+=_spec_context_section(t)
             rules=None
             if repo_row:
                 try:
@@ -711,10 +766,18 @@ def create_app(settings=None):
         status-transition, one audit shape, regardless of which UI action
         produced the report. `ready_source` records which path it was
         (never changes what READY itself requires: commit_sha is always
-        the exact pinned HEAD, still validated clean by the caller)."""
+        the exact pinned HEAD, still validated clean by the caller).
+
+        Spec Layer (S8): snapshots the Task's spec_* linkage onto this
+        evidence row at the moment it's produced -- Evidence stays
+        traceable (Spec -> Task -> Agent execution -> Verification ->
+        Evidence) even if the Task's own linkage is edited afterward.
+        A Task with no linkage (spec_feature_id NULL) stamps NULL/empty
+        here too -- this is never required for the insert to succeed."""
         wid=w["id"]
-        db.execute("INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,files_changed,tests_run,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks,commit_sha,brief_version,ready_source,operator) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                   (w["task_id"],wid,status_upper,what_changed.strip(),files_changed.strip(),tests_run.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip(),head,t["brief_version"] if t else None,ready_source,operator))
+        db.execute("INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,files_changed,tests_run,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks,commit_sha,brief_version,ready_source,operator,spec_feature_id,spec_version,spec_requirement_ids,spec_acceptance_ids,spec_invariant_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (w["task_id"],wid,status_upper,what_changed.strip(),files_changed.strip(),tests_run.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip(),head,t["brief_version"] if t else None,ready_source,operator,
+                    (t or {}).get("spec_feature_id"),(t or {}).get("spec_version"),(t or {}).get("spec_requirement_ids") or "[]",(t or {}).get("spec_acceptance_ids") or "[]",(t or {}).get("spec_invariant_ids") or "[]"))
         db.event("agent",wid,"VERIFICATION_REPORT_ADDED",f"{status_upper} source={ready_source}")
         if status_upper=="READY" and w["status"]!="READY":
             db.execute("UPDATE agent_workspaces SET status='READY',ready_for_integration=1,last_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,wid))
@@ -940,8 +1003,23 @@ def create_app(settings=None):
         at all; Task Title fallback means intent is always resolvable.
         The user is never expected to paste the prompt manually as the
         normal flow; a failed delivery is recorded as prompt_status
-        FAILED for [Retry Prompt Delivery], not silently retried."""
+        FAILED for [Retry Prompt Delivery], not silently retried.
+
+        Spec Layer (S5): this is the Supervisor entry point -- the one
+        place an Agent session actually starts for a Builder Workspace
+        (create_session/_resume_builder_session/start_all_builders all
+        go through here). SpecGate runs first; a behavior-changing Task
+        (spec_change_classification set to anything but NULL/
+        NO_BEHAVIOR_CHANGE) whose spec linkage doesn't PASS never gets
+        an Agent started. A Task with no classification at all
+        (NOT_APPLICABLE) is unaffected -- every existing/legacy workflow
+        keeps working exactly as before this feature existed."""
         if w["agent"] not in settings.agents: raise GitSafetyError("Agent is not allowed")
+        if w.get("task_id"):
+            t=task_row(w["task_id"])
+            gate=spec_gate.evaluate(t)
+            if gate["outcome"] not in ("PASS","NOT_APPLICABLE"):
+                raise GitSafetyError(f"SpecGate {gate['outcome']}: {gate['reason']}")
         mode="VIEW_ONLY" if mode=="VIEW_ONLY" else "INTERACTIVE"
         sid=agent_sessions.start(task_id=w["task_id"],workspace_id=w["id"],agent=w["agent"],worktree_path=w["worktree_path"],mode=mode)
         db.event("agent",w["id"],"SESSION_STARTED",f"session={sid} mode={mode}")
@@ -1220,12 +1298,20 @@ def create_app(settings=None):
         rather than a second `operations` row (db.py V12 comment). The
         only gap closed here is duplicate-click protection: a click while
         the current run for this Integration is still QUEUED/RUNNING is
-        a no-op, never a second concurrent TestRun (section 4)."""
+        a no-op, never a second concurrent TestRun (section 4).
+        A repo with no PROJECT.yaml (or one declaring zero required CI
+        stages) has nothing for TestRunner to queue -- integration_gate_
+        status() already resolves that straight to PASS, so a click here
+        is a no-op back to the same page rather than a raw ContractError
+        (real incident: this used to 500)."""
         i=integration_row(iid)
         if git.conflict_files(i["worktree_path"]): raise GitSafetyError("Cannot test unresolved conflicts")
         active=db.one("SELECT id FROM test_runs WHERE workspace_type='integration' AND workspace_id=? AND status IN ('QUEUED','RUNNING') ORDER BY id DESC LIMIT 1",(iid,))
         if active: return RedirectResponse(f"/integrations/{iid}",303)
-        invalidate(iid); runner.start("integration",iid,Path(i["worktree_path"])); return RedirectResponse(f"/integrations/{iid}",303)
+        invalidate(iid)
+        try: runner.start("integration",iid,Path(i["worktree_path"]))
+        except ContractError: pass
+        return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/ready-for-main")
     def ready_main(iid:int):
         """[Mark Ready for Main] (section 15): tracked as one
@@ -1873,6 +1959,62 @@ def create_app(settings=None):
         directly so automation/tests never have to re-derive status/
         stage/gates from raw child rows themselves."""
         task_row(tid); return decision.evaluate(tid)
+
+    # ---------------------------------------------------------- Spec Layer
+    @app.get("/api/spec/registry")
+    def api_spec_registry():
+        """Spec Layer status (S3): load errors (if any), the deterministic
+        baseline digest, and feature/requirement/acceptance/invariant
+        counts -- the one place to check "is the canonical spec tree
+        currently valid" without walking specs/ by hand."""
+        try:
+            registry=SpecRegistry(specs_root).load()
+        except SpecError as exc:
+            return JSONResponse({"ok":False,"errors":exc.errors},status_code=422)
+        return {"ok":True,"baseline_sha256":registry.baseline_digest(),
+                "features":len(registry.features),"requirements":len(registry.requirements),
+                "acceptance_criteria":len(registry.acceptance),"invariants":len(registry.invariants)}
+    @app.get("/api/spec/features")
+    def api_spec_features():
+        registry=SpecRegistry(specs_root).load()
+        return [{"id":f["id"],"title":f.get("title"),"version":f.get("version"),"status":f.get("status")} for f in registry.features.values()]
+    @app.get("/api/spec/features/{feature_id}")
+    def api_spec_feature(feature_id:str):
+        registry=SpecRegistry(specs_root).load()
+        feature=registry.feature(feature_id)
+        if not feature: raise HTTPException(404,"Unknown feature id")
+        return {k:v for k,v in feature.items() if k!="_path"}
+    @app.post("/api/tasks/{tid}/spec")
+    def save_task_spec(tid:int,classification:str=Form(""),feature_id:str=Form(""),spec_version:str=Form(""),
+                        requirement_ids:str=Form(""),acceptance_ids:str=Form(""),invariant_ids:str=Form("")):
+        """Task/spec TraceLink (S4): sets a Task's spec_* linkage.
+        Deliberately permissive at write time (this route never itself
+        validates against the registry -- SpecGate does that, every
+        time, right before an Agent would start) so linking a Task to a
+        not-yet-approved or in-progress spec is never blocked; only
+        STARTING an Agent for a behavior-changing Task is."""
+        task_row(tid)
+        cls=classification.strip().upper() or None
+        if cls and cls not in ALL_CLASSIFICATIONS:
+            raise GitSafetyError(f"Unknown change classification: {cls} (must be one of {ALL_CLASSIFICATIONS})")
+        def _ids(raw):
+            return json.dumps([x.strip() for x in raw.replace(",","\n").splitlines() if x.strip()])
+        db.execute(
+            "UPDATE tasks SET spec_change_classification=?,spec_feature_id=?,spec_version=?,spec_requirement_ids=?,spec_acceptance_ids=?,spec_invariant_ids=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (cls,feature_id.strip() or None,int(spec_version) if spec_version.strip().isdigit() else None,
+             _ids(requirement_ids),_ids(acceptance_ids),_ids(invariant_ids),tid))
+        db.event("task",tid,"SPEC_LINKAGE_UPDATED",f"classification={cls} feature_id={feature_id.strip() or None}")
+        return RedirectResponse(f"/tasks/{tid}",303)
+    @app.get("/api/tasks/{tid}/spec-gate")
+    def api_task_spec_gate(tid:int):
+        t=task_row(tid); return spec_gate.evaluate(t)
+    @app.get("/api/tasks/{tid}/spec-compliance")
+    def api_task_spec_compliance(tid:int):
+        task_row(tid); return spec_compliance.verify(tid)
+    @app.get("/api/tasks/{tid}/evidence")
+    def api_task_evidence(tid:int):
+        task_row(tid); return evidence_store.for_task(tid)
+
     @app.post("/api/workspaces/{wid}/builder-instructions")
     def save_builder_instructions(wid:int,builder_instructions:str=Form("")):
         """Optional, per-Builder-Workspace extra instructions layered on
@@ -2346,9 +2488,16 @@ def create_app(settings=None):
         if existing and existing["status"] in ("PENDING","PREPARING","BUILDING","DEPLOYING","VERIFYING"):
             return RedirectResponse(f"/tasks/{tid}",303)
         source_commit,source_branch=deployment_source(tid,repository_id)
+        try:
+            spec_baseline=SpecRegistry(specs_root).load().baseline_digest()
+        except SpecError:
+            # S10: a broken spec tree never blocks a deployment -- this
+            # column is a traceability pointer (what spec baseline was
+            # current when this deployment was made), not a gate.
+            spec_baseline=None
         did=db.execute(
-            "INSERT INTO deployments(task_id,repository_id,environment,target_name,source_branch,source_commit,status) VALUES(?,?,?,?,?,?,'PENDING')",
-            (tid,repository_id,environment,target.get("target"),source_branch,source_commit))
+            "INSERT INTO deployments(task_id,repository_id,environment,target_name,source_branch,source_commit,status,spec_baseline_sha256) VALUES(?,?,?,?,?,?,'PENDING',?)",
+            (tid,repository_id,environment,target.get("target"),source_branch,source_commit,spec_baseline))
         db.event("task",tid,"DEPLOYMENT_REQUESTED",f"repo={repository_id} env={environment} commit={source_commit[:12]} deployment={did}")
         deployer.deploy(did)
         return RedirectResponse(f"/tasks/{tid}",303)

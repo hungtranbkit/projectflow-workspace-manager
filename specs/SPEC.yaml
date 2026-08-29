@@ -1,0 +1,14 @@
+# Canonical specification manifest for projectflow-workspace-manager.
+#
+# This file tree (specs/) is the source of truth for externally
+# observable behavior -- app/services/spec_registry.py reads it fresh on
+# every load. Any persistence (Task.spec_* columns, verification_reports
+# spec trace columns, deployments.spec_baseline_sha256) is an INDEX into
+# this tree, never a second copy of its content. See AGENTS.md
+# "Spec-Driven Development (Spec Layer, V1)".
+schema_version: 1
+project: projectflow-workspace-manager
+glossary: glossary.yaml
+features_dir: features
+policies_dir: policies
+architecture_dir: architecture

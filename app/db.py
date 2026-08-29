@@ -539,6 +539,41 @@ ALTER TABLE verification_reports ADD COLUMN operator TEXT;
 -- could drift.
 ALTER TABLE manual_verifications ADD COLUMN operator TEXT;
 """),
+    (17, """
+-- Spec Layer V1: the canonical specification is the file tree under
+-- specs/ (SpecRegistry reads it fresh every time -- these columns are
+-- an INDEX/trace pointer into that tree, never a second copy of spec
+-- content itself). All nullable/optional -- a Task created before this
+-- feature existed, or through a route that doesn't ask, keeps
+-- spec_change_classification NULL ("not yet classified", distinct from
+-- the explicit AMBIGUOUS value) and SpecGate treats that as
+-- NOT_APPLICABLE (passes unchanged) -- required for backward
+-- compatibility with every existing Task/test/workflow. Only a Task
+-- explicitly classified BEHAVIOR_CHANGE/NEW_FEATURE/SPEC_CHANGE/
+-- BUG_FIX_TO_EXISTING_SPEC/AMBIGUOUS is ever gated.
+ALTER TABLE tasks ADD COLUMN spec_change_classification TEXT;
+ALTER TABLE tasks ADD COLUMN spec_feature_id TEXT;
+ALTER TABLE tasks ADD COLUMN spec_version INTEGER;
+ALTER TABLE tasks ADD COLUMN spec_requirement_ids TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE tasks ADD COLUMN spec_acceptance_ids TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE tasks ADD COLUMN spec_invariant_ids TEXT NOT NULL DEFAULT '[]';
+-- Evidence trace metadata on the existing verification_reports table
+-- (the EvidenceStore's real backing store -- see
+-- app/services/evidence_store.py -- never a second, parallel evidence
+-- table). Snapshotted from the Task at report-creation time so evidence
+-- stays traceable to the exact spec slice it was produced against, even
+-- if the Task's own linkage is edited afterward.
+ALTER TABLE verification_reports ADD COLUMN spec_feature_id TEXT;
+ALTER TABLE verification_reports ADD COLUMN spec_version INTEGER;
+ALTER TABLE verification_reports ADD COLUMN spec_requirement_ids TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE verification_reports ADD COLUMN spec_acceptance_ids TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE verification_reports ADD COLUMN spec_invariant_ids TEXT NOT NULL DEFAULT '[]';
+-- Release <-> spec baseline binding (section S10) -- minimal, additive
+-- extension point on the one existing Release-shaped table
+-- (DeploymentService/`deployments`), never a new Release/Qualification
+-- model of its own.
+ALTER TABLE deployments ADD COLUMN spec_baseline_sha256 TEXT;
+"""),
 ]
 
 

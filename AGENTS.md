@@ -352,3 +352,70 @@ This file and `PROJECT.yaml` are the standalone repository contract.
   `test_runs` row exists at the Builder's *exact current HEAD*
   (`builder_tests_status()`) -- an agent's own WORK_STATUS=READY claim is
   not evidence of tests passing.
+
+## Spec-Driven Development (Spec Layer, V1)
+
+`specs/` (manifest `specs/SPEC.yaml`) is the canonical, approved
+specification for this project's own externally observable behavior --
+loaded by `SpecRegistry` (`app/services/spec_registry.py`), gated by
+`SpecGate` (`app/services/spec_gate.py`), and verified against real
+evidence by `SpecComplianceVerifier` (`app/services/spec_compliance.py`)
+and `EvidenceStore` (`app/services/evidence_store.py`). This governs a
+different concern from ONE-AGENT-ONE-BRANCH-ONE-WORKTREE / MAIN ONLY
+THROUGH PR above (that's Builder Workspace orchestration for *managed*
+repositories); this section is about how any agent -- human-directed or
+autonomous -- changes THIS repository's own behavior.
+
+Before implementing a change that is not a pure refactor/typo/comment
+fix:
+
+- Identify which FeatureSpec, Requirement(s), and Acceptance
+  Criterion/Criteria the change belongs to (`GET /api/spec/features`,
+  `GET /api/spec/features/{id}`). If none exists yet for genuinely new
+  behavior, that is a real blocker -- say so; do not proceed by
+  inventing scope.
+- Classify the change (`spec_change_classification`:
+  `NO_BEHAVIOR_CHANGE`, `BUG_FIX_TO_EXISTING_SPEC`, `BEHAVIOR_CHANGE`,
+  `NEW_FEATURE`, `SPEC_CHANGE`, or `AMBIGUOUS`) and, for anything but
+  `NO_BEHAVIOR_CHANGE`, link the Task to its feature/requirement/
+  acceptance ids via `POST /api/tasks/{tid}/spec`. A Task with no
+  classification at all is legacy/unclassified and stays completely
+  ungated (`SpecGate` -> `NOT_APPLICABLE`) -- this is intentional
+  backward compatibility (REQ-005), not a loophole to leave every new
+  behavior-changing Task unclassified.
+- `SpecGate.evaluate()` runs automatically in `_start_builder_session`
+  (the one real place an Agent session starts) and must return `PASS`
+  or `NOT_APPLICABLE` before an Agent is started for a Task; a gated
+  classification without a valid, approved, fully-traced feature link
+  is refused with a concrete outcome
+  (`SPEC_REQUIRED`/`SPEC_NOT_APPROVED`/`TRACEABILITY_MISSING`/
+  `SPEC_REFERENCE_INVALID`), never silently allowed through.
+- Preserve every listed Invariant. Stay inside the linked feature's
+  declared scope (`includes`/`excludes`). Implement the smallest change
+  that satisfies the linked Requirements/Acceptance Criteria -- do not
+  expand scope, weaken an acceptance criterion, or invent unspecified
+  behavior to make something "work."
+- Run real verification (tests, review, and Runtime Verification when
+  the Task's risk profile requires it -- `RISK_GATES` above) and let it
+  generate real evidence in the existing tables
+  (`verification_reports`/`review_runs`/`qa_runs`/`test_runs`/
+  `manual_verifications`); do not declare a Task done with missing or
+  fabricated verification. `EvidenceStore` and
+  `GET /api/tasks/{tid}/evidence` are the read path over that evidence,
+  never a second copy of it.
+- Before calling spec-linked work complete, run
+  `GET /api/tasks/{tid}/spec-compliance` (`SpecComplianceVerifier`).
+  `PASS` means required evidence is present and passing; `INCOMPLETE`
+  means real evidence is still missing; `FAIL` means evidence reports a
+  real failure; `SPEC_DRIFT` means the implementation and the approved
+  spec (or the spec reference itself) disagree -- in every case but
+  `PASS`, keep working or report the disagreement; never reclassify or
+  re-scope the spec yourself to force a `PASS`.
+- If the approved spec and the real, correct implementation genuinely
+  disagree, report `SPEC_DRIFT` explicitly (in the Task/PR/commit
+  description) rather than silently picking one side.
+- The spec file tree (`specs/**/*.yaml`) is the single source of truth
+  (S1); `tasks.spec_*` / `verification_reports.spec_*` columns are only
+  ID/version trace pointers into it, never a second authoritative copy
+  -- edit specs by editing the YAML under `specs/`, not by reasoning
+  from a Task's stored linkage alone.

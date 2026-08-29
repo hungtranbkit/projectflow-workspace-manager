@@ -1,0 +1,21 @@
+# Reference copy of the real, authoritative gate policy -- documentation
+# only. app/services/task_decision_service.py's RISK_GATES table is the
+# ONE place that policy is actually enforced; this file must never drift
+# into a second, silently-authoritative copy (S1: "must not silently
+# become a second source of truth"). A future automated check may assert
+# this file matches RISK_GATES; until then, keep them in sync by hand
+# whenever RISK_GATES changes.
+schema_version: 1
+id: POLICY-RISK-GATES
+title: Task risk-profile gate policy
+version: 1
+source_of_truth: app/services/task_decision_service.py:RISK_GATES
+profiles:
+  LOW: [REVIEW]
+  NORMAL: [REVIEW, QA, INTEGRATION]
+  HIGH: [REVIEW, QA, INTEGRATION]
+notes: >
+  QA here is the Runtime Verification gate (user-facing label changed,
+  see AGENTS.md "Workflow Summary UX (V3)"; the internal name/table
+  stayed QA/qa_runs). LOW is the only profile that skips straight from
+  Review PASS to Integration/Ready for Main.

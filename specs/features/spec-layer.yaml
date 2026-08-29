@@ -1,0 +1,114 @@
+# The Spec Layer's own FeatureSpec -- dogfooded so SpecGate/
+# SpecComplianceVerifier have at least one real, approved feature to
+# evaluate against from day one, and so the Spec Layer's own future
+# changes go through the same gate it enforces on everything else.
+schema_version: 1
+id: FEAT-SPEC-LAYER
+title: Spec-Driven Development Layer
+version: 1
+status: approved
+summary: >
+  ProjectFlow tracks an approved, machine-readable specification (this
+  file tree) as the source of truth for externally observable behavior,
+  gates Agent execution on spec traceability for behavior-changing
+  Tasks, and verifies implementation compliance against the approved
+  spec using evidence ProjectFlow already collects.
+scope:
+  includes:
+    - SpecRegistry loading/validating specs/ and resolving IDs
+    - SpecGate evaluating a Task's spec linkage before Agent execution
+    - Spec context injection into the Builder prompt
+    - SpecComplianceVerifier producing a SpecComplianceResult from
+      existing evidence (review_runs, qa_runs, test_runs,
+      verification_reports)
+    - Deterministic spec baseline digest
+  excludes:
+    - Semantic/theorem-proving verification of requirement text
+    - Rewriting PROJECT.yaml or the CI/CD contract
+    - Any change to the multi-agent Builder Workspace / worktree model
+requirements:
+  - id: REQ-001
+    text: >
+      A Task classified BEHAVIOR_CHANGE, NEW_FEATURE, SPEC_CHANGE, or
+      BUG_FIX_TO_EXISTING_SPEC must reference an approved FeatureSpec
+      (spec.feature_id) with at least one valid requirement id and one
+      valid acceptance criterion id before an Agent session may be
+      started for it.
+  - id: REQ-002
+    text: >
+      SpecGate.evaluate() returns exactly one of PASS, SPEC_REQUIRED,
+      SPEC_NOT_APPROVED, TRACEABILITY_MISSING, SPEC_REFERENCE_INVALID,
+      or NOT_APPLICABLE for every Task -- never an ambiguous/undefined
+      outcome.
+  - id: REQ-003
+    text: >
+      The canonical specification is the file tree under specs/;
+      SpecRegistry reads it fresh (or from an explicitly-refreshed
+      cache) -- persisted Task/verification_reports spec_* columns are
+      trace pointers into it, never a second authoritative copy.
+  - id: REQ-004
+    text: >
+      SpecComplianceVerifier never returns PASS when required evidence
+      (a current, PASS review; runtime verification when the Task's
+      risk profile requires it; a real requirement/acceptance mapping)
+      is missing -- it returns INCOMPLETE instead.
+  - id: REQ-005
+    text: >
+      A Task with no spec_change_classification set at all (created
+      before this feature existed, or via a route that does not ask)
+      passes SpecGate as NOT_APPLICABLE -- existing legacy workflows are
+      never broken by this feature's introduction.
+acceptance_criteria:
+  - id: AC-001
+    text: >
+      Given a Task classified BEHAVIOR_CHANGE with no spec.feature_id,
+      SpecGate returns SPEC_REQUIRED and _start_builder_session refuses
+      to start an Agent session for it.
+  - id: AC-002
+    text: >
+      Given a Task linked to FEAT-SPEC-LAYER (approved) with valid
+      requirement_ids and acceptance_ids, SpecGate returns PASS.
+  - id: AC-003
+    text: >
+      Given a Task linked to a feature file whose status is draft,
+      SpecGate returns SPEC_NOT_APPROVED.
+  - id: AC-004
+    text: >
+      Given a Task linked to an unknown feature_id, or to a requirement/
+      acceptance/invariant id not declared on the referenced feature,
+      SpecGate returns SPEC_REFERENCE_INVALID.
+  - id: AC-005
+    text: >
+      Given a Task classified NO_BEHAVIOR_CHANGE, or with no
+      classification at all, SpecGate returns NOT_APPLICABLE/PASS
+      without requiring any spec linkage.
+  - id: AC-006
+    text: >
+      SpecRegistry.baseline_digest() returns the identical SHA256 across
+      repeated calls when specs/ content is unchanged, and a different
+      digest the moment any spec file's parsed content changes.
+  - id: AC-007
+    text: >
+      SpecComplianceVerifier returns SPEC_DRIFT when a Task claims a
+      requirement/acceptance/invariant id that SpecRegistry cannot
+      resolve, even if the Task's own evidence otherwise looks complete.
+invariants:
+  - id: INV-001
+    text: >
+      SpecGate never returns PASS for a behavior-changing Task that
+      lacks a valid, approved feature reference.
+  - id: INV-002
+    text: >
+      The spec baseline digest is a pure function of specs/ content --
+      never influenced by database state, task history, or wall-clock
+      time.
+  - id: INV-003
+    text: >
+      SpecRegistry raises a explicit, actionable error (never a silent
+      partial load) on a duplicate id, a broken reference, or a missing
+      referenced file.
+  - id: INV-004
+    text: >
+      Loading or evaluating the Spec Layer never mutates specs/ on disk
+      -- the file tree is read-only from the application's perspective;
+      only a human/editor changes it.
