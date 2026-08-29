@@ -23,7 +23,7 @@ from app.services.sandbox_contract import (
 from app.services.sandbox_manager import SandboxError, SandboxManager, SourceSpec
 from app.services.sandbox_runtime import SandboxRuntimeService
 from app.services.agent_session_manager import AgentSessionManager, SessionError
-from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source
+from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source, LIVE_SESSION_STATUSES
 from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
 from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES
 from app.services.operations import OperationInProgress, OperationService
@@ -749,7 +749,8 @@ def create_app(settings=None):
     def session_detail(request:Request,wid:int,sid:int):
         w=agent_row(wid); s=session_row(sid)
         if s["workspace_id"]!=wid: raise HTTPException(404)
-        return render(request,"session_detail.html",w=w,s=s)
+        t=task_row(w["task_id"]) if w.get("task_id") else None
+        return render(request,"session_detail.html",w=w,s=s,t=t)
     @app.websocket("/ws/sessions/{sid}")
     async def session_ws(websocket:WebSocket,sid:int):
         """Browser <-> WebSocket <-> real PTY. VIEW_ONLY connections never
@@ -1378,6 +1379,14 @@ def create_app(settings=None):
         for w in workspaces:
             w["details"]=safe_details(w["worktree_path"]); w["status_label"]=workspace_status_label(w["status"])
             session=latest_session_for_workspace(w["id"]); w["session"]=session
+            # Section 1/3 of the Live Terminal fix: a session only has an
+            # actual terminal to attach to while it's STARTING/RUNNING/
+            # WAITING_FOR_INPUT -- the latest session for a workspace is
+            # very often already EXITED/FAILED (the normal end state after
+            # a Builder finishes and submits for review), and a template
+            # must never render "Open Live Terminal" pointing at a dead
+            # session's route as if it were still attachable.
+            w["live_session"]=session if session and session["status"] in LIVE_SESSION_STATUSES else None
             w_repo=repo(w["repository_id"])
             try: w["sandbox_configured"]=load_sandbox_contract(Path(w_repo["repo_path"])) is not None
             except SandboxContractError: w["sandbox_configured"]=True  # misconfigured contract is not "absent"

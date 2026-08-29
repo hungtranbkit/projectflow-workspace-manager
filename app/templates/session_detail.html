@@ -1,8 +1,11 @@
 {% extends 'base.html' %}{% block title %}Session · {{w.agent|capitalize}} · {{w.task_name}}{% endblock %}{% block header_action %}<span class="badge {{s.status|lower}}">{{s.status.replace('_',' ')}}</span> <a href="/agents/live">Live Agents</a>{% endblock %}{% block content %}
 <link rel="stylesheet" href="/static/vendor/xterm.min.css">
 <section class="facts">
+<div><small>Task</small><b>{{t.title if t else '—'}}</b></div>
 <div><small>Agent</small><b class="cap">{{w.agent}}</b></div>
-<div><small>Workspace</small><code>{{w.branch}}</code></div>
+<div><small>Repository</small><code>{{w.repo_name}}</code></div>
+<div><small>Branch</small><code>{{w.branch}}</code></div>
+<div><small>Session status</small><b>{{s.status.replace('_',' ')}}</b></div>
 <div><small>Mode</small><b id="mode-label">{{s.mode}}</b></div>
 <div><small>Started</small><code>{{s.started_at}}</code></div>
 </section>

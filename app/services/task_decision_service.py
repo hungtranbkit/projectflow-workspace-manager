@@ -555,7 +555,11 @@ class TaskDecisionService:
                 return _action("RETURN_TO_BUILDER", f"Fix required: {b['agent']}", (b["review"] or {}).get("findings") or "Reviewer requested changes.", f"/workspaces/{b['id']}")
             if not b["ready"]:
                 if b["agent_status"] in LIVE_SESSION_STATUSES:
-                    return _action("VIEW_BUILDER", f"View: {b['agent']}", "Agent is running.", f"/workspaces/{b['id']}")
+                    # The actual PTY-backed terminal, never the Workspace
+                    # management page (session is guaranteed present here
+                    # since agent_status can only be live when a session
+                    # row exists -- see _builder_view above).
+                    return _action("VIEW_BUILDER", f"View: {b['agent']}", "Agent is running.", f"/workspaces/{b['id']}/sessions/{b['session']['id']}")
                 if b["agent_status"] in ("EXITED", "FAILED"):
                     return _action("REVIEW_BUILDER_RESULT", f"Review result: {b['agent']}", "Agent session ended without a completion report yet.", f"/workspaces/{b['id']}")
                 return _action("START_BUILDER", f"Start {b['agent'].capitalize()}: {b['role'] or b['repo_name']}", "Builder Workspace ready, agent not started yet.", f"/workspaces/{b['id']}")

@@ -95,23 +95,29 @@
 <div class="warning"><b>{{'Prompt chưa gửi được tới agent.' if w.session.prompt_status=='FAILED' else 'Prompt chưa gửi (agent vừa mới mở, đang chờ sẵn sàng).'}}</b></div>
 <div class="primary-action">
 <form method="post" action="/api/sessions/{{w.session.id}}/deliver-prompt" class="inline" data-loading-label="Delivering task..."><button class="success">Send Task to {{w.agent|capitalize}}</button></form>
-<a class="ghost" href="/workspaces/{{w.id}}">Open Live</a>
+{% if w.live_session %}<a class="ghost" href="/workspaces/{{w.id}}/sessions/{{w.live_session.id}}">Open Live Terminal</a>{% endif %}
+<a class="ghost" href="/workspaces/{{w.id}}">View Workspace Details</a>
 </div>
 {% elif w.fix_required %}
 <div class="warning"><b>Cần sửa theo Review.</b><p>{{(w.review.findings if w.review else '') or 'Reviewer requested changes.'}}</p></div>
 <div class="primary-action">
 {% if w.agent in ['codex','claude'] %}<form method="post" action="/api/tasks/{{t.id}}/setup-and-start" class="inline"><input type="hidden" name="repository_id" value="{{w.repository_id}}"><input type="hidden" name="agent" value="{{w.agent}}"><button class="success">Resume Agent</button></form>{% endif %}
-<a class="ghost" href="/workspaces/{{w.id}}">Open Live</a>
+{% if w.live_session %}<a class="ghost" href="/workspaces/{{w.id}}/sessions/{{w.live_session.id}}">Open Live Terminal</a>{% endif %}
+<a class="ghost" href="/workspaces/{{w.id}}">View Workspace Details</a>
 </div>
 {% elif w.agent_status in ['EXITED','FAILED'] and not w.ready %}
 <div class="warning"><b>Agent exited without completion report.</b></div>
 <div class="primary-action">
 {% if w.agent in ['codex','claude'] %}<form method="post" action="/api/tasks/{{t.id}}/setup-and-start" class="inline"><input type="hidden" name="repository_id" value="{{w.repository_id}}"><input type="hidden" name="agent" value="{{w.agent}}"><button class="success">Resume Agent</button></form>{% endif %}
-<a class="ghost" href="/workspaces/{{w.id}}">Open Live</a>
+{% if w.session %}<a class="ghost" href="/workspaces/{{w.id}}/sessions/{{w.session.id}}">View Session</a>{% endif %}
+<a class="ghost" href="/workspaces/{{w.id}}">View Workspace Details</a>
 <form method="post" action="/api/workspaces/{{w.id}}/verification-report" class="inline"><input type="hidden" name="work_status" value="FIX_REQUIRED"><input type="hidden" name="risks" value="Manually marked blocked from the wizard."><button class="danger">Mark Blocked</button></form>
 </div>
 {% else %}
-<div class="primary-action"><a class="button" href="/workspaces/{{w.id}}">View Live Terminal</a></div>
+<div class="primary-action">
+{% if w.live_session %}<a class="button" href="/workspaces/{{w.id}}/sessions/{{w.live_session.id}}">Open Live Terminal</a>{% endif %}
+<a class="ghost" href="/workspaces/{{w.id}}">View Workspace Details</a>
+</div>
 {% endif %}
 </section>
 {% endfor %}
@@ -375,7 +381,7 @@
 <a class="ghost" href="/workspaces/{{w.id}}">View Detail</a>
 </div>
 <div class="nested">
-{% if w.session %}<div class="quick-actions"><span class="badge {{w.session.status|lower}}">Web session: {{w.session.status}}</span><a class="ghost" href="/workspaces/{{w.id}}/sessions/{{w.session.id}}">View Live</a></div>
+{% if w.session %}<div class="quick-actions"><span class="badge {{w.session.status|lower}}">Web session: {{w.session.status}}</span><a class="ghost" href="/workspaces/{{w.id}}/sessions/{{w.session.id}}">{{'Open Live Terminal' if w.live_session else 'View Session'}}</a></div>
 {% else %}<form method="post" action="/api/workspaces/{{w.id}}/sessions"><input type="hidden" name="mode" value="INTERACTIVE"><button class="ghost">Open in Web</button></form>{% endif %}
 <details><summary>+ Builder Instructions (optional, this workspace only)</summary>
 <form method="post" action="/api/workspaces/{{w.id}}/builder-instructions"><textarea name="builder_instructions" rows="2" placeholder="Ví dụ: Add API support only.">{{w.builder_instructions}}</textarea><button class="ghost">Save Instructions</button></form>

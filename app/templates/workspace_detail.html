@@ -49,7 +49,7 @@
 <h3 class="subgroup">Web Terminal <a href="/help#live-agents">? Web terminal dùng thế nào?</a></h3>
 <section class="panel">
 {% set live=sessions|selectattr('status','in',['STARTING','RUNNING','WAITING_FOR_INPUT'])|list %}
-{% if live %}{% for s in live %}<div class="row"><div><strong>Session #{{s.id}}</strong><small>{{s.command_profile}} · {{s.mode}}</small></div><span class="badge {{s.status|lower}}">{{s.status.replace('_',' ')}}</span></div><div class="quick-actions"><a class="ghost" href="/workspaces/{{w.id}}/sessions/{{s.id}}">View Live</a><form method="post" action="/api/sessions/{{s.id}}/stop"><button class="ghost">Stop</button></form></div>{% endfor %}
+{% if live %}{% for s in live %}<div class="row"><div><strong>Session #{{s.id}}</strong><small>{{s.command_profile}} · {{s.mode}}</small></div><span class="badge {{s.status|lower}}">{{s.status.replace('_',' ')}}</span></div><div class="quick-actions"><a class="ghost" href="/workspaces/{{w.id}}/sessions/{{s.id}}">Open Live Terminal</a><form method="post" action="/api/sessions/{{s.id}}/stop"><button class="ghost">Stop</button></form></div>{% endfor %}
 {% else %}<form method="post" action="/api/workspaces/{{w.id}}/sessions"><input type="hidden" name="mode" value="INTERACTIVE"><button>Open in Web</button></form>{% endif %}
 {% if sessions %}<h4>Recent sessions</h4>{% for s in sessions[:5] %}<div class="row"><div><small>{{s.started_at}}</small></div><span class="badge {{s.status|lower}}">{{s.status}}{% if s.exit_code is not none %} · exit {{s.exit_code}}{% endif %}</span></div>{% endfor %}{% endif %}
 </section>

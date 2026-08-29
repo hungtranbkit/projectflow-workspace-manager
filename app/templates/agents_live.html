@@ -10,7 +10,7 @@
 <td><code>{{s.activity_hint or '—'}}</code></td>
 <td>{% if s.sandbox_status %}<span class="badge {{s.sandbox_status|lower}}">{{s.sandbox_status}}{% if s.sandbox_health %} · {{s.sandbox_health}}{% endif %}</span>{% else %}—{% endif %}</td>
 <td><small>{{s.last_activity_at or s.started_at}}</small></td>
-<td><a class="ghost button" href="/workspaces/{{s.workspace_id}}/sessions/{{s.id}}">View Live</a></td>
+<td><a class="ghost button" href="/workspaces/{{s.workspace_id}}/sessions/{{s.id}}">Open Live Terminal</a></td>
 </tr>{% endfor %}
 </tbody></table></div>
 {% else %}<div class="empty-state"><h4>Không có agent nào đang chạy trong Web Terminal</h4><p>Mở một Agent Workspace và bấm Open in Web để bắt đầu một session.</p><a href="/tasks">Đi tới Tasks</a></div>{% endif %}
