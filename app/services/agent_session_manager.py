@@ -172,6 +172,12 @@ class AgentSessionManager:
                 os._exit(127)
 
         def on_exit(exit_code):
+            # Persist the final transcript on every real process exit, not
+            # only on a browser's WS disconnect -- a session nobody was
+            # watching (or that outlives the browser tab) must not lose
+            # its completion report just because no one was connected
+            # when it printed one.
+            self.persist_tail(sid)
             self.db.execute("UPDATE agent_sessions SET status='EXITED',exited_at=?,exit_code=? WHERE id=?", (now(), exit_code, sid))
             self._live.pop(sid, None)
 
@@ -251,14 +257,28 @@ class AgentSessionManager:
         self.db.execute("UPDATE agent_sessions SET mode=? WHERE id=?", (mode, sid))
 
     def persist_tail(self, sid: int) -> None:
+        """Persists the FULL live buffer (already capped at
+        LivePtySession.BUFFER_CAP), not some smaller re-truncation of it.
+
+        A real bug, found via live production verification: this used to
+        downsample to a fixed 20_000-byte tail on every WS disconnect,
+        independent of the live buffer's own (larger) 200_000-byte cap.
+        A real Codex TUI redraws its whole screen (cursor moves, spinner
+        frames, style resets) for every printed line, so a 20_000-byte
+        window can hold only a few thousand characters of actual content
+        -- nowhere near enough to still contain a real completion
+        report's WORK_STATUS marker by the time WHAT_CHANGED appears.
+        Persisting the same window the live session already keeps means
+        a session that exits or gets disconnected loses no more than an
+        already-live session's own view would have."""
         session = self._live.get(sid)
         if not session:
             return
         with session._lock:
-            tail = bytes(session._buffer)[-20000:]
+            tail = bytes(session._buffer)[-session.BUFFER_CAP:]
         self.db.execute("UPDATE agent_sessions SET transcript_tail=? WHERE id=?", (tail.decode("utf-8", "replace"), sid))
 
-    def live_tail(self, sid: int, n: int = 20000) -> str | None:
+    def live_tail(self, sid: int, n: int = LivePtySession.BUFFER_CAP) -> str | None:
         """The session's current transcript, read straight from the live
         in-process PTY buffer when the session is still running --
         transcript_tail on the DB row is only ever refreshed on WS
