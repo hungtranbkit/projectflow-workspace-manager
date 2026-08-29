@@ -65,7 +65,14 @@ class SandboxManager:
 
     # ---- capacity -------------------------------------------------
     def running_count(self) -> int:
-        return self.db.one("SELECT COUNT(*) n FROM sandboxes WHERE status IN ('RUNNING','STARTING','PROVISIONING')")["n"]
+        """State-consistency audit finding: CLEANUP_ELIGIBLE is a
+        retention-countdown label, not a runtime state -- that sandbox's
+        real container is still up and consuming a capacity slot for
+        the whole grace window (cleanup() is what actually tears it
+        down, never mark_cleanup_eligible() alone). Excluding it here
+        previously let more real containers run simultaneously than
+        max_running actually allows once any Task started completing."""
+        return self.db.one("SELECT COUNT(*) n FROM sandboxes WHERE status IN ('RUNNING','STARTING','PROVISIONING','CLEANUP_ELIGIBLE')")["n"]
 
     def capacity_available(self) -> bool:
         return self.running_count() < self.max_running
@@ -145,7 +152,7 @@ class SandboxManager:
         refresh instead of freezing the tab for the whole docker call."""
         sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
         if not sb: raise SandboxError("SANDBOX_NOT_FOUND", "sandbox not found")
-        if not self.capacity_available() and sb["status"] not in ("RUNNING", "STARTING", "PROVISIONING"):
+        if not self.capacity_available() and sb["status"] not in ("RUNNING", "STARTING", "PROVISIONING", "CLEANUP_ELIGIBLE"):
             self.db.execute(
                 "UPDATE sandboxes SET status='FAILED',error_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 ("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached", sandbox_id),
