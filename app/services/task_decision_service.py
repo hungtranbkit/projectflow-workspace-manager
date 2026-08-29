@@ -435,7 +435,16 @@ class TaskDecisionService:
         MergeRecord's last-synced GitHub snapshot -- never a second,
         template-side calculation, and never trusting stale UI state
         (section 4/5/9: the real merge action re-fetches all of this
-        again immediately before actually calling the GitHub merge API)."""
+        again immediately before actually calling the GitHub merge API).
+        Merge-reconciliation section 2/4: once a repo's MergeRecord is
+        already MERGED, mergeability/CI/conflict/staleness are pre-merge
+        eligibility concepts that no longer apply -- a merged repo never
+        goes back to evaluating them, never shows a stale PR_OPEN/
+        UNKNOWN_MERGEABILITY/SOURCE_STALE blocker, and is never eligible
+        for a second real merge call."""
+        if merge_record.get("merge_status") == "MERGED":
+            branch, commit = self.effective_source_for_repo(d, repository_id)
+            return {"eligible": False, "blockers": [], "source_branch": branch, "current_commit": commit, "merged": True}
         branch, commit = self.effective_source_for_repo(d, repository_id)
         blockers: list[str] = []
         if not d["ready_for_main"]:

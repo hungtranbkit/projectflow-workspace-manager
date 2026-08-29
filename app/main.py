@@ -25,7 +25,7 @@ from app.services.sandbox_runtime import SandboxRuntimeService
 from app.services.agent_session_manager import AgentSessionManager, SessionError
 from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source
 from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
-from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService
+from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES
 from app.services.operations import OperationInProgress, OperationService
 
 def create_app(settings=None):
@@ -1612,6 +1612,46 @@ def create_app(settings=None):
         else:
             db.event("task",tid,"SANDBOX_CONTRACT_REQUIRED","no participating repo declares sandbox: contract")
         return RedirectResponse(f"/tasks/{tid}",303)
+    @app.post("/api/tasks/{tid}/verification-sandbox")
+    def create_verification_sandbox(tid:int):
+        """[Create Verification Sandbox] (section 11-13): post-completion
+        'view the running app' fallback for when Integration creation
+        never provisioned one (contract added later, earlier provision
+        attempt failed, etc). Reuses the exact registered Integration
+        Workspace worktree(s) already on disk -- never checks out a
+        fresh commit or accepts one from the browser -- pinned to
+        whatever that worktree's real current HEAD is right now (the
+        same 'pin to the registered worktree's live HEAD' pattern every
+        other sandbox in this app already uses). A sandbox already
+        existing for this task_integration is left alone (idempotent,
+        never a duplicate)."""
+        t=task_row(tid); ti=task_integration_row(tid)
+        if not ti: raise GitSafetyError("No Integration exists for this Task yet")
+        if db.one("SELECT id FROM sandboxes WHERE owner_type='TASK_INTEGRATION' AND owner_id=?",(ti["id"],)):
+            return RedirectResponse(f"/tasks/{tid}",303)
+        ti_repos=decision.integration_repos(ti["id"])
+        if not ti_repos: raise GitSafetyError("No Integration Workspace to build a sandbox from")
+        rows=[]
+        for r_ in ti_repos:
+            try: head=git.head(r_["worktree_path"])
+            except Exception: continue
+            rows.append({"repository_id":r_["repository_id"],"repo_path":repo(r_["repository_id"])["repo_path"],
+                         "worktree_path":r_["worktree_path"],"branch":r_["branch"],"pinned_commit":head})
+        provider=None; extra=[]
+        for row_ in rows:
+            try: contract=load_sandbox_contract(Path(row_["repo_path"]))
+            except SandboxContractError: contract=None
+            if contract and provider is None: provider={**row_,"contract":contract}
+            else: extra.append(row_)
+        if not provider:
+            raise GitSafetyError("No participating repository declares a sandbox: contract")
+        role_for=lambda repository_id: repo(repository_id)["repo_name"]
+        wanted=provider["contract"].get("integration_profile") or resolve_profile(provider["contract"],None,t.get("default_sandbox_profile"))
+        provider_source=SourceSpec(repository_id=provider["repository_id"],role=role_for(provider["repository_id"]),branch=provider["branch"],commit_sha=provider["pinned_commit"],worktree_path=provider["worktree_path"],repo_path=provider["repo_path"],source_type="TASK_INTEGRATION")
+        extra_sources=[SourceSpec(repository_id=x["repository_id"],role=role_for(x["repository_id"]),branch=x["branch"],commit_sha=x["pinned_commit"],worktree_path=x["worktree_path"],repo_path=x["repo_path"],source_type="TASK_INTEGRATION") for x in extra]
+        sid=sandboxes.create(task_id=tid,owner_type="TASK_INTEGRATION",owner_id=ti["id"],profile=wanted,provider=provider_source,extra_sources=extra_sources)
+        if sid: sandboxes.provision(sid)
+        return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/mark-merged")
     def mark_merge_record(tid:int,repository_id:int,pr_ref:str=Form(""),merged_commit:str=Form("")):
         """Per-repository merge tracking (section 25): a cross-repo Task
@@ -1646,11 +1686,46 @@ def create_app(settings=None):
         MergeRecord being MERGED (TaskDecisionService computes it, never
         set directly here) -- but the moment that becomes true, sandbox
         retention starts counting down. Never deletes a worktree/branch
-        itself (section 14/15)."""
+        itself (section 14/15). Also the one place TASK_COMPLETED gets
+        emitted (section 15/16): idempotent -- a Task that is already
+        DONE and already has a TASK_COMPLETED event never gets a second
+        one on a later Refresh/merge/reconcile, and re-entering DONE
+        never resets cleanup_eligible_at (mark_cleanup_eligible is
+        itself idempotent-ish per sandbox, guarded by status)."""
         d=decision.evaluate(tid)
         if d["status"]=="DONE":
+            if not db.one("SELECT id FROM workspace_events WHERE entity_type='task' AND entity_id=? AND action='TASK_COMPLETED'",(tid,)):
+                required=[f"{m['repo_name']}(pr={m.get('pr_number')},merge_sha={(m.get('merged_commit') or '')[:12]})" for m in d["merge_records"] if m["required"]]
+                db.event("task",tid,"TASK_COMPLETED",f"all required repos merged: {', '.join(required)}")
             for sb in task_sandboxes(tid):
                 if sb["status"] not in ("CLOSED","CLEANING"): sandboxes.mark_cleanup_eligible(sb["id"])
+    def _reconcile_merge_record(tid,row,status,source):
+        """Section 1/5/6/7/15/16: the ONE place a freshly-fetched GitHub
+        PR status ever gets written into a MergeRecord -- GitHub's own
+        reported state is authoritative and always wins over whatever
+        was persisted before (a PR gh reports MERGED is never left
+        stuck at PR_OPEN/CONFLICT). Exact merge commit SHA and GitHub's
+        own merged_at are persisted, never guessed or set to "now".
+        Idempotent: re-reconciling an already-MERGED record just writes
+        the same GitHub-sourced facts again and never emits a second
+        PR_MERGED_DETECTED (source is WORKSPACE_MANAGER_MERGE for the
+        real /merge action, GITHUB_REFRESH for a passive Refresh/
+        Create-PR-reuse discovering it externally)."""
+        was_merged=row["merge_status"]=="MERGED"
+        new_status="MERGED" if status["pr_state"] in MERGED_STATES else ("CONFLICT" if status["mergeability"]=="CONFLICTING" else "PR_OPEN")
+        if new_status=="MERGED":
+            db.execute(
+                "UPDATE merge_records SET merge_status='MERGED',pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,merged_commit=?,merged_at=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (status["pr_state"],status["ci_status"],status["mergeability"],status["merge_state_status"],status["head_sha"],
+                 status.get("merged_commit"),status.get("merged_at") or row.get("merged_at"),row["id"]))
+        else:
+            db.execute(
+                "UPDATE merge_records SET merge_status=?,pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (new_status,status["pr_state"],status["ci_status"],status["mergeability"],status["merge_state_status"],status["head_sha"],row["id"]))
+        db.event("task",tid,"PR_REFRESHED",f"repo={row['repository_id']} pr={row['pr_number']} head={status.get('head_sha')} source={source}")
+        if new_status=="MERGED" and not was_merged:
+            db.event("task",tid,"PR_MERGED_DETECTED",f"repo={row['repository_id']} pr={row['pr_number']} merge_sha={status.get('merged_commit')} source={source}")
+        _schedule_cleanup_if_done(tid)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/create-pr")
     def create_merge_pr(tid:int,repository_id:int):
         """[Create PR] (section 3): only from the exact verified source
@@ -1688,26 +1763,35 @@ def create_app(settings=None):
         except GitHubIntegrationError as exc:
             ops.fail(op_id,f"{exc.code}: {exc}")
             raise GitSafetyError(f"{exc.code}: {exc}") from exc
+        # pr_number/pr_url/base_branch/source_branch/verified_commit are
+        # pinned here (this is the one place they're first established);
+        # everything else GitHub-authoritative (merge_status/merged_commit/
+        # merged_at included) goes through the same reconciliation helper
+        # Refresh/Merge use, so re-discovering an ALREADY-merged PR while
+        # reusing it (section 6/7) is handled identically, never a second
+        # ad hoc "is it merged" check.
         db.execute(
-            "UPDATE merge_records SET merge_status=?,pr_number=?,pr_url=?,pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,base_branch=?,source_branch=?,verified_commit=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-            ("MERGED" if status["pr_state"]=="MERGED" else ("CONFLICT" if status["mergeability"]=="CONFLICTING" else "PR_OPEN"),
-             status["pr_number"],status["pr_url"],status["pr_state"],status["ci_status"],status["mergeability"],
-             status["merge_state_status"],status["head_sha"],base_branch,branch,commit,row["id"]))
+            "UPDATE merge_records SET pr_number=?,pr_url=?,base_branch=?,source_branch=?,verified_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (status["pr_number"],status["pr_url"],base_branch,branch,commit,row["id"]))
+        row=db.one("SELECT * FROM merge_records WHERE id=?",(row["id"],))
+        _reconcile_merge_record(tid,row,status,source="GITHUB_REFRESH")
         ops.succeed(op_id,f"PR #{status['pr_number']} already open" if reused else f"PR #{status['pr_number']} created")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/refresh")
     def refresh_merge_pr(tid:int,repository_id:int):
-        """[Refresh] (section 2): re-reads live PR/CI/mergeability from
-        GitHub -- never trusts whatever was last rendered."""
+        """[Refresh] (section 2/5/7): re-reads live PR/CI/mergeability
+        from GitHub -- never trusts whatever was last rendered. If
+        GitHub reports the PR as MERGED (whether Workspace Manager
+        merged it or it was merged directly on GitHub), reconciles the
+        MergeRecord to MERGED right here, in the same request -- no
+        second button press, no stale READY_FOR_MAIN left standing
+        (section 7/19)."""
         task_row(tid); r=repo(repository_id)
         row=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
         if not row or not row["pr_number"]: raise GitSafetyError("No PR to refresh yet")
         try: status=github_merge.pr_status(r["repo_path"],row["pr_number"])
         except GitHubIntegrationError as exc: raise GitSafetyError(f"{exc.code}: {exc}") from exc
-        db.execute(
-            "UPDATE merge_records SET pr_state=?,ci_status=?,mergeability=?,merge_state_status=?,head_sha=?,last_synced_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-            (status["pr_state"],status["ci_status"],status["mergeability"],status["merge_state_status"],status["head_sha"],row["id"]))
-        if status["mergeability"]=="CONFLICTING": db.execute("UPDATE merge_records SET merge_status='CONFLICT' WHERE id=?",(row["id"],))
+        _reconcile_merge_record(tid,row,status,source="GITHUB_REFRESH")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/merge")
     def real_merge_pr(tid:int,repository_id:int):
@@ -1742,12 +1826,15 @@ def create_app(settings=None):
             db.event("task",tid,"MERGE_BLOCKED",f"repo={repository_id} error={exc.code}")
             ops.fail(op_id,f"{exc.code}: {exc}")
             raise GitSafetyError(f"{exc.code}: {exc}") from exc
-        db.execute(
-            "UPDATE merge_records SET merge_status='MERGED',merged_commit=?,pr_state=?,pr_ref=?,merged_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,last_synced_at=CURRENT_TIMESTAMP WHERE id=?",
-            (merged["merged_commit"],merged["pr_state"],merged["pr_url"],row["id"]))
+        # Persisted through the same reconciliation helper Refresh/Create-PR
+        # use (section 6): exact merge commit SHA + GitHub's own merged_at,
+        # MERGE_SUCCEEDED recorded here for the WM-initiated action
+        # specifically, PR_MERGED_DETECTED/TASK_COMPLETED handled by the
+        # helper itself -- Task DONE is immediate, no later Refresh needed.
         db.event("task",tid,"MERGE_SUCCEEDED",f"repo={repository_id} pr={row['pr_number']} merge_sha={merged['merged_commit']}")
+        _reconcile_merge_record(tid,row,merged,source="WORKSPACE_MANAGER_MERGE")
+        db.execute("UPDATE merge_records SET pr_ref=? WHERE id=?",(merged["pr_url"],row["id"]))
         ops.succeed(op_id,f"Merged {(merged['merged_commit'] or '')[:8]}")
-        _schedule_cleanup_if_done(tid)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/confirm-external-merge")
     def confirm_external_merge(tid:int,repository_id:int,merged_commit:str=Form(""),reason:str=Form(...)):
