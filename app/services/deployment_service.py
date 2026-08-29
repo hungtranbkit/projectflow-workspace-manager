@@ -1,0 +1,280 @@
+from __future__ import annotations
+import re
+import subprocess
+import threading
+import time
+import urllib.request
+import urllib.error
+from datetime import datetime, timezone
+from pathlib import Path
+
+from app.services.project_contract import deployment_config, load_command
+
+"""Post-Merge DEV Deployment (section 2 of the spec this implements):
+deliberately NOT a second deployment framework. Every real action here
+is one of the SAME PROJECT.yaml-declared commands ProjectFlow already
+runs for preflight/test/build (project_contract.load_command) -- this
+service only orchestrates WHICH commands run in WHICH order, against
+WHICH exact source commit, and persists the result. No route/template
+ever constructs a shell command, hostname, or path itself (section 8/21).
+
+Target audit (recorded here since it drove every design decision):
+this host's REAL 'DEV LOCAL' Deploy Agent (127.0.0.1:8090) and its
+target (mesflow-app/mesflow-postgres, port 8080) are the SAME running
+containers nginx publicly serves as mesflow.net on 80/443 -- confirmed
+via mesflow/reports/PROJECTFLOW_STANDARDIZATION_ASSESSMENT.md section 5
+and the real /api/health response's own "server_role":"DEV" label,
+which does NOT mean "safe to automate against" on this host. A prior,
+independent audit already reached the same conclusion and built
+`compose.projectflow-local.yml` (compose project mesflow-projectflow-
+local, port 18280, its own bind-mount directory, no `build:` block)
+specifically so ProjectFlow can safely drive BUILD -> DEPLOY -> HEALTH
+-> SMOKE without ever touching the real target. THAT isolated sandbox,
+reachable only through this repo's own commands.local_deploy/build/
+smoke/local_status, is what "DEV" means everywhere in this feature --
+never port 8090, never port 8080, never mesflow.net."""
+
+
+class DeploymentError(RuntimeError):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _default_runner(argv: list[str], cwd, timeout: int) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, cwd=str(cwd), shell=isinstance(argv, str), text=True, capture_output=True, timeout=timeout)
+
+
+# Never let a command's own output leak a credential into a persisted
+# phase log or the UI -- section 17/21. Deliberately broad (line-level,
+# case-insensitive) rather than trying to enumerate every possible
+# secret name; a false-positive redaction costs nothing, a leaked one
+# costs everything.
+_SECRET_LINE = re.compile(r"(password|passwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*\S+", re.IGNORECASE)
+
+
+def sanitize(text: str) -> str:
+    if not text:
+        return text
+    return "\n".join(_SECRET_LINE.sub(lambda m: m.group(0).split(next(c for c in ":=" if c in m.group(0)))[0] + "=***REDACTED***", ln) for ln in text.splitlines())
+
+
+class DeploymentService:
+    """`runner` (argv/cwd/timeout -> CompletedProcess) and `spawn`
+    (fn, args) are both injectable -- same DI pattern as GitHubMergeService/
+    SandboxManager. Real subprocess + real background thread in
+    production; tests substitute fakes that never actually shell out or
+    run one, so every existing assertion right after calling deploy()
+    still sees the already-finished result."""
+
+    def __init__(self, db, git, runner=_default_runner):
+        self.db = db
+        self.git = git
+        self.runner = runner
+        self.spawn = lambda fn, args=(): threading.Thread(target=fn, args=args, daemon=True).start()
+        self.http_get = urllib.request.urlopen
+        self.health_attempts = 20
+        self.health_delay = 3.0
+
+    # ---- target resolution (section 8) -----------------------------------
+    def target(self, repo_path: str, environment: str) -> dict | None:
+        """The trusted target/environment registry: PROJECT.yaml's own
+        deployment.<environment> block. None means 'not configured' --
+        never guessed, never a browser-supplied host/path substitute."""
+        cfg = deployment_config(Path(repo_path), environment)
+        if not cfg or not cfg.get("enabled"):
+            return None
+        return cfg
+
+    def health_url(self, repo_path: str) -> str | None:
+        """service.healthcheck.url from PROJECT.yaml, with its own
+        ${VAR:-default} shell-style placeholder resolved from the
+        process environment the same way the project's own scripts
+        would -- never a URL built from anything the browser supplied."""
+        import os
+        import yaml
+        path = Path(repo_path) / "PROJECT.yaml"
+        if not path.is_file():
+            return None
+        data = yaml.safe_load(path.read_text()) or {}
+        url = ((data.get("service") or {}).get("healthcheck") or {}).get("url")
+        if not url:
+            return None
+        def _sub(m):
+            name, default = m.group(1), m.group(2)
+            return os.environ.get(name, default)
+        return re.sub(r"\$\{(\w+):-([^}]*)\}", _sub, url)
+
+    # ---- phase bookkeeping ------------------------------------------------
+    def _phase(self, deployment_id: int, phase: str):
+        return self.db.execute(
+            "INSERT INTO deployment_phases(deployment_id,phase,status,started_at) VALUES(?,?,?,CURRENT_TIMESTAMP)",
+            (deployment_id, phase, "RUNNING"))
+
+    def _phase_done(self, phase_id: int, status: str, result: subprocess.CompletedProcess | None = None):
+        stdout = sanitize((result.stdout if result else "") or "")[-8000:]
+        stderr = sanitize((result.stderr if result else "") or "")[-8000:]
+        self.db.execute(
+            "UPDATE deployment_phases SET status=?,stdout_tail=?,stderr_tail=?,exit_code=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
+            (status, stdout, stderr, result.returncode if result else None, phase_id))
+
+    def _set(self, deployment_id: int, **fields) -> None:
+        cols = ",".join(f"{k}=?" for k in fields)
+        self.db.execute(f"UPDATE deployments SET {cols} WHERE id=?", (*fields.values(), deployment_id))
+
+    # ---- the real orchestration --------------------------------------------
+    def deploy(self, deployment_id: int) -> None:
+        """Dispatches the real BUILD (if needed) -> DEPLOY -> HEALTH ->
+        SMOKE chain to a background thread -- callers get an immediate
+        PREPARING row back and poll for progress (button-state-ux),
+        never blocking the request on real docker/build work."""
+        self.spawn(self._run, (deployment_id,))
+
+    def _run(self, deployment_id: int) -> None:
+        d = self.db.one("SELECT * FROM deployments WHERE id=?", (deployment_id,))
+        repo = self.db.one("SELECT * FROM repositories WHERE id=?", (d["repository_id"],))
+        repo_path = repo["repo_path"]
+        try:
+            self._set(deployment_id, status="PREPARING", started_at=now())
+            self._prepare_source(deployment_id, repo_path, d["source_commit"])
+
+            build_cmd = load_command(Path(repo_path), "build")
+            needs_build = self._needs_build(repo_path, d["source_commit"])
+            if build_cmd and needs_build:
+                self._set(deployment_id, status="BUILDING")
+                self._run_command(deployment_id, "BUILDING", build_cmd, repo_path)
+            artifact = self._read_artifact_metadata(repo_path)
+            if artifact:
+                self._set(deployment_id, artifact_version=artifact.get("version"),
+                          artifact_image=artifact.get("artifact"), artifact_digest=artifact.get("image_digest"))
+
+            deploy_cmd = load_command(Path(repo_path), "local_deploy")
+            if not deploy_cmd:
+                raise DeploymentError("NO_DEPLOY_COMMAND", "PROJECT.yaml declares no local_deploy command")
+            self._set(deployment_id, status="DEPLOYING")
+            self._run_command(deployment_id, "DEPLOYING", deploy_cmd, repo_path)
+
+            self._set(deployment_id, status="VERIFYING")
+            health_url = self.health_url(repo_path)
+            healthy = self._check_health(deployment_id, health_url)
+            self._set(deployment_id, health_status="PASS" if healthy else "FAIL", health_checked_at=now())
+            if not healthy:
+                raise DeploymentError("HEALTH_FAILED", f"Health check did not pass: {health_url}")
+
+            smoke_cmd = load_command(Path(repo_path), "smoke")
+            smoke_ok = True
+            if smoke_cmd:
+                smoke_ok = self._run_command(deployment_id, "SMOKE", smoke_cmd, repo_path, raise_on_fail=False)
+            self._set(deployment_id, smoke_status="PASS" if smoke_ok else "FAIL")
+            if not smoke_ok:
+                raise DeploymentError("SMOKE_FAILED", "Smoke verification failed")
+
+            status_cmd = load_command(Path(repo_path), "local_status")
+            url = None
+            if status_cmd:
+                r = self.runner(["bash", "-lc", status_cmd[0]], Path(repo_path) / status_cmd[1], status_cmd[2])
+                m = re.search(r"^URL=(\S+)$", r.stdout or "", re.MULTILINE)
+                if m: url = m.group(1)
+            self._set(deployment_id, status="VERIFIED", deployed_url=url, finished_at=now(), error=None)
+        except DeploymentError as exc:
+            self._set(deployment_id, status="FAILED", error=f"{exc.code}: {exc}"[:2000], finished_at=now())
+        except Exception as exc:
+            self._set(deployment_id, status="FAILED", error=str(exc)[:2000], finished_at=now())
+        finally:
+            self._restore_source(repo_path)
+
+    # ---- source pinning (section 3/24) -------------------------------------
+    def _prepare_source(self, deployment_id: int, repo_path: str, source_commit: str) -> None:
+        """Pins the SHARED repository checkout to the exact merge commit
+        for the duration of the build -- a real, detached `git checkout`,
+        never a guess, never the integration/agent branch. Verified as a
+        real ancestor of origin/main first (never an arbitrary/unrelated
+        commit); restored back onto `main` in _restore_source() whether
+        this succeeds or fails, so every OTHER ProjectFlow operation that
+        reads this checkout's `main` branch ref (worktree creation always
+        reads the ref, never the working tree) is unaffected either way."""
+        phase_id = self._phase(deployment_id, "PREPARING")
+        try:
+            self.git.git(repo_path, "fetch", "origin", "main")
+            if not self._is_ancestor_of_origin_main(repo_path, source_commit):
+                raise DeploymentError("SOURCE_NOT_ON_MAIN", f"{source_commit[:12]} is not an ancestor of origin/main -- refusing to deploy")
+            r = self.git.git(repo_path, "checkout", "--detach", source_commit, check=False)
+            if r.returncode:
+                raise DeploymentError("CHECKOUT_FAILED", r.stderr.strip() or "git checkout failed")
+            self._phase_done(phase_id, "SUCCESS", r)
+        except DeploymentError:
+            self._phase_done(phase_id, "FAILED")
+            raise
+
+    def _is_ancestor_of_origin_main(self, repo_path: str, commit: str) -> bool:
+        return self.git.git(repo_path, "merge-base", "--is-ancestor", commit, "origin/main", check=False).returncode == 0
+
+    def _restore_source(self, repo_path: str) -> None:
+        try:
+            self.git.git(repo_path, "checkout", "main", check=False)
+            self.git.git(repo_path, "merge", "--ff-only", "origin/main", check=False)
+        except Exception:
+            pass  # best-effort restore -- never let this mask the real deploy result
+
+    # ---- build-once / artifact identity (section 10) -----------------------
+    def _read_artifact_metadata(self, repo_path: str) -> dict | None:
+        import json
+        try: data = self._read_repo_yaml(repo_path)
+        except Exception: return None
+        meta_rel = (data.get("artifacts") or {}).get("metadata")
+        if not meta_rel: return None
+        meta_path = (Path(repo_path) / meta_rel).resolve()
+        if not meta_path.is_file(): return None
+        try: return json.loads(meta_path.read_text())
+        except Exception: return None
+
+    def _needs_build(self, repo_path: str, source_commit: str) -> bool:
+        """Build Once: if the last-built artifact's own recorded commit
+        already IS this exact source_commit, reuse it -- never rebuild a
+        different artifact between verification and deploy without a
+        new identity (section 10)."""
+        meta = self._read_artifact_metadata(repo_path)
+        return not (meta and meta.get("commit") == source_commit)
+
+    def _read_repo_yaml(self, repo_path: str) -> dict:
+        import yaml
+        return yaml.safe_load((Path(repo_path) / "PROJECT.yaml").read_text()) or {}
+
+    # ---- command execution --------------------------------------------------
+    def _run_command(self, deployment_id: int, phase: str, cmd: tuple, repo_path: str, raise_on_fail: bool = True) -> bool:
+        command, working_directory, timeout = cmd
+        phase_id = self._phase(deployment_id, phase)
+        cwd = (Path(repo_path) / working_directory).resolve()
+        try:
+            r = self.runner(["bash", "-lc", command], cwd, timeout)
+        except subprocess.TimeoutExpired as exc:
+            self._phase_done(phase_id, "TIMEOUT")
+            if raise_on_fail: raise DeploymentError(f"{phase}_TIMEOUT", f"{phase} timed out after {timeout}s") from exc
+            return False
+        ok = r.returncode == 0
+        self._phase_done(phase_id, "SUCCESS" if ok else "FAILED", r)
+        if not ok and raise_on_fail:
+            raise DeploymentError(f"{phase}_FAILED", sanitize(r.stderr or r.stdout or f"{phase} failed")[:500])
+        return ok
+
+    def _check_health(self, deployment_id: int, url: str | None) -> bool:
+        phase_id = self._phase(deployment_id, "VERIFYING")
+        if not url:
+            self._phase_done(phase_id, "FAILED")
+            return False
+        for attempt in range(self.health_attempts):
+            try:
+                with self.http_get(url, timeout=5) as resp:
+                    if 200 <= resp.status < 300:
+                        self._phase_done(phase_id, "SUCCESS")
+                        return True
+            except Exception:
+                pass
+            if attempt < self.health_attempts - 1:
+                time.sleep(self.health_delay)
+        self._phase_done(phase_id, "FAILED")
+        return False
