@@ -202,7 +202,8 @@
 </div>
 {% elif not readiness.sandbox_configured %}
 <p><small>Sandbox</small><code>NOT CONFIGURED</code></p>
-<p class="empty">Repository "{{w.repo_name}}" declares no sandbox contract -- automated runtime verification is unavailable for this repo.</p>
+<p class="empty">Runtime sandbox is not configured for this repository. Repository "{{w.repo_name}}" declares no sandbox contract -- automated runtime verification is unavailable for this repo.</p>
+<a class="ghost button" href="/repositories/{{w.repository_id}}/runtime">Configure Sandbox</a>
 {% elif not readiness.sandbox_required %}
 <p><small>Sandbox</small><code>NOT REQUIRED</code></p>
 <p class="empty">This workspace's sandbox profile is explicitly NONE -- no runtime environment was requested.</p>

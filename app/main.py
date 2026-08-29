@@ -29,6 +29,7 @@ from app.services.github_merge_service import GitHubIntegrationError, GitHubMerg
 from app.services.operations import OperationInProgress, OperationService
 from app.services.deployment_service import DeploymentService, DeploymentError
 from app.services.deployment_decision import deployment_view
+from app.services.repository_contract_editor import RepositoryContractEditor, ContractEditError
 from app.services.completion_report_parser import parse_completion_report, strip_ansi
 
 def create_app(settings=None):
@@ -43,6 +44,7 @@ def create_app(settings=None):
     github_merge = GitHubMergeService()
     ops = OperationService(db)
     deployer = DeploymentService(db, git)
+    contract_editor = RepositoryContractEditor(git)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
@@ -54,6 +56,7 @@ def create_app(settings=None):
     app.state.github_merge = github_merge
     app.state.deployer = deployer
     app.state.ops = ops
+    app.state.contract_editor = contract_editor
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -458,6 +461,135 @@ def create_app(settings=None):
         return RedirectResponse("/repositories",303)
     @app.get("/api/repositories")
     def api_repos(): return db.all("SELECT * FROM repositories")
+
+    # ------------------------------------------- Repository Runtime & Sandbox
+    def check_dependency_cycle(self_repo_name, dependency_names):
+        """Cross-repo cycle check (section 23) -- needs every OTHER
+        registered repo's own contract, so it lives here (main.py already
+        has the full repository registry) rather than inside
+        RepositoryContractEditor itself. Rejects only a real cycle back to
+        self_repo_name; unrelated dependency graphs elsewhere are none of
+        this repo's concern."""
+        seen = set()
+        stack = list(dependency_names)
+        while stack:
+            name = stack.pop()
+            if name == self_repo_name: return True
+            if name in seen: continue
+            seen.add(name)
+            row = db.one("SELECT repo_path FROM repositories WHERE repo_name=? AND enabled=1", (name,))
+            if not row: continue
+            try: settings_ = contract_editor.read_sandbox_settings(Path(row["repo_path"]))
+            except ContractEditError: continue
+            stack.extend(d["repo"] for d in settings_.get("runtime_dependencies", []))
+        return False
+    @app.get("/repositories/{rid}/runtime", response_class=HTMLResponse)
+    def repository_runtime(request: Request, rid: int):
+        r = repo(rid)
+        try:
+            current = contract_editor.read_sandbox_settings(Path(r["repo_path"]))
+            load_error = None
+        except ContractEditError as exc:
+            current = None; load_error = "; ".join(exc.errors)
+        registered = db.all("SELECT id,repo_name FROM repositories WHERE enabled=1 AND id!=?", (rid,))
+        history = db.all("SELECT * FROM workspace_events WHERE entity_type='repository' AND entity_id=? AND action='REPOSITORY_CONTRACT_UPDATED' ORDER BY id DESC LIMIT 10", (rid,))
+        diff = request.query_params.get("diff") == "1"
+        raw_text = None
+        if diff or request.query_params.get("view") == "raw":
+            try: raw_text = contract_editor.load(Path(r["repo_path"]))["raw_text"]
+            except ContractEditError: pass
+        git_dirty = None
+        try: git_dirty = bool(git.status(r["repo_path"]).strip())
+        except Exception: pass
+        test_sandbox = db.one("SELECT * FROM sandboxes WHERE owner_type='REPOSITORY_TEST' AND owner_id=? ORDER BY id DESC LIMIT 1", (rid,))
+        return render(request, "repository_runtime.html", r=r, current=current, load_error=load_error,
+                      registered=registered, history=history, raw_text=raw_text, git_dirty=git_dirty,
+                      test_sandbox=test_sandbox)
+
+    def _parse_runtime_form(form) -> dict:
+        enabled = form.get("enabled") == "on"
+        dep_repos = form.getlist("dep_repo")
+        dep_profiles = form.getlist("dep_profile")
+        dep_modes = form.getlist("dep_mode")
+        deps = [
+            {"repo": repo_.strip(), "profile": (prof or "BACKEND").strip(), "mode": (mode or "KNOWN_GOOD_MAIN").strip()}
+            for repo_, prof, mode in zip(dep_repos, dep_profiles, dep_modes) if repo_.strip()
+        ]
+        services = [s.strip() for s in (form.get("services") or "").split(",") if s.strip()]
+        profile_name = (form.get("profile_name") or "").strip().upper()
+        own_service = services[0] if services else profile_name.lower()
+        # Ports/health/outputs (section 3: "health endpoint if schema
+        # supports it... runtime output labels" ARE normal-UI settings,
+        # not Advanced-only) -- the user only ever types the container
+        # port + health path; the HOST port range is never user-supplied
+        # (section 24/26) -- port_specs() already falls back to a wide,
+        # safe default range (20000-29999) whenever `range` is omitted,
+        # so this deliberately never writes one.
+        ports = {}
+        own_port = (form.get("own_port") or "").strip()
+        if own_port.isdigit():
+            ports[own_service] = {"container": int(own_port)}
+        health = {}
+        health_path = (form.get("health_path") or "").strip()
+        if health_path:
+            health[own_service] = {"path": health_path}
+        outputs = {}
+        if services and profile_name:
+            outputs[f"{profile_name.lower()}_url"] = {"service": own_service}
+        return {
+            "enabled": enabled,
+            "profile_name": profile_name,
+            "services": services,
+            "runtime_dependencies": deps,
+            "seed_default": (form.get("seed_default") or "").strip() or None,
+            "auto_provision": form.get("auto_provision") == "on",
+            "ports": ports, "health": health, "outputs": outputs,
+        }
+    @app.post("/api/repositories/{rid}/runtime-sandbox")
+    async def save_runtime_sandbox(request: Request, rid: int):
+        r = repo(rid)
+        form = await request.form()
+        proposed = _parse_runtime_form(form)
+        # section 7: production target never accidentally selected --
+        # a profile literally named PRODUCTION (or a dependency mode
+        # pointed at one) is refused outright, never silently accepted.
+        if proposed["enabled"] and proposed["profile_name"] == "PRODUCTION":
+            raise GitSafetyError("Refusing to save a sandbox profile named PRODUCTION -- sandboxes are never production targets")
+        registered_names = {x["repo_name"] for x in db.all("SELECT repo_name FROM repositories WHERE enabled=1")}
+        dep_names = [d["repo"] for d in proposed["runtime_dependencies"]]
+        if check_dependency_cycle(r["repo_name"], dep_names):
+            raise GitSafetyError(f"Runtime dependency graph would form a cycle back to {r['repo_name']}")
+        try:
+            diff = contract_editor.write_sandbox_settings(Path(r["repo_path"]), proposed, self_repo_name=r["repo_name"], registered_repo_names=registered_names)
+        except ContractEditError as exc:
+            raise GitSafetyError("; ".join(exc.errors))
+        db.event("repository", rid, "REPOSITORY_CONTRACT_UPDATED",
+                  f"repo={r['repo_name']} fields=sandbox before_sha={diff['before_sha256'][:12]} after_sha={diff['after_sha256'][:12]} operator=ui")
+        return RedirectResponse(f"/repositories/{rid}/runtime?diff=1", 303)
+    @app.post("/api/repositories/{rid}/runtime-sandbox/test")
+    def test_runtime_sandbox(rid: int):
+        r = repo(rid)
+        try:
+            current = contract_editor.read_sandbox_settings(Path(r["repo_path"]))
+        except ContractEditError as exc:
+            raise GitSafetyError("; ".join(exc.errors))
+        if not current["enabled"]:
+            raise GitSafetyError("Sandbox is not enabled for this repository -- save a configuration first")
+        existing = db.one("SELECT * FROM sandboxes WHERE owner_type='REPOSITORY_TEST' AND owner_id=? AND status IN ('CREATED','PROVISIONING','STARTING','RUNNING') ORDER BY id DESC LIMIT 1", (rid,))
+        if existing:
+            return RedirectResponse(f"/sandboxes/{existing['id']}", 303)
+        commit = git.head(r["repo_path"])
+        source = SourceSpec(repository_id=rid, role="test-configuration", branch=r["default_branch"], commit_sha=commit,
+                             worktree_path=r["repo_path"], repo_path=r["repo_path"], source_type="REPOSITORY_TEST")
+        try:
+            sid = sandboxes.create(task_id=None, owner_type="REPOSITORY_TEST", owner_id=rid, profile=current["profile_name"], provider=source)
+        except SandboxError as exc:
+            raise GitSafetyError(str(exc))
+        if sid is None:
+            raise GitSafetyError("Sandbox profile resolved to NONE -- nothing to test")
+        db.event("repository", rid, "REPOSITORY_CONTRACT_TESTED", f"repo={r['repo_name']} profile={current['profile_name']} sandbox={sid}")
+        sandboxes.provision(sid)
+        return RedirectResponse(f"/sandboxes/{sid}", 303)
 
     @app.get("/workspaces", response_class=HTMLResponse)
     def workspaces(request: Request): return render(request,"workspaces.html",workspaces=db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id ORDER BY w.updated_at DESC"),repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),tasks=db.all("SELECT id,title FROM tasks WHERE status NOT IN ('MERGED','CANCELLED') ORDER BY title"))

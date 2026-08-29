@@ -1,0 +1,86 @@
+{% extends 'base.html' %}{% block title %}Runtime & Sandbox · {{r.repo_name}}{% endblock %}{% block header_action %}<a href="/repositories">← Repositories</a>{% endblock %}{% block content %}
+<h2>Repository · {{r.repo_name}}</h2>
+<h3 class="subgroup">Runtime & Sandbox</h3>
+
+{% if load_error %}
+<div class="alert"><b>PROJECT.yaml could not be read</b><p>{{load_error}}</p></div>
+{% else %}
+
+{% if git_dirty %}
+<div class="warning"><b>Configuration changed in repository.</b><p>Git changes are not yet committed. PROJECT.yaml is part of this repository's source -- review before committing.</p><a class="ghost button" href="/repositories/{{r.id}}/runtime?diff=1">View Diff</a></div>
+{% endif %}
+
+{% if request.query_params.get('diff')=='1' and raw_text %}
+<section class="panel"><h4>Current PROJECT.yaml (raw)</h4><pre>{{raw_text}}</pre></section>
+{% endif %}
+
+{% if current.enabled %}
+<div class="readybox">
+<p><b>Configuration saved</b></p>
+<div class="facts">
+<div><small>Sandbox</small><b>CONFIGURED</b></div>
+<div><small>Profile</small><b>{{current.profile_name}}</b></div>
+<div class="wide"><small>Runtime dependencies</small><b>{% for d in current.runtime_dependencies %}{{d.repo}} · {{d.profile}}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</b></div>
+<div><small>Test data</small><b>{{current.seed_default or '—'}}</b></div>
+</div>
+</div>
+
+<section class="panel">
+<div class="row"><div><strong>Test Configuration</strong><small>Validates the contract, then provisions a real, isolated sandbox to confirm it actually works.</small></div>
+{% if test_sandbox %}<span class="badge {{test_sandbox.status|lower}}"{% if test_sandbox.status in ['PROVISIONING','STARTING'] %} data-running{% endif %}>{{test_sandbox.status.replace('_',' ')}}</span>{% endif %}</div>
+<div class="quick-actions">
+<form method="post" action="/api/repositories/{{r.id}}/runtime-sandbox/test" class="inline" data-loading-label="Validating..."><button class="success">Test Configuration</button></form>
+{% if test_sandbox %}<a class="ghost" href="/sandboxes/{{test_sandbox.id}}">View Test Sandbox</a>{% endif %}
+</div>
+{% if test_sandbox and test_sandbox.status=='RUNNING' and test_sandbox.health_status=='HEALTHY' %}<p class="result-note succeeded">Runtime configuration VERIFIED -- Create Sandbox is now available from Task pages.</p>{% endif %}
+</section>
+{% else %}
+<div class="warning"><b>Runtime sandbox is not configured for this repository.</b><p>Chưa có cấu hình sandbox nào -- Task/Builder page sẽ không tự tạo được môi trường chạy riêng cho tới khi lưu cấu hình bên dưới.</p></div>
+{% endif %}
+
+<section class="panel">
+<h4>{{'Edit Configuration' if current.enabled else 'Configure Sandbox'}}</h4>
+<form method="post" action="/api/repositories/{{r.id}}/runtime-sandbox">
+<label><input type="checkbox" name="enabled" {{'checked' if current.enabled else ''}}> Sandbox support enabled</label>
+<label>Profile name<input name="profile_name" value="{{current.profile_name or ''}}" placeholder="QA_CENTER"></label>
+<label>Own services (comma-separated, matches this repo's compose file)<input name="services" value="{{current.services|join(', ')}}" placeholder="qa"></label>
+<label>Container port (first service)<input name="own_port" type="number" value="{{(current.ports.values()|list)[0].container if current.ports else ''}}" placeholder="8095"></label>
+<label>Health check path<input name="health_path" value="{{(current.health.values()|list)[0].path if current.health else ''}}" placeholder="/api/version"></label>
+
+<h4>Runtime dependencies</h4>
+<p class="empty">Other repositories this sandbox connects to at runtime -- never edited as source, never a second Builder Workspace.</p>
+{% for d in current.runtime_dependencies %}
+<div class="row"><div>
+<select name="dep_repo"><option value="">— none —</option>{% for x in registered %}<option value="{{x.repo_name}}" {{'selected' if x.repo_name==d.repo else ''}}>{{x.repo_name}}</option>{% endfor %}</select>
+<input name="dep_profile" value="{{d.profile}}" placeholder="BACKEND" style="width:8em">
+<select name="dep_mode"><option {{'selected' if d.mode=='KNOWN_GOOD_MAIN' else ''}}>KNOWN_GOOD_MAIN</option><option {{'selected' if d.mode=='PINNED_COMMIT' else ''}}>PINNED_COMMIT</option><option {{'selected' if d.mode=='PINNED_IMAGE' else ''}}>PINNED_IMAGE</option></select>
+</div></div>
+{% endfor %}
+<div class="row"><div>
+<select name="dep_repo"><option value="">— add dependency —</option>{% for x in registered %}<option value="{{x.repo_name}}">{{x.repo_name}}</option>{% endfor %}</select>
+<input name="dep_profile" value="BACKEND" placeholder="BACKEND" style="width:8em">
+<select name="dep_mode"><option selected>KNOWN_GOOD_MAIN</option><option>PINNED_COMMIT</option><option>PINNED_IMAGE</option></select>
+</div></div>
+
+<label>Test data profile<input name="seed_default" value="{{current.seed_default or ''}}" placeholder="QA_DEMO"></label>
+<label><input type="checkbox" name="auto_provision" {{'checked' if current.auto_provision else ''}}> Auto-provision for new Builder</label>
+<button class="success">Save Configuration</button>
+</form>
+</section>
+
+<details><summary><b>Advanced</b></summary>
+<section class="panel">
+<p><small>Compose file</small><code>{{current.compose_file or 'compose.sandbox.yml (default)'}}</code></p>
+{% if current.ports %}<p><small>Ports</small>{% for svc,p in current.ports.items() %}<code>{{svc}}: {{p.container}} ({{p.range}})</code>{% endfor %}</p>{% endif %}
+{% if current.health %}<p><small>Health checks</small>{% for svc in current.health %}<code>{{svc}}</code> {% endfor %}</p>{% endif %}
+{% if current.outputs %}<p><small>Outputs</small>{% for o in current.outputs %}<code>{{o}}</code> {% endfor %}</p>{% endif %}
+<a class="ghost button" href="/repositories/{{r.id}}/runtime?view=raw">View PROJECT.yaml</a>
+</section>
+{% if history %}
+<section class="panel"><h4>Change history</h4>
+{% for h in history %}<div class="row"><div><small>{{h.created_at}}</small><br><code>{{h.details}}</code></div></div>{% endfor %}
+</section>
+{% endif %}
+</details>
+{% endif %}
+{% endblock %}

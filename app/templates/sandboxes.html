@@ -16,7 +16,7 @@
 <section class="panel"><h3>All sandboxes</h3>{% for v in sandboxes %}<div class="row sandbox-row">
 <div>
 <a href="/sandboxes/{{v.row.id}}"><strong>{{v.row.sandbox_slug}}</strong></a>
-<small>{% if v.row.task_id %}Task: <a href="/tasks/{{v.row.task_id}}">{{v.row.task_title}}</a>{% else %}No task{% endif %} · {{v.row.repo_name or 'multi-repo'}} · {{'Agent Workspace' if v.row.owner_type=='AGENT_WORKSPACE' else 'Integration'}} · profile {{v.row.profile}}</small>
+<small>{% if v.row.task_id %}Task: <a href="/tasks/{{v.row.task_id}}">{{v.row.task_title}}</a>{% else %}No task{% endif %} · {{v.row.repo_name or 'multi-repo'}} · {{'Agent Workspace' if v.row.owner_type=='AGENT_WORKSPACE' else ('Repository Test' if v.row.owner_type=='REPOSITORY_TEST' else 'Integration')}} · profile {{v.row.profile}}</small>
 <small>{% if v.primary_source %}<code>{{v.primary_source.branch}} @ {{v.primary_source.commit_sha[:8]}}</code>{% endif %} · created {{v.row.created_at}}{% if v.cleanup_countdown %} · cleanup {{v.cleanup_countdown}}{% endif %}</small>
 {% if v.ports %}<small>ports: {% for p in v.ports %}{{p.service}}→{{p.host_port}}{% if not loop.last %}, {% endif %}{% endfor %}</small>{% endif %}
 </div>
