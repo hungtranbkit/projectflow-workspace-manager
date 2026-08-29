@@ -159,8 +159,18 @@ class SandboxManager:
     def is_stale(self, sandbox_id: int, current_commits: dict[int, str]) -> bool:
         """current_commits: {repository_id: current HEAD of that source's branch}.
         Caller resolves current HEADs via git (this module has no git
-        dependency by design -- keeps it testable without a git fixture)."""
-        sources = self.db.all("SELECT repository_id,commit_sha FROM sandbox_sources WHERE sandbox_id=?", (sandbox_id,))
+        dependency by design -- keeps it testable without a git fixture).
+
+        RUNTIME_DEPENDENCY sources are excluded (QA Center sandbox
+        regression): a runtime dependency is deliberately pinned to a
+        known-good snapshot (mode: KNOWN_GOOD_MAIN), not meant to track
+        its own repo's live branch tip the way the Task's own
+        AGENT_WORKSPACE/TASK_INTEGRATION source is -- comparing it
+        against that repo's current HEAD would show a fresh, healthy
+        sandbox as SOURCE STALE the moment anyone else pushes an
+        unrelated commit to the dependency's main branch, which is not
+        an actionable staleness signal here."""
+        sources = self.db.all("SELECT repository_id,commit_sha FROM sandbox_sources WHERE sandbox_id=? AND source_type!='RUNTIME_DEPENDENCY'", (sandbox_id,))
         return any(current_commits.get(s["repository_id"]) not in (None, s["commit_sha"]) for s in sources)
 
     # ---- provisioning ---------------------------------------------------
