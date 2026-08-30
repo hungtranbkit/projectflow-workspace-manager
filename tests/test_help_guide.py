@@ -60,11 +60,18 @@ def test_help_reads_as_operator_guide_not_architecture(client):
 
 def test_help_honest_about_unimplemented_capabilities(client):
     """Section 40: never instruct the user as if an unbuilt button/flow
-    exists -- GitHub PR/merge automation and ESP flashing are manual."""
+    exists. GitHub PR/merge automation IS real for the normal Task-based
+    flow (real-merge) -- help.html must say so, not describe it as
+    manual; it stays honestly manual only for the narrower standalone
+    (task-less) Agent Workspace path (github-flow). ESP flashing is
+    still manual either way."""
     text = client.get("/help").text
-    assert "không bypass GitHub CI" in text
-    assert "không tự merge main" in text
-    assert "chưa tự động tạo PR hay tự merge" in text
+    # real-merge: the automated Task-based flow must be described as real
+    assert "Pull Request thật" in text
+    assert "merge thật của GitHub" in text
+    # github-flow: honestly scoped to the standalone-workspace exception
+    assert "chưa gắn Task chưa có nút Create PR/Merge tự động" in text
+    assert "không bao giờ bypass GitHub CI" in text
     assert "chưa tự động flash firmware" in text
 
 
@@ -127,6 +134,33 @@ def test_help_repositories_rescan_wording_is_honest(client):
     re-scans on every load. Help must describe the real behavior."""
     text = client.get("/help").text
     assert "tự làm mới mỗi khi bạn mở lại trang" in text
+
+
+def test_help_dev_deployment_anchor_is_not_dead(client, git_repo):
+    """task_detail.html links to /help#dev-deployment (Configure DEV
+    Target) -- that anchor must actually exist and explain the real
+    persistent-DEV-vs-ephemeral-Verification-Sandbox distinction."""
+    text = client.get("/help").text
+    assert 'id="dev-deployment"' in text
+    for needle in [
+        "Verification Sandbox", "DEV Deployment", "Ephemeral", "Persistent",
+        "DEV VERIFIED", "NOT DEPLOYED", "Rollback",
+    ]:
+        assert needle in text, f"dev-deployment guide missing: {needle!r}"
+
+
+def test_help_documents_status_hero_and_checklist(client):
+    """Workflow Summary UX (V3): the real Status Hero vocabulary --
+    4 state classes, 5 real checklist states/symbols, the Missing-vs-
+    blocker distinction, and the Previous Step Summary card -- must be
+    documented, not just the old vague "gate checklist (checkmark/circle)" wording."""
+    text = client.get("/help").text
+    for needle in [
+        "ĐANG XỬ LÝ", "ĐANG CHỜ", "CẦN THAO TÁC", "HOÀN TẤT",
+        "done", "current", "future", "blocked", "skipped",
+        "Vấn đề (blocker)", "completed",
+    ]:
+        assert needle in text, f"status hero guide missing: {needle!r}"
 
 
 def test_help_documents_spec_layer(client):

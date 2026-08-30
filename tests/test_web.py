@@ -13,7 +13,7 @@ def test_help_page_navigation_and_operator_content(client):
     text=response.text
     assert "Hướng dẫn sử dụng Workspace Manager" in text
     assert "READY_FOR_MAIN không có nghĩa là đã merge main" in text
-    assert "GitHub Pull Request" in text and "không bypass GitHub CI" in text
+    assert "GitHub Pull Request" in text and "không bao giờ bypass GitHub CI" in text
     assert 'href="/help">Hướng dẫn</a>' in text
     assert "visual sample" in text and "không đụng repository thật" in text
 

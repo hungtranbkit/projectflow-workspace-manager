@@ -14,6 +14,7 @@
 <a href="#baseline-failure">Baseline failure là gì?</a>
 <a href="#real-merge">PR/Merge thật hoạt động thế nào?</a>
 <a href="#push-integration">Push Integration Branch dùng khi nào?</a>
+<a href="#dev-deployment">Deploy to DEV là gì?</a>
 <a href="#action-feedback">Vì sao nút chuyển "Running..." rồi tự đổi?</a>
 <a href="#quick-start">Bắt đầu nhanh (chi tiết kỹ thuật)</a>
 <a href="#tasks">1. Có task mới</a>
@@ -39,7 +40,7 @@
 <a href="#test-readiness">Test được chưa? (YES/NO/PARTIAL)</a>
 <a href="#kanban">Kanban dùng thế nào?</a>
 <a href="#ready-for-main">13. READY_FOR_MAIN là gì?</a>
-<a href="#github-flow">14. Đưa code lên main</a>
+<a href="#github-flow">14. Đưa code lên main (workspace độc lập)</a>
 <a href="#merge-cleanup">15. Sandbox sau khi merge</a>
 <a href="#stop-cleanup">Stop khác Cleanup thế nào?</a>
 <a href="#repositories">Repositories</a>
@@ -112,6 +113,26 @@
 <p><b>Task chỉ DONE khi mọi repository bắt buộc đều MERGED thật</b> — không có nút "Mark All Merged" giả trạng thái nữa.</p>
 </section>
 
+<section class="guide-section" id="dev-deployment"><span class="section-kicker">DEPLOY</span><h3>Deploy to DEV là gì?</h3>
+<p><b>DEV Deployment</b> khác hẳn <b>Verification Sandbox</b> (mục kiểm tra ở bước Runtime Verification) — đừng nhầm hai khái niệm này:</p>
+<div class="sample-grid">
+<article><b>Verification Sandbox</b><small>Ephemeral — dữ liệu sạch, tạo riêng mỗi lần verify, dùng để kiểm tra hành vi Task này. Xoá sau khi merge/dọn dẹp.</small></article>
+<article><b>DEV Deployment</b><small>Persistent — môi trường DEV thật, giữ nguyên dữ liệu ứng dụng và mật khẩu người dùng qua các lần deploy. Deploy không reset data.</small></article>
+</div>
+<p>Chỉ xuất hiện sau khi Task đã <b>DONE</b> (mọi repository bắt buộc đã Merged thật) và repository đã khai báo <code>deployment:</code> trong <code>PROJECT.yaml</code> của nó (giống cách khai báo <code>sandbox:</code> — do người phụ trách repo cấu hình, không bắt buộc với mọi project).</p>
+<table><thead><tr><th>Trạng thái</th><th>Ý nghĩa</th></tr></thead><tbody>
+<tr><td><span class="badge">DEV target not configured</span></td><td>Repo chưa khai báo <code>deployment:</code> trong PROJECT.yaml — chưa có gì để deploy.</td></tr>
+<tr><td><span class="badge">NOT DEPLOYED</span></td><td>Đã cấu hình nhưng chưa deploy lần nào. Bấm <b>Deploy to DEV</b>.</td></tr>
+<tr><td><span class="badge coding">(đang chạy)</span></td><td>Đang build/deploy/health-check — nút khoá lại, hiện đúng phase đang chạy.</td></tr>
+<tr><td><span class="badge ready">DEV VERIFIED</span></td><td>Deploy xong, health check + smoke test PASS. Có nút <b>Open DEV</b>.</td></tr>
+<tr><td><span class="badge failed">DEV FAILED</span></td><td>Deploy lỗi — xem <b>View Deploy Log</b>. Có <b>Retry Deploy</b>, và <b>Rollback</b> nếu còn bản VERIFIED trước đó.</td></tr>
+<tr><td><span class="badge failed">ROLLBACK FAILED</span></td><td>Rollback về bản trước cũng thất bại — xem log, cần xử lý thủ công.</td></tr>
+<tr><td><span class="badge">ROLLED BACK</span></td><td>Đã quay lại đúng image đã VERIFIED trước đó.</td></tr>
+</tbody></table>
+<p><b>Redeploy</b> (trên một bản đã VERIFIED) deploy lại đúng source hiện tại. <b>View Deploy Log</b> xem chi tiết từng phase (build/deploy/health/smoke) của một lần deploy cụ thể.</p>
+<div class="warning">DEV Deployment không phải một Sandbox thứ hai — nó dùng target/host thật đã cấu hình cho môi trường DEV của repo đó, và Workspace Manager không tự xoá dữ liệu môi trường này khi deploy lại.</div>
+</section>
+
 <section class="guide-section" id="push-integration"><span class="section-kicker">INTEGRATION</span><h3>Push Integration Branch dùng khi nào?</h3>
 <p>Sau khi Integration <b>Merge Latest Changes</b> hoặc resolve conflict, HEAD local của Integration branch thay đổi. Nút <b>Push Integration Branch</b> đẩy đúng branch đó lên GitHub (không force, không branch khác, không remote khác) để cập nhật PR hiện có và kích hoạt CI chạy lại.</p>
 <p><b>Push ≠ Merge.</b> Push chỉ cập nhật branch/PR nguồn trên GitHub — không tự merge, không tự tạo PR mới nếu đã có PR cho branch đó (chỉ refresh PR cũ: cùng số PR, head SHA mới, CI/mergeability refresh lại).</p>
@@ -141,7 +162,7 @@
 <li><b>Runtime Verification (QA)</b><span>Bắt buộc với NORMAL/HIGH, chỉ sau khi mọi Review đã PASS. LOW bỏ qua bước này (hiện <code>NOT_REQUIRED</code>, không phải PASS giả). Cần Sandbox trước khi kiểm tra thủ công.</span></li>
 <li><a href="#integration">Create Integration</a><span>Chỉ bắt buộc khi risk profile = NORMAL/HIGH. LOW risk đi thẳng từ Review PASS sang READY_FOR_MAIN.</span></li>
 <li><a href="#ready-for-main">READY_FOR_MAIN</a><span>Đủ điều kiện để mở Pull Request — tính tự động (TaskDecisionService), không ai gán tay.</span></li>
-<li><a href="#github-flow">PR / CI / Merge</a><span>Tạo GitHub Pull Request cho từng repo, chờ CI PASS, merge trên GitHub, rồi đánh dấu Merged trong Workspace Manager.</span></li>
+<li><a href="#real-merge">Create PR / Merge</a><span>Với repo có GitHub remote: bấm <b>Create PR</b>/<b>Merge</b> ngay trong Workspace Manager — PR và merge đều thật qua GitHub API, không cần rời trang. Repo không có GitHub remote dùng <b>Confirm External Merge</b> thay thế.</span></li>
 <li><b>DONE</b><span>Chỉ khi <i>mọi</i> repository bắt buộc đã Merged — một PR còn mở ở bất kỳ repo nào cũng giữ Task ở READY_FOR_MAIN/MERGING, chưa DONE.</span></li>
 <li><b>Close Task</b><span>Chỉ là timestamp lưu trữ, không phải điều kiện để dọn sandbox — sandbox/worktree/branch cleanup độc lập với Close.</span></li>
 </ol>
@@ -251,7 +272,7 @@
 <section class="guide-section" id="agent-ready-next"><span class="section-kicker">READY ≠ XONG</span><h3>Agent báo READY rồi thì làm gì?</h3>
 <div class="warning"><b>READY ≠ task hoàn tất, và READY ≠ READY_FOR_MAIN.</b> READY chỉ có nghĩa agent coi source đã xong tại một commit cụ thể, sẵn sàng để Reviewer xem — chưa Review PASS, chưa QA, chưa Integration, chưa sẵn sàng lên main.</div>
 <div class="flow-tree"><code>READY (Submit for Review)</code><div>→ Review PASS</div><div>→ Runtime Verification (NORMAL/HIGH)</div><div>→ Integration (NORMAL/HIGH)</div><b>→ READY_FOR_MAIN</b></div>
-<p>Workspace Detail và Task Detail đều tách rõ bốn giá trị khác nhau: <b>Task Status</b> (BACKLOG/ACTIVE/BLOCKED/READY_FOR_MAIN/DONE/CANCELLED), <b>Workspace Status</b> (CREATED/READY/CLOSED), <b>Sandbox Status</b>, và <b>Test Status</b> — không gộp chung thành một badge. Task Detail có thêm <b>Overview gate checklist</b> (✓/○) giải thích chính xác vì sao chưa READY_FOR_MAIN, và một khối <b>Bước tiếp theo</b> tính tự động (TaskDecisionService) — không đoán, không dùng AI, chỉ theo luật cố định, và không route/template nào khác được tự tính lại giá trị này.</p>
+<p>Workspace Detail và Task Detail đều tách rõ bốn giá trị khác nhau: <b>Task Status</b> (BACKLOG/ACTIVE/BLOCKED/READY_FOR_MAIN/DONE/CANCELLED), <b>Workspace Status</b> (CREATED/READY/CLOSED), <b>Sandbox Status</b>, và <b>Test Status</b> — không gộp chung thành một badge. Task Detail có thêm checklist tiến độ + một nút hành động chính duy nhất tính tự động (TaskDecisionService) giải thích chính xác vì sao chưa READY_FOR_MAIN — xem <a href="#test-progress">Xem task đã hoàn thiện tới đâu</a>. Không đoán, không dùng AI, chỉ theo luật cố định, và không route/template nào khác được tự tính lại giá trị này.</p>
 <p>Nếu agent đã báo cáo theo mẫu Agent Completion Report (<code>templates/agent-completion-report.md</code>: WORK_STATUS/WHAT_CHANGED/HOW_TO_VERIFY/EXPECTED_RESULT/TEST_DATA/RISKS), phần <b>Cách kiểm tra</b> trên trang sẽ hiện đúng nội dung đó — nếu agent chưa báo cáo, trang sẽ nói thật: "Agent chưa cung cấp hướng dẫn kiểm tra." thay vì tự bịa ra các bước.</p>
 <p>Một Review PASS chỉ hợp lệ cho <b>đúng commit</b> nó review. Agent commit thêm sau khi Review PASS → review đó tự động hiện <code>STALE</code>, phải Start Review lại — không có route/nút nào "giữ" một PASS cũ qua commit mới.</p>
 </section>
@@ -340,9 +361,29 @@
 </section>
 
 <section class="guide-section" id="test-progress"><span class="section-kicker">TIẾN ĐỘ</span><h3>Xem task đã hoàn thiện tới đâu</h3>
-<p>Đầu trang Task Detail luôn có badge <b>Status</b> / <b>Stage</b> / <b>Risk</b>, và phần <b>Overview</b> ngay bên dưới là gate checklist (✓/○) — mỗi dòng là một điều kiện thật (Brief đủ, mọi Builder Submit for Review, mọi Review PASS, QA nếu cần, Integration nếu cần, không còn blocking finding, mọi repo bắt buộc Merged). Đây là nơi chính để xem task còn thiếu đúng bước nào — không có phần trăm giả, chỉ ✓ hoặc ○ theo trạng thái thật.</p>
-<p>Nếu một Builder Workspace đang chặn Task lại (Reviewer yêu cầu FIX_REQUIRED, QA FAIL, hoặc Integration còn conflict), Task Status chuyển <b>BLOCKED</b> và Overview hiện rõ lý do:</p>
-<div class="alert"><b>Task blocked by:</b><p>codex · frontend: reviewer requested changes</p></div>
+<p>Mở một Task, phần đầu trang (<b>Status Hero</b>) luôn trả lời được ngay ba câu: đang ở đâu, còn thiếu gì, và phải bấm gì tiếp — không cần đọc kỹ toàn bộ trang mới hiểu.</p>
+<div class="sample-grid">
+<article><b>ĐANG XỬ LÝ</b><small>WORKING — có việc đang chạy (agent đang code, sandbox đang lên, integration đang test...), chỉ cần chờ.</small></article>
+<article><b>ĐANG CHỜ</b><small>WAITING — đang chờ thứ ngoài Workspace Manager (GitHub CI, hoặc bạn xác nhận thủ công một bước).</small></article>
+<article><b>CẦN THAO TÁC</b><small>ACTION_REQUIRED — có đúng một hành động chính bạn cần bấm để đi tiếp.</small></article>
+<article><b>HOÀN TẤT</b><small>COMPLETE — mọi repository bắt buộc đã Merged, Task DONE.</small></article>
+</div>
+<p>Ngay dưới đó là <b>checklist tiến độ</b> — mỗi dòng một bước thật (Task/Builder/Automated Tests/Review/Runtime Verification/Integration/Merge), luôn đúng một trong năm trạng thái:</p>
+<table><thead><tr><th>Ký hiệu</th><th>Trạng thái</th><th>Ý nghĩa</th></tr></thead><tbody>
+<tr><td>✓</td><td>done</td><td>Bước đã xong, có bằng chứng thật.</td></tr>
+<tr><td>●</td><td>current</td><td>Bước hiện tại — đúng nơi hành động chính bên dưới đang nhắm tới.</td></tr>
+<tr><td>○</td><td>future</td><td>Chưa tới lượt, chưa bắt đầu.</td></tr>
+<tr><td>!</td><td>blocked</td><td>Đang bị chặn thật (test fail, review yêu cầu sửa...).</td></tr>
+<tr><td>—</td><td>skipped</td><td>Không áp dụng cho Workflow này (ví dụ LOW risk bỏ qua Runtime Verification) — không bao giờ hiện như đã done giả.</td></tr>
+</tbody></table>
+<p>Ngay dưới checklist là đúng <b>một</b> trong hai hộp sau, không bao giờ cả hai cùng lúc:</p>
+<div class="sample-grid">
+<article><b>Vấn đề (blocker)</b><small>Có sự cố thật cần xử lý — ví dụ Reviewer yêu cầu sửa, QA FAIL, Integration conflict. Luôn ưu tiên hiện hộp này nếu có.</small></article>
+<article><b>Missing</b><small>Chưa có sự cố gì — chỉ là danh sách việc còn thiếu bằng ngôn ngữ thường (ví dụ "Chưa Submit for Review"), không phải lỗi.</small></article>
+</div>
+<div class="alert"><b>Vấn đề</b><p>codex · frontend: reviewer requested changes</p></div>
+<p>Sau hộp đó là đúng <b>một nút hành động chính</b> (primary) — không phải bạn tự đoán trong nhiều nút cùng màu đang cạnh tranh nhau. Nếu Builder gần nhất vừa hoàn thành, một thẻ <b>"[Agent] completed"</b> hiện ngay bên dưới: Commit, Tests, Review, và tóm tắt ngắn agent đã báo cáo — không phải toàn bộ Agent Report dài, chỉ bằng chứng thật đã ghi nhận.</p>
+<p>Mọi thông tin trên đều đọc thẳng từ <code>TaskDecisionService.evaluate()</code> — không route/template nào khác được phép tự tính lại. Chi tiết kỹ thuật đầy đủ (Agent Workspace, Sandbox, Review, QA, Integration từng phần riêng) vẫn còn nguyên trong <b>"Xem tất cả chi tiết kỹ thuật"</b> ở cuối trang cho ai cần đào sâu.</p>
 </section>
 
 <section class="guide-section" id="test-readiness"><span class="section-kicker">TEST READINESS</span><h3>Task này test được chưa?</h3>
@@ -384,11 +425,12 @@
 <div class="readybox"><b>READY_FOR_MAIN không có nghĩa là đã merge main.</b><p>Nó chỉ có nghĩa Task đã đủ điều kiện để tạo Pull Request. Nếu bất kỳ evidence nào ở trên trở nên cũ (commit mới, Brief đổi version, source Integration di chuyển), READY_FOR_MAIN tự động biến mất và Task quay lại ACTIVE với gate tương ứng cần làm lại — không có route nào giữ nguyên giá trị này thủ công.</p></div>
 </section>
 
-<section class="guide-section" id="github-flow"><span class="section-kicker">BƯỚC CUỐI</span><h3>Sau READY_FOR_MAIN</h3>
-<div class="horizontal-flow"><span>Push integration branch</span><b>→</b><span>Tạo GitHub Pull Request</span><b>→</b><span>GitHub CI</span><b>→</b><span>CI PASS</span><b>→</b><span>Merge main</span></div>
-<pre>git push -u origin integration/session-management</pre>
-<div class="warning"><b>Workspace Manager không bypass GitHub CI và không tự merge main.</b> Tạo Pull Request và merge trên GitHub là thao tác thủ công ngoài Workspace Manager — hiện tại phiên bản này chưa tự động tạo PR hay tự merge.</div>
-<div class="info"><b>Tiếp theo:</b> Push branch và tạo Pull Request.</div>
+<section class="guide-section" id="github-flow"><span class="section-kicker">WORKSPACE ĐỘC LẬP</span><h3>Sau READY_FOR_MAIN, nếu workspace chưa gắn Task</h3>
+<div class="info">Mục này chỉ áp dụng cho một <b>Agent Workspace tạo độc lập</b> (từ <a href="/workspaces">Agent Workspaces</a>, chưa gắn Task nào). Với luồng bình thường — một Builder Workspace thuộc một Task — Create PR/Merge <b>đã tự động thật</b> qua GitHub API, xem <a href="#real-merge">PR/Merge thật hoạt động thế nào?</a>. Bạn cũng có thể <b>gắn workspace độc lập vào một Task</b> bất cứ lúc nào để dùng luôn automation đó, thay vì làm thủ công bên dưới.</div>
+<div class="horizontal-flow"><span>Push branch</span><b>→</b><span>Tạo GitHub Pull Request</span><b>→</b><span>GitHub CI</span><b>→</b><span>CI PASS</span><b>→</b><span>Merge main</span></div>
+<pre>git push -u origin agent/claude/session-management</pre>
+<div class="warning">Workspace độc lập chưa gắn Task chưa có nút Create PR/Merge tự động — push branch và tạo Pull Request là thao tác thủ công ngoài Workspace Manager cho đúng trường hợp này. Workspace Manager vẫn không bao giờ bypass GitHub CI hay tự ý merge thay bạn.</div>
+<div class="info"><b>Tiếp theo:</b> Push branch và tạo Pull Request — hoặc gắn vào một Task để dùng Create PR/Merge thật.</div>
 </section>
 
 <section class="guide-section" id="merge-cleanup"><span class="section-kicker">SAU MERGE</span><h3>Sau khi task merge thành công</h3>
