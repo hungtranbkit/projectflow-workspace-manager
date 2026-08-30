@@ -58,6 +58,30 @@
 <p><small>{{overview.change._tasks|length}} Task{{'s' if overview.change._tasks|length != 1 else ''}} — see the <a href="/changes/{{cid}}/tasks">Tasks tab</a> for operational detail.</small></p>
 {% endif %}
 
+<!-- Integration / Release / Deploy compact summary (E10.29): every
+     value here is IntegrationService/ReleaseService's own already-
+     computed state (merge_records.merge_status, releases.status) --
+     never a second status calculation. Strong red (.danger) reserved
+     for BLOCKED/failed/rolled_back -- everything not-yet-attempted
+     stays neutral, never a fake warning. -->
+{% set rds = overview.release_deploy_summary %}
+{% if rds and (rds.integration or rds.release or rds.test or rds.production) %}
+<div class="cards">
+<article class="{{'danger' if rds.integration=='BLOCKED' else ('accent' if rds.integration=='INTEGRATED' else '')}}">
+<b>{{rds.integration or 'NOT READY'}}</b><span>Integration — <a href="/changes/{{cid}}/release">Release tab</a></span>
+</article>
+<article class="{{'danger' if rds.release=='failed' else ('accent' if rds.release=='ready' else '')}}">
+<b>{{ (rds.release or 'none')|upper }}</b><span>Release</span>
+</article>
+<article class="{{'danger' if rds.test=='failed' else ('accent' if rds.test=='verified' else '')}}">
+<b>{{ (rds.test or 'not deployed')|upper }}</b><span>TEST</span>
+</article>
+<article class="{{'danger' if rds.production in ('failed','rolled_back') else ('accent' if rds.production=='verified' else ('warn' if rds.production=='waiting_approval' else ''))}}">
+<b>{{ (rds.production or 'not deployed')|replace('_',' ')|upper }}</b><span>PRODUCTION — <a href="/changes/{{cid}}/deploy">Deploy tab</a></span>
+</article>
+</div>
+{% endif %}
+
 <!-- AUTONOMOUS EXECUTION card (E8.23): a read-only view of
      AutonomousExecutionService.status() plus one explicit
      "Run next ready task" trigger for operator testing -- E8 never

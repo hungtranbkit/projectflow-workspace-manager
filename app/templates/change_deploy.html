@@ -1,14 +1,17 @@
 {% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Deploy · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
 {% include '_change_header.html' %}
 
-<section class="panel"><h3>Deploy</h3>
-<p><small>Real deployment status, traced Change → Task → required MergeRecord → deployments (the same join WorkflowService's DEPLOY_VERIFIED gate already uses) -- never invented linkage.</small></p>
-{% if data.linked %}
+{% set deploy_badge = {'PENDING':'created','PREPARING':'running','BUILDING':'running','DEPLOYING':'running',
+   'VERIFYING':'running','VERIFIED':'pass','FAILED':'fail','ROLLED_BACK':'conflict','ROLLING_BACK':'running'} %}
+
+<section class="panel"><h3>Legacy DEV Deploy</h3>
+<p><small>Per-repository DEV deployment status, traced Change → Task → required MergeRecord → deployments (the same join WorkflowService's DEPLOY_VERIFIED gate falls back to) -- never invented linkage.</small></p>
+{% if data.deployments %}
 <div class="table-scroll"><table><thead><tr><th>Repository</th><th>Environment</th><th>Status</th><th>Commit</th><th>Health</th><th>Requested</th></tr></thead><tbody>
 {% for d in data.deployments %}<tr>
 <td>{{d.repo_name}}</td>
 <td>{{d.environment}}</td>
-<td><span class="badge {{d.status|lower}}">{{d.status}}</span></td>
+<td><span class="badge {{deploy_badge.get(d.status,'')}}">{{d.status}}</span></td>
 <td><code>{{(d.source_commit or '—')[:10]}}</code></td>
 <td>{{d.health_status or '—'}}</td>
 <td><small>{{d.requested_at}}</small></td>
@@ -16,6 +19,35 @@
 </tbody></table></div>
 {% else %}
 {{ m.empty('Not deployed yet', 'No repository this Change touches has a DEV deployment recorded against a merged Task yet.') }}
+{% endif %}
+</section>
+
+<section class="panel"><h3>Release Deployments (TEST / PRODUCTION)</h3>
+<p><small>Real runtime verification per Release (E10) -- environment identity, requested vs. observed version, artifact digest match, and rollback state, never trusted from exit code alone.</small></p>
+{% if data.releases %}
+{% for r in data.releases %}
+<div class="panel" style="margin-bottom:12px">
+<p><b>{{r.version}}</b> <span class="badge {{ {'PRODUCTION_VERIFIED':'succeeded','FAILED':'fail','ROLLED_BACK':'conflict'}.get(r.status,'') }}">{{r.status}}</span> <small>artifact <code>{{(r.artifact_digest or '—')[:19]}}</code></small></p>
+<div class="table-scroll"><table><thead><tr><th>Environment</th><th>Target</th><th>Requested Version</th><th>Observed Version</th><th>Health</th><th>Previous Version</th><th>Rollback</th></tr></thead><tbody>
+{% for d in [r.test_deployment, r.production_deployment] %}{% if d %}<tr>
+<td>{{d.environment}}</td>
+<td>{{d.target_name or d.deployed_url or '—'}}</td>
+<td>{{r.artifact_version}}</td>
+<td>{{d.artifact_version or '—'}}</td>
+<td><span class="badge {{'pass' if d.health_status=='PASS' else ('fail' if d.health_status=='FAIL' else '')}}">{{d.health_status or '—'}}</span></td>
+<td>{{d.previous_version or '—'}}</td>
+<td>{% if d.rollback_status %}<span class="badge {{'conflict' if d.rollback_status=='ROLLED_BACK' else ('fail' if d.rollback_status=='FAILED' else '')}}">{{d.rollback_status}}</span>{% else %}—{% endif %}</td>
+</tr>{% endif %}{% endfor %}
+</tbody></table></div>
+{% if r.status in ('PRODUCTION_VERIFIED','FAILED') and r.production_deployment_id and r.migration_classification != 'DESTRUCTIVE' %}
+<p><button type="button" class="danger" onclick="if(confirm('Roll back production to the previous verified artifact?'))runReleaseAction('/api/releases/{{r.id}}/rollback',this)">Rollback</button></p>
+{% elif r.migration_classification == 'DESTRUCTIVE' and r.status == 'FAILED' %}
+<p><small>Migration classified DESTRUCTIVE — rollback requires an explicit human decision, never automatic.</small></p>
+{% endif %}
+</div>
+{% endfor %}
+{% else %}
+{{ m.empty('No Release deployments yet', 'See the Release tab to build and deploy a Release for this Change.') }}
 {% endif %}
 </section>
 

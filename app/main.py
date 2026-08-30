@@ -72,6 +72,8 @@ from app.services.review_service import ReviewError, FindingsStore, task_chain_i
 from app.services.code_review_service import CodeReviewService
 from app.services.security_review_service import SecurityApplicabilityService, SecurityReviewService
 from app.services.review_fix_orchestrator import ReviewFixOrchestratorService, ReviewFixError
+from app.services.integration_service import IntegrationService, IntegrationError
+from app.services.release_service import ReleaseService, ReleaseError
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -755,13 +757,15 @@ def create_app(settings=None):
     @app.exception_handler(WorktreeManagerError)
     @app.exception_handler(ReviewError)
     @app.exception_handler(ReviewFixError)
+    @app.exception_handler(IntegrationError)
+    @app.exception_handler(ReleaseError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5/E9's Change/WorkProduct/
+        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5/E9/E10's Change/WorkProduct/
         Workflow/Plan/Spec-Proposal/Architecture/Design/Test-Design/
-        Autonomous-Execution/Worktree/Review-Fix API is a pure JSON
-        surface (E1.7: 'API/service correctness first, no large UI
-        yet') -- a clean 400 + message, never the HTML 'Action
-        blocked' page the older form-posting routes use."""
+        Autonomous-Execution/Worktree/Review-Fix/Integration/Release
+        API is a pure JSON surface (E1.7: 'API/service correctness
+        first, no large UI yet') -- a clean 400 + message, never the
+        HTML 'Action blocked' page the older form-posting routes use."""
         return JSONResponse({"ok":False,"message":str(exc)},status_code=400)
 
     @app.get("/", response_class=HTMLResponse)
@@ -3112,6 +3116,23 @@ def create_app(settings=None):
     # back to the exact legacy per-workspace check otherwise.
     workflow_service.review_gate=review_fix_orchestrator
 
+    # ---- E10: Integration, Release, Deploy & Runtime Verification ----
+    integration_service=IntegrationService(db,work_products,worktree_manager,review_fix_orchestrator,git)
+    app.state.integration_service=integration_service
+    release_service=ReleaseService(db,changes,work_products,workflow_service,human_decisions,deployer,
+        _resolve_project_policy_for_change)
+    app.state.release_service=release_service
+    # E10.23: same additive-hook pattern as review_gate above --
+    # DEPLOY_VERIFIED now consults real Release/runtime evidence when
+    # it exists, falls back to the exact legacy DEV-only check otherwise.
+    workflow_service.deploy_verified_gate=release_service
+    # E10.28/E10.29: wire the Release/Deploy tabs + Change Overview
+    # summary onto real evidence -- same additive-attribute pattern,
+    # change_control_surface was constructed earlier in create_app()
+    # before these two services existed.
+    change_control_surface.integration_service=integration_service
+    change_control_surface.release_service=release_service
+
     @app.get("/api/changes/{cid}/autonomous-execution")
     def api_autonomous_execution_status(cid:int):
         change_row(cid)
@@ -3205,6 +3226,74 @@ def create_app(settings=None):
     def api_task_integration_readiness(tid:int):
         task_row(tid)
         return review_fix_orchestrator.integration_readiness(tid)
+
+    # ---- E10 Integration / Release / Deploy / Rollback ----------------
+    @app.post("/api/tasks/{tid}/integrate")
+    def api_task_integrate(tid:int):
+        task_row(tid)
+        return integration_service.integrate_task(tid)
+    @app.get("/api/tasks/{tid}/integration")
+    def api_task_integration_status(tid:int):
+        task_row(tid)
+        return integration_service.preflight_integration(tid)
+
+    @app.post("/api/releases")
+    def api_create_release(repository_id:int=Form(...),task_ids:str=Form(...),version:str=Form("")):
+        ids=[int(x) for x in task_ids.split(",") if x.strip()]
+        r=release_service.create_release(repository_id,ids,version.strip() or None)
+        return r
+    @app.get("/api/releases")
+    def api_list_releases(repository_id:int):
+        return release_service.list_for_repository(repository_id)
+    @app.get("/api/releases/{rid}")
+    def api_get_release(rid:int):
+        r=release_service.get(rid)
+        if not r: raise HTTPException(404,"Release not found")
+        return {**r,"tasks":release_service.tasks_for(rid)}
+
+    @app.post("/api/releases/{rid}/build")
+    def api_release_build(rid:int):
+        return release_service.build(rid)
+    @app.post("/api/releases/{rid}/qualify")
+    def api_release_qualify(rid:int):
+        return release_service.qualify(rid,review_fix_orchestrator)
+
+    @app.post("/api/releases/{rid}/deploy/test")
+    def api_release_deploy_test(rid:int):
+        return release_service.deploy_test(rid)
+    @app.post("/api/releases/{rid}/deploy/production")
+    def api_release_deploy_production(rid:int):
+        return release_service.deploy_production(rid)
+    @app.post("/api/releases/{rid}/approve-production")
+    def api_release_approve_production(rid:int,approved_by:str=Form(...)):
+        return release_service.approve_production(rid,approved_by)
+    @app.post("/api/releases/{rid}/tick")
+    def api_release_tick(rid:int):
+        return release_service.release_tick(rid,review_fix_orchestrator)
+
+    @app.get("/api/releases/{rid}/deployments")
+    def api_release_deployments(rid:int):
+        r=release_service.get(rid)
+        if not r: raise HTTPException(404,"Release not found")
+        ids=[x for x in (r["test_deployment_id"],r["production_deployment_id"]) if x]
+        return [db.one("SELECT * FROM deployments WHERE id=?",(i,)) for i in ids]
+    @app.get("/api/releases/{rid}/runtime-verification")
+    def api_release_runtime_verification(rid:int):
+        r=release_service.get(rid)
+        if not r: raise HTTPException(404,"Release not found")
+        return db.all(
+            "SELECT * FROM work_products WHERE kind='RUNTIME_VERIFICATION' AND json_extract(content_metadata,'$.release_id')=? ORDER BY id DESC",(rid,))
+
+    # E10.19: a dedicated release-scoped rollback route -- the existing
+    # /api/deployments/{did}/rollback (below, unchanged) stays the exact
+    # legacy per-Task DEV form/redirect action; a Release's own
+    # rollback is a distinct JSON API action, never overloaded onto the
+    # same path with a different response shape.
+    @app.post("/api/releases/{rid}/rollback")
+    def api_release_rollback(rid:int):
+        r=release_service.get(rid)
+        if not r: raise HTTPException(404,"Release not found")
+        return release_service.rollback_production(rid)
 
     @app.post("/api/tasks/{tid}/workspaces")
     def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):

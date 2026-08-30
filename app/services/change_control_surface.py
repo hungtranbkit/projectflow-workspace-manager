@@ -38,6 +38,14 @@ class ChangeControlSurfaceService:
         self.human_decisions = human_decisions
         self.specs_root = specs_root
         self.project_policy_resolver = project_policy_resolver
+        # E10.28/E10.29: wired by main.py AFTER construction (same
+        # additive-attribute pattern as workflow_service.review_gate) --
+        # IntegrationService/ReleaseService are built later in create_app()
+        # since they depend on worktree_manager/review_fix_orchestrator/
+        # deployer. None-safe throughout: every method below falls back
+        # to the exact honest "not linked yet" behavior when unwired.
+        self.integration_service = None
+        self.release_service = None
 
     # ---- shared helpers -------------------------------------------------
     def _change(self, change_id: int) -> dict | None:
@@ -108,7 +116,7 @@ class ChangeControlSurfaceService:
         spec_drift = {"stale": False, "reason": None}
         if plans:
             spec_drift = self.planner_service.check_staleness(plans[-1]["id"])
-        return build_change_overview(
+        ov = build_change_overview(
             change=change, work_products=self.work_products.list_for_change(change_id), workflow_state=workflow_state,
             architecture_status=self.architecture_design_service.status(change_id, project_policy=policy),
             design_status=self.architecture_design_service.status(change_id, project_policy=policy),
@@ -116,6 +124,8 @@ class ChangeControlSurfaceService:
             spec_proposals=self.spec_lifecycle_service.list_proposals(change_id),
             human_decisions_pending=self.human_decisions.list_pending_for_change(change_id),
             agents_completed=agents_completed, agents_running=agents_running, spec_drift=spec_drift)
+        ov["release_deploy_summary"] = self.release_deploy_summary(change_id)  # E10.29
+        return ov
 
     # ---- E7.5.6 Spec tab --------------------------------------------------
     def spec_tab(self, change_id: int) -> dict:
@@ -287,12 +297,39 @@ class ChangeControlSurfaceService:
                 by_task.append({"task": t, "evidence": ev})
         return {"change": change, "by_task": by_task}
 
-    # ---- E7.5.15 Release / Deploy (honest, reuses the exact join
-    # WorkflowService._gate_deploy_verified already uses -- never a new
-    # linkage) -------------------------------------------------------------
+    # ---- E7.5.15 / E10.28 Release / Deploy (honest, reuses the exact
+    # join WorkflowService._gate_deploy_verified already uses for the
+    # legacy DEV-only rows, plus real Release/Deploy state once
+    # release_service/integration_service are wired -- never a new,
+    # independently-derived status) ------------------------------------
+    def _deployment_with_previous_version(self, deployment_id: int | None) -> dict | None:
+        """Attaches `previous_version` -- the artifact_version of the
+        deployment this one rolled back TO (deployments.
+        rollback_to_deployment_id, set by DeploymentService.rollback())
+        -- so the Deploy tab can show it without a template-side query."""
+        if not deployment_id:
+            return None
+        d = self.db.one("SELECT * FROM deployments WHERE id=?", (deployment_id,))
+        if not d:
+            return None
+        d["previous_version"] = None
+        if d.get("rollback_to_deployment_id"):
+            prev = self.db.one("SELECT artifact_version FROM deployments WHERE id=?", (d["rollback_to_deployment_id"],))
+            d["previous_version"] = prev["artifact_version"] if prev else None
+        return d
+
+    def _change_release_ids(self, change_id: int, task_ids: list[int]) -> list[int]:
+        if not task_ids:
+            return []
+        placeholders = ",".join("?" * len(task_ids))
+        rows = self.db.all(
+            f"SELECT DISTINCT release_id FROM release_tasks WHERE task_id IN ({placeholders})", tuple(task_ids))
+        return sorted((r["release_id"] for r in rows), reverse=True)
+
     def deploy_tab(self, change_id: int) -> dict:
         change = self._change(change_id)
         tasks = self.changes.list_tasks_for_change(change_id)
+        task_ids = [t["id"] for t in tasks]
         repo_ids: set[int] = set()
         merge_records = []
         for t in tasks:
@@ -307,14 +344,127 @@ class ChangeControlSurfaceService:
                 "ORDER BY d.id DESC LIMIT 1", (rid, change_id))
             if latest:
                 deployments.append(latest)
-        return {"change": change, "linked": bool(deployments), "deployments": deployments,
-                "merge_records": merge_records}
+
+        # E10.28: the same Releases this Change's Tasks belong to --
+        # composition only, reading ReleaseService's own already-computed
+        # release/test/production state, never a second one.
+        releases = []
+        if self.release_service:
+            for rid in self._change_release_ids(change_id, task_ids):
+                r = self.release_service.get(rid)
+                if r:
+                    r["test_deployment"] = self._deployment_with_previous_version(r["test_deployment_id"])
+                    r["production_deployment"] = self._deployment_with_previous_version(r["production_deployment_id"])
+                    releases.append(r)
+        return {"change": change, "linked": bool(deployments) or bool(releases), "deployments": deployments,
+                "merge_records": merge_records, "releases": releases}
 
     def release_tab(self, change_id: int) -> dict:
-        """No ReleaseService/artifact-versioning concept exists yet in
-        this codebase (E1 only reserved the RELEASE_MANIFEST WorkProduct
-        kind) -- honest 'not linked yet' rather than inventing one
-        (E7.5.15's own explicit instruction)."""
         change = self._change(change_id)
+        tasks = self.changes.list_tasks_for_change(change_id)
+        task_ids = [t["id"] for t in tasks]
+
+        # Per-Task integration state: readiness (E9's own
+        # integration_readiness(), via IntegrationService.
+        # preflight_integration -- never re-derived) plus whether it's
+        # already been integrated (merge_records.merge_status='MERGED',
+        # the exact row IntegrationService.integrate_task() itself
+        # writes).
+        integrations = []
+        integrated_task_ids: list[int] = []
+        repository_id = None
+        for t in tasks:
+            merged = self.db.one(
+                "SELECT * FROM merge_records WHERE task_id=? AND required=1 ORDER BY id DESC LIMIT 1", (t["id"],))
+            integrated = bool(merged and merged["merge_status"] == "MERGED")
+            readiness = None
+            if self.integration_service and not integrated:
+                try:
+                    readiness = self.integration_service.preflight_integration(t["id"])
+                except Exception:
+                    readiness = None
+            integrations.append({
+                "task": t, "merge_record": merged, "integrated": integrated, "readiness": readiness,
+                "can_integrate": bool(readiness and readiness.get("ready") and not integrated)})
+            if integrated:
+                integrated_task_ids.append(t["id"])
+                repository_id = repository_id or merged["repository_id"]
+
+        releases = []
+        if self.release_service:
+            for rid in self._change_release_ids(change_id, task_ids):
+                r = self.release_service.get(rid)
+                if r:
+                    releases.append(r)
+
         manifests = self._wps(change_id, "RELEASE_MANIFEST", current_only=False)
-        return {"change": change, "linked": bool(manifests), "manifests": manifests}
+        return {"change": change, "linked": bool(releases) or bool(manifests), "manifests": manifests,
+                "integrations": integrations, "releases": releases,
+                "can_create_release": bool(self.release_service and integrated_task_ids and repository_id and not releases),
+                "repository_id": repository_id, "integrated_task_ids": integrated_task_ids}
+
+    # ---- E10.29: compact Integration/Release/TEST/PRODUCTION summary,
+    # for the Change Overview page -- every field is read straight off
+    # IntegrationService/ReleaseService's own already-computed state
+    # (merge_records.merge_status, releases.status), reserving the
+    # BLOCKED/failed states for cases genuinely worth strong-red
+    # attention. Returns None fields throughout when no evidence exists
+    # yet (a Change with no Tasks, or the services unwired) -- never a
+    # fabricated "ready" default. ------------------------------------
+    _RELEASE_BUCKET = {
+        "DRAFT": "building", "BUILDING": "building", "BUILT": "building", "QUALIFYING": "building",
+        "READY": "ready", "DEPLOYING_TEST": "ready", "TEST_VERIFIED": "ready",
+        "WAITING_PRODUCTION_APPROVAL": "ready", "DEPLOYING_PRODUCTION": "ready", "PRODUCTION_VERIFIED": "ready",
+        "FAILED": "failed", "ROLLED_BACK": "failed",
+    }
+    _TEST_VERIFIED_STATUSES = ("TEST_VERIFIED", "WAITING_PRODUCTION_APPROVAL", "DEPLOYING_PRODUCTION",
+                                "PRODUCTION_VERIFIED", "ROLLED_BACK")
+
+    def release_deploy_summary(self, change_id: int) -> dict:
+        tasks = self.changes.list_tasks_for_change(change_id)
+        task_ids = [t["id"] for t in tasks]
+        summary = {"integration": None, "release": None, "test": None, "production": None}
+        if not tasks:
+            return summary
+
+        merged_task_ids = {row["task_id"] for row in self.db.all(
+            "SELECT task_id FROM merge_records WHERE required=1 AND merge_status='MERGED' "
+            "AND task_id IN (SELECT id FROM tasks WHERE change_id=?)", (change_id,))}
+        if merged_task_ids and set(task_ids) <= merged_task_ids:
+            summary["integration"] = "INTEGRATED"
+        elif self.integration_service:
+            any_ready, any_blocked = False, False
+            for t in tasks:
+                if t["id"] in merged_task_ids:
+                    continue
+                try:
+                    readiness = self.integration_service.preflight_integration(t["id"])
+                except Exception:
+                    continue
+                if readiness.get("ready"):
+                    any_ready = True
+                elif readiness.get("blockers"):
+                    any_blocked = True
+            if any_ready:
+                summary["integration"] = "READY"
+            elif any_blocked:
+                summary["integration"] = "BLOCKED"
+
+        if self.release_service:
+            release_ids = self._change_release_ids(change_id, task_ids)
+            releases = [r for r in (self.release_service.get(rid) for rid in release_ids) if r]
+            if releases:
+                latest = releases[0]  # _change_release_ids sorts newest-first
+                summary["release"] = self._RELEASE_BUCKET.get(latest["status"], "building")
+                if latest["test_deployment_id"]:
+                    summary["test"] = "verified" if latest["status"] in self._TEST_VERIFIED_STATUSES else "failed"
+                if latest["production_deployment_id"]:
+                    if latest["status"] == "WAITING_PRODUCTION_APPROVAL":
+                        summary["production"] = "waiting_approval"
+                    elif latest["status"] == "PRODUCTION_VERIFIED":
+                        summary["production"] = "verified"
+                    elif latest["status"] == "ROLLED_BACK":
+                        summary["production"] = "rolled_back"
+                    elif latest["status"] == "FAILED":
+                        summary["production"] = "failed"
+        return summary

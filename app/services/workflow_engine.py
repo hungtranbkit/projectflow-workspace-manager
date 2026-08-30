@@ -391,6 +391,14 @@ class WorkflowService:
         # construction) preserves the exact legacy REVIEW_PASS/
         # SECURITY_PASS behavior below untouched.
         self.review_gate = None
+        # Phase E10 additive hook, same pattern as review_gate/
+        # architecture_design_gate above: an optional object exposing
+        # .deploy_verified(change_id) -> bool|None (wired in app/main.py
+        # once ReleaseService exists). None means "no real Release
+        # evidence to consult" -- falls back to the exact legacy DEV-
+        # only deployments check below, zero behavior change for any
+        # pre-E10 construction.
+        self.deploy_verified_gate = None
 
     # ---- creation (E3.10) -----------------------------------------
     def create_workflow_for_change(self, change_id: int, profile_key: str | None = None, project_policy: dict | None = None) -> dict:
@@ -548,8 +556,16 @@ class WorkflowService:
         return True
 
     def _gate_deploy_verified(self, change_id: int, tasks: list[dict]) -> bool:
-        """Reuses the existing `deployments` table (DeploymentService's
-        own evidence) -- never a second deployment-status calculation."""
+        """E10.23: real Release/deployment/runtime evidence when a
+        deploy_verified_gate is wired (ReleaseService's own PRODUCTION_
+        VERIFIED-equivalent truth) -- falls back to the exact legacy
+        DEV-only `deployments` check (DeploymentService's own evidence,
+        never a second deployment-status calculation) when unwired or
+        when it has no Release evidence for this Change yet."""
+        if self.deploy_verified_gate is not None:
+            result = self.deploy_verified_gate.deploy_verified(change_id)
+            if result is not None:
+                return result
         repo_ids: set[int] = set()
         for t in tasks:
             repo_ids.update(r["repository_id"] for r in self.db.all(

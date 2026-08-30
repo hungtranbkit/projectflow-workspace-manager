@@ -96,6 +96,14 @@ class DeploymentService:
         self.health_attempts = 20
         self.health_delay = 3.0
         self.image_exists = _default_image_exists
+        # E10.19/E10.34: the env var a rollback pins to force the exact
+        # prior artifact -- "MESFLOW_IMAGE" is this host's own real,
+        # already-audited target's convention (see this module's own
+        # target-audit docstring). Injectable so a non-Docker-artifact
+        # target (e.g. this phase's own disposable HTTP fixture, which
+        # has no docker image at all) can use its own env var name
+        # without touching the real target's proven-safe default.
+        self.rollback_env_var = "MESFLOW_IMAGE"
 
     # ---- target resolution (section 8) -----------------------------------
     def target(self, repo_path: str, environment: str) -> dict | None:
@@ -106,6 +114,35 @@ class DeploymentService:
         if not cfg or not cfg.get("enabled"):
             return None
         return cfg
+
+    # ---- environment-scoped commands (E10.12/E10.13) ----------------------
+    def _command_for_env(self, repo_path: str, environment: str, name: str):
+        """E10: an environment's own `deployment.<env>.commands.<name>`
+        override (same {command, working_directory, timeout_seconds}
+        shape load_command already uses), falling back to the EXACT
+        existing global `commands.<name>` when no environment-specific
+        override is declared. DEV has never declared a `deployment.DEV`
+        block in any real PROJECT.yaml this app manages, so `target()`
+        returns None and this always falls through to load_command() --
+        zero behavior change for existing DEV automation. This is what
+        lets TEST and PRODUCTION point at genuinely different targets
+        (different port, different compose project, ...) without a
+        second deploy mechanism."""
+        cfg = self.target(repo_path, environment)
+        if cfg and isinstance(cfg.get("commands"), dict):
+            spec = cfg["commands"].get(name)
+            if isinstance(spec, dict) and spec.get("command"):
+                return (str(spec["command"]), str(spec.get("working_directory", ".")), int(spec.get("timeout_seconds", 1800)))
+        return load_command(Path(repo_path), name)
+
+    def _health_url_for_env(self, repo_path: str, environment: str) -> str | None:
+        cfg = self.target(repo_path, environment)
+        if cfg and isinstance(cfg.get("healthcheck"), dict) and cfg["healthcheck"].get("url"):
+            import os
+            def _sub(m):
+                return os.environ.get(m.group(1), m.group(2))
+            return re.sub(r"\$\{(\w+):-([^}]*)\}", _sub, cfg["healthcheck"]["url"])
+        return self.health_url(repo_path)
 
     def health_url(self, repo_path: str) -> str | None:
         """service.healthcheck.url from PROJECT.yaml, with its own
@@ -151,6 +188,48 @@ class DeploymentService:
         never blocking the request on real docker/build work."""
         self.spawn(self._run, (deployment_id,))
 
+    def build_once(self, deployment_id: int, repo_path: str, source_commit: str, environment: str = "DEV") -> dict | None:
+        """E10.9/E10.10: the ONE place build-once + artifact-identity
+        logic lives -- extracted so ReleaseService.build() can reuse it
+        for a build-only phase (via its own throwaway `deployments`
+        row, environment='BUILD', purely to reuse this exact phase-
+        audit mechanism) without duplicating a second build pipeline.
+        Returns the artifact metadata dict (or None if the project
+        declares no artifact metadata file at all) and always leaves
+        the deployment row's own artifact_* columns updated when one
+        exists. Raises DeploymentError on a genuine source mismatch --
+        never deploys/records an artifact whose evidence contradicts
+        the commit it claims to be built from."""
+        build_cmd = self._command_for_env(repo_path, environment, "build")
+        needs_build = self._needs_build(repo_path, source_commit)
+        if build_cmd and needs_build:
+            self._set(deployment_id, status="BUILDING")
+            self._run_command(deployment_id, "BUILDING", build_cmd, repo_path)
+        artifact = self._read_artifact_metadata(repo_path)
+        if artifact:
+            # section 4: an artifact metadata file exists (either just
+            # built, or reused because it already matched -- see
+            # _needs_build) but its OWN recorded source_commit must
+            # still equal what THIS deployment was asked to deploy.
+            # A mismatch here means either a build silently produced
+            # evidence for the wrong commit, or a concurrent build for
+            # a different commit clobbered the shared "latest"
+            # metadata pointer after this one's own build finished --
+            # never deploy an artifact whose evidence contradicts the
+            # commit we were told to deploy.
+            artifact_commit = artifact.get("source_commit")
+            if artifact_commit and artifact_commit != source_commit:
+                raise DeploymentError(
+                    "ARTIFACT_SOURCE_MISMATCH",
+                    f"artifact metadata source_commit {artifact_commit[:12]} != requested {source_commit[:12]}")
+            self._set(deployment_id,
+                      artifact_version=artifact.get("version"),
+                      artifact_image=artifact.get("image"),
+                      artifact_digest=artifact.get("image_digest"),
+                      artifact_filename=artifact.get("package_filename"),
+                      artifact_sha256=artifact.get("package_sha256"))
+        return artifact
+
     def _run(self, deployment_id: int) -> None:
         d = self.db.one("SELECT * FROM deployments WHERE id=?", (deployment_id,))
         repo = self.db.one("SELECT * FROM repositories WHERE id=?", (d["repository_id"],))
@@ -158,43 +237,15 @@ class DeploymentService:
         try:
             self._set(deployment_id, status="PREPARING", started_at=now())
             self._prepare_source(deployment_id, repo_path, d["source_commit"])
+            self.build_once(deployment_id, repo_path, d["source_commit"], d["environment"])
 
-            build_cmd = load_command(Path(repo_path), "build")
-            needs_build = self._needs_build(repo_path, d["source_commit"])
-            if build_cmd and needs_build:
-                self._set(deployment_id, status="BUILDING")
-                self._run_command(deployment_id, "BUILDING", build_cmd, repo_path)
-            artifact = self._read_artifact_metadata(repo_path)
-            if artifact:
-                # section 4: an artifact metadata file exists (either just
-                # built, or reused because it already matched -- see
-                # _needs_build) but its OWN recorded source_commit must
-                # still equal what THIS deployment was asked to deploy.
-                # A mismatch here means either a build silently produced
-                # evidence for the wrong commit, or a concurrent build for
-                # a different commit clobbered the shared "latest"
-                # metadata pointer after this one's own build finished --
-                # never deploy an artifact whose evidence contradicts the
-                # commit we were told to deploy.
-                artifact_commit = artifact.get("source_commit")
-                if artifact_commit and artifact_commit != d["source_commit"]:
-                    raise DeploymentError(
-                        "ARTIFACT_SOURCE_MISMATCH",
-                        f"artifact metadata source_commit {artifact_commit[:12]} != requested {d['source_commit'][:12]}")
-                self._set(deployment_id,
-                          artifact_version=artifact.get("version"),
-                          artifact_image=artifact.get("image"),
-                          artifact_digest=artifact.get("image_digest"),
-                          artifact_filename=artifact.get("package_filename"),
-                          artifact_sha256=artifact.get("package_sha256"))
-
-            deploy_cmd = load_command(Path(repo_path), "local_deploy")
+            deploy_cmd = self._command_for_env(repo_path, d["environment"], "local_deploy")
             if not deploy_cmd:
                 raise DeploymentError("NO_DEPLOY_COMMAND", "PROJECT.yaml declares no local_deploy command")
             self._set(deployment_id, status="DEPLOYING")
             self._run_command(deployment_id, "DEPLOYING", deploy_cmd, repo_path)
-            self._verify_health_and_smoke(deployment_id, repo_path)
-            url = self._read_deployed_url(repo_path)
+            self._verify_health_and_smoke(deployment_id, repo_path, d["environment"])
+            url = self._read_deployed_url(repo_path, d["environment"])
             self._set(deployment_id, status="VERIFIED", deployed_url=url, finished_at=now(), error=None)
         except DeploymentError as exc:
             self._set(deployment_id, status="FAILED", error=f"{exc.code}: {exc}"[:2000], finished_at=now())
@@ -203,19 +254,19 @@ class DeploymentService:
         finally:
             self._restore_source(repo_path)
 
-    def _verify_health_and_smoke(self, deployment_id: int, repo_path: str) -> None:
+    def _verify_health_and_smoke(self, deployment_id: int, repo_path: str, environment: str = "DEV") -> None:
         """Shared by a normal deploy and a rollback -- both must pass the
         exact same real health+smoke bar before being called VERIFIED /
         ROLLED_BACK (section 8: 'not successful merely because docker
         compose starts')."""
         self._set(deployment_id, status="VERIFYING")
-        health_url = self.health_url(repo_path)
+        health_url = self._health_url_for_env(repo_path, environment)
         healthy = self._check_health(deployment_id, health_url)
         self._set(deployment_id, health_status="PASS" if healthy else "FAIL", health_checked_at=now())
         if not healthy:
             raise DeploymentError("HEALTH_FAILED", f"Health check did not pass: {health_url}")
 
-        smoke_cmd = load_command(Path(repo_path), "smoke")
+        smoke_cmd = self._command_for_env(repo_path, environment, "smoke")
         smoke_ok = True
         if smoke_cmd:
             smoke_ok = self._run_command(deployment_id, "SMOKE", smoke_cmd, repo_path, raise_on_fail=False)
@@ -223,8 +274,8 @@ class DeploymentService:
         if not smoke_ok:
             raise DeploymentError("SMOKE_FAILED", "Smoke verification failed")
 
-    def _read_deployed_url(self, repo_path: str) -> str | None:
-        status_cmd = load_command(Path(repo_path), "local_status")
+    def _read_deployed_url(self, repo_path: str, environment: str = "DEV") -> str | None:
+        status_cmd = self._command_for_env(repo_path, environment, "local_status")
         if not status_cmd:
             return None
         r = self.runner(["bash", "-lc", status_cmd[0]], Path(repo_path) / status_cmd[1], status_cmd[2])
@@ -342,11 +393,25 @@ class DeploymentService:
         to, or None if rollback genuinely isn't available right now --
         section 7: never show a fake/disabled rollback affordance. Real
         requirements: a strictly earlier VERIFIED deployment exists for
-        the exact same task+repo+environment, it recorded an artifact
-        image, and that image still exists on this host's docker."""
-        target = self.db.one(
-            "SELECT * FROM deployments WHERE task_id=? AND repository_id=? AND environment=? AND status='VERIFIED' AND id<? ORDER BY id DESC LIMIT 1",
-            (deployment["task_id"], deployment["repository_id"], deployment["environment"], deployment["id"]))
+        the exact same repo+environment, it recorded an artifact image,
+        and that image still exists on this host's docker.
+
+        E10: a Release-driven TEST/PRODUCTION deployment has no single
+        owning task_id (a Release may span multiple Tasks) -- those
+        rows are created with task_id NULL, and SQL's NULL=NULL is
+        never true, so the original task_id-scoped query would always
+        find nothing for them. Matches by task_id when the deployment
+        HAS one (the exact original per-Task DEV lineage, unchanged
+        behavior); matches by repo+environment alone (task_id IS NULL)
+        when it doesn't."""
+        if deployment.get("task_id"):
+            target = self.db.one(
+                "SELECT * FROM deployments WHERE task_id=? AND repository_id=? AND environment=? AND status='VERIFIED' AND id<? ORDER BY id DESC LIMIT 1",
+                (deployment["task_id"], deployment["repository_id"], deployment["environment"], deployment["id"]))
+        else:
+            target = self.db.one(
+                "SELECT * FROM deployments WHERE task_id IS NULL AND repository_id=? AND environment=? AND status='VERIFIED' AND id<? ORDER BY id DESC LIMIT 1",
+                (deployment["repository_id"], deployment["environment"], deployment["id"]))
         if not target or not target.get("artifact_image"):
             return None
         if not self.image_exists(target["artifact_image"]):
@@ -380,16 +445,16 @@ class DeploymentService:
         started = now()
         self._set(deployment_id, status="PREPARING", started_at=started, rollback_started_at=started)
         try:
-            deploy_cmd = load_command(Path(repo_path), "local_deploy")
+            deploy_cmd = self._command_for_env(repo_path, d["environment"], "local_deploy")
             if not deploy_cmd:
                 raise DeploymentError("NO_DEPLOY_COMMAND", "PROJECT.yaml declares no local_deploy command")
             self._set(deployment_id, status="DEPLOYING")
             # The one line that makes this a rollback rather than a
             # normal redeploy: force the exact previous artifact image,
             # never whatever "latest" happens to resolve to right now.
-            self._run_command(deployment_id, "DEPLOYING", deploy_cmd, repo_path, env={"MESFLOW_IMAGE": d["artifact_image"]})
-            self._verify_health_and_smoke(deployment_id, repo_path)
-            url = self._read_deployed_url(repo_path)
+            self._run_command(deployment_id, "DEPLOYING", deploy_cmd, repo_path, env={self.rollback_env_var: d["artifact_image"]})
+            self._verify_health_and_smoke(deployment_id, repo_path, d["environment"])
+            url = self._read_deployed_url(repo_path, d["environment"])
             finished = now()
             self._set(deployment_id, status="ROLLED_BACK", rollback_status="VERIFIED", deployed_url=url,
                       finished_at=finished, rollback_finished_at=finished, error=None)

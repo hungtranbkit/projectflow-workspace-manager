@@ -2,14 +2,57 @@
 {% include '_change_header.html' %}
 
 <section class="panel">
-{% if data.linked %}
-<h3>Release Manifests</h3>
-<div class="table-scroll"><table><thead><tr><th>Title</th><th>Status</th><th>Created</th></tr></thead><tbody>
-{% for m_ in data.manifests %}<tr><td>{{m_.title}}</td><td><span class="badge {{m_.status|lower}}">{{m_.status}}</span></td><td><small>{{m_.created_at}}</small></td></tr>{% endfor %}
+<h3>Integration</h3>
+<p><small>Real per-Task integration state (E10) -- reuses E9's own integration_readiness(), never a second review/staleness check.</small></p>
+<div class="table-scroll"><table><thead><tr><th>Task</th><th>Status</th><th>Merged Commit</th><th></th></tr></thead><tbody>
+{% for row in data.integrations %}<tr>
+<td>{{row.task.title}}</td>
+<td>{% if row.integrated %}<span class="badge pass">INTEGRATED</span>{% elif row.readiness and row.readiness.ready %}<span class="badge ready">READY</span>{% elif row.readiness %}<span class="badge blocked">BLOCKED — {{row.readiness.blockers|join(', ')}}</span>{% else %}<span class="badge">NOT READY</span>{% endif %}</td>
+<td>{% if row.merge_record %}<code>{{(row.merge_record.merged_commit or '—')[:10]}}</code>{% else %}—{% endif %}</td>
+<td>{% if row.can_integrate %}<button type="button" onclick="runReleaseAction('/api/tasks/{{row.task.id}}/integrate',this)">Integrate</button>{% endif %}</td>
+</tr>{% endfor %}
+</tbody></table></div>
+</section>
+
+<section class="panel">
+<h3>Release</h3>
+{% if data.releases %}
+{% set release_badge = {'DRAFT':'draft','BUILDING':'running','BUILT':'implemented','QUALIFYING':'running',
+   'READY':'ready','DEPLOYING_TEST':'running','TEST_VERIFIED':'pass','WAITING_PRODUCTION_APPROVAL':'created',
+   'DEPLOYING_PRODUCTION':'running','PRODUCTION_VERIFIED':'succeeded','FAILED':'fail','ROLLED_BACK':'conflict'} %}
+<div class="table-scroll"><table><thead><tr><th>Version</th><th>Status</th><th>Source Commit</th><th>Artifact Digest</th><th>TEST</th><th>Production Approval</th><th>Production</th><th>Actions</th></tr></thead><tbody>
+{% for r in data.releases %}<tr>
+<td><b>{{r.version}}</b></td>
+<td><span class="badge {{release_badge.get(r.status,'')}}">{{r.status}}</span></td>
+<td><code>{{(r.source_commit or '—')[:10]}}</code></td>
+<td><code>{{(r.artifact_digest or '—')[:19]}}</code></td>
+<td>{{'PASS' if r.status in ('TEST_VERIFIED','WAITING_PRODUCTION_APPROVAL','DEPLOYING_PRODUCTION','PRODUCTION_VERIFIED','ROLLED_BACK') else ('FAILED' if r.status=='FAILED' and r.test_deployment_id else ('DEPLOYING' if r.status=='DEPLOYING_TEST' else '—'))}}</td>
+<td>{% if r.production_approved_by %}{{r.production_approved_by}}<br><small>{{r.production_approved_at}}</small>{% else %}—{% endif %}</td>
+<td>{% if r.status=='PRODUCTION_VERIFIED' %}<span class="badge pass">VERIFIED</span>{% elif r.status=='ROLLED_BACK' %}<span class="badge conflict">ROLLED BACK</span>{% elif r.status=='WAITING_PRODUCTION_APPROVAL' %}<span class="badge created">WAITING APPROVAL</span>{% elif r.status=='FAILED' and r.production_deployment_id %}<span class="badge fail">FAILED</span>{% else %}—{% endif %}</td>
+<td class="actions">
+{% if r.status=='DRAFT' %}<button type="button" onclick="runReleaseAction('/api/releases/{{r.id}}/build',this)">Build Release</button>{% endif %}
+{% if r.status=='BUILT' %}<button type="button" onclick="runReleaseAction('/api/releases/{{r.id}}/qualify',this)">Qualify</button>{% endif %}
+{% if r.status=='READY' %}<button type="button" onclick="runReleaseAction('/api/releases/{{r.id}}/deploy/test',this)">Deploy TEST</button>{% endif %}
+{% if r.status=='TEST_VERIFIED' %}
+<details class="mark-ready-form"><summary class="button ghost">Approve Production</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/releases/{{r.id}}/approve-production',this.querySelector('button'),{approved_by:this.approved_by.value})">
+<label>Approved by<input name="approved_by" required></label><button type="submit">Approve</button>
+</form></details>
+{% endif %}
+{% if r.status in ('TEST_VERIFIED','WAITING_PRODUCTION_APPROVAL') %}<button type="button" onclick="runReleaseAction('/api/releases/{{r.id}}/deploy/production',this)">Deploy Production</button>{% endif %}
+{% if r.status in ('PRODUCTION_VERIFIED','FAILED') and r.production_deployment_id and r.migration_classification != 'DESTRUCTIVE' %}<button type="button" class="danger" onclick="if(confirm('Roll back production to the previous verified artifact?'))runReleaseAction('/api/releases/{{r.id}}/rollback',this)">Rollback</button>{% endif %}
+</td>
+</tr>{% endfor %}
 </tbody></table></div>
 {% else %}
-<h3>Release</h3>
-{{ m.empty('Not linked yet', "ProjectFlow has no Release/artifact-versioning service wired to Change yet -- see the Deploy tab for real per-repository deployment status via this Change's merged Tasks.") }}
+{{ m.empty('Not linked yet', 'No Release has been created for this Change yet.') }}
+{% if data.can_create_release %}
+<details class="mark-ready-form"><summary class="button">Create Release</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/releases',this.querySelector('button'),{repository_id:{{data.repository_id}},task_ids:'{{data.integrated_task_ids|join(",")}}',version:this.version.value})">
+<label>Version (optional — derived from VERSION/PROJECT.yaml if left blank)<input name="version" placeholder="e.g. v1.2.0"></label>
+<button type="submit">Create Release</button>
+</form></details>
+{% endif %}
 {% endif %}
 </section>
 

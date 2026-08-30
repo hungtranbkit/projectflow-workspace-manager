@@ -45,6 +45,13 @@ WORK_PRODUCT_KINDS = (
     # TEST_REVIEW, since SECURITY_PASS must stop aliasing REVIEW_PASS
     # (E9.24) and needs its own distinct evidence kind to do that.
     "SECURITY_REVIEW",
+    # Phase E10 (Integration, Release, Deploy & Runtime Verification
+    # Loop): RELEASE_MANIFEST already existed (E1 seeded it ahead of
+    # time) and is reused as-is for a Release's own durable summary.
+    # The other four are genuinely new -- one per E10.24's own required
+    # trace chain link that had no existing typed evidence.
+    "INTEGRATED_CHANGE", "BUILD_ARTIFACT", "DEPLOYMENT_EVIDENCE",
+    "RUNTIME_VERIFICATION", "ROLLBACK_EVIDENCE",
 )
 WORK_PRODUCT_STATUSES = ("DRAFT", "PROPOSED", "APPROVED", "SUPERSEDED", "REJECTED")
 DIRECTIONS = ("INPUT", "OUTPUT")

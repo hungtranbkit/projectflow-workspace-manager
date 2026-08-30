@@ -43,6 +43,15 @@ async function runAutonomousTick(cid,button){let original=button.textContent;but
 // Same operator-testing pattern, one specific Task
 // (POST /api/tasks/{id}/autonomous-start) -- Tasks tab's per-row "Run now".
 async function runAutonomousStart(tid,button){let original=button.textContent;button.disabled=true;button.textContent='Running...';try{let response=await fetch(`/api/tasks/${tid}/autonomous-start`,{method:'POST'}),data=await response.json();alert(`Result: ${data.outcome||JSON.stringify(data)}`);location.reload()}catch(error){alert(error.message||'Start failed');button.disabled=false;button.textContent=original}}
+// E10.28: one generic action runner for the Release/Deploy tabs'
+// Integrate/Build/Qualify/Deploy TEST/Approve/Deploy Production/revert
+// buttons -- every button here POSTs to a real IntegrationService/
+// ReleaseService route and reloads from the server's own resulting
+// state, same "alert the outcome, then reload" discipline as
+// runAutonomousStart above. `body`, if given, is a plain {key:value}
+// object sent as a form-encoded POST body (approve-production's
+// approved_by, releases' create fields).
+async function runReleaseAction(url,button,body){let original=button.textContent;button.disabled=true;button.textContent='Working...';try{let opts={method:'POST'};if(body){opts.headers={'Content-Type':'application/x-www-form-urlencoded'};opts.body=new URLSearchParams(body).toString()}let response=await fetch(url,opts),data=await response.json();if(!response.ok){alert(data.detail?JSON.stringify(data.detail):JSON.stringify(data));button.disabled=false;button.textContent=original;return}alert(`Result: ${data.outcome||'OK'}`);location.reload()}catch(error){alert(error.message||'Action failed');button.disabled=false;button.textContent=original}}
 // Action-button feedback (button-state-ux): every state-changing form can
 // carry data-loading-label -- on submit, its button is disabled and
 // relabeled INSTANTLY, client-side, before the network round trip even

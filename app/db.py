@@ -1195,6 +1195,62 @@ ALTER TABLE tasks ADD COLUMN fix_of_task_id INTEGER REFERENCES tasks(id);
 ALTER TABLE tasks ADD COLUMN fix_review_id INTEGER REFERENCES review_runs(id);
 CREATE INDEX IF NOT EXISTS idx_review_runs_task_kind ON review_runs(task_id,review_kind);
 """),
+    # V27: Integration, Release, Deploy & Runtime Verification Loop
+    # (Phase E10). Discovery finding: DeploymentService (build-once
+    # artifact reuse, real health+smoke verification, real rollback via
+    # a pinned prior artifact image, per-phase audit trail) and
+    # `deployments`/`deployment_phases` ALREADY implement most of E10's
+    # own build/deploy/runtime-verify/rollback requirements -- reused
+    # as-is, never rebuilt. `merge_records`/GitWorkspaceService.merge()/
+    # create_baseline_probe (E1/E8.5) are reused for the real local
+    # integration merge. What's genuinely new: a durable Release
+    # lifecycle (releases/release_tasks) wrapping one or more integrated
+    # Tasks around one immutable artifact/version, and a minimal
+    # repository-scoped integration lock (E10.4 -- "establish safety
+    # now" even though E13 concurrency isn't enabled yet).
+    (27, """
+CREATE TABLE IF NOT EXISTS releases(
+  id INTEGER PRIMARY KEY,
+  repository_id INTEGER NOT NULL REFERENCES repositories(id),
+  version TEXT NOT NULL,
+  source_commit TEXT NOT NULL,
+  spec_baseline_work_product_id INTEGER REFERENCES work_products(id),
+  design_baseline_work_product_id INTEGER REFERENCES work_products(id),
+  test_design_baseline_work_product_id INTEGER REFERENCES work_products(id),
+  status TEXT NOT NULL DEFAULT 'DRAFT',
+  artifact_version TEXT,
+  artifact_image TEXT,
+  artifact_digest TEXT,
+  artifact_filename TEXT,
+  artifact_sha256 TEXT,
+  build_evidence TEXT NOT NULL DEFAULT '',
+  migration_classification TEXT,
+  test_deployment_id INTEGER REFERENCES deployments(id),
+  production_deployment_id INTEGER REFERENCES deployments(id),
+  production_approved_by TEXT,
+  production_approved_at TEXT,
+  production_approval_digest TEXT,
+  work_product_id INTEGER REFERENCES work_products(id),
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  released_at TEXT,
+  UNIQUE(repository_id, version)
+);
+CREATE TABLE IF NOT EXISTS release_tasks(
+  release_id INTEGER NOT NULL REFERENCES releases(id),
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  merged_commit TEXT,
+  PRIMARY KEY(release_id, task_id)
+);
+CREATE TABLE IF NOT EXISTS repository_integration_locks(
+  repository_id INTEGER PRIMARY KEY REFERENCES repositories(id),
+  locked_by TEXT NOT NULL,
+  locked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_releases_repo ON releases(repository_id);
+CREATE INDEX IF NOT EXISTS idx_release_tasks_task ON release_tasks(task_id);
+"""),
 ]
 
 
