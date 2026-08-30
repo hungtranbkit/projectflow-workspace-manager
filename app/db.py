@@ -1019,6 +1019,78 @@ CREATE INDEX IF NOT EXISTS idx_human_decisions_subject ON human_decisions(subjec
     (23, """
 ALTER TABLE plans ADD COLUMN design_baseline_digest TEXT;
 """),
+    # V24: Test Design, Requirement Coverage & Executable Acceptance
+    # Mapping (Phase E7). TEST_PLAN/TEST_CASE_SET WorkProducts (already-
+    # typed kinds, seeded ahead of time in E1) wrap the strategy summary
+    # and "this batch of TestCaseSpecs was produced by this invocation"
+    # respectively -- test_case_specs is the ONE new domain table E7.3
+    # asked for ("prefer a thin domain/table only if needed for trace/
+    # queryability" -- individual TestCaseSpecs are referenced by the
+    # coverage engine, the executable mapping, and future E8 Planner
+    # Task generation, so a real table earns its keep here unlike E6's
+    # WorkProduct-only choice). test_executable_mappings is E7.13's
+    # separate TestCaseSpec<->implementation domain (its own status
+    # machine: UNIMPLEMENTED/IMPLEMENTED/PASS/FAIL, staleness computed
+    # live rather than stored -- same E5/E6 staleness discipline).
+    # verification_reports/test_runs each gain one additive, nullable
+    # test_case_spec_id column (E7.19: "reference TestCaseSpec ID...
+    # where current schema safely permits... additive") -- both tables
+    # already carry requirement/acceptance/invariant trace columns
+    # (verification_reports since V-whatever-the-Spec-Layer-added-them);
+    # nothing here duplicates that. plans.test_design_baseline_digest
+    # mirrors V23's design_baseline_digest exactly (E7.16:
+    # PLAN_TEST_DESIGN_STALE).
+    (24, """
+CREATE TABLE IF NOT EXISTS test_case_specs(
+  id INTEGER PRIMARY KEY,
+  change_id INTEGER NOT NULL REFERENCES changes(id),
+  work_product_id INTEGER REFERENCES work_products(id),
+  item_key TEXT NOT NULL,
+  source_feature_id TEXT,
+  requirement_ids TEXT NOT NULL DEFAULT '[]',
+  acceptance_ids TEXT NOT NULL DEFAULT '[]',
+  invariant_ids TEXT NOT NULL DEFAULT '[]',
+  test_level TEXT NOT NULL,
+  test_type TEXT NOT NULL DEFAULT 'POSITIVE',
+  title TEXT NOT NULL,
+  purpose TEXT NOT NULL DEFAULT '',
+  preconditions TEXT NOT NULL DEFAULT '',
+  setup TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL DEFAULT '',
+  expected_results TEXT NOT NULL DEFAULT '',
+  failure_expectations TEXT NOT NULL DEFAULT '',
+  data_requirements TEXT NOT NULL DEFAULT '',
+  environment_requirements TEXT NOT NULL DEFAULT '',
+  automation_candidate INTEGER NOT NULL DEFAULT 1,
+  execution_hint TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'DRAFT',
+  supersedes_id INTEGER REFERENCES test_case_specs(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(work_product_id, item_key)
+);
+CREATE TABLE IF NOT EXISTS test_executable_mappings(
+  id INTEGER PRIMARY KEY,
+  test_case_spec_id INTEGER NOT NULL REFERENCES test_case_specs(id),
+  repository_id INTEGER REFERENCES repositories(id),
+  repository_path TEXT NOT NULL DEFAULT '',
+  test_symbol TEXT NOT NULL DEFAULT '',
+  command TEXT NOT NULL DEFAULT '',
+  framework TEXT NOT NULL DEFAULT '',
+  implementation_status TEXT NOT NULL DEFAULT 'UNIMPLEMENTED',
+  last_result_reference TEXT,
+  mapped_by TEXT NOT NULL DEFAULT 'HUMAN',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(test_case_spec_id)
+);
+ALTER TABLE verification_reports ADD COLUMN test_case_spec_id INTEGER REFERENCES test_case_specs(id);
+ALTER TABLE test_runs ADD COLUMN test_case_spec_id INTEGER REFERENCES test_case_specs(id);
+ALTER TABLE plans ADD COLUMN test_design_baseline_digest TEXT;
+CREATE INDEX IF NOT EXISTS idx_test_case_specs_change ON test_case_specs(change_id);
+CREATE INDEX IF NOT EXISTS idx_test_case_specs_wp ON test_case_specs(work_product_id);
+CREATE INDEX IF NOT EXISTS idx_test_exec_mappings_spec ON test_executable_mappings(test_case_spec_id);
+"""),
 ]
 
 

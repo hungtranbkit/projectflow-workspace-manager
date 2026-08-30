@@ -93,6 +93,16 @@ ROLES = {
         "name": "UI/UX Designer", "category": "ANALYSIS",
         "description": "Defines user-facing behavior and structure -- flows, screens, states, accessibility -- as a UI_UX_DESIGN WorkProduct, only when a Change actually changes user-facing interaction. Behavior/structure only; E6 does not generate visual mockups/screenshots.",
     },
+    # Phase E7 (Test Design, Requirement Coverage & Executable Acceptance
+    # Mapping): TEST_REVIEWER deliberately not added -- REVIEWER already
+    # cleanly serves independent test review (same "inspect independently,
+    # return a PASS/NEEDS_REFINEMENT/HUMAN_DECISION_REQUIRED/REJECT-shaped
+    # verdict" responsibility it already holds for architecture/design
+    # review in E6).
+    "TEST_DESIGNER": {
+        "name": "Test Designer", "category": "QUALITY",
+        "description": "Turns an approved spec (requirements/acceptance criteria/invariants) plus architecture/design into structured TestCaseSpecs that PROVE expected behavior -- never derives expected outcome from current implementation. Records TEST_PLAN/TEST_CASE_SET WorkProducts. Never writes source or test files itself -- that stays a Builder/Test-Implementation Task (E8).",
+    },
 }
 
 # ------------------------------------------------------------ Capabilities
@@ -182,6 +192,21 @@ CAPABILITIES = {
         "description": "Design a migration/rollback plan for a persistence or contract change. Never itself runs a migration -- BUILD-stage execution stays a Builder/RELEASE_MANAGER responsibility."},
     "ARCHITECTURE_REVIEW": {"name": "Architecture/design review", "category": "ARCHITECTURE", "sensitivity": "NORMAL",
         "description": "Independently review a proposed ArchitectureAnalysis or TechnicalDesign/UI_UX_DESIGN and return a PASS/NEEDS_REFINEMENT/HUMAN_DECISION_REQUIRED/REJECT-shaped verdict. Reused for both architecture review and design review -- same responsibility shape as REVIEWER's existing SUBMIT_REVIEW, against a different artifact."},
+    # Phase E7: reasoning-only, never deployment/release-sensitive.
+    "TEST_DESIGN": {"name": "Test design", "category": "QUALITY", "sensitivity": "NORMAL",
+        "description": "Produce structured TestCaseSpecs proving approved requirements/acceptance criteria -- never derives expected behavior from current implementation."},
+    "ACCEPTANCE_TEST_DESIGN": {"name": "Acceptance test design", "category": "QUALITY", "sensitivity": "NORMAL",
+        "description": "Design TestCaseSpecs that explicitly prove one or more AcceptanceCriteria."},
+    "INVARIANT_TEST_DESIGN": {"name": "Invariant test design", "category": "QUALITY", "sensitivity": "NORMAL",
+        "description": "Design a proof strategy (integration test, report-query test, runtime invariant verification, ...) for a FeatureSpec invariant."},
+    "REGRESSION_TEST_DESIGN": {"name": "Regression test design", "category": "QUALITY", "sensitivity": "NORMAL",
+        "description": "Design TestCaseSpecs guarding previously-fixed or previously-approved behavior against future regression."},
+    "FAILURE_CASE_DESIGN": {"name": "Failure case design", "category": "QUALITY", "sensitivity": "NORMAL",
+        "description": "Design negative/failure/boundary TestCaseSpecs -- expected behavior under invalid input, denied permission, or a failed dependency."},
+    "COVERAGE_ANALYSIS": {"name": "Coverage analysis", "category": "QUALITY", "sensitivity": "NORMAL",
+        "description": "Analyze which requirements/acceptance criteria/invariants a set of TestCaseSpecs actually proves. The deterministic recomputation (RequirementCoverageService) never trusts this as authoritative -- it always re-derives real coverage from IDs itself."},
+    "TEST_REVIEW": {"name": "Test review", "category": "QUALITY", "sensitivity": "NORMAL",
+        "description": "Independently review a Test Plan/TestCaseSpecs and return a PASS/NEEDS_REFINEMENT/HUMAN_DECISION_REQUIRED/REJECT-shaped verdict -- same responsibility shape as ARCHITECTURE_REVIEW, against test design instead."},
 }
 
 # --------------------------------------------------------- Role -> Capability
@@ -195,7 +220,7 @@ ROLE_CAPABILITIES = {
     "BUILDER": {"REQUIRED": ["READ_REPOSITORY", "EDIT_SOURCE", "CREATE_COMMIT", "RUN_TESTS"],
                 "OPTIONAL": ["READ_SPEC", "USE_INTERACTIVE_TERMINAL", "USE_BROWSER", "WRITE_WORK_PRODUCT"]},
     "REVIEWER": {"REQUIRED": ["READ_REPOSITORY", "REVIEW_SOURCE", "REVIEW_DIFF", "READ_TEST_RESULTS", "SUBMIT_REVIEW"],
-                 "OPTIONAL": ["READ_SPEC", "ARCHITECTURE_REVIEW"]},
+                 "OPTIONAL": ["READ_SPEC", "ARCHITECTURE_REVIEW", "TEST_REVIEW"]},
     "SECURITY_REVIEWER": {"REQUIRED": ["READ_REPOSITORY", "REVIEW_SOURCE", "REVIEW_DIFF", "SUBMIT_REVIEW"],
                            "OPTIONAL": ["READ_SPEC"]},
     "QA_VERIFIER": {"REQUIRED": ["READ_EVIDENCE", "RUN_RUNTIME_VERIFICATION", "RECORD_VERIFICATION"],
@@ -209,6 +234,9 @@ ROLE_CAPABILITIES = {
     "TECHNICAL_DESIGNER": {"REQUIRED": ["READ_SPEC", "TECHNICAL_DESIGN", "API_DESIGN", "DATA_DESIGN", "WRITE_WORK_PRODUCT"],
                             "OPTIONAL": ["READ_REPOSITORY", "FAILURE_MODE_ANALYSIS", "MIGRATION_DESIGN"]},
     "UI_UX_DESIGNER": {"REQUIRED": ["READ_SPEC", "UI_UX_DESIGN", "WRITE_WORK_PRODUCT"], "OPTIONAL": ["READ_REPOSITORY"]},
+    "TEST_DESIGNER": {"REQUIRED": ["READ_SPEC", "TEST_DESIGN", "COVERAGE_ANALYSIS", "WRITE_WORK_PRODUCT"],
+                       "OPTIONAL": ["READ_REPOSITORY", "ACCEPTANCE_TEST_DESIGN", "INVARIANT_TEST_DESIGN",
+                                    "REGRESSION_TEST_DESIGN", "FAILURE_CASE_DESIGN"]},
 }
 
 # --------------------------------------------------------------- Providers
@@ -288,6 +316,14 @@ def _launchable_caps() -> dict[str, tuple[str, str]]:
         "FAILURE_MODE_ANALYSIS": ("SUPPORTED", ""),
         "MIGRATION_DESIGN": ("SUPPORTED", "Design only -- never executes a migration."),
         "ARCHITECTURE_REVIEW": ("SUPPORTED", ""),
+        # Phase E7: reasoning-only, same as E6's block above.
+        "TEST_DESIGN": ("SUPPORTED", ""),
+        "ACCEPTANCE_TEST_DESIGN": ("SUPPORTED", ""),
+        "INVARIANT_TEST_DESIGN": ("SUPPORTED", ""),
+        "REGRESSION_TEST_DESIGN": ("SUPPORTED", ""),
+        "FAILURE_CASE_DESIGN": ("SUPPORTED", ""),
+        "COVERAGE_ANALYSIS": ("SUPPORTED", ""),
+        "TEST_REVIEW": ("SUPPORTED", ""),
     }
 
 

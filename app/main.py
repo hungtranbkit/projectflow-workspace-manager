@@ -41,7 +41,7 @@ from app.services.change_service import ChangeService, ChangeError, CHANGE_TYPES
 from app.services.work_product_service import WorkProductService, WorkProductError, WORK_PRODUCT_KINDS, WORK_PRODUCT_STATUSES, DIRECTIONS as WP_DIRECTIONS
 from app.services.trace_service import TraceService
 from app.services.engineering_catalog import RoleCapabilityService, is_known_provider
-from app.services.project_contract import load_engineering_policy
+from app.services.project_contract import load_engineering_policy, load_command
 from app.services.workflow_engine import (
     WorkflowCatalogService, TaskDependencyService, WorkflowService, WorkflowError,
 )
@@ -57,6 +57,10 @@ from app.services.architecture_design_service import (
     ArchitectureContextBuilder, ArchitectureAnalysisService, ArchitectureReviewService,
     UiUxApplicabilityService, TechnicalDesignService, UiUxDesignService, DesignReviewService,
     ArchitectureDesignLifecycleService, ArchitectureDesignError,
+)
+from app.services.test_design_service import (
+    TestCaseSpecStore, TestDesignContextBuilder, TestDesignService, RequirementCoverageService,
+    TestReviewService, ExecutableTestMappingService, TestDesignLifecycleService, TestDesignError,
 )
 
 def create_app(settings=None):
@@ -179,6 +183,35 @@ def create_app(settings=None):
     # ready/_gate_design_ready). Every E3/E4/E5 test's own WorkflowService
     # construction leaves this None (zero behavior change there).
     workflow_service.architecture_design_gate = architecture_design_service
+    # Test Design, Requirement Coverage & Executable Acceptance Mapping
+    # (Phase E7): same reuse discipline as E5/E6 -- PlannerAgentInvoker
+    # (tool-less; a Test Designer has no source/test-file-write path at
+    # all), roles_catalog, THIS repo's own specs_root, human_decisions.
+    # RequirementCoverageService is the ONE new deterministic (no LLM)
+    # class -- never trusts a model-provided coverage total.
+    test_case_specs_store = TestCaseSpecStore(db)
+    test_design_context_builder = TestDesignContextBuilder(db, changes, work_products, trace, test_case_specs_store, specs_root)
+    test_design_service = TestDesignService(db, changes, work_products, planner_invoker, roles_catalog, test_design_context_builder, test_case_specs_store, specs_root, settings.root)
+    requirement_coverage_service = RequirementCoverageService(trace, test_case_specs_store, specs_root)
+    test_review_service = TestReviewService(db, changes, work_products, planner_invoker, roles_catalog, test_case_specs_store, requirement_coverage_service, specs_root, settings.root, human_decisions)
+    executable_test_mapping_service = ExecutableTestMappingService(db, test_case_specs_store)
+    test_design_lifecycle_service = TestDesignLifecycleService(
+        db, changes, work_products, trace, test_design_context_builder, test_design_service, requirement_coverage_service,
+        test_review_service, test_case_specs_store, executable_test_mapping_service, human_decisions, workflow_service=workflow_service)
+    # E7.17: additive-only hook, exact same pattern as E6.16's
+    # architecture_design_gate -- TEST_DESIGN_READY (attached to the
+    # existing VERIFY stage, see workflow_engine.py's GATES entry) now
+    # resolves through real coverage/review evidence instead of being
+    # unconditionally vacuous.
+    workflow_service.test_design_gate = test_design_lifecycle_service
+    # E7.16: PlannerContextBuilder sees current test-design state.
+    planner_context_builder.test_design_lifecycle = test_design_lifecycle_service
+    # E7.18: additive-only hook, exact same pattern -- SpecComplianceVerifier
+    # can now distinguish TEST_DESIGN_MISSING/TEST_IMPLEMENTATION_MISSING/
+    # TEST_EVIDENCE_MISSING/TEST_EVIDENCE_FAIL as a purely diagnostic field,
+    # never changing its own verdict logic.
+    spec_compliance.test_case_specs = test_case_specs_store
+    spec_compliance.executable_mapping = executable_test_mapping_service
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
@@ -219,6 +252,13 @@ def create_app(settings=None):
     app.state.ui_ux_design_service = ui_ux_design_service
     app.state.design_review_service = design_review_service
     app.state.architecture_design_service = architecture_design_service
+    app.state.test_case_specs_store = test_case_specs_store
+    app.state.test_design_context_builder = test_design_context_builder
+    app.state.test_design_service = test_design_service
+    app.state.requirement_coverage_service = requirement_coverage_service
+    app.state.test_review_service = test_review_service
+    app.state.executable_test_mapping_service = executable_test_mapping_service
+    app.state.test_design_lifecycle_service = test_design_lifecycle_service
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -659,11 +699,12 @@ def create_app(settings=None):
     @app.exception_handler(PlannerError)
     @app.exception_handler(SpecLifecycleError)
     @app.exception_handler(ArchitectureDesignError)
+    @app.exception_handler(TestDesignError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3/E4/E5/E6's Change/WorkProduct/Workflow/Plan/Spec-
-        Proposal/Architecture/Design API is a pure JSON surface (E1.7:
-        'API/service correctness first, no large UI yet') -- a clean
-        400 + message, never the HTML 'Action
+        """Phase E1/E3/E4/E5/E6/E7's Change/WorkProduct/Workflow/Plan/
+        Spec-Proposal/Architecture/Design/Test-Design API is a pure JSON
+        surface (E1.7: 'API/service correctness first, no large UI
+        yet') -- a clean 400 + message, never the HTML 'Action
         blocked' page the older form-posting routes use."""
         return JSONResponse({"ok":False,"message":str(exc)},status_code=400)
 
@@ -2476,6 +2517,12 @@ def create_app(settings=None):
         vs. architecture/design WorkProduct state)."""
         _plan_row(pid)
         return planner_service.check_design_staleness(pid)
+    @app.get("/api/plans/{pid}/test-design-staleness")
+    def api_plan_test_design_staleness(pid:int):
+        """E7.16: PLAN_TEST_DESIGN_STALE -- surfaced separately from spec/
+        design staleness above since it detects test-design drift."""
+        _plan_row(pid)
+        return planner_service.check_test_design_staleness(pid)
     @app.post("/api/human-decisions/{did}/resolve")
     def api_resolve_human_decision_generic(did:int,resolution_note:str=Form(...)):
         """E5.11: the generalized resolve path -- works for a decision
@@ -2668,6 +2715,99 @@ def create_app(settings=None):
     def api_design_findings(cid:int):
         _change_row(cid)
         return architecture_design_service.design_findings(cid)
+
+    # ------------------------------------- Test Design & Requirement Coverage (E7)
+    # TEST SPECIFICATION / EXECUTABLE TEST / TEST RESULT / SPEC COMPLIANCE
+    # stay strictly separate here too -- see app/services/test_design_
+    # service.py's module docstring. A designed TestCaseSpec is never
+    # itself evidence; no route here ever writes source/test files.
+    def _tcs_row(tcs_id:int):
+        row=test_case_specs_store.get(tcs_id)
+        if not row: raise HTTPException(404,"TestCaseSpec not found")
+        return row
+    def _tcs_out(tc:dict):
+        return {**tc,"requirement_ids":json.loads(tc["requirement_ids"] or "[]"),
+                "acceptance_ids":json.loads(tc["acceptance_ids"] or "[]"),
+                "invariant_ids":json.loads(tc["invariant_ids"] or "[]")}
+    def _change_test_command(cid:int):
+        change=_change_row(cid)
+        if not change.get("project_id"): return None
+        r=db.one("SELECT repo_path FROM repositories WHERE id=?",(change["project_id"],))
+        if not r: return None
+        cmd=load_command(Path(r["repo_path"]),"test")
+        if not cmd: return None
+        return {"command":cmd[0],"working_directory":cmd[1],"timeout_seconds":cmd[2]}
+
+    def _test_design_result_out(result:dict):
+        if result.get("test_plan") is not None: result["test_plan"]=_wp_out(result["test_plan"])
+        if result.get("test_case_set") is not None: result["test_case_set"]=_wp_out(result["test_case_set"])
+        if result.get("test_cases") is not None: result["test_cases"]=[_tcs_out(tc) for tc in result["test_cases"]]
+        return result
+
+    @app.post("/api/changes/{cid}/tests/design")
+    def api_tests_design(cid:int,provider:str=Form("claude")):
+        _change_row(cid)
+        result=test_design_service.design(cid,provider=provider,project_test_command=_change_test_command(cid))
+        return _test_design_result_out(result)
+    @app.get("/api/changes/{cid}/tests")
+    def api_get_tests(cid:int):
+        _change_row(cid)
+        test_set=test_design_service.current_test_case_set(cid)
+        return {"test_plan":_wp_out(test_design_service.current_test_plan(cid)),
+                "test_case_set":_wp_out(test_set),
+                "test_cases":[_tcs_out(tc) for tc in (test_case_specs_store.list_for_work_product(test_set["id"]) if test_set else [])]}
+    @app.get("/api/changes/{cid}/tests/coverage")
+    def api_tests_coverage(cid:int):
+        _change_row(cid)
+        return requirement_coverage_service.compute(cid)
+    @app.post("/api/changes/{cid}/tests/review")
+    def api_tests_review(cid:int,test_case_set_id:str=Form(""),provider:str=Form("claude")):
+        _change_row(cid)
+        sid=int(test_case_set_id) if test_case_set_id.strip().isdigit() else None
+        if sid is None:
+            wp=test_design_service.current_test_case_set(cid)
+            if not wp: raise HTTPException(404,"No Test Design exists for this Change yet -- run /tests/design first")
+            sid=wp["id"]
+        result=test_review_service.review(sid,provider=provider)
+        if result.get("work_product") is not None: result["work_product"]=_wp_out(result["work_product"])
+        if result.get("coverage_work_product") is not None: result["coverage_work_product"]=_wp_out(result["coverage_work_product"])
+        return result
+    @app.post("/api/changes/{cid}/tests/refine")
+    def api_tests_refine(cid:int,test_case_set_id:str=Form(""),provider:str=Form("claude")):
+        _change_row(cid)
+        sid=int(test_case_set_id) if test_case_set_id.strip().isdigit() else None
+        if sid is None:
+            wp=test_design_service.current_test_case_set(cid)
+            if not wp: raise HTTPException(404,"No Test Design exists for this Change yet")
+            sid=wp["id"]
+        review_wp=db.one("SELECT content_metadata FROM work_products WHERE kind='TEST_REVIEW' AND change_id=? ORDER BY id DESC LIMIT 1",(cid,))
+        findings=json.loads(review_wp["content_metadata"]) if review_wp else {}
+        result=test_design_service.refine(sid,findings,provider=provider)
+        return _test_design_result_out(result)
+    @app.get("/api/changes/{cid}/tests/status")
+    def api_tests_status(cid:int):
+        _change_row(cid)
+        s=test_design_lifecycle_service.status(cid)
+        return {**s,"test_plan":_wp_out(s["test_plan"]),"test_case_set":_wp_out(s["test_case_set"])}
+    @app.get("/api/changes/{cid}/tests/staleness")
+    def api_tests_staleness(cid:int):
+        _change_row(cid)
+        return test_design_lifecycle_service.staleness(cid)
+
+    @app.get("/api/test-cases/{tcid}")
+    def api_get_test_case(tcid:int):
+        return _tcs_out(_tcs_row(tcid))
+    @app.post("/api/test-cases/{tcid}/map-executable")
+    def api_map_test_case_executable(tcid:int,repository_id:str=Form(""),repository_path:str=Form(...),
+                                      test_symbol:str=Form(""),command:str=Form(""),framework:str=Form("")):
+        _tcs_row(tcid)
+        rid=int(repository_id) if repository_id.strip().isdigit() else None
+        return executable_test_mapping_service.map(tcid,rid,repository_path,test_symbol,command=command,framework=framework)
+    @app.get("/api/test-cases/{tcid}/mapping")
+    def api_get_test_case_mapping(tcid:int):
+        _tcs_row(tcid)
+        m=executable_test_mapping_service.get(tcid)
+        return m if m else {"test_case_spec_id":tcid,"implementation_status":"UNIMPLEMENTED"}
 
     @app.post("/api/workspaces/{wid}/builder-instructions")
     def save_builder_instructions(wid:int,builder_instructions:str=Form("")):

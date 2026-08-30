@@ -32,6 +32,11 @@ WORK_PRODUCT_KINDS = (
     # ADR/TECHNICAL_DESIGN/UI_UX_DESIGN already existed above (E1 seeded
     # them ahead of E6 actually implementing the services that use them).
     "ARCHITECTURE_REVIEW", "DESIGN_REVIEW",
+    # Phase E7 (Test Design, Requirement Coverage & Executable Acceptance
+    # Mapping): TEST_PLAN/TEST_CASE_SET already existed above (E1 seeded
+    # them ahead of E7 too). TEST_REVIEW follows the same dedicated-kind
+    # precedent as ARCHITECTURE_REVIEW/DESIGN_REVIEW.
+    "TEST_REVIEW", "REQUIREMENT_COVERAGE_REPORT",
 )
 WORK_PRODUCT_STATUSES = ("DRAFT", "PROPOSED", "APPROVED", "SUPERSEDED", "REJECTED")
 DIRECTIONS = ("INPUT", "OUTPUT")

@@ -77,6 +77,16 @@ GATES = {
         "description": "Same review evidence as REVIEW_PASS -- ProjectFlow has no distinct security-review data source yet (see docs/ENGINEERING_ROLES.md's SECURITY_REVIEWER note); kept as its own gate key for future differentiation."},
     "TESTS_PASS": {"name": "Automated tests pass", "stage": "VERIFY",
         "description": "Every Task's AUTOMATED_TESTS checklist item is done, at the exact current HEAD."},
+    # Phase E7: attached to the EXISTING VERIFY stage rather than a new
+    # top-level stage (E7.17's own explicit fallback -- adding a stage
+    # would shift order_index for every already-seeded stage in
+    # production; a gate needs no stage of its own, the same way
+    # REVIEW_PASS/SPEC_COMPLIANCE_PASS/SECURITY_PASS already share
+    # REVIEW). Vacuously satisfied when nothing governs the Change yet
+    # (no FeatureSpec linkage -- see _gate_test_design_ready), so VIBE
+    # (typically un-spec-linked) is never blocked by it.
+    "TEST_DESIGN_READY": {"name": "Test design ready", "stage": "VERIFY",
+        "description": "Every governing FeatureSpec's requirements have at least one proving TestCaseSpec, confirmed by an independent Test Review PASS."},
     "RELEASE_READY": {"name": "Release ready", "stage": "RELEASE",
         "description": "Every Task in this Change is READY_FOR_MAIN or DONE."},
     "DEPLOY_VERIFIED": {"name": "Deploy verified", "stage": "DEPLOY",
@@ -157,7 +167,11 @@ TASK_TYPES = {
     "ARCHITECTURE_REVIEW": {"name": "Architecture Review", "stage": "ARCHITECTURE", "preferred_role": "REVIEWER", "compatible_roles": ["REVIEWER"]},
     "TECHNICAL_DESIGN": {"name": "Technical Design", "stage": "DESIGN", "preferred_role": "TECHNICAL_DESIGNER", "compatible_roles": ["TECHNICAL_DESIGNER", "SOFTWARE_ARCHITECT"]},
     "UI_UX_DESIGN": {"name": "UI/UX Design", "stage": "DESIGN", "preferred_role": "UI_UX_DESIGNER", "compatible_roles": ["UI_UX_DESIGNER"]},
-    "TEST_DESIGN": {"name": "Test Design", "stage": "PLANNING", "preferred_role": "QA_VERIFIER", "compatible_roles": ["QA_VERIFIER"]},
+    # Phase E7: completes E3's own placeholder the same way E6 completed
+    # ARCHITECTURE_ANALYSIS/TECHNICAL_DESIGN/UI_UX_DESIGN's -- QA_VERIFIER
+    # stays a compatible role (it still owns runtime verification), but
+    # TEST_DESIGNER is now the specialized preferred one.
+    "TEST_DESIGN": {"name": "Test Design", "stage": "PLANNING", "preferred_role": "TEST_DESIGNER", "compatible_roles": ["TEST_DESIGNER", "QA_VERIFIER"]},
     "IMPLEMENTATION": {"name": "Implementation", "stage": "BUILD", "preferred_role": "BUILDER", "compatible_roles": ["BUILDER"]},
     "TEST_IMPLEMENTATION": {"name": "Test Implementation", "stage": "BUILD", "preferred_role": "BUILDER", "compatible_roles": ["BUILDER"]},
     "CODE_REVIEW": {"name": "Code Review", "stage": "REVIEW", "preferred_role": "REVIEWER", "compatible_roles": ["REVIEWER"]},
@@ -357,6 +371,15 @@ class WorkflowService:
         # behavior below -- zero behavior change for anything that
         # doesn't wire this in.
         self.architecture_design_gate = None
+        # Phase E7 additive hook, same pattern as architecture_design_gate
+        # above: an optional object exposing .test_design_ready(change_id)
+        # (wired in app/main.py once TestDesignLifecycleService exists).
+        # None by default -- every E3/E4/E5/E6 test's own construction
+        # leaves this unset, and _gate_test_design_ready below is
+        # vacuously satisfied whenever nothing governs the Change
+        # (no Change-level spec_feature trace link) regardless, so no
+        # existing behavior changes either way.
+        self.test_design_gate = None
 
     # ---- creation (E3.10) -----------------------------------------
     def create_workflow_for_change(self, change_id: int, profile_key: str | None = None, project_policy: dict | None = None) -> dict:
@@ -418,6 +441,21 @@ class WorkflowService:
 
     def _gate_human_acceptance(self, change_id: int, tasks: list[dict]) -> bool:
         return self._approved_work_product_exists(change_id, ("HUMAN_DECISION",))
+
+    def _gate_test_design_ready(self, change_id: int, tasks: list[dict]) -> bool:
+        """E7.17: attached to VERIFY (see the GATES entry's own comment
+        for why no new stage was added). Unwired (test_design_gate is
+        None, every pre-E7 test's own construction) -- vacuously True,
+        zero behavior change. Wired: delegates to
+        TestDesignLifecycleService.test_design_ready(), which is itself
+        vacuously True whenever nothing governs the Change at the
+        Change-level spec trace-link (the same 'governing feature'
+        definition E6's ArchitectureContextBuilder established) -- a
+        real, documented scope limit: Task-level spec_feature_id
+        linkage alone does not yet trigger this gate."""
+        if self.test_design_gate is None:
+            return True
+        return bool(self.test_design_gate.test_design_ready(change_id))
 
     def _gate_review_pass(self, change_id: int, tasks: list[dict]) -> bool:
         """Reuses TaskDecisionService.evaluate()'s own builder review
@@ -496,6 +534,7 @@ class WorkflowService:
         "SPEC_COMPLIANCE_PASS": "_gate_spec_compliance_pass",
         "SECURITY_PASS": "_gate_security_pass",
         "TESTS_PASS": "_gate_tests_pass",
+        "TEST_DESIGN_READY": "_gate_test_design_ready",
         "RELEASE_READY": "_gate_release_ready",
         "DEPLOY_VERIFIED": "_gate_deploy_verified",
         "HUMAN_ACCEPTANCE": "_gate_human_acceptance",

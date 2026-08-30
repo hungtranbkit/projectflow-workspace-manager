@@ -16,13 +16,59 @@ readiness calculation."""
 
 VERDICTS = ("PASS", "FAIL", "INCOMPLETE", "SPEC_DRIFT")
 
+# Phase E7.18: additive diagnostic classifications ONLY -- never a
+# fifth VERDICT and never a way to reach PASS. A designed-but-unexecuted
+# TestCaseSpec is never evidence; these four values only explain WHY a
+# non-PASS verdict looks the way it does, when Test Design (E7) exists
+# for this Task's Change at all.
+TEST_CONTRACT_GAPS = ("TEST_DESIGN_MISSING", "TEST_IMPLEMENTATION_MISSING", "TEST_EVIDENCE_MISSING", "TEST_EVIDENCE_FAIL")
+
 
 class SpecComplianceVerifier:
-    def __init__(self, db, decision, specs_root):
+    def __init__(self, db, decision, specs_root, test_case_specs=None, executable_mapping=None):
         self.db = db
         self.decision = decision
         self.gate = SpecGate(specs_root)
         self.evidence = EvidenceStore(db)
+        # Phase E7.18 additive hook -- both None (every pre-E7 caller's
+        # own construction, including every E1-E6 test) means
+        # test_contract_gap() always returns None and verify()'s result
+        # never gains the extra key at all. Wired in app/main.py once
+        # TestCaseSpecStore/ExecutableTestMappingService exist.
+        self.test_case_specs = test_case_specs
+        self.executable_mapping = executable_mapping
+
+    def test_contract_gap(self, task_id: int) -> str | None:
+        """E7.18: distinguishes TEST_DESIGN_MISSING / TEST_IMPLEMENTATION_
+        MISSING / TEST_EVIDENCE_MISSING / TEST_EVIDENCE_FAIL -- purely
+        diagnostic, never influences verify()'s own verdict. Requires
+        both E7 services to be wired and the Task to actually be
+        spec-linked with real requirement ids; returns None (no opinion)
+        otherwise, same 'never PASS/never claim on missing evidence'
+        safe direction the rest of this module already uses."""
+        if self.test_case_specs is None or self.executable_mapping is None:
+            return None
+        t = self.db.one("SELECT * FROM tasks WHERE id=?", (task_id,))
+        if not t or not t.get("change_id") or not t.get("spec_requirement_ids"):
+            return None
+        task_req_ids = set(spec_id_list(t.get("spec_requirement_ids")))
+        if not task_req_ids:
+            return None
+        cases = self.test_case_specs.list_for_change(t["change_id"])
+        if not cases:
+            return "TEST_DESIGN_MISSING"
+        import json
+        covering = [tc for tc in cases if task_req_ids & set(json.loads(tc["requirement_ids"] or "[]"))]
+        if not covering:
+            return "TEST_DESIGN_MISSING"
+        mappings = [self.executable_mapping.get(tc["id"]) for tc in covering]
+        if not any(m and m["implementation_status"] != "UNIMPLEMENTED" for m in mappings):
+            return "TEST_IMPLEMENTATION_MISSING"
+        if any(m and m["implementation_status"] == "FAIL" for m in mappings):
+            return "TEST_EVIDENCE_FAIL"
+        if not any(m and m["implementation_status"] == "PASS" for m in mappings):
+            return "TEST_EVIDENCE_MISSING"
+        return None
 
     def verify(self, task_id: int) -> dict:
         t = self.db.one("SELECT * FROM tasks WHERE id=?", (task_id,))
@@ -32,9 +78,15 @@ class SpecComplianceVerifier:
                 "requirement_ids": [], "acceptance_ids": [], "invariant_ids": [],
                 "scope": {}, "gate_outcome": None, "gate_reason": "Task not found",
                 "traceability": {}, "evidence": {}, "verdict": "INCOMPLETE", "reason": "Task not found",
+                "test_contract": None,
             }
         gate = self.gate.evaluate(t)
         d = self.decision.evaluate(task_id)
+        # E7.18: computed once, attached to every returned shape below --
+        # purely diagnostic, never read by any of the verdict branches
+        # that follow, so it can never change PASS/FAIL/INCOMPLETE/
+        # SPEC_DRIFT.
+        test_contract = self.test_contract_gap(task_id)
 
         result = {
             "task_id": task_id,
@@ -44,6 +96,7 @@ class SpecComplianceVerifier:
             "acceptance_ids": spec_id_list(t.get("spec_acceptance_ids")),
             "invariant_ids": spec_id_list(t.get("spec_invariant_ids")),
             "scope": {"classification": t.get("spec_change_classification")},
+            "test_contract": test_contract,
             "gate_outcome": gate["outcome"],
             "gate_reason": gate["reason"],
             "traceability": {},
