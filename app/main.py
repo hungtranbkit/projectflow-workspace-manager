@@ -67,6 +67,7 @@ from app.services.change_control_surface import ChangeControlSurfaceService
 from app.services.autonomous_execution_service import (
     AutonomousExecutionService, TaskExecutionContextBuilder, AutonomousExecutionError,
 )
+from app.services.worktree_manager import WorktreeManager, WorktreeManagerError
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -606,6 +607,22 @@ def create_app(settings=None):
             parts=[f"# Task: {t['title']}","","## TASK",intent,"","## TASK TITLE",t["title"],""]
             if repo_row: parts+=["## REPOSITORY",f"{repo_row['repo_name']} ({repo_row['repo_path']})",""]
             if workspace: parts+=["## BRANCH",workspace["branch"],"","## WORKTREE",workspace["worktree_path"],""]
+            if workspace:
+                # E8.5.12: WORKSPACE ISOLATION -- prompt-level statement of
+                # a boundary already enforced structurally (this worktree
+                # IS the Builder's cwd; the canonical checkout is a
+                # different directory the launcher never gives it access
+                # to) -- defense in depth, never depended on alone.
+                parts+=["## WORKSPACE ISOLATION",
+                        "- You are operating in a ProjectFlow-managed task worktree.",
+                        "- Modify only this worktree.",
+                        "- Do not access or edit the canonical checkout.",
+                        "- Do not create additional git worktrees.",
+                        "- Do not switch branches.",
+                        "- Do not merge.",
+                        "- Do not rebase.",
+                        "- Do not push unless ProjectFlow explicitly instructs it.",
+                        "- Complete only the assigned Task scope.",""]
             if sandbox_line: parts+=["## SANDBOX",sandbox_line,""]
             if workspace:
                 parts+=["## ROLE",workspace.get("role") or workspace.get("agent") or "",""]
@@ -731,12 +748,14 @@ def create_app(settings=None):
     @app.exception_handler(ArchitectureDesignError)
     @app.exception_handler(TestDesignError)
     @app.exception_handler(AutonomousExecutionError)
+    @app.exception_handler(WorktreeManagerError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3/E4/E5/E6/E7/E8's Change/WorkProduct/Workflow/Plan/
-        Spec-Proposal/Architecture/Design/Test-Design/Autonomous-Execution API is a pure JSON
-        surface (E1.7: 'API/service correctness first, no large UI
-        yet') -- a clean 400 + message, never the HTML 'Action
-        blocked' page the older form-posting routes use."""
+        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5's Change/WorkProduct/Workflow/
+        Plan/Spec-Proposal/Architecture/Design/Test-Design/Autonomous-
+        Execution/Worktree API is a pure JSON surface (E1.7: 'API/service
+        correctness first, no large UI yet') -- a clean 400 + message,
+        never the HTML 'Action blocked' page the older form-posting
+        routes use."""
         return JSONResponse({"ok":False,"message":str(exc)},status_code=400)
 
     @app.get("/", response_class=HTMLResponse)
@@ -2095,6 +2114,11 @@ def create_app(settings=None):
 
         for w in workspaces:
             w["details"]=safe_details(w["worktree_path"]); w["status_label"]=workspace_status_label(w["status"])
+            # E8.5.25: managed-worktree lifecycle/staleness -- computed,
+            # cheap (no probe merge; integration-check is its own
+            # on-demand action, never run on every page view).
+            w["worktree_lifecycle_status"]=worktree_manager.lifecycle_status(w,tid)
+            w["worktree_staleness"]=worktree_manager.check_staleness(tid,ws=w)
             session=latest_session_for_workspace(w["id"]); w["session"]=session
             # Section 1/3 of the Live Terminal fix: a session only has an
             # actual terminal to attach to while it's STARTING/RUNNING/
@@ -3042,10 +3066,13 @@ def create_app(settings=None):
     # called by anything in this file automatically -- only the explicit
     # API routes below, matching E8.6/E8.27's own "opt-in, manual-tick
     # only, no background daemon" requirement.
+    worktree_manager=WorktreeManager(db,git,add_task_workspace)
+    app.state.worktree_manager=worktree_manager
     autonomous_execution_service=AutonomousExecutionService(
         db,changes,work_products,decision,task_dependencies,workflow_service,human_decisions,spec_gate,
         roles_catalog,planner_service,git,add_task_workspace,_start_builder_session,
-        _resolve_project_policy_for_change,settings,test_case_specs=test_case_specs_store)
+        _resolve_project_policy_for_change,settings,test_case_specs=test_case_specs_store,
+        worktree_manager=worktree_manager)
     app.state.autonomous_execution_service=autonomous_execution_service
 
     @app.get("/api/changes/{cid}/autonomous-execution")
@@ -3073,6 +3100,41 @@ def create_app(settings=None):
     def api_task_execution_readiness(tid:int):
         task_row(tid)
         return autonomous_execution_service.evaluate_task(tid)
+
+    # ---- E8.5 Worktree Isolation Foundation --------------------------
+    @app.get("/api/tasks/{tid}/worktree")
+    def api_task_worktree(tid:int):
+        task_row(tid)
+        ws=worktree_manager.get_task_worktree(tid)
+        if not ws: raise HTTPException(404,"This Task has no managed worktree")
+        return ws
+    @app.post("/api/tasks/{tid}/worktree/create")
+    def api_task_worktree_create(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form(""),sandbox_profile:str=Form("")):
+        """Diagnostic/manual-testing entry point (E8.5.26) -- autonomous
+        execution normally creates a worktree internally via the exact
+        same add_task_workspace() call this delegates to."""
+        task_row(tid)
+        return worktree_manager.create_task_worktree(tid,repository_id,agent,role,base_branch or None,sandbox_profile)
+    @app.get("/api/repositories/{rid}/worktrees")
+    def api_repository_worktrees(rid:int):
+        repo(rid)
+        return worktree_manager.list_repository_worktrees(rid)
+    @app.post("/api/tasks/{tid}/worktree/inspect")
+    def api_task_worktree_inspect(tid:int):
+        task_row(tid)
+        return worktree_manager.inspect_task_worktree(tid)
+    @app.post("/api/tasks/{tid}/worktree/abandon")
+    def api_task_worktree_abandon(tid:int,note:str=Form("")):
+        task_row(tid)
+        return worktree_manager.abandon_task_worktree(tid,note)
+    @app.post("/api/tasks/{tid}/worktree/cleanup")
+    def api_task_worktree_cleanup(tid:int,force:bool=Form(False)):
+        task_row(tid)
+        return worktree_manager.remove_task_worktree(tid,force)
+    @app.get("/api/tasks/{tid}/integration-check")
+    def api_task_integration_check(tid:int):
+        task_row(tid)
+        return worktree_manager.check_integration(tid)
 
     @app.post("/api/tasks/{tid}/workspaces")
     def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):

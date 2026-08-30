@@ -221,15 +221,23 @@ def test_invalid_role_assignment_blocks(client, git_repo):
     assert r.json()["readiness"] == "ROLE_ASSIGNMENT_INVALID"
 
 
-def test_dirty_worktree_blocks(client, git_repo):
+def test_dirty_canonical_repo_no_longer_blocks_but_is_noted(client, git_repo):
+    """E8.5.6: a dirty CANONICAL checkout is no longer an automatic
+    block -- git worktree add (add_task_workspace's own mechanism, used
+    for every launch, manual or autonomous) never reads/touches the
+    canonical working tree's uncommitted files, so it can't actually
+    endanger anything. Still surfaced honestly as an informational
+    note, never silently ignored."""
     root, repo = git_repo
     enable_autonomous(repo)
     rid = register(client, repo, "demo")
-    cid = new_change(client, "Dirty worktree change", project_id=rid)
+    cid = new_change(client, "Dirty canonical change", project_id=rid)
     tid, _ = materialize_task(client, cid)
     (repo / "unrelated.txt").write_text("uncommitted work in progress\n")
     r = client.get(f"/api/tasks/{tid}/execution-readiness")
-    assert r.json()["readiness"] == "DIRTY_WORKTREE_REQUIRES_ATTENTION"
+    body = r.json()
+    assert body["readiness"] == "AUTO_READY", body
+    assert body["worktree_isolation_note"] == "BASE_REVISION_EXCLUDES_UNCOMMITTED_CHANGES"
 
 
 def test_task_complete_state(client, git_repo):

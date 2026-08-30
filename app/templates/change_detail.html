@@ -84,6 +84,11 @@
 <span class="wf-label">Last orchestration result</span>
 {% if ae.last_orchestration_event %}<small> — {{ae.last_orchestration_event.action}} ({{ae.last_orchestration_event.created_at}})</small>{% else %}<small> — none yet</small>{% endif %}
 </div>
+<div class="wf-check {{'wf-current' if ae.managed_worktrees else 'wf-future'}}">
+<span class="wf-mark">{{'●' if ae.managed_worktrees else '○'}}</span>
+<span class="wf-label">{{ae.managed_worktrees}} Managed worktree{{'s' if ae.managed_worktrees != 1 else ''}}</span>
+{% if ae.review_pending_worktrees %}<small> — {{ae.review_pending_worktrees}} review pending</small>{% endif %}
+</div>
 </div>
 {% if ae.policy.enabled %}
 <p><button type="button" onclick="runAutonomousTick({{cid}},this)">Run next ready task</button> <span data-tick-feedback class="launch-feedback"></span></p>

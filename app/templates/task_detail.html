@@ -130,7 +130,7 @@
 <p>Builder đã sẵn sàng. Bấm Start {{workspaces[0].agent|capitalize}} để bắt đầu làm Task.<br><small>Chỉ thêm Builder khác nếu Task này cần thêm agent hoặc repository.</small></p>
 {% for w in workspaces %}
 <div class="row"><div><strong class="cap">{{w.agent}}</strong> · {{w.role or w.repo_name}}<br><small>Repository</small> <code>{{w.repo_name}}</code> · <small>Branch</small> <code>{{w.branch}}</code> · <small>Base</small> <code>{{w.branch and w.head[:8] if w.head else '—'}}</code></div>
-<span class="badge {{w.status|lower}}">Workspace: {{w.status_label}}</span></div>
+<span class="badge {{w.status|lower}}">Workspace: {{w.status_label}}</span> <span class="badge {{w.worktree_lifecycle_status|lower}}">Worktree state: {{w.worktree_lifecycle_status.replace('_',' ')}}</span></div>
 {% if w.ready %}<p class="empty">Đã Submit for Review — không cần Start lại.</p>
 {% else %}<div class="quick-actions"><form method="post" action="/api/tasks/{{t.id}}/setup-and-start"><input type="hidden" name="repository_id" value="{{w.repository_id}}"><input type="hidden" name="agent" value="{{w.agent}}"><button class="success">Start {{w.agent|capitalize}}</button></form></div>{% endif %}
 {% endfor %}
@@ -152,6 +152,9 @@
 <div><small>Repository</small><code>{{w.repo_name}}</code></div>
 <div><small>Branch</small><code>{{w.branch}}</code></div>
 <div class="wide"><small>Worktree</small><code>{{w.worktree_path}}</code></div>
+<div><small>Base</small><code>{{w.base_commit[:8] if w.base_commit else '—'}}</code></div>
+<div><small>Worktree state</small><span class="badge {{w.worktree_lifecycle_status|lower}}">{{w.worktree_lifecycle_status.replace('_',' ')}}</span></div>
+{% if w.worktree_staleness and w.worktree_staleness.stale %}<div class="wide"><small>Base stale</small><span class="badge pending">WORKTREE_BASE_STALE</span></div>{% endif %}
 </div>
 {% if w.session %}<p><small>Prompt</small> <span class="badge {{w.session.prompt_status|lower}}"{% if w.session.prompt_status=='PENDING' and w.agent_status in ['STARTING','RUNNING','WAITING_FOR_INPUT'] %} data-running{% endif %}>{{'DELIVERED' if w.session.prompt_status=='DELIVERED' else ('DELIVERY FAILED' if w.session.prompt_status=='FAILED' else 'PENDING')}}</span></p>{% endif %}
 {% if w.sandbox %}<p><small>Sandbox</small> <span class="badge {{w.sandbox.row.status|lower}}">{{w.sandbox.row.status.replace('_',' ')}}{% if w.sandbox.row.status=='RUNNING' %} · {{w.sandbox.row.health_status}}{% endif %}</span> {% if w.sandbox.backend_url or w.sandbox.frontend_url %}<a class="ghost" href="{{w.sandbox.backend_url or w.sandbox.frontend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}</p>{% endif %}

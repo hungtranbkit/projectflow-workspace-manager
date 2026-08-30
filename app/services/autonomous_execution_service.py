@@ -45,8 +45,13 @@ READINESS_STATES = (
     "WAITING_HUMAN", "STALE_PLAN", "ROLE_ASSIGNMENT_INVALID", "SCOPE_BLOCKED", "ALREADY_RUNNING",
     "REPEATED_FAILURE_STOP", "NOT_AUTONOMOUS_TASK", "COMPLETE",
     # Named explicitly by E8.19 (not in E8.4's own list, but given its
-    # own real state name there) -- autonomous execution is stricter
-    # than manual, so this is a real, distinct readiness outcome.
+    # own real state name there). E8.5.6 relaxed evaluate_task() to no
+    # longer EMIT this for a dirty CANONICAL checkout (worktree isolation
+    # means it never actually endangers anything -- see evaluate_task()'s
+    # own comment) -- kept in this tuple for the readiness-state
+    # vocabulary's own documentation/history and in case a future,
+    # genuinely-unsafe worktree-creation failure wants a state of its own
+    # again; not currently returned by any code path.
     "DIRTY_WORKTREE_REQUIRES_ATTENTION",
 )
 
@@ -201,7 +206,7 @@ class AutonomousExecutionService:
     def __init__(self, db, changes, work_products, decision, task_dependencies, workflow_service,
                  human_decisions, spec_gate, roles_catalog, planner_service, git,
                  add_task_workspace, start_builder_session, project_policy_resolver, settings,
-                 test_case_specs=None):
+                 test_case_specs=None, worktree_manager=None):
         self.db = db
         self.changes = changes
         self.work_products = work_products
@@ -218,6 +223,12 @@ class AutonomousExecutionService:
         # valid, fully backward-compatible construction (the WorkProduct
         # is still captured, just without test_case_spec_ids).
         self.test_case_specs = test_case_specs
+        # E8.5: optional -- only needed for the base-staleness note
+        # (informational, see E8.5.6/E8.5.18 below) and the canonical-
+        # status snapshot taken right before a Builder launches (E8.5.5).
+        # None is a fully backward-compatible construction (every E8
+        # unit test built before E8.5 still passes unchanged).
+        self.worktree_manager = worktree_manager
         # E8.10: the ONLY two callables this service ever invokes to
         # actually touch a repository/start a process -- both are the
         # EXACT closures app/main.py already uses for the manual "Start
@@ -353,16 +364,37 @@ class AutonomousExecutionService:
 
         if not repo_row:
             return _item("SCOPE_BLOCKED", "This Change has no registered repository to launch a Builder into", task_id=task_id)
-        try:
-            dirty = bool(self.git.status(repo_row["repo_path"]).strip())
-        except Exception:
-            dirty = False  # fail-open on a transient git error, same discipline the rest of this module uses
-        if dirty:
-            return _item("DIRTY_WORKTREE_REQUIRES_ATTENTION",
-                         "The target repository's primary working tree has unrelated uncommitted changes -- autonomous execution is stricter than manual and will not launch until it is clean",
-                         task_id=task_id)
 
-        return _item("AUTO_READY", "Eligible to auto-start", task_id=task_id, repository_id=repo_row["id"], provider=provider)
+        # E8.5.6: relaxed from a hard block. Discovery for E8.5 confirmed
+        # a Builder NEVER operates on the canonical checkout at all --
+        # add_task_workspace()/GitWorkspaceService.create_agent() always
+        # creates a real, isolated `git worktree add` from the immutable
+        # base_commit, for a manual launch and an autonomous one alike,
+        # since before E1. `git worktree add` does not read or touch the
+        # canonical working tree's uncommitted files, so a dirty
+        # CANONICAL checkout -- e.g. this very repo's own known unrelated
+        # WIP diff -- never actually endangers anything and is no longer
+        # an automatic block. What it DOES mean, honestly: autonomous
+        # execution never guesses at including a user's own uncommitted
+        # canonical changes in the Task's base -- surfaced as an
+        # informational note, never silently ignored.
+        extra: dict = {}
+        try:
+            if self.git.status(repo_row["repo_path"]).strip():
+                extra["worktree_isolation_note"] = "BASE_REVISION_EXCLUDES_UNCOMMITTED_CHANGES"
+        except Exception:
+            pass  # fail-open on a transient git error, same discipline the rest of this module uses
+
+        # E8.5.18: base staleness is informational only here -- never
+        # blocking, never auto-rebased. Only meaningful once a worktree
+        # already exists for this Task (a brand-new AUTO_READY Task has
+        # nothing to compare yet).
+        if self.worktree_manager is not None:
+            staleness = self.worktree_manager.check_staleness(task_id)
+            if staleness.get("stale"):
+                extra["worktree_base_stale"] = True
+
+        return _item("AUTO_READY", "Eligible to auto-start", task_id=task_id, repository_id=repo_row["id"], provider=provider, **extra)
 
     def _default_provider(self) -> str | None:
         from app.services.engineering_catalog import LAUNCHABLE_PROVIDERS
@@ -516,6 +548,13 @@ class AutonomousExecutionService:
                 self.db.event("task", task_id, "AUTO_EXECUTION_BLOCKED", result["error"])
                 return {"outcome": "BLOCKED", "task_id": task_id, "message": result["error"]}
             ws = self.db.one("SELECT * FROM agent_workspaces WHERE id=?", (result["workspace_id"],))
+        # E8.5.5: snapshot the CANONICAL repository's own status right
+        # before the Builder actually starts -- compared again when it
+        # submits work (record_code_change_work_product below) so an
+        # unexpected change to the canonical checkout during that window
+        # is real, checked evidence, never an assumption.
+        if self.worktree_manager is not None and repo_row:
+            self.worktree_manager.snapshot_canonical_status(ws["id"], repo_row["repo_path"])
         try:
             sid = self._start_builder_session(ws)
         except Exception as exc:
@@ -585,8 +624,26 @@ class AutonomousExecutionService:
                        if wp["kind"] == "TECHNICAL_DESIGN" and wp["status"] == "APPROVED"]
         session = self.db.one("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
         scope_check = self.check_scope_violation(w, t)
+        # E8.5.15: worktree/branch/base/head trace -- w already carries
+        # every one of these (agent_workspaces IS the managed-worktree
+        # identity, see worktree_manager.py's own module docstring); no
+        # giant diff blob stored, git history is the authoritative copy.
+        try:
+            commits = self.git.git(w["worktree_path"], "log", f"{w['base_commit']}..{head}",
+                                    "--pretty=format:%h %s", check=False).stdout.splitlines()
+        except Exception:
+            commits = []
+        canonical_check = {"checked": False, "modified": False}
+        if self.worktree_manager is not None:
+            canonical_check = self.worktree_manager.verify_canonical_untouched(w["id"])
         metadata = {
             "workspace_id": w["id"],
+            "repository_id": w.get("repository_id"),
+            "worktree_path": w.get("worktree_path"),
+            "branch_name": w.get("branch"),
+            "base_commit": w.get("base_commit"),
+            "head_commit": head,
+            "commits": commits,
             "agent_session_id": session["id"] if session else None,
             "provider": w.get("agent"), "role": w.get("role"),
             "modified_files": [f.strip() for f in (files_changed or "").split(",") if f.strip()],
@@ -596,6 +653,7 @@ class AutonomousExecutionService:
             "design_baseline_work_product_id": design_rows[-1]["id"] if design_rows else None,
             "spec_baseline_work_product_id": spec_rows[-1]["id"] if spec_rows else None,
             "scope_check": scope_check,
+            "canonical_repo_check": canonical_check,
         }
         wpid = self.work_products.create(
             kind="CODE_CHANGE", title=f"Code change: {t.get('title') or t.get('slug')} ({head[:8]})",
@@ -619,5 +677,19 @@ class AutonomousExecutionService:
             "SELECT * FROM workspace_events WHERE entity_type IN ('task','change') AND action LIKE 'AUTO_%' "
             "AND (entity_id IN (SELECT id FROM tasks WHERE change_id=?) OR (entity_type='change' AND entity_id=?)) "
             "ORDER BY id DESC LIMIT 1", (change_id, change_id))
+        # E8.5.25: "Managed worktrees / Review pending" counts for the
+        # Change Overview card -- purely a read/count over the SAME
+        # worktree_manager.lifecycle_status() every other E8.5 surface
+        # already uses, never a second computation.
+        managed_worktrees = 0
+        review_pending = 0
+        if self.worktree_manager is not None:
+            for t in self.changes.list_tasks_for_change(change_id):
+                ws = self.worktree_manager.get_task_worktree(t["id"])
+                if ws:
+                    managed_worktrees += 1
+                    if ws["lifecycle_status"] == "REVIEW_PENDING":
+                        review_pending += 1
         return {"change_id": change_id, "policy": policy, "ready_tasks": ready, "running_builders": running,
-                "last_orchestration_event": last_event}
+                "last_orchestration_event": last_event,
+                "managed_worktrees": managed_worktrees, "review_pending_worktrees": review_pending}

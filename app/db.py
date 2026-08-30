@@ -1091,6 +1091,36 @@ CREATE INDEX IF NOT EXISTS idx_test_case_specs_change ON test_case_specs(change_
 CREATE INDEX IF NOT EXISTS idx_test_case_specs_wp ON test_case_specs(work_product_id);
 CREATE INDEX IF NOT EXISTS idx_test_exec_mappings_spec ON test_executable_mappings(test_case_spec_id);
 """),
+    # V25: Worktree Isolation Foundation (Phase E8.5). Discovery finding:
+    # agent_workspaces ALREADY IS the Task<->managed-git-worktree
+    # relationship -- GitWorkspaceService.create_agent() has created a
+    # real, isolated `git worktree add` per Builder Workspace since
+    # before E1, for every manual AND autonomous launch alike (there is
+    # no "direct on canonical checkout" code path in this codebase to
+    # migrate away from). E8.5 therefore adds only the two columns that
+    # genuinely don't exist yet -- everything else (branch, worktree_path,
+    # base_commit, status, task_id, closed_at, ...) is already there and
+    # is what app/services/worktree_manager.py's WorktreeManager reads/
+    # writes, never a second/duplicate workspace table.
+    #
+    # `abandoned_at`: explicit, human/operator-driven abandonment (E8.5.21)
+    # -- distinct from `closed_at` (the existing clean-close path via
+    # git.close()/[Close Workspace]), since an abandoned worktree may
+    # still be dirty and its filesystem worktree is never auto-removed
+    # just because it's abandoned (E8.5.20: "never delete worktree merely
+    # because Builder process exits").
+    #
+    # `canonical_status_snapshot`: a hash of the CANONICAL repository's
+    # own `git status --porcelain` taken the moment a Builder session is
+    # launched into this workspace's worktree (E8.5.5) -- compared again
+    # when the workspace's Builder submits work, so an unexpected change
+    # to the canonical checkout during that window (CANONICAL_REPO_
+    # MODIFIED) is detected from real evidence, never assumed impossible
+    # just because the execution model is isolated by convention.
+    (25, """
+ALTER TABLE agent_workspaces ADD COLUMN abandoned_at TEXT;
+ALTER TABLE agent_workspaces ADD COLUMN canonical_status_snapshot TEXT;
+"""),
 ]
 
 
