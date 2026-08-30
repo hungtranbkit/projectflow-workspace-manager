@@ -127,3 +127,23 @@ def test_help_repositories_rescan_wording_is_honest(client):
     re-scans on every load. Help must describe the real behavior."""
     text = client.get("/help").text
     assert "tự làm mới mỗi khi bạn mở lại trang" in text
+
+
+def test_help_documents_spec_layer(client):
+    """Spec Layer guide: real endpoints, real classification values, real
+    SpecGate outcomes and Spec Compliance verdicts -- not a placeholder,
+    and honest that it is API-only (no dedicated Task Detail form yet)."""
+    text = client.get("/help").text
+    assert 'id="spec-layer"' in text
+    for needle in [
+        "GET /api/spec/features", "POST /api/tasks/{id}/spec",
+        "NO_BEHAVIOR_CHANGE", "BEHAVIOR_CHANGE", "AMBIGUOUS",
+        "SPEC_REQUIRED", "SPEC_NOT_APPROVED", "TRACEABILITY_MISSING", "SPEC_REFERENCE_INVALID",
+        "SPEC_DRIFT", "INCOMPLETE",
+        "chưa có form riêng trên Task Detail",
+        "AGENTS.md",
+    ]:
+        assert needle in text, f"spec-layer guide missing: {needle!r}"
+    # internal class names still must never leak into user-facing copy
+    for internal in ["SpecComplianceVerifier", "SpecRegistry", "EvidenceStore"]:
+        assert internal not in text

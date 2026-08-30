@@ -48,6 +48,7 @@
 <a href="#troubleshoot">Khi có lỗi</a>
 <a href="#nav-map">Bản đồ điều hướng</a>
 <a href="#risk-profile">Risk profile LOW/NORMAL/HIGH</a>
+<a href="#spec-layer">Spec Layer — code phải khớp đặc tả</a>
 <a href="#live-agents">Web Terminal</a>
 <a href="#remote-access">Remote Access Security</a>
 </nav>
@@ -80,6 +81,7 @@
 </ol>
 <p>Nếu gửi prompt thất bại (CLI chưa kịp sẵn sàng, hoặc lỗi khác), màn hình hiện <b>PROMPT NOT DELIVERED</b> kèm nút <b>[Send Task to Codex/Claude]</b> để thử lại — đây là hành động khôi phục ngoại lệ, không phải luồng bình thường.</p>
 <p><b>Resume Agent</b> (khi Review yêu cầu sửa, hoặc agent thoát mà chưa báo cáo) thông minh: nếu agent đang chạy và đã nhận prompt rồi thì KHÔNG gửi lại (tránh gửi trùng); nếu Review trả FIX_REQUIRED thì gửi prompt sửa lỗi (task gốc + nhận xét review), không phải prompt cũ.</p>
+<p>Nếu Task đã khai báo <a href="#spec-layer">Spec Layer</a> (đổi hành vi có chủ đích) mà liên kết spec chưa hợp lệ, Start Agent báo <b>Action blocked</b> ngay tại đây — không có process nào được mở.</p>
 </section>
 
 <section class="guide-section" id="reset-sandbox-data"><span class="section-kicker">SANDBOX</span><h3>Reset Sandbox Data dùng khi nào?</h3>
@@ -481,6 +483,50 @@
 <article><b>High</b><small>code + review + runtime verification + integration, với yêu cầu kiểm tra sâu hơn.</small></article>
 </div>
 <div class="info">Không có một luồng cứng cho mọi Task — Task Detail's Overview gate checklist và Kanban tự thêm/bớt gate QA/Integration tuỳ risk profile. Một gate bị bỏ qua hiện rõ là <code>NOT_REQUIRED</code>, không bao giờ hiện như thể đã PASS.</div>
+</section>
+
+<section class="guide-section" id="spec-layer"><span class="section-kicker">SPEC LAYER</span><h3>Spec Layer — code phải khớp đặc tả</h3>
+<p><code>specs/</code> (trong chính repo Workspace Manager) là nơi mô tả hành vi <b>đã được duyệt</b> của app — không phải tài liệu rời rạc, mà là thứ một Task thật sự bị kiểm tra dựa vào: trước khi Agent được phép chạy, và sau khi Agent nộp báo cáo.</p>
+<div class="step-flow"><span>Change Request</span><i>→</i><span>Spec Layer</span><i>→</i><span>Task</span><i>→</i><span>Supervisor</span><i>→</i><span>Agent</span><i>→</i><span>Verification</span><i>→</i><span>Evidence</span><i>→</i><span>Spec Compliance</span><i>→</i><span>Deploy</span></div>
+<p>Mỗi FeatureSpec có 3 loại điều khoản: <b>Requirement</b> (<code>REQ-xxx</code> — phải làm gì), <b>Acceptance Criterion</b> (<code>AC-xxx</code> — điều kiện chứng minh đã làm đúng), <b>Invariant</b> (<code>INV-xxx</code> — điều luôn luôn đúng, không chỉ lúc xong việc).</p>
+<div class="info">Tính năng này hiện thao tác qua API (chưa có form riêng trên Task Detail) — dùng cho Agent tự động và cho ai chỉnh sửa chính Workspace Manager. Task bình thường không đụng tới Spec Layer hoạt động y hệt như trước, không bị ảnh hưởng gì.</div>
+
+<h4>Gắn một Task với spec</h4>
+<ol class="steps">
+<li><b>Xem spec đã duyệt</b><span><code>GET /api/spec/features</code> liệt kê mọi FeatureSpec; <code>GET /api/spec/features/{id}</code> xem chi tiết requirement/acceptance/invariant của nó.</span></li>
+<li><b>Chọn phân loại thay đổi</b><span>Không phải Task nào cũng cần — chỉ thay đổi hành vi thật sự mới cần khai báo (xem bảng bên dưới).</span></li>
+<li><b>Gửi liên kết</b><span><code>POST /api/tasks/{id}/spec</code> với <code>classification</code> + <code>feature_id</code> + <code>requirement_ids</code> + <code>acceptance_ids</code>.</span></li>
+</ol>
+<table><thead><tr><th>Phân loại (classification)</th><th>Dùng khi nào</th><th>Bắt buộc gắn spec?</th></tr></thead><tbody>
+<tr><td><code>(để trống)</code></td><td>Mặc định — Task chưa đụng gì tới Spec Layer.</td><td><span class="badge unknown">Không</span></td></tr>
+<tr><td><code>NO_BEHAVIOR_CHANGE</code></td><td>Refactor, sửa comment/typo — không ai nhìn thấy hành vi khác.</td><td><span class="badge pass">Không</span></td></tr>
+<tr><td><code>BUG_FIX_TO_EXISTING_SPEC</code></td><td>Spec đã đúng, code chưa khớp — sửa cho khớp spec.</td><td><span class="badge pending">Có</span></td></tr>
+<tr><td><code>BEHAVIOR_CHANGE</code> / <code>NEW_FEATURE</code> / <code>SPEC_CHANGE</code></td><td>Hành vi đổi thật, tính năng mới, hoặc chính spec đang được sửa.</td><td><span class="badge pending">Có</span></td></tr>
+<tr><td><code>AMBIGUOUS</code></td><td>Chưa rõ thuộc loại nào — khai báo thật, đừng đoán đại một loại "an toàn hơn".</td><td><span class="badge fail">Luôn chặn</span></td></tr>
+</tbody></table>
+
+<h4>SpecGate — chặn trước khi Agent chạy</h4>
+<p>Ngay khi bấm <b>Start Agent</b> (xem <a href="#start-agent">Start Agent làm gì?</a>), SpecGate kiểm tra liên kết spec của Task đó. Không PASS thì không có process nào được khởi động — <b>Action blocked</b>, kèm lý do cụ thể.</p>
+<table><thead><tr><th>Kết quả</th><th>Ý nghĩa</th></tr></thead><tbody>
+<tr><td><span class="badge pass">PASS</span></td><td>Liên kết hợp lệ, feature đã <code>approved</code> — Agent chạy bình thường.</td></tr>
+<tr><td><span class="badge unknown">NOT_APPLICABLE</span></td><td>Task chưa khai báo phân loại — luôn cho chạy (Task cũ không bị ảnh hưởng).</td></tr>
+<tr><td><span class="badge pending">SPEC_REQUIRED</span></td><td>Cần gắn feature_id nhưng chưa có, hoặc classification = AMBIGUOUS.</td></tr>
+<tr><td><span class="badge pending">SPEC_NOT_APPROVED</span></td><td>Feature đã gắn nhưng còn <code>draft</code>/<code>deprecated</code>, chưa <code>approved</code>.</td></tr>
+<tr><td><span class="badge pending">TRACEABILITY_MISSING</span></td><td>Có feature nhưng chưa gắn requirement/acceptance id nào.</td></tr>
+<tr><td><span class="badge fail">SPEC_REFERENCE_INVALID</span></td><td>Id không tồn tại, thuộc feature khác, hoặc cây spec bị lỗi.</td></tr>
+</tbody></table>
+
+<h4>Spec Compliance — kiểm tra sau khi có bằng chứng</h4>
+<p><code>GET /api/tasks/{id}/spec-compliance</code> trả một trong 4 kết quả, luôn dựa trên bằng chứng thật (review/QA/test đã ghi nhận) — không bao giờ tự suy đoán:</p>
+<table><thead><tr><th>Verdict</th><th>Ý nghĩa</th></tr></thead><tbody>
+<tr><td><span class="badge pass">PASS</span></td><td>SpecGate PASS, và có bằng chứng thật gắn đúng feature này.</td></tr>
+<tr><td><span class="badge pending">INCOMPLETE</span></td><td>Chưa sai gì — chỉ là bằng chứng bắt buộc (review/kiểm tra) chưa xong.</td></tr>
+<tr><td><span class="badge fail">FAIL</span></td><td>Có bằng chứng thật và nó báo lỗi (FIX_REQUIRED/BLOCKED/QA FAIL).</td></tr>
+<tr><td><span class="badge spec_drift">SPEC_DRIFT</span></td><td>Liên kết spec không còn giải được — spec đã đổi, hoặc liên kết sai từ đầu. Không bao giờ âm thầm hạ xuống INCOMPLETE.</td></tr>
+</tbody></table>
+<div class="warning">SPEC_DRIFT là tín hiệu cần giải quyết thật (sửa code hoặc sửa spec) — không phải lỗi để né bằng cách gắn lại id khác cho "qua".</div>
+<p><code>GET /api/tasks/{id}/evidence</code> xem toàn bộ bằng chứng thô (verification_reports/review_runs/qa_runs/test_runs) đã ghi cho Task đó.</p>
+<div class="info">Cho agent tự sửa chính Workspace Manager: quy tắc bắt buộc nằm ở <code>AGENTS.md → Spec-Driven Development (Spec Layer, V1)</code> — xác định feature/requirement trước khi code, không tự mở rộng phạm vi, không khai xong việc khi bằng chứng còn thiếu, báo <code>SPEC_DRIFT</code> khi code và spec đã duyệt mâu thuẫn nhau.</div>
 </section>
 
 <section class="guide-section" id="live-agents"><span class="section-kicker">WEB TERMINAL</span><h3>Web terminal dùng thế nào?</h3>
