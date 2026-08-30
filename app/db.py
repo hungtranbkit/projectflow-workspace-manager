@@ -1003,6 +1003,22 @@ CREATE INDEX IF NOT EXISTS idx_spec_proposals_feature ON spec_proposals(feature_
 CREATE INDEX IF NOT EXISTS idx_spec_proposals_supersedes ON spec_proposals(supersedes_proposal_id);
 CREATE INDEX IF NOT EXISTS idx_human_decisions_subject ON human_decisions(subject_type,subject_id,resolved);
 """),
+    # V23: Architecture & Technical/UI Design Lifecycle (Phase E6). No
+    # new tables -- E6's own instruction is to prefer WorkProduct
+    # relationships (ARCHITECTURE_ANALYSIS/ADR/TECHNICAL_DESIGN/
+    # UI_UX_DESIGN/ARCHITECTURE_REVIEW/DESIGN_REVIEW, all already-typed
+    # WorkProduct kinds -- see app/services/work_product_service.py) plus
+    # a thin ArchitectureDesignLifecycleService over them, never a
+    # redundant state table. human_decisions already generalizes to a
+    # new subject_type='work_product' value with zero schema change
+    # (TEXT column, no CHECK constraint). The one real column this phase
+    # needs: a design-state digest on plans, exactly mirroring V22's
+    # spec_baseline_sha256 (E5.18), so a Plan can surface
+    # PLAN_DESIGN_STALE (E6.17) the same way it already surfaces
+    # SPEC_BASELINE_CHANGED/PLAN_SPEC_DRIFT.
+    (23, """
+ALTER TABLE plans ADD COLUMN design_baseline_digest TEXT;
+"""),
 ]
 
 

@@ -83,9 +83,10 @@ def test_task_type_role_mapping_matches_worked_examples(client):
     assert preferred("SECURITY_REVIEW") == "SECURITY_REVIEWER"
     assert preferred("RELEASE") == "RELEASE_MANAGER"
     assert preferred("SPEC_AUTHORING") == "SPEC_ANALYST"
-    # UI_UX_DESIGN: the catalog intentionally has no matching specialized
-    # role -- never forced onto an unrelated one.
-    assert preferred("UI_UX_DESIGN") is None
+    # UI_UX_DESIGN: E3 seeded this with no matching role ("never forced
+    # onto an unrelated one"); Phase E6 added the real UI_UX_DESIGNER
+    # role, completing this placeholder rather than redefining it.
+    assert preferred("UI_UX_DESIGN") == "UI_UX_DESIGNER"
 
 
 def test_task_type_get_404_for_unknown_key(client):

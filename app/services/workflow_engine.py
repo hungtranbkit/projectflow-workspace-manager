@@ -148,10 +148,15 @@ TASK_TYPES = {
     "REQUIREMENT_ANALYSIS": {"name": "Requirement Analysis", "stage": "ANALYSIS", "preferred_role": "REQUIREMENTS_ANALYST", "compatible_roles": ["REQUIREMENTS_ANALYST"]},
     "SPEC_AUTHORING": {"name": "Spec Authoring", "stage": "SPEC", "preferred_role": "SPEC_ANALYST", "compatible_roles": ["SPEC_ANALYST"]},
     "SPEC_REVIEW": {"name": "Spec Review", "stage": "SPEC", "preferred_role": "REVIEWER", "compatible_roles": ["REVIEWER", "SPEC_ANALYST"]},
-    "ARCHITECTURE_ANALYSIS": {"name": "Architecture Analysis", "stage": "ARCHITECTURE", "preferred_role": "PLANNER", "compatible_roles": ["PLANNER"]},
+    # Phase E6: these four were seeded ahead of time in E3 with a
+    # placeholder preferred_role (PLANNER/None) because no specialized
+    # role existed yet -- E6.1 adds SOFTWARE_ARCHITECT/TECHNICAL_DESIGNER/
+    # UI_UX_DESIGNER, so filling these in now is completing E3's own
+    # documented placeholder, not redefining the catalog.
+    "ARCHITECTURE_ANALYSIS": {"name": "Architecture Analysis", "stage": "ARCHITECTURE", "preferred_role": "SOFTWARE_ARCHITECT", "compatible_roles": ["SOFTWARE_ARCHITECT"]},
     "ARCHITECTURE_REVIEW": {"name": "Architecture Review", "stage": "ARCHITECTURE", "preferred_role": "REVIEWER", "compatible_roles": ["REVIEWER"]},
-    "TECHNICAL_DESIGN": {"name": "Technical Design", "stage": "DESIGN", "preferred_role": "PLANNER", "compatible_roles": ["PLANNER"]},
-    "UI_UX_DESIGN": {"name": "UI/UX Design", "stage": "DESIGN", "preferred_role": None, "compatible_roles": []},
+    "TECHNICAL_DESIGN": {"name": "Technical Design", "stage": "DESIGN", "preferred_role": "TECHNICAL_DESIGNER", "compatible_roles": ["TECHNICAL_DESIGNER", "SOFTWARE_ARCHITECT"]},
+    "UI_UX_DESIGN": {"name": "UI/UX Design", "stage": "DESIGN", "preferred_role": "UI_UX_DESIGNER", "compatible_roles": ["UI_UX_DESIGNER"]},
     "TEST_DESIGN": {"name": "Test Design", "stage": "PLANNING", "preferred_role": "QA_VERIFIER", "compatible_roles": ["QA_VERIFIER"]},
     "IMPLEMENTATION": {"name": "Implementation", "stage": "BUILD", "preferred_role": "BUILDER", "compatible_roles": ["BUILDER"]},
     "TEST_IMPLEMENTATION": {"name": "Test Implementation", "stage": "BUILD", "preferred_role": "BUILDER", "compatible_roles": ["BUILDER"]},
@@ -342,6 +347,16 @@ class WorkflowService:
         # Planner module -- None here (the default, and every E3 test's
         # own construction) means zero behavior change.
         self.human_decisions_pending = human_decisions_pending
+        # Phase E6 additive hook, same pattern as human_decisions_pending
+        # above: an optional object exposing .architecture_ready(change_id)
+        # and .design_ready(change_id) (wired in app/main.py once
+        # ArchitectureDesignLifecycleService exists) so ARCHITECTURE_READY/
+        # DESIGN_READY use real independent-review evidence instead of
+        # bare WorkProduct presence. None here (default, and every E3/E4/
+        # E5 test's own construction) preserves the exact E3 fallback
+        # behavior below -- zero behavior change for anything that
+        # doesn't wire this in.
+        self.architecture_design_gate = None
 
     # ---- creation (E3.10) -----------------------------------------
     def create_workflow_for_change(self, change_id: int, profile_key: str | None = None, project_policy: dict | None = None) -> dict:
@@ -378,9 +393,27 @@ class WorkflowService:
         return self._approved_work_product_exists(change_id, ("FEATURE_SPEC",))
 
     def _gate_architecture_ready(self, change_id: int, tasks: list[dict]) -> bool:
+        """E6.16: closes the E3 placeholder. When
+        ArchitectureDesignLifecycleService is wired in (self.
+        architecture_design_gate, additive hook set in app/main.py),
+        this is real independent-review evidence -- an ArchitectureAnalysis
+        APPROVED only after a separate ArchitectureReviewService
+        invocation returned PASS, never bare WorkProduct presence. Falls
+        back to the original E3 presence-only check when unwired (every
+        E3 test's own WorkflowService construction) -- zero behavior
+        change there."""
+        if self.architecture_design_gate is not None:
+            return bool(self.architecture_design_gate.architecture_ready(change_id))
         return self._approved_work_product_exists(change_id, ("ARCHITECTURE_ANALYSIS", "ADR"))
 
     def _gate_design_ready(self, change_id: int, tasks: list[dict]) -> bool:
+        """E6.16: same upgrade as _gate_architecture_ready above -- real
+        evidence (TechnicalDesign valid/current, independent design
+        review PASS, UI/UX PASS if applicable, no unresolved design
+        human decisions, requirement references valid, no unresolved
+        DESIGN_SPEC_CONFLICT) instead of bare WorkProduct presence."""
+        if self.architecture_design_gate is not None:
+            return bool(self.architecture_design_gate.design_ready(change_id))
         return self._approved_work_product_exists(change_id, ("TECHNICAL_DESIGN", "UI_UX_DESIGN"))
 
     def _gate_human_acceptance(self, change_id: int, tasks: list[dict]) -> bool:

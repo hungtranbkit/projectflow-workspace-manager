@@ -45,14 +45,18 @@ class HumanDecisionService:
         return self.get(decision_id)
 
     def pending_for_change(self, change_id: int) -> bool:
-        """True if the Change itself, any of its Plans, or any of its
-        SpecProposals has an unresolved human decision -- the single
-        check WorkflowService's WAITING_HUMAN wiring uses (E4.12/E5.11)."""
+        """True if the Change itself, any of its Plans, any of its
+        SpecProposals, or any of its WorkProducts (E6.14: architecture/
+        design human decisions reuse this same subject_type='work_product'
+        row rather than a second decision system) has an unresolved
+        human decision -- the single check WorkflowService's
+        WAITING_HUMAN wiring uses (E4.12/E5.11/E6.14)."""
         row = self.db.one(
             "SELECT id FROM human_decisions WHERE resolved=0 AND ("
             "  (subject_type='change' AND subject_id=?)"
             "  OR (subject_type='plan' AND subject_id IN (SELECT id FROM plans WHERE change_id=?))"
             "  OR (subject_type='spec_proposal' AND subject_id IN (SELECT id FROM spec_proposals WHERE change_id=?))"
+            "  OR (subject_type='work_product' AND subject_id IN (SELECT id FROM work_products WHERE change_id=?))"
             ") LIMIT 1",
-            (change_id, change_id, change_id))
+            (change_id, change_id, change_id, change_id))
         return bool(row)

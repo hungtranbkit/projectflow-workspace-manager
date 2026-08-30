@@ -113,6 +113,7 @@ Rules (violating these makes your output unusable, not just imperfect):
 - Cover every stage listed under workflow.required_stages with at least one task whose task_type maps to it, unless existing_progress already covers that stage (say so in "assumptions" if so) -- never propose skipping a required stage or gate.
 - If continuing requires a decision that would change WHAT is being built (business behavior, security boundary, data meaning, a materially different user-facing outcome, or a material change to an already-approved spec) -- add it to "human_decisions" instead of guessing. Do not invent product/business decisions yourself.
 - Ordinary implementation choices (library choice with equivalent behavior, internal structure, refactor strategy, test fixtures, file layout, algorithm choice with unchanged behavior) are yours to make -- never escalate those.
+- If "architecture_and_design" below has an APPROVED TechnicalDesign (and, if present, an APPROVED UI_UX_DESIGN), plan implementation Tasks FROM that design -- its components_to_change/interfaces/api_contracts/migration_plan/covered_requirements are the concrete shape of the work, not a second thing to re-derive from the spec alone.
 """
 
 
@@ -234,6 +235,19 @@ class PlannerContextBuilder:
             for wp in self.work_products.list_for_change(change_id)
         ]
 
+        # E6.17: the Planner must be able to plan implementation FROM
+        # architecture/design artifacts once they exist -- current
+        # (non-SUPERSEDED) ArchitectureAnalysis/ADR/TechnicalDesign/
+        # UI_UX_DESIGN, plus their review findings, read straight off
+        # WorkProduct.content_metadata (never re-derived/duplicated).
+        design_kinds = ("ARCHITECTURE_ANALYSIS", "ADR", "ARCHITECTURE_REVIEW", "TECHNICAL_DESIGN", "UI_UX_DESIGN", "DESIGN_REVIEW")
+        design_context = [
+            {"kind": wp["kind"], "title": wp["title"], "status": wp["status"], "id": wp["id"],
+             "content": json.loads(wp["content_metadata"] or "{}")}
+            for wp in self.work_products.list_for_change(change_id)
+            if wp["kind"] in design_kinds and wp["status"] != "SUPERSEDED"
+        ]
+
         return {
             "change": {
                 "id": change_id, "title": change.get("title") if change else None,
@@ -256,6 +270,7 @@ class PlannerContextBuilder:
                 "roles": [r["key"] for r in self.roles_catalog.list_roles()],
             },
             "existing_progress": {"tasks": existing_tasks, "work_products": existing_work_products},
+            "architecture_and_design": design_context,
         }
 
     @staticmethod
@@ -505,13 +520,14 @@ class PlannerService:
             self.db.event("change", change_id, "PLANNER_OUTPUT_INVALID", "missing summary/tasks")
             return {"outcome": "PLANNER_OUTPUT_INVALID", "plan": None, "message": "Planner output is missing required 'summary'/'tasks' fields"}
 
+        from app.services.architecture_design_service import design_state_digest
         revision = (self.db.one("SELECT MAX(revision) AS r FROM plans WHERE change_id=?", (change_id,))["r"] or 0) + 1
         plan_id = self.db.execute(
-            "INSERT INTO plans(change_id,workflow_run_id,revision,status,planner_provider,planner_role,input_context_digest,summary,assumptions,raw_output,spec_baseline_sha256) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO plans(change_id,workflow_run_id,revision,status,planner_provider,planner_role,input_context_digest,summary,assumptions,raw_output,spec_baseline_sha256,design_baseline_digest) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (change_id, run["id"], revision, "DRAFT", provider, "PLANNER", digest,
              str(parsed.get("summary") or ""), json.dumps(parsed.get("assumptions") or []), json.dumps(parsed),
-             context["spec"]["baseline_sha256"]))
+             context["spec"]["baseline_sha256"], design_state_digest(self.work_products, change_id)))
         # OR IGNORE (plan_items has UNIQUE(plan_id,item_key)): a
         # malformed LLM output with a duplicate/missing key must never
         # crash the write path with an unhandled IntegrityError -- the
@@ -649,3 +665,23 @@ class PlannerService:
         reason = "PLAN_SPEC_DRIFT" if drift else "SPEC_BASELINE_CHANGED"
         return {"stale": True, "reason": reason, "replan_recommended": True,
                 "plan_baseline": plan["spec_baseline_sha256"], "current_baseline": current_baseline}
+
+    # ---- design staleness (E6.17) --------------------------------------
+    def check_design_staleness(self, plan_id: int) -> dict:
+        """PLAN_DESIGN_STALE: the architecture/design WorkProduct state
+        that governed this Plan at creation time has changed since (a
+        new/refined/re-reviewed ArchitectureAnalysis/ADR/TechnicalDesign/
+        UI_UX_DESIGN). Same visibility-only discipline as check_staleness
+        above -- never destroys/auto-invalidates the Plan (E6.17: 'Do not
+        destroy the old Plan automatically. Recommend replan.')."""
+        from app.services.architecture_design_service import design_state_digest
+        plan = self.get_plan(plan_id)
+        if not plan:
+            raise PlannerError("Plan not found")
+        current = design_state_digest(self.work_products, plan["change_id"])
+        stored = plan["design_baseline_digest"]
+        if not stored and not current:
+            return {"stale": False, "reason": None, "replan_recommended": False, "plan_baseline": stored, "current_baseline": current}
+        stale = stored != current
+        return {"stale": stale, "reason": "PLAN_DESIGN_STALE" if stale else None, "replan_recommended": stale,
+                "plan_baseline": stored, "current_baseline": current}

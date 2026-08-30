@@ -73,6 +73,26 @@ ROLES = {
         "name": "Release Manager", "category": "OPERATIONS",
         "description": "Builds, promotes, and deploys qualified merged source under deployment policy (DeploymentService). MERGE_PR/DEPLOY_PRODUCTION stay human-gated regardless of this role.",
     },
+    # Phase E6 (Architecture & Technical/UI Design Lifecycle): three new
+    # roles, justified by real E6 execution only -- no artificial org
+    # chart (E6.1's own instruction). ARCHITECTURE_REVIEW/DESIGN_REVIEW
+    # deliberately reuse the existing REVIEWER role below rather than
+    # adding a fourth: reviewing a proposed architecture/design is the
+    # same "inspect independently, return PASS/FIX_REQUIRED-shaped
+    # verdict" responsibility REVIEWER already models, just against a
+    # different artifact than source code.
+    "SOFTWARE_ARCHITECT": {
+        "name": "Software Architect", "category": "ANALYSIS",
+        "description": "Assesses a Change's structural impact against the current architecture -- affected components, boundaries, dependencies, data ownership, security/compatibility impact -- and records it as an ArchitectureAnalysis WorkProduct, proposing ADRs for decisions worth remembering. Never modifies production code.",
+    },
+    "TECHNICAL_DESIGNER": {
+        "name": "Technical Designer", "category": "ANALYSIS",
+        "description": "Turns an approved spec plus architecture analysis/ADRs into a structured TechnicalDesign WorkProduct (interfaces, API/data contracts, failure modes, migration/rollback, requirement trace) a future implementation Task can be planned and built against. Never modifies production code.",
+    },
+    "UI_UX_DESIGNER": {
+        "name": "UI/UX Designer", "category": "ANALYSIS",
+        "description": "Defines user-facing behavior and structure -- flows, screens, states, accessibility -- as a UI_UX_DESIGN WorkProduct, only when a Change actually changes user-facing interaction. Behavior/structure only; E6 does not generate visual mockups/screenshots.",
+    },
 }
 
 # ------------------------------------------------------------ Capabilities
@@ -136,6 +156,32 @@ CAPABILITIES = {
         "description": "Read recorded evidence for a Task (EvidenceStore)."},
     "WRITE_WORK_PRODUCT": {"name": "Write work product", "category": "EVIDENCE", "sensitivity": "NORMAL",
         "description": "Create/record a WorkProduct (WorkProductService)."},
+    # Phase E6: reasoning-only capabilities -- every one of these is
+    # structured LLM reasoning over bounded context (E6.21: "prefer
+    # tool-less structured invocation"), never a deployment or
+    # release-sensitive operation (E6.1's own instruction: "Do NOT
+    # associate any design role with deployment or sensitive release
+    # capabilities").
+    "REPOSITORY_ANALYSIS": {"name": "Repository analysis", "category": "ARCHITECTURE", "sensitivity": "NORMAL",
+        "description": "Bounded, explicitly read-only structural inspection (e.g. a top-level module/file inventory) -- never an unrestricted Builder shell; see ArchitectureContextBuilder."},
+    "ARCHITECTURE_REASONING": {"name": "Architecture reasoning", "category": "ARCHITECTURE", "sensitivity": "NORMAL",
+        "description": "Reason about component boundaries, dependencies, and structural impact of a proposed Change."},
+    "DEPENDENCY_ANALYSIS": {"name": "Dependency analysis", "category": "ARCHITECTURE", "sensitivity": "NORMAL",
+        "description": "Identify upstream/downstream dependencies and integration points a proposed change would affect."},
+    "TECHNICAL_DESIGN": {"name": "Technical design", "category": "DESIGN", "sensitivity": "NORMAL",
+        "description": "Produce a structured technical design (interfaces, contracts, failure modes) from an approved spec/architecture."},
+    "API_DESIGN": {"name": "API design", "category": "DESIGN", "sensitivity": "NORMAL",
+        "description": "Design API/interface contracts for a proposed change."},
+    "DATA_DESIGN": {"name": "Data design", "category": "DESIGN", "sensitivity": "NORMAL",
+        "description": "Design data model/persistence changes, including migration and rollback shape."},
+    "UI_UX_DESIGN": {"name": "UI/UX design", "category": "DESIGN", "sensitivity": "NORMAL",
+        "description": "Define user-facing flows, screens, states, and acceptance mapping. Behavior/structure only, never visual mockup generation."},
+    "FAILURE_MODE_ANALYSIS": {"name": "Failure mode analysis", "category": "DESIGN", "sensitivity": "NORMAL",
+        "description": "Identify failure modes and error-handling requirements for a proposed architecture/design."},
+    "MIGRATION_DESIGN": {"name": "Migration design", "category": "DESIGN", "sensitivity": "NORMAL",
+        "description": "Design a migration/rollback plan for a persistence or contract change. Never itself runs a migration -- BUILD-stage execution stays a Builder/RELEASE_MANAGER responsibility."},
+    "ARCHITECTURE_REVIEW": {"name": "Architecture/design review", "category": "ARCHITECTURE", "sensitivity": "NORMAL",
+        "description": "Independently review a proposed ArchitectureAnalysis or TechnicalDesign/UI_UX_DESIGN and return a PASS/NEEDS_REFINEMENT/HUMAN_DECISION_REQUIRED/REJECT-shaped verdict. Reused for both architecture review and design review -- same responsibility shape as REVIEWER's existing SUBMIT_REVIEW, against a different artifact."},
 }
 
 # --------------------------------------------------------- Role -> Capability
@@ -149,7 +195,7 @@ ROLE_CAPABILITIES = {
     "BUILDER": {"REQUIRED": ["READ_REPOSITORY", "EDIT_SOURCE", "CREATE_COMMIT", "RUN_TESTS"],
                 "OPTIONAL": ["READ_SPEC", "USE_INTERACTIVE_TERMINAL", "USE_BROWSER", "WRITE_WORK_PRODUCT"]},
     "REVIEWER": {"REQUIRED": ["READ_REPOSITORY", "REVIEW_SOURCE", "REVIEW_DIFF", "READ_TEST_RESULTS", "SUBMIT_REVIEW"],
-                 "OPTIONAL": ["READ_SPEC"]},
+                 "OPTIONAL": ["READ_SPEC", "ARCHITECTURE_REVIEW"]},
     "SECURITY_REVIEWER": {"REQUIRED": ["READ_REPOSITORY", "REVIEW_SOURCE", "REVIEW_DIFF", "SUBMIT_REVIEW"],
                            "OPTIONAL": ["READ_SPEC"]},
     "QA_VERIFIER": {"REQUIRED": ["READ_EVIDENCE", "RUN_RUNTIME_VERIFICATION", "RECORD_VERIFICATION"],
@@ -158,6 +204,11 @@ ROLE_CAPABILITIES = {
                    "OPTIONAL": ["PUSH_BRANCH", "CREATE_PR", "READ_CI"]},
     "RELEASE_MANAGER": {"REQUIRED": ["BUILD_ARTIFACT", "DEPLOY_DEV", "READ_EVIDENCE"],
                          "OPTIONAL": ["DEPLOY_TEST", "DEPLOY_PRODUCTION", "ROLLBACK_DEPLOYMENT", "MERGE_PR"]},
+    "SOFTWARE_ARCHITECT": {"REQUIRED": ["READ_SPEC", "ARCHITECTURE_REASONING", "DEPENDENCY_ANALYSIS", "WRITE_WORK_PRODUCT"],
+                            "OPTIONAL": ["READ_REPOSITORY", "REPOSITORY_ANALYSIS", "FAILURE_MODE_ANALYSIS", "MIGRATION_DESIGN"]},
+    "TECHNICAL_DESIGNER": {"REQUIRED": ["READ_SPEC", "TECHNICAL_DESIGN", "API_DESIGN", "DATA_DESIGN", "WRITE_WORK_PRODUCT"],
+                            "OPTIONAL": ["READ_REPOSITORY", "FAILURE_MODE_ANALYSIS", "MIGRATION_DESIGN"]},
+    "UI_UX_DESIGNER": {"REQUIRED": ["READ_SPEC", "UI_UX_DESIGN", "WRITE_WORK_PRODUCT"], "OPTIONAL": ["READ_REPOSITORY"]},
 }
 
 # --------------------------------------------------------------- Providers
@@ -222,6 +273,21 @@ def _launchable_caps() -> dict[str, tuple[str, str]]:
         "ROLLBACK_DEPLOYMENT": ("UNSUPPORTED", "Policy-controlled/human-gated."),
         "READ_EVIDENCE": ("SUPPORTED", ""),
         "WRITE_WORK_PRODUCT": ("SUPPORTED", ""),
+        # Phase E6: all reasoning-only (bounded structured context, no
+        # tool access -- PlannerAgentInvoker.invoke() runs with
+        # --tools "" exactly like the Planner/Spec roles do), so every
+        # one is SUPPORTED for a real launchable provider. None of them
+        # touches deployment/release.
+        "REPOSITORY_ANALYSIS": ("SUPPORTED", "Bounded, read-only top-level structural metadata only (ArchitectureContextBuilder) -- never a live shell/tool call."),
+        "ARCHITECTURE_REASONING": ("SUPPORTED", ""),
+        "DEPENDENCY_ANALYSIS": ("SUPPORTED", ""),
+        "TECHNICAL_DESIGN": ("SUPPORTED", ""),
+        "API_DESIGN": ("SUPPORTED", ""),
+        "DATA_DESIGN": ("SUPPORTED", ""),
+        "UI_UX_DESIGN": ("SUPPORTED", ""),
+        "FAILURE_MODE_ANALYSIS": ("SUPPORTED", ""),
+        "MIGRATION_DESIGN": ("SUPPORTED", "Design only -- never executes a migration."),
+        "ARCHITECTURE_REVIEW": ("SUPPORTED", ""),
     }
 
 
@@ -365,7 +431,7 @@ class RoleCapabilityService:
         if ctype == "FEATURE" and "SPEC_ANALYST" not in roles:
             roles.insert(0, "SPEC_ANALYST")
         if ctype == "ARCHITECTURE_CHANGE":
-            for r in ("PLANNER", "SPEC_ANALYST"):
+            for r in ("PLANNER", "SPEC_ANALYST", "SOFTWARE_ARCHITECT", "TECHNICAL_DESIGNER"):
                 if r not in roles:
                     roles.insert(0, r)
         if ctype == "SECURITY_CHANGE" and "SECURITY_REVIEWER" not in roles:

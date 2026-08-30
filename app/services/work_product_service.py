@@ -25,6 +25,13 @@ WORK_PRODUCT_KINDS = (
     # traceable WorkProduct in its own right -- Change -> Plan -> Plan
     # WorkProduct -> Tasks. See app/services/planner_service.py.
     "IMPLEMENTATION_PLAN",
+    # Phase E6 (Architecture & Technical/UI Design Lifecycle): distinct
+    # review kinds, same precedent SPEC_REVIEW already set above (a
+    # dedicated kind per review type, never overloaded onto the generic
+    # REVIEW_REPORT which is for code review). ARCHITECTURE_ANALYSIS/
+    # ADR/TECHNICAL_DESIGN/UI_UX_DESIGN already existed above (E1 seeded
+    # them ahead of E6 actually implementing the services that use them).
+    "ARCHITECTURE_REVIEW", "DESIGN_REVIEW",
 )
 WORK_PRODUCT_STATUSES = ("DRAFT", "PROPOSED", "APPROVED", "SUPERSEDED", "REJECTED")
 DIRECTIONS = ("INPUT", "OUTPUT")
@@ -76,6 +83,21 @@ class WorkProductService:
 
     def get(self, wp_id: int) -> dict | None:
         return self.db.one("SELECT * FROM work_products WHERE id=?", (wp_id,))
+
+    def set_status(self, wp_id: int, status: str) -> dict:
+        """Phase E6: the one place a WorkProduct's status is transitioned
+        after creation (e.g. DRAFT -> APPROVED on an independent review
+        PASS, DRAFT -> REJECTED on REJECT) -- never touches content/
+        content_metadata, matching create()'s own supersede-in-place
+        status update for the same reason."""
+        status = (status or "").strip().upper()
+        if status not in WORK_PRODUCT_STATUSES:
+            raise WorkProductError(f"Unknown status: {status} (must be one of {WORK_PRODUCT_STATUSES})")
+        if not self.get(wp_id):
+            raise WorkProductError("WorkProduct not found")
+        self.db.execute("UPDATE work_products SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (status, wp_id))
+        self.db.event("work_product", wp_id, "WORK_PRODUCT_STATUS_CHANGED", f"status={status}")
+        return self.get(wp_id)
 
     def list_for_change(self, change_id: int) -> list[dict]:
         return self.db.all("SELECT * FROM work_products WHERE change_id=? ORDER BY id", (change_id,))

@@ -73,6 +73,10 @@ def load_engineering_policy(repo: Path) -> dict | None:
         workflow:
           default_profile: AGENTIC_STANDARD
           allowed_profiles: [AGENTIC_STANDARD, CONTROLLED]
+        architecture:
+          require_for: [CONTROLLED]
+        design:
+          ui_ux_when_user_facing: true
 
     Returns None if the project declares no such block at all -- a
     project without one uses safe global defaults, the same convention
@@ -84,7 +88,18 @@ def load_engineering_policy(repo: Path) -> dict | None:
     support, and never touch a chosen profile's own stage/gate
     requirements (there is no mechanism here that could weaken a
     CONTROLLED profile's mandatory gates; only which profile may be
-    SELECTED is narrowable)."""
+    SELECTED is narrowable).
+
+    Phase E6.19 additions, same narrow-only discipline: `architecture.
+    require_for` is a list of WorkflowProfile keys that should treat the
+    normally-OPTIONAL ARCHITECTURE stage as REQUIRED (WorkflowService/
+    ArchitectureDesignLifecycleService consult this; PROFILE_STAGES
+    itself is never mutated) -- it can only ADD a requirement, never
+    remove CONTROLLED's own mandatory DESIGN stage. `design.
+    ui_ux_when_user_facing` is an explicit override for UI/UX
+    applicability detection (E6.10): true/false forces the decision;
+    omitted leaves UiUxApplicabilityService's own structured-evidence
+    heuristic in charge."""
     path = repo / "PROJECT.yaml"
     if not path.is_file(): return None
     data = yaml.safe_load(path.read_text()) or {}
@@ -107,4 +122,16 @@ def load_engineering_policy(repo: Path) -> dict | None:
         default_profile = workflow.get("default_profile")
         if default_profile is not None and not isinstance(default_profile, str):
             raise ContractError("engineering.workflow.default_profile must be a string")
+    architecture = block.get("architecture")
+    if architecture is not None:
+        if not isinstance(architecture, dict): raise ContractError("engineering.architecture must be a mapping")
+        require_for = architecture.get("require_for")
+        if require_for is not None and not isinstance(require_for, list):
+            raise ContractError("engineering.architecture.require_for must be a list")
+    design = block.get("design")
+    if design is not None:
+        if not isinstance(design, dict): raise ContractError("engineering.design must be a mapping")
+        ui_ux = design.get("ui_ux_when_user_facing")
+        if ui_ux is not None and not isinstance(ui_ux, bool):
+            raise ContractError("engineering.design.ui_ux_when_user_facing must be a boolean")
     return block

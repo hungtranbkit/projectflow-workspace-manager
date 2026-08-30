@@ -53,6 +53,11 @@ from app.services.spec_lifecycle_service import (
     RequirementAnalysisService, SpecAuthorService, SpecProposalValidator, SpecReviewService,
     SpecLifecycleService, SpecLifecycleError,
 )
+from app.services.architecture_design_service import (
+    ArchitectureContextBuilder, ArchitectureAnalysisService, ArchitectureReviewService,
+    UiUxApplicabilityService, TechnicalDesignService, UiUxDesignService, DesignReviewService,
+    ArchitectureDesignLifecycleService, ArchitectureDesignError,
+)
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -132,6 +137,48 @@ def create_app(settings=None):
     spec_lifecycle_service = SpecLifecycleService(db, changes, work_products, trace, requirement_analysis_service,
                                                    spec_author_service, spec_proposal_validator, spec_review_service,
                                                    human_decisions, specs_root)
+    # Architecture & Technical/UI Design Lifecycle (Phase E6): same
+    # reuse discipline as E5 -- PlannerAgentInvoker (tool-less, stateless,
+    # so an architecture/design agent can never write source), roles_catalog
+    # (RoleCapabilityService, no second validator), THIS repo's own
+    # specs_root (never a managed-repo path), and human_decisions
+    # (HumanDecisionService, subject_type='work_product' -- no second
+    # decision system). _change_engineering_policy below (E3.12) is
+    # defined further down with the other Workflow routes; passed in here
+    # as a resolver callable so ArchitectureDesignLifecycleService can
+    # resolve a Change's own PROJECT.yaml engineering policy without a
+    # forward reference.
+    def _resolve_project_policy_for_change(change: dict) -> dict | None:
+        if not change.get("project_id"):
+            return None
+        r = db.one("SELECT repo_path FROM repositories WHERE id=?", (change["project_id"],))
+        if not r:
+            return None
+        try:
+            return load_engineering_policy(Path(r["repo_path"]))
+        except ContractError:
+            return None
+
+    architecture_context_builder = ArchitectureContextBuilder(db, changes, work_products, trace, roles_catalog, workflow_catalog, workflow_service, specs_root, settings.root)
+    architecture_analysis_service = ArchitectureAnalysisService(db, changes, work_products, trace, planner_invoker, roles_catalog, architecture_context_builder, settings.root)
+    architecture_review_service = ArchitectureReviewService(db, changes, work_products, trace, planner_invoker, roles_catalog, specs_root, settings.root, human_decisions)
+    ui_ux_applicability_service = UiUxApplicabilityService(work_products, changes)
+    technical_design_service = TechnicalDesignService(db, changes, work_products, trace, planner_invoker, roles_catalog, architecture_context_builder, specs_root, settings.root)
+    ui_ux_design_service = UiUxDesignService(db, changes, work_products, planner_invoker, roles_catalog, architecture_context_builder, specs_root, settings.root)
+    design_review_service = DesignReviewService(db, changes, work_products, planner_invoker, roles_catalog, specs_root, settings.root, human_decisions)
+    architecture_design_service = ArchitectureDesignLifecycleService(
+        db, changes, work_products, trace, architecture_context_builder,
+        architecture_analysis_service, architecture_review_service, ui_ux_applicability_service,
+        technical_design_service, ui_ux_design_service, design_review_service, human_decisions,
+        requirement_analysis_lookup=lambda cid: (lambda wp: json.loads(wp["content_metadata"] or "{}") if wp else None)(spec_lifecycle_service.get_requirement_analysis(cid)),
+        workflow_service=workflow_service, project_policy_resolver=_resolve_project_policy_for_change)
+    # E6.16: additive-only hook, exact same pattern as E4.12's
+    # human_decisions_pending above -- ARCHITECTURE_READY/DESIGN_READY
+    # now resolve through real independent-review evidence instead of
+    # bare WorkProduct presence (see WorkflowService._gate_architecture_
+    # ready/_gate_design_ready). Every E3/E4/E5 test's own WorkflowService
+    # construction leaves this None (zero behavior change there).
+    workflow_service.architecture_design_gate = architecture_design_service
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
@@ -164,6 +211,14 @@ def create_app(settings=None):
     app.state.spec_proposal_validator = spec_proposal_validator
     app.state.spec_review_service = spec_review_service
     app.state.spec_lifecycle_service = spec_lifecycle_service
+    app.state.architecture_context_builder = architecture_context_builder
+    app.state.architecture_analysis_service = architecture_analysis_service
+    app.state.architecture_review_service = architecture_review_service
+    app.state.ui_ux_applicability_service = ui_ux_applicability_service
+    app.state.technical_design_service = technical_design_service
+    app.state.ui_ux_design_service = ui_ux_design_service
+    app.state.design_review_service = design_review_service
+    app.state.architecture_design_service = architecture_design_service
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -603,11 +658,12 @@ def create_app(settings=None):
     @app.exception_handler(WorkflowError)
     @app.exception_handler(PlannerError)
     @app.exception_handler(SpecLifecycleError)
+    @app.exception_handler(ArchitectureDesignError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3/E4/E5's Change/WorkProduct/Workflow/Plan/Spec-
-        Proposal API is a pure JSON surface (E1.7: 'API/service
-        correctness first, no large UI yet') -- a clean 400 + message,
-        never the HTML 'Action
+        """Phase E1/E3/E4/E5/E6's Change/WorkProduct/Workflow/Plan/Spec-
+        Proposal/Architecture/Design API is a pure JSON surface (E1.7:
+        'API/service correctness first, no large UI yet') -- a clean
+        400 + message, never the HTML 'Action
         blocked' page the older form-posting routes use."""
         return JSONResponse({"ok":False,"message":str(exc)},status_code=400)
 
@@ -2413,6 +2469,13 @@ def create_app(settings=None):
     def api_plan_staleness(pid:int):
         _plan_row(pid)
         return planner_service.check_staleness(pid)
+    @app.get("/api/plans/{pid}/design-staleness")
+    def api_plan_design_staleness(pid:int):
+        """E6.17: PLAN_DESIGN_STALE -- surfaced separately from spec
+        staleness above since they detect different drift (spec baseline
+        vs. architecture/design WorkProduct state)."""
+        _plan_row(pid)
+        return planner_service.check_design_staleness(pid)
     @app.post("/api/human-decisions/{did}/resolve")
     def api_resolve_human_decision_generic(did:int,resolution_note:str=Form(...)):
         """E5.11: the generalized resolve path -- works for a decision
@@ -2499,6 +2562,112 @@ def create_app(settings=None):
     def api_spec_proposal_validation(pid:int):
         p=_proposal_row(pid)
         return json.loads(p["validation_result"] or "{}")
+
+    # ------------------------------------- Architecture & Design Lifecycle (E6)
+    # ARCHITECTURE ANALYSIS / ARCHITECTURE ARTIFACT / TECHNICAL DESIGN /
+    # UI/UX DESIGN / DESIGN REVIEW / TASK IMPLEMENTATION stay strictly
+    # separate here too -- see app/services/architecture_design_service.py's
+    # module docstring. No implementation Task is ever generated by this
+    # block (E6.18) -- once DESIGN_READY, the Planner (E4, above) is the
+    # only thing that ever creates a Task.
+    def _wp_out(wp:dict|None):
+        if wp is None: return None
+        return {**wp,"content_metadata":json.loads(wp["content_metadata"] or "{}")}
+    def _change_policy_or_none(cid:int):
+        return _change_engineering_policy(_change_row(cid))
+
+    @app.post("/api/changes/{cid}/architecture/analyze")
+    def api_architecture_analyze(cid:int,provider:str=Form("claude")):
+        _change_row(cid)
+        result=architecture_analysis_service.analyze(cid,provider=provider)
+        if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
+        return result
+    @app.get("/api/changes/{cid}/architecture")
+    def api_get_architecture(cid:int):
+        _change_row(cid)
+        wp=architecture_analysis_service.current_for_change(cid)
+        if not wp: raise HTTPException(404,"No Architecture Analysis yet for this Change")
+        return _wp_out(wp)
+    @app.post("/api/changes/{cid}/architecture/review")
+    def api_architecture_review(cid:int,analysis_id:str=Form(""),provider:str=Form("claude")):
+        _change_row(cid)
+        aid=int(analysis_id) if analysis_id.strip().isdigit() else None
+        if aid is None:
+            wp=architecture_analysis_service.current_for_change(cid)
+            if not wp: raise HTTPException(404,"No Architecture Analysis exists for this Change yet -- run /architecture/analyze first")
+            aid=wp["id"]
+        result=architecture_review_service.review(aid,provider=provider)
+        if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
+        return result
+    @app.get("/api/changes/{cid}/adrs")
+    def api_list_adrs(cid:int):
+        _change_row(cid)
+        return [_wp_out(wp) for wp in work_products.list_for_change(cid) if wp["kind"]=="ADR"]
+
+    @app.post("/api/changes/{cid}/design/technical")
+    def api_design_technical(cid:int,architecture_analysis_id:str=Form(""),provider:str=Form("claude")):
+        _change_row(cid)
+        aid=int(architecture_analysis_id) if architecture_analysis_id.strip().isdigit() else None
+        if aid is None:
+            wp=architecture_analysis_service.current_for_change(cid)
+            aid=wp["id"] if wp and wp["status"]=="APPROVED" else None
+        result=technical_design_service.design(cid,aid,provider=provider)
+        if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
+        return result
+    @app.post("/api/changes/{cid}/design/ui-ux")
+    def api_design_ui_ux(cid:int,provider:str=Form("claude")):
+        _change_row(cid)
+        result=ui_ux_design_service.design(cid,provider=provider)
+        if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
+        return result
+    @app.get("/api/changes/{cid}/design")
+    def api_get_design(cid:int):
+        _change_row(cid)
+        return {"technical_design":_wp_out(technical_design_service.current_for_change(cid)),
+                "ui_ux_design":_wp_out(ui_ux_design_service.current_for_change(cid)),
+                "ui_ux_applicability":architecture_design_service.detect_ui_ux(cid,project_policy=_change_policy_or_none(cid))}
+    @app.post("/api/changes/{cid}/design/review")
+    def api_design_review(cid:int,technical_design_id:str=Form(""),ui_ux_design_id:str=Form(""),provider:str=Form("claude")):
+        _change_row(cid)
+        tid=int(technical_design_id) if technical_design_id.strip().isdigit() else None
+        if tid is None:
+            wp=technical_design_service.current_for_change(cid)
+            if not wp: raise HTTPException(404,"No Technical Design exists for this Change yet -- run /design/technical first")
+            tid=wp["id"]
+        uid=int(ui_ux_design_id) if ui_ux_design_id.strip().isdigit() else None
+        if uid is None:
+            uwp=ui_ux_design_service.current_for_change(cid)
+            uid=uwp["id"] if uwp else None
+        result=design_review_service.review(tid,uid,provider=provider)
+        if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
+        return result
+    @app.post("/api/changes/{cid}/design/refine")
+    def api_design_refine(cid:int,technical_design_id:str=Form(""),provider:str=Form("claude")):
+        _change_row(cid)
+        tid=int(technical_design_id) if technical_design_id.strip().isdigit() else None
+        if tid is None:
+            wp=technical_design_service.current_for_change(cid)
+            if not wp: raise HTTPException(404,"No Technical Design exists for this Change yet")
+            tid=wp["id"]
+        review_wp=db.one("SELECT content_metadata FROM work_products WHERE kind='DESIGN_REVIEW' AND change_id=? ORDER BY id DESC LIMIT 1",(cid,))
+        findings=json.loads(review_wp["content_metadata"]) if review_wp else {}
+        result=technical_design_service.refine(tid,findings,provider=provider)
+        if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
+        uwp=ui_ux_design_service.current_for_change(cid)
+        if uwp:
+            ui_result=ui_ux_design_service.refine(uwp["id"],findings,provider=provider)
+            if ui_result.get("work_product"): result["ui_ux_design"]=_wp_out(ui_result["work_product"])
+        return result
+    @app.get("/api/changes/{cid}/design/status")
+    def api_design_status(cid:int):
+        _change_row(cid)
+        s=architecture_design_service.status(cid,project_policy=_change_policy_or_none(cid))
+        return {**s,"architecture_analysis":_wp_out(s["architecture_analysis"]),
+                "technical_design":_wp_out(s["technical_design"]),"ui_ux_design":_wp_out(s["ui_ux_design"])}
+    @app.get("/api/changes/{cid}/design/findings")
+    def api_design_findings(cid:int):
+        _change_row(cid)
+        return architecture_design_service.design_findings(cid)
 
     @app.post("/api/workspaces/{wid}/builder-instructions")
     def save_builder_instructions(wid:int,builder_instructions:str=Form("")):
