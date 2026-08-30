@@ -68,6 +68,10 @@ from app.services.autonomous_execution_service import (
     AutonomousExecutionService, TaskExecutionContextBuilder, AutonomousExecutionError,
 )
 from app.services.worktree_manager import WorktreeManager, WorktreeManagerError
+from app.services.review_service import ReviewError, FindingsStore, task_chain_ids
+from app.services.code_review_service import CodeReviewService
+from app.services.security_review_service import SecurityApplicabilityService, SecurityReviewService
+from app.services.review_fix_orchestrator import ReviewFixOrchestratorService, ReviewFixError
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -749,13 +753,15 @@ def create_app(settings=None):
     @app.exception_handler(TestDesignError)
     @app.exception_handler(AutonomousExecutionError)
     @app.exception_handler(WorktreeManagerError)
+    @app.exception_handler(ReviewError)
+    @app.exception_handler(ReviewFixError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5's Change/WorkProduct/Workflow/
-        Plan/Spec-Proposal/Architecture/Design/Test-Design/Autonomous-
-        Execution/Worktree API is a pure JSON surface (E1.7: 'API/service
-        correctness first, no large UI yet') -- a clean 400 + message,
-        never the HTML 'Action blocked' page the older form-posting
-        routes use."""
+        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5/E9's Change/WorkProduct/
+        Workflow/Plan/Spec-Proposal/Architecture/Design/Test-Design/
+        Autonomous-Execution/Worktree/Review-Fix API is a pure JSON
+        surface (E1.7: 'API/service correctness first, no large UI
+        yet') -- a clean 400 + message, never the HTML 'Action
+        blocked' page the older form-posting routes use."""
         return JSONResponse({"ok":False,"message":str(exc)},status_code=400)
 
     @app.get("/", response_class=HTMLResponse)
@@ -2244,7 +2250,14 @@ def create_app(settings=None):
             w["last_activity_hint"]=activity_summary(w["session"]["id"], 200) if w["session"] else None
 
         qa_required=decision.requires_qa(d["risk_profile"]); integration_required=decision.requires_integration(d["risk_profile"])
+        # E9.32: Review/Fix panel -- read-only, all from ReviewFixOrchestratorService's
+        # own status()/integration_readiness() (never a second computation here).
+        review_fix=review_fix_orchestrator.status(tid)
+        review_fix["findings"]=findings_store.list_for_task(task_chain_ids(db,tid))
+        try: review_fix["integration_readiness"]=review_fix_orchestrator.integration_readiness(tid)
+        except Exception: review_fix["integration_readiness"]=None
         return render(request,"task_detail.html",t=t,decision=d,workspaces=workspaces,sandboxes=sbxs,task_integration=ti,ti_repos=ti_repos,
+                      review_fix=review_fix,
                       integration_sandboxes=integration_sandboxes,
                       status=d["status"],stage=d["stage"],risk_profile=d["risk_profile"],next_action=d["next_action"],
                       blocking_reasons=d["blocking_reasons"],test_readiness=d["test_readiness"],ready_for_main=d["ready_for_main"],
@@ -3075,6 +3088,30 @@ def create_app(settings=None):
         worktree_manager=worktree_manager)
     app.state.autonomous_execution_service=autonomous_execution_service
 
+    # ---- E9: Independent Code Review, Security Review & Fix Loop -----
+    findings_store=FindingsStore(db)
+    app.state.findings_store=findings_store
+    code_review_service=CodeReviewService(
+        db,changes,work_products,findings_store,planner_invoker,roles_catalog,git,
+        worktree_manager,task_execution_context_builder,human_decisions,_resolve_project_policy_for_change)
+    app.state.code_review_service=code_review_service
+    security_applicability_service=SecurityApplicabilityService(db,git)
+    app.state.security_applicability_service=security_applicability_service
+    security_review_service=SecurityReviewService(
+        db,changes,work_products,findings_store,planner_invoker,roles_catalog,git,
+        worktree_manager,task_execution_context_builder,human_decisions,_resolve_project_policy_for_change)
+    app.state.security_review_service=security_review_service
+    review_fix_orchestrator=ReviewFixOrchestratorService(
+        db,changes,work_products,findings_store,code_review_service,security_review_service,
+        security_applicability_service,worktree_manager,workflow_service,human_decisions,decision,git,
+        _start_builder_session,_resolve_project_policy_for_change)
+    app.state.review_fix_orchestrator=review_fix_orchestrator
+    # E9.23/E9.24/E9.25: same additive-hook pattern E6/E7 already used
+    # for architecture_design_gate/test_design_gate -- REVIEW_PASS/
+    # SECURITY_PASS now consult real E9 evidence when it exists, fall
+    # back to the exact legacy per-workspace check otherwise.
+    workflow_service.review_gate=review_fix_orchestrator
+
     @app.get("/api/changes/{cid}/autonomous-execution")
     def api_autonomous_execution_status(cid:int):
         change_row(cid)
@@ -3135,6 +3172,39 @@ def create_app(settings=None):
     def api_task_integration_check(tid:int):
         task_row(tid)
         return worktree_manager.check_integration(tid)
+
+    # ---- E9 Independent Review / Security Review / Fix Loop ---------
+    @app.post("/api/tasks/{tid}/review/code")
+    def api_task_review_code(tid:int,provider:str=Form("claude")):
+        task_row(tid)
+        return code_review_service.review_task(tid,provider)
+    @app.post("/api/tasks/{tid}/review/security")
+    def api_task_review_security(tid:int,provider:str=Form("claude")):
+        task_row(tid)
+        return security_review_service.review_task(tid,provider)
+    @app.get("/api/tasks/{tid}/reviews")
+    def api_task_reviews(tid:int):
+        task_row(tid)
+        return db.all("SELECT * FROM review_runs WHERE task_id=? ORDER BY id DESC",(tid,))
+    @app.get("/api/tasks/{tid}/findings")
+    def api_task_findings(tid:int):
+        task_row(tid)
+        return findings_store.list_for_task(task_chain_ids(db,tid))
+    @app.post("/api/tasks/{tid}/review-fix/tick")
+    def api_task_review_fix_tick(tid:int,provider:str=Form("claude")):
+        task_row(tid)
+        return review_fix_orchestrator.tick(tid,provider)
+    @app.get("/api/tasks/{tid}/review-fix/status")
+    def api_task_review_fix_status(tid:int):
+        task_row(tid)
+        return review_fix_orchestrator.status(tid)
+    @app.post("/api/findings/{fid}/resolve")
+    def api_finding_resolve(fid:int,resolution_reference:str=Form(...),status:str=Form("RESOLVED")):
+        return findings_store.resolve(fid,resolution_reference,status)
+    @app.get("/api/tasks/{tid}/integration-readiness")
+    def api_task_integration_readiness(tid:int):
+        task_row(tid)
+        return review_fix_orchestrator.integration_readiness(tid)
 
     @app.post("/api/tasks/{tid}/workspaces")
     def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):

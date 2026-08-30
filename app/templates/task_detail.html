@@ -616,6 +616,31 @@
 {% endif %}
 </section>
 
+<!-- E9.32: Independent Review & Fix Loop -- read-only, all from
+     ReviewFixOrchestratorService.status()/integration_readiness(). -->
+<h3 class="subgroup">Independent Review &amp; Fix Loop</h3>
+<section class="panel" id="review-fix">
+<div class="facts">
+<div><small>Code Review</small>{% if review_fix.code_review %}<span class="badge {{'ready' if review_fix.code_review.verdict in ['PASS','PASS_WITH_FINDINGS'] else 'failed'}}">{{review_fix.code_review.verdict}}</span>{% else %}<span class="badge">not run</span>{% endif %}</div>
+<div><small>Security Review</small>{% if review_fix.security_review %}<span class="badge {{'ready' if review_fix.security_review.verdict in ['PASS','PASS_WITH_FINDINGS'] else 'failed'}}">{{review_fix.security_review.verdict}}</span>{% else %}<span class="badge">not run / N/A</span>{% endif %}</div>
+<div><small>Fix Round</small><b>{{review_fix.round}} / {{review_fix.max_rounds}}</b></div>
+<div><small>Current Fix Task</small>{% if review_fix.current_fix_task %}<a href="/tasks/{{review_fix.current_fix_task.id}}">{{review_fix.current_fix_task.title}}</a>{% else %}<span class="empty">none</span>{% endif %}</div>
+</div>
+<div class="quick-actions">
+<form method="post" action="/api/tasks/{{t.id}}/review/code"><button class="ghost">Run Code Review</button></form>
+<form method="post" action="/api/tasks/{{t.id}}/review/security"><button class="ghost">Run Security Review</button></form>
+<form method="post" action="/api/tasks/{{t.id}}/review-fix/tick"><button class="ghost">Run next Review/Fix step</button></form>
+</div>
+{% if review_fix.findings %}
+<h4>Findings</h4>
+{% for f in review_fix.findings %}<div class="row"><div><span class="badge {{'failed' if f.severity in ['HIGH','CRITICAL'] else ''}}">{{f.severity}}</span> <strong>{{f.category}}</strong> · {{f.title}}{% if f.file_path %}<br><small>{{f.file_path}}</small>{% endif %}</div><span class="badge {{'ready' if f.status=='RESOLVED' else ''}}">{{f.status}}</span></div>{% endfor %}
+{% else %}<p class="empty">No findings yet.</p>{% endif %}
+{% if review_fix.integration_readiness %}
+<h4>Integration Readiness</h4>
+<p><span class="badge {{'ready' if review_fix.integration_readiness.ready else 'failed'}}">{{review_fix.integration_readiness.outcome}}</span>{% if review_fix.integration_readiness.blockers %} <small>{{review_fix.integration_readiness.blockers|join(', ')}}</small>{% endif %}</p>
+{% endif %}
+</section>
+
 <h3 class="subgroup">Integration</h3>
 {% if task_integration %}<section class="panel" id="integration"><h3>Integration <span class="badge {{task_integration.status|lower}}">{{task_integration.status.replace('_',' ')}}</span></h3>
 <div class="facts">

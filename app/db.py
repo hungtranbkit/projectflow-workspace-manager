@@ -1121,6 +1121,80 @@ CREATE INDEX IF NOT EXISTS idx_test_exec_mappings_spec ON test_executable_mappin
 ALTER TABLE agent_workspaces ADD COLUMN abandoned_at TEXT;
 ALTER TABLE agent_workspaces ADD COLUMN canonical_status_snapshot TEXT;
 """),
+    # V26: Independent Code Review, Security Review & Autonomous Fix Loop
+    # (Phase E9). Discovery finding: review_runs already IS a durable,
+    # commit-pinned review record (task_id/workspace_id/reviewer_agent/
+    # reviewed_commit/status/findings), used by the existing manual
+    # Submit-for-Review flow -- extended additively here for E9's own
+    # AI-driven, structured, commit/baseline-bound reviews, rather than
+    # a second review table. `findings` is genuinely new: review_runs.
+    # findings is a flat TEXT blob (free-form notes), never queryable
+    # per-finding (category/severity/status/dedup) the way E9.2 needs.
+    #
+    # review_runs new columns (all NULL for every pre-E9 row -- zero
+    # behavior change for the legacy human flow, which never sets them):
+    #   review_kind: 'CODE'|'SECURITY', distinguishes an E9 AI review
+    #     row from a legacy human one (reviewer_type keeps its own
+    #     existing vocabulary untouched).
+    #   verdict: the E9.3 normalized 5-value scheme, kept separate from
+    #     the legacy `status` column (PENDING/RUNNING/PASS/FIX_REQUIRED/
+    #     BLOCKED) since the two schemes are not 1:1 and status stays
+    #     the truth manual UI already reads.
+    #   provider, base_commit, worktree_id, code_change_work_product_id,
+    #   spec_baseline_work_product_id, design_baseline_work_product_id,
+    #   work_product_id (the REVIEW_REPORT/SECURITY_REVIEW WorkProduct
+    #     this row's structured output was persisted to): the full
+    #     immutable-change-set trace E9.1 requires.
+    #   independence_note: SAME_PROVIDER_INDEPENDENT_CONTEXT or
+    #     CROSS_PROVIDER_REVIEW (E9.19/E9.36 audit).
+    #   round_number: this review's position in the bounded fix loop
+    #     (E9.18), 0 for the first CodeReview of a Task.
+    #
+    # tasks.fix_of_task_id / fix_review_id: additive Fix-Task linkage
+    # (E9.13) -- a FIX Task always has task_type='FIX' (existing E3
+    # TaskType, no new type invented) plus these two pointers back to
+    # the Task it repairs and the review_runs row whose blocking
+    # Findings it exists to resolve.
+    (26, """
+CREATE TABLE IF NOT EXISTS findings(
+  id INTEGER PRIMARY KEY,
+  change_id INTEGER REFERENCES changes(id),
+  task_id INTEGER REFERENCES tasks(id),
+  review_id INTEGER REFERENCES review_runs(id),
+  category TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  file_path TEXT,
+  line_start INTEGER,
+  line_end INTEGER,
+  requirement_ids TEXT NOT NULL DEFAULT '[]',
+  acceptance_ids TEXT NOT NULL DEFAULT '[]',
+  invariant_ids TEXT NOT NULL DEFAULT '[]',
+  test_case_ids TEXT NOT NULL DEFAULT '[]',
+  fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  resolution_reference TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_findings_task ON findings(task_id);
+CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(task_id,fingerprint);
+ALTER TABLE review_runs ADD COLUMN review_kind TEXT;
+ALTER TABLE review_runs ADD COLUMN verdict TEXT;
+ALTER TABLE review_runs ADD COLUMN provider TEXT;
+ALTER TABLE review_runs ADD COLUMN base_commit TEXT;
+ALTER TABLE review_runs ADD COLUMN worktree_id INTEGER REFERENCES agent_workspaces(id);
+ALTER TABLE review_runs ADD COLUMN code_change_work_product_id INTEGER REFERENCES work_products(id);
+ALTER TABLE review_runs ADD COLUMN spec_baseline_work_product_id INTEGER REFERENCES work_products(id);
+ALTER TABLE review_runs ADD COLUMN design_baseline_work_product_id INTEGER REFERENCES work_products(id);
+ALTER TABLE review_runs ADD COLUMN work_product_id INTEGER REFERENCES work_products(id);
+ALTER TABLE review_runs ADD COLUMN independence_note TEXT;
+ALTER TABLE review_runs ADD COLUMN round_number INTEGER;
+ALTER TABLE tasks ADD COLUMN fix_of_task_id INTEGER REFERENCES tasks(id);
+ALTER TABLE tasks ADD COLUMN fix_review_id INTEGER REFERENCES review_runs(id);
+CREATE INDEX IF NOT EXISTS idx_review_runs_task_kind ON review_runs(task_id,review_kind);
+"""),
 ]
 
 

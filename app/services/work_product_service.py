@@ -37,6 +37,14 @@ WORK_PRODUCT_KINDS = (
     # them ahead of E7 too). TEST_REVIEW follows the same dedicated-kind
     # precedent as ARCHITECTURE_REVIEW/DESIGN_REVIEW.
     "TEST_REVIEW", "REQUIREMENT_COVERAGE_REPORT",
+    # Phase E9 (Independent Code Review, Security Review & Autonomous Fix
+    # Loop): REVIEW_REPORT already existed above (E1 seeded it "for code
+    # review") and is reused as-is for CodeReviewService's own structured
+    # output. SECURITY_REVIEW is the one genuinely new kind -- same
+    # dedicated-kind precedent as ARCHITECTURE_REVIEW/DESIGN_REVIEW/
+    # TEST_REVIEW, since SECURITY_PASS must stop aliasing REVIEW_PASS
+    # (E9.24) and needs its own distinct evidence kind to do that.
+    "SECURITY_REVIEW",
 )
 WORK_PRODUCT_STATUSES = ("DRAFT", "PROPOSED", "APPROVED", "SUPERSEDED", "REJECTED")
 DIRECTIONS = ("INPUT", "OUTPUT")

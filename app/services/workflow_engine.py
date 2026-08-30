@@ -380,6 +380,17 @@ class WorkflowService:
         # (no Change-level spec_feature trace link) regardless, so no
         # existing behavior changes either way.
         self.test_design_gate = None
+        # Phase E9 additive hook, same pattern as architecture_design_gate/
+        # test_design_gate above: an optional object exposing
+        # .review_pass(task_id) and .security_pass(task_id) -- each
+        # returns True/False when it has real E9 CodeReview/SecurityReview
+        # evidence for that Task's CURRENT head commit, or None to mean
+        # "no E9 evidence yet, fall back to the legacy per-workspace
+        # check" (wired in app/main.py once ReviewFixOrchestratorService
+        # exists). None here (default, every pre-E9 test's own
+        # construction) preserves the exact legacy REVIEW_PASS/
+        # SECURITY_PASS behavior below untouched.
+        self.review_gate = None
 
     # ---- creation (E3.10) -----------------------------------------
     def create_workflow_for_change(self, change_id: int, profile_key: str | None = None, project_policy: dict | None = None) -> dict:
@@ -458,22 +469,51 @@ class WorkflowService:
         return bool(self.test_design_gate.test_design_ready(change_id))
 
     def _gate_review_pass(self, change_id: int, tasks: list[dict]) -> bool:
-        """Reuses TaskDecisionService.evaluate()'s own builder review
-        evidence -- never re-derived from raw review_runs rows."""
+        """E9.25: a Task with real E9 CodeReview evidence for its
+        CURRENT head commit uses that (review_gate.review_pass()
+        returns True/False); a Task with none yet (review_gate is
+        unwired, or simply has no E9 review row) falls back to the
+        exact legacy per-workspace check -- TaskDecisionService.
+        evaluate()'s own builder review_status, never re-derived here.
+        This is a per-Task compatibility rule, not a service-level
+        on/off switch, so old/manual Tasks keep working unchanged even
+        after review_gate is wired."""
         if not tasks:
             return False
         for t in tasks:
+            if self.review_gate is not None:
+                result = self.review_gate.review_pass(t["id"])
+                if result is not None:
+                    if not result:
+                        return False
+                    continue
             d = self.decision.evaluate(t["id"])
             if not d["builders"] or any(b["review_status"] != "PASS" for b in d["builders"]):
                 return False
         return True
 
     def _gate_security_pass(self, change_id: int, tasks: list[dict]) -> bool:
-        """No distinct security-review evidence exists in ProjectFlow
-        yet (E2 discovery: SECURITY_REVIEWER is capability-equivalent to
-        REVIEWER) -- reuses the exact same REVIEW_PASS evidence rather
-        than inventing a second, fabricated signal."""
-        return self._gate_review_pass(change_id, tasks)
+        """E9.24: closes the E3 limitation this method's own previous
+        docstring named -- SECURITY_PASS no longer aliases REVIEW_PASS
+        when real SecurityReview evidence exists. review_gate.
+        security_pass() returns True (PASS/PASS_WITH_FINDINGS or
+        genuinely NOT_APPLICABLE), False (FIX_REQUIRED/blocked), or
+        None ("no E9 evidence for this Task's head yet, or review_gate
+        unwired") -- None falls back to the exact legacy REVIEW_PASS-
+        reuse behavior, so nothing pre-E9 changes."""
+        if not tasks:
+            return False
+        for t in tasks:
+            if self.review_gate is not None:
+                result = self.review_gate.security_pass(t["id"])
+                if result is not None:
+                    if not result:
+                        return False
+                    continue
+            d = self.decision.evaluate(t["id"])
+            if not d["builders"] or any(b["review_status"] != "PASS" for b in d["builders"]):
+                return False
+        return True
 
     def _gate_spec_compliance_pass(self, change_id: int, tasks: list[dict]) -> bool:
         """Reuses SpecComplianceVerifier directly -- never re-implements
