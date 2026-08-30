@@ -39,6 +39,7 @@ Workflow Engine's own GateRequirements remain the only things that ever
 decide whether real work is actually done."""
 
 from app.services.workflow_engine import GATES_BY_STAGE, TASK_TYPES
+from app.services.human_decisions import HumanDecisionService
 
 
 # ===================================================================
@@ -116,30 +117,42 @@ Rules (violating these makes your output unusable, not just imperfect):
 
 
 class PlannerAgentInvoker:
-    """The ONLY place a subprocess for planning is ever spawned. `runner`
-    is injectable (same DI pattern as DeploymentService/GitHubMergeService)
-    so every test except the one dedicated real-planner test never
-    shells out or spends real API budget."""
+    """The ONLY place a subprocess for a bounded, non-interactive,
+    structured Claude call is ever spawned -- shared by every E4/E5
+    agent role (Planner, Requirements Analyst, Spec Author, Spec
+    Reviewer, ...). Each `invoke()` call is a brand-new, stateless
+    subprocess with zero session/conversation continuity -- this is
+    what makes "review must not inherit hidden author reasoning" (E5
+    critical rule) true by construction, not by convention: a reviewer
+    invocation literally cannot see anything the caller didn't put in
+    its own prompt. `runner` is injectable (same DI pattern as
+    DeploymentService/GitHubMergeService) so every test except the
+    dedicated real-invocation tests never shells out or spends real API
+    budget."""
 
     def __init__(self, runner=_default_runner, timeout=180, which=shutil.which):
         self.runner = runner
         self.timeout = timeout
         self.which = which
 
-    def invoke(self, provider: str, prompt: str, cwd) -> str:
+    def invoke(self, provider: str, prompt: str, schema: dict, cwd) -> str:
         """Returns the raw JSON text the model produced (already
         json-schema-validated by the CLI itself where supported) --
         never parsed here. Raises PlannerAgentError for anything that
         means "no usable output came back at all" (not found, timeout,
         non-zero exit, malformed envelope) -- PLANNER_EXECUTION_FAILED,
-        never silently treated as an empty plan."""
+        never silently treated as empty/valid output. `schema` is the
+        JSON Schema for THIS call's expected output shape -- callers
+        pass whichever schema matches their own role (PLAN_JSON_SCHEMA,
+        REQUIREMENT_ANALYSIS_JSON_SCHEMA, SPEC_PROPOSAL_JSON_SCHEMA,
+        SPEC_REVIEW_JSON_SCHEMA, ...), never a shared/global one."""
         provider = (provider or "").strip().lower()
         if provider == "claude":
             executable = self.which("claude")
             if not executable:
                 raise PlannerAgentError("claude CLI not found in PATH")
             argv = [executable, "-p", prompt, "--output-format", "json",
-                    "--json-schema", json.dumps(PLAN_JSON_SCHEMA), "--tools", "", "--max-turns", "1"]
+                    "--json-schema", json.dumps(schema), "--tools", "", "--max-turns", "1"]
         else:
             # codex's non-interactive structured-output flags are not
             # wired for planning in this phase -- an honest
@@ -258,9 +271,16 @@ class PlannerContextBuilder:
 # PLAN ARTIFACT -- deterministic validation, never "trust the LLM"
 # ===================================================================
 class PlanValidator:
-    def __init__(self, workflow_catalog, roles_catalog):
+    def __init__(self, workflow_catalog, roles_catalog, specs_root=None):
         self.workflow_catalog = workflow_catalog
         self.roles_catalog = roles_catalog
+        # E5.15: closes a known E4 limitation -- requirement_ids the
+        # Planner cites are now cross-checked against the real
+        # SpecRegistry, never trusted as fictional strings. Optional
+        # (None) so existing E4 callers/tests that construct
+        # PlanValidator without it keep working unchanged; skips the
+        # check entirely rather than erroring when unset.
+        self.specs_root = specs_root
 
     def _cycle_free(self, tasks_by_key: dict) -> list[str]:
         errors = []
@@ -307,6 +327,20 @@ class PlanValidator:
             keys_seen.add(key)
             tasks_by_key[key] = t
 
+        # E5.15: requirement_ids must resolve through the real
+        # SpecRegistry -- loaded once, fresh (never a stale cache),
+        # matching SpecGate's own convention. A broken/missing spec
+        # tree never crashes plan validation; it just means every
+        # requirement reference is treated as unresolved (the safe
+        # direction to fail in, same as SpecGate).
+        known_requirement_ids: set[str] | None = None
+        if self.specs_root is not None:
+            try:
+                from app.services.spec_registry import SpecRegistry
+                known_requirement_ids = set(SpecRegistry(self.specs_root).load().requirements.keys())
+            except Exception:
+                known_requirement_ids = set()
+
         for t in tasks:
             key = t.get("key")
             task_type = (t.get("task_type") or "").strip().upper()
@@ -328,6 +362,10 @@ class PlanValidator:
                     errors.append(f"Task '{key}': cannot depend on itself")
                 elif dep not in keys_seen and dep not in [x.get("key") for x in tasks]:
                     errors.append(f"Task '{key}': depends_on unknown key '{dep}'")
+            if known_requirement_ids is not None:
+                for rid in t.get("requirements") or []:
+                    if rid not in known_requirement_ids:
+                        errors.append(f"Task '{key}': unknown requirement id '{rid}' -- does not resolve through SpecRegistry; a fictional REQ id must never reach Task materialization")
 
         errors.extend(self._cycle_free(tasks_by_key))
 
@@ -380,7 +418,7 @@ class PlannerError(ValueError):
 class PlannerService:
     def __init__(self, db, changes, work_products, decision, roles_catalog, workflow_catalog, workflow_service,
                  context_builder: PlannerContextBuilder, invoker: PlannerAgentInvoker, validator: PlanValidator,
-                 specs_root, repo_root):
+                 specs_root, repo_root, human_decisions: HumanDecisionService | None = None):
         self.db = db
         self.changes = changes
         self.work_products = work_products
@@ -393,6 +431,12 @@ class PlannerService:
         self.validator = validator
         self.specs_root = specs_root
         self.repo_root = repo_root
+        # E5.11: the generic Human Decision mechanism (app/services/
+        # human_decisions.py), shared with SpecProposal -- defaults to a
+        # fresh instance over the same db so nothing that constructs
+        # PlannerService without passing one explicitly (every existing
+        # E4 test) breaks.
+        self.human_decision_service = human_decisions or HumanDecisionService(db)
 
     # ---- read -------------------------------------------------------
     def get_plan(self, plan_id: int) -> dict | None:
@@ -405,29 +449,26 @@ class PlannerService:
         return self.db.all("SELECT * FROM plan_items WHERE plan_id=? ORDER BY id", (plan_id,))
 
     def human_decisions(self, plan_id: int) -> list[dict]:
-        return self.db.all("SELECT * FROM plan_human_decisions WHERE plan_id=? ORDER BY id", (plan_id,))
+        return self.human_decision_service.list_for("plan", plan_id)
 
     def human_decisions_pending(self, change_id: int) -> bool:
         """Additive hook WorkflowService (E3) can optionally call (wired
         in app/main.py, defaults to None everywhere else so E3's own
-        tests/behavior are completely unaffected) -- E4.12: 'Change/
-        Workflow must expose WAITING_HUMAN' while a Plan has an
-        unresolved WHAT-level decision."""
-        row = self.db.one(
-            "SELECT d.id FROM plan_human_decisions d JOIN plans p ON p.id=d.plan_id "
-            "WHERE p.change_id=? AND d.resolved=0 LIMIT 1", (change_id,))
-        return bool(row)
+        tests/behavior are completely unaffected) -- E4.12/E5.11:
+        'Change/Workflow must expose WAITING_HUMAN' while a Plan OR a
+        SpecProposal has an unresolved WHAT-level decision."""
+        return self.human_decision_service.pending_for_change(change_id)
 
     def resolve_human_decision(self, decision_id: int, resolution_note: str) -> dict:
-        row = self.db.one("SELECT * FROM plan_human_decisions WHERE id=?", (decision_id,))
+        row = self.human_decision_service.get(decision_id)
         if not row:
             raise PlannerError("Human decision not found")
-        self.db.execute(
-            "UPDATE plan_human_decisions SET resolved=1,resolution_note=?,resolved_at=CURRENT_TIMESTAMP WHERE id=?",
-            (resolution_note.strip(), decision_id))
-        plan = self.get_plan(row["plan_id"])
-        self.db.event("change", plan["change_id"], "PLAN_HUMAN_DECISION_RESOLVED", f"plan={plan['id']} decision={decision_id}")
-        return self.db.one("SELECT * FROM plan_human_decisions WHERE id=?", (decision_id,))
+        resolved = self.human_decision_service.resolve(decision_id, resolution_note)
+        if row["subject_type"] == "plan":
+            plan = self.get_plan(row["subject_id"])
+            if plan:
+                self.db.event("change", plan["change_id"], "PLAN_HUMAN_DECISION_RESOLVED", f"plan={plan['id']} decision={decision_id}")
+        return resolved
 
     # ---- generation (E4.10) ------------------------------------------
     def plan_change(self, change_id: int, provider: str = "claude", materialize: bool = False) -> dict:
@@ -450,7 +491,7 @@ class PlannerService:
         prompt = PlannerContextBuilder.render_prompt(context)
 
         try:
-            raw_text = self.invoker.invoke(provider, prompt, self.repo_root)
+            raw_text = self.invoker.invoke(provider, prompt, PLAN_JSON_SCHEMA, self.repo_root)
         except PlannerAgentError as exc:
             self.db.event("change", change_id, "PLANNER_EXECUTION_FAILED", str(exc)[:500])
             return {"outcome": "PLANNER_EXECUTION_FAILED", "plan": None, "message": str(exc)}
@@ -466,10 +507,11 @@ class PlannerService:
 
         revision = (self.db.one("SELECT MAX(revision) AS r FROM plans WHERE change_id=?", (change_id,))["r"] or 0) + 1
         plan_id = self.db.execute(
-            "INSERT INTO plans(change_id,workflow_run_id,revision,status,planner_provider,planner_role,input_context_digest,summary,assumptions,raw_output) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO plans(change_id,workflow_run_id,revision,status,planner_provider,planner_role,input_context_digest,summary,assumptions,raw_output,spec_baseline_sha256) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (change_id, run["id"], revision, "DRAFT", provider, "PLANNER", digest,
-             str(parsed.get("summary") or ""), json.dumps(parsed.get("assumptions") or []), json.dumps(parsed)))
+             str(parsed.get("summary") or ""), json.dumps(parsed.get("assumptions") or []), json.dumps(parsed),
+             context["spec"]["baseline_sha256"]))
         # OR IGNORE (plan_items has UNIQUE(plan_id,item_key)): a
         # malformed LLM output with a duplicate/missing key must never
         # crash the write path with an unhandled IntegrityError -- the
@@ -489,9 +531,7 @@ class PlannerService:
                  json.dumps(t.get("expected_outputs") or []), json.dumps(t.get("requirements") or []),
                  json.dumps(t.get("scope") or []), t.get("rationale") or "", 1 if t.get("optional") else 0))
         for hd in parsed.get("human_decisions") or []:
-            self.db.execute(
-                "INSERT INTO plan_human_decisions(plan_id,question,reason,spec_change_signal) VALUES(?,?,?,?)",
-                (plan_id, hd.get("question") or "", hd.get("reason") or "", hd.get("spec_change_signal") or "NONE"))
+            self.human_decision_service.create("plan", plan_id, hd.get("question") or "", hd.get("reason") or "", hd.get("spec_change_signal") or "NONE")
         self.db.event("change", change_id, "PLAN_CREATED", f"plan={plan_id} revision={revision} provider={provider}")
 
         result = self._validate_and_finalize(plan_id, profile_key)
@@ -576,3 +616,36 @@ class PlannerService:
             self.db.event("change", change_id, "PLAN_SUPERSEDED", f"{latest['id']} -> {result['plan']['id']}")
             result["plan"] = self.get_plan(result["plan"]["id"])
         return result
+
+    # ---- spec staleness (E5.18) ---------------------------------------
+    def check_staleness(self, plan_id: int) -> dict:
+        """Minimal staleness detection -- never a full Impact Analyzer
+        (that stays later work). SPEC_BASELINE_CHANGED means the spec
+        tree moved since this Plan was generated; the stronger
+        PLAN_SPEC_DRIFT means a requirement id this Plan actually
+        referenced no longer resolves at all. Neither ever auto-
+        invalidates the Plan -- this is a visibility signal only."""
+        from app.services.spec_registry import SpecRegistry, SpecError
+        plan = self.get_plan(plan_id)
+        if not plan:
+            raise PlannerError("Plan not found")
+        if not plan["spec_baseline_sha256"]:
+            return {"stale": False, "reason": None, "replan_recommended": False,
+                    "plan_baseline": None, "current_baseline": None}
+        try:
+            registry = SpecRegistry(self.specs_root).load()
+            current_baseline = registry.baseline_digest()
+        except SpecError:
+            return {"stale": False, "reason": None, "replan_recommended": False,
+                    "plan_baseline": plan["spec_baseline_sha256"], "current_baseline": None}
+        if current_baseline == plan["spec_baseline_sha256"]:
+            return {"stale": False, "reason": None, "replan_recommended": False,
+                    "plan_baseline": plan["spec_baseline_sha256"], "current_baseline": current_baseline}
+        drift = False
+        for it in self.plan_items(plan_id):
+            for rid in json.loads(it["requirement_ids"] or "[]"):
+                if registry.requirement(rid) is None:
+                    drift = True
+        reason = "PLAN_SPEC_DRIFT" if drift else "SPEC_BASELINE_CHANGED"
+        return {"stale": True, "reason": reason, "replan_recommended": True,
+                "plan_baseline": plan["spec_baseline_sha256"], "current_baseline": current_baseline}

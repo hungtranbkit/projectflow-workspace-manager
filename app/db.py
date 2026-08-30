@@ -931,6 +931,78 @@ CREATE INDEX IF NOT EXISTS idx_plan_items_plan ON plan_items(plan_id);
 CREATE INDEX IF NOT EXISTS idx_plan_items_task ON plan_items(materialized_task_id);
 CREATE INDEX IF NOT EXISTS idx_plan_human_decisions_plan ON plan_human_decisions(plan_id, resolved);
 """),
+    # V22: Autonomous Spec Lifecycle (Phase E5). spec_proposals is the
+    # PLAN ARTIFACT half of E5's own critical rule (author/review/apply
+    # kept strictly separate) -- a proposed FeatureSpec revision,
+    # separate from the canonical approved specs/ tree until explicitly
+    # APPLIED (app/services/spec_lifecycle_service.py). History-friendly
+    # the same way plans already are: refine/replan always INSERTs a new
+    # spec_proposals row (supersedes_proposal_id), never rewrites a
+    # prior revision's proposed_content in place.
+    #
+    # human_decisions GENERALIZES V21's plan_human_decisions (E5.11:
+    # "Integrate with the E4 human-decision mechanism rather than
+    # creating a second decision system") into a subject_type/subject_id
+    # pair, exactly the same typed-reference pattern trace_links (V18)
+    # already established -- Plan and SpecProposal (and a Change
+    # directly) all create/resolve decisions through this ONE table now.
+    # plan_human_decisions itself is left in the schema (migrations are
+    # never rewritten after shipping, and dropping a table is
+    # destructive) but is superseded/unused going forward -- it held
+    # zero rows in every environment this migration has been applied to,
+    # so the INSERT...SELECT below is a real, verified no-op today and
+    # only a safety net if that were ever not true.
+    #
+    # plans.spec_baseline_sha256 (E5.18): the spec baseline that was
+    # CURRENT at plan-generation time, captured once and never
+    # recomputed -- PlannerService.check_staleness() compares it against
+    # SpecRegistry's live baseline_digest() to detect SPEC_BASELINE_CHANGED
+    # / PLAN_SPEC_DRIFT without a second, independent baseline concept.
+    (22, """
+CREATE TABLE IF NOT EXISTS spec_proposals(
+  id INTEGER PRIMARY KEY,
+  change_id INTEGER NOT NULL REFERENCES changes(id),
+  project_id INTEGER REFERENCES repositories(id),
+  feature_id TEXT NOT NULL,
+  base_spec_version INTEGER,
+  proposed_version INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'DRAFT',
+  author_provider TEXT NOT NULL,
+  author_role TEXT NOT NULL DEFAULT 'SPEC_ANALYST',
+  spec_change_signal TEXT NOT NULL DEFAULT 'NONE',
+  input_context_digest TEXT NOT NULL,
+  proposed_content TEXT NOT NULL,
+  validation_result TEXT NOT NULL DEFAULT '{}',
+  review_result TEXT NOT NULL DEFAULT '{}',
+  refinement_round INTEGER NOT NULL DEFAULT 0,
+  id_remap_notes TEXT NOT NULL DEFAULT '[]',
+  supersedes_proposal_id INTEGER REFERENCES spec_proposals(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  applied_at TEXT
+);
+CREATE TABLE IF NOT EXISTS human_decisions(
+  id INTEGER PRIMARY KEY,
+  subject_type TEXT NOT NULL,
+  subject_id INTEGER NOT NULL,
+  question TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  spec_change_signal TEXT NOT NULL DEFAULT 'NONE',
+  resolved INTEGER NOT NULL DEFAULT 0,
+  resolution_note TEXT,
+  resolved_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO human_decisions(subject_type,subject_id,question,reason,spec_change_signal,resolved,resolution_note,resolved_at,created_at)
+  SELECT 'plan',plan_id,question,reason,spec_change_signal,resolved,resolution_note,resolved_at,created_at FROM plan_human_decisions;
+
+ALTER TABLE plans ADD COLUMN spec_baseline_sha256 TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_spec_proposals_change ON spec_proposals(change_id);
+CREATE INDEX IF NOT EXISTS idx_spec_proposals_feature ON spec_proposals(feature_id);
+CREATE INDEX IF NOT EXISTS idx_spec_proposals_supersedes ON spec_proposals(supersedes_proposal_id);
+CREATE INDEX IF NOT EXISTS idx_human_decisions_subject ON human_decisions(subject_type,subject_id,resolved);
+"""),
 ]
 
 

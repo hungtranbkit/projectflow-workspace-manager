@@ -48,6 +48,11 @@ from app.services.workflow_engine import (
 from app.services.planner_service import (
     PlannerAgentInvoker, PlannerContextBuilder, PlanValidator, PlannerService, PlannerError,
 )
+from app.services.human_decisions import HumanDecisionService
+from app.services.spec_lifecycle_service import (
+    RequirementAnalysisService, SpecAuthorService, SpecProposalValidator, SpecReviewService,
+    SpecLifecycleService, SpecLifecycleError,
+)
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -100,9 +105,11 @@ def create_app(settings=None):
     # entirely separate from AgentSessionManager/_start_builder_session.
     planner_context_builder = PlannerContextBuilder(db, changes, work_products, decision, workflow_catalog, workflow_service, roles_catalog, specs_root)
     planner_invoker = PlannerAgentInvoker()
-    planner_validator = PlanValidator(workflow_catalog, roles_catalog)
+    planner_validator = PlanValidator(workflow_catalog, roles_catalog, specs_root)
+    human_decisions = HumanDecisionService(db)
     planner_service = PlannerService(db, changes, work_products, decision, roles_catalog, workflow_catalog, workflow_service,
-                                      planner_context_builder, planner_invoker, planner_validator, specs_root, settings.root)
+                                      planner_context_builder, planner_invoker, planner_validator, specs_root, settings.root,
+                                      human_decisions=human_decisions)
     # E4.12: additive-only hook -- WorkflowService's own evaluate_workflow
     # already defaults this to None (zero behavior change for anything
     # that constructs WorkflowService without it, including every E3
@@ -110,6 +117,21 @@ def create_app(settings=None):
     # actually surface WAITING_HUMAN while a Plan has an unresolved
     # WHAT-level decision.
     workflow_service.human_decisions_pending = planner_service.human_decisions_pending
+    # Autonomous Spec Lifecycle (Phase E5): reuses PlannerAgentInvoker
+    # (a fresh, stateless subprocess per call -- author/review are
+    # already separate invocations by construction) and roles_catalog
+    # (RoleCapabilityService, not a second validator) exactly as the
+    # rest of the engineering domain does. requirement_analysis/
+    # spec_author/spec_reviewer all target THIS repo's own specs_root
+    # (same resolution as spec_gate/spec_compliance above) -- never a
+    # managed-repo path.
+    requirement_analysis_service = RequirementAnalysisService(db, changes, work_products, planner_invoker, roles_catalog, specs_root, settings.root)
+    spec_author_service = SpecAuthorService(db, changes, work_products, planner_invoker, roles_catalog, specs_root, settings.root)
+    spec_proposal_validator = SpecProposalValidator(specs_root)
+    spec_review_service = SpecReviewService(db, changes, work_products, planner_invoker, roles_catalog, specs_root, settings.root, human_decisions)
+    spec_lifecycle_service = SpecLifecycleService(db, changes, work_products, trace, requirement_analysis_service,
+                                                   spec_author_service, spec_proposal_validator, spec_review_service,
+                                                   human_decisions, specs_root)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
@@ -136,6 +158,12 @@ def create_app(settings=None):
     app.state.task_dependencies = task_dependencies
     app.state.workflow_service = workflow_service
     app.state.planner_service = planner_service
+    app.state.human_decisions = human_decisions
+    app.state.requirement_analysis_service = requirement_analysis_service
+    app.state.spec_author_service = spec_author_service
+    app.state.spec_proposal_validator = spec_proposal_validator
+    app.state.spec_review_service = spec_review_service
+    app.state.spec_lifecycle_service = spec_lifecycle_service
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -574,10 +602,12 @@ def create_app(settings=None):
     @app.exception_handler(WorkProductError)
     @app.exception_handler(WorkflowError)
     @app.exception_handler(PlannerError)
+    @app.exception_handler(SpecLifecycleError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3/E4's Change/WorkProduct/Workflow/Plan API is a
-        pure JSON surface (E1.7: 'API/service correctness first, no
-        large UI yet') -- a clean 400 + message, never the HTML 'Action
+        """Phase E1/E3/E4/E5's Change/WorkProduct/Workflow/Plan/Spec-
+        Proposal API is a pure JSON surface (E1.7: 'API/service
+        correctness first, no large UI yet') -- a clean 400 + message,
+        never the HTML 'Action
         blocked' page the older form-posting routes use."""
         return JSONResponse({"ok":False,"message":str(exc)},status_code=400)
 
@@ -2379,6 +2409,96 @@ def create_app(settings=None):
     def api_resolve_human_decision(pid:int,did:int,resolution_note:str=Form(...)):
         _plan_row(pid)
         return planner_service.resolve_human_decision(did,resolution_note)
+    @app.get("/api/plans/{pid}/staleness")
+    def api_plan_staleness(pid:int):
+        _plan_row(pid)
+        return planner_service.check_staleness(pid)
+    @app.post("/api/human-decisions/{did}/resolve")
+    def api_resolve_human_decision_generic(did:int,resolution_note:str=Form(...)):
+        """E5.11: the generalized resolve path -- works for a decision
+        raised against a Change, a Plan, OR a SpecProposal alike, since
+        human_decisions is now one shared table/service (app/services/
+        human_decisions.py). /api/plans/{pid}/human-decisions/{did}/resolve
+        above stays exactly as E4 shipped it for backward compatibility."""
+        return planner_service.resolve_human_decision(did,resolution_note)
+
+    # ------------------------------------------ Autonomous Spec Lifecycle (E5)
+    # SPEC AUTHORING AGENT / SPEC ARTIFACT / SPEC REVIEW AGENT / SPEC
+    # APPROVAL stay strictly separate here too -- see
+    # app/services/spec_lifecycle_service.py's module docstring.
+    # SpecRegistry remains the one canonical truth loader; apply_proposal
+    # is the ONLY place canonical specs/**/*.yaml is ever written.
+    def _proposal_row(pid:int):
+        row=spec_lifecycle_service.get_proposal(pid)
+        if not row: raise HTTPException(404,"Spec proposal not found")
+        return row
+
+    @app.post("/api/changes/{cid}/requirements/analyze")
+    def api_analyze_requirements(cid:int,provider:str=Form("claude")):
+        _change_row(cid)
+        return requirement_analysis_service.analyze(cid,provider=provider)
+    @app.get("/api/changes/{cid}/requirements")
+    def api_get_requirements(cid:int):
+        _change_row(cid)
+        wp=spec_lifecycle_service.get_requirement_analysis(cid)
+        if not wp: raise HTTPException(404,"No Requirement Analysis yet for this Change")
+        return {**wp,"content_metadata":json.loads(wp["content_metadata"] or "{}")}
+
+    def _proposal_out(p:dict):
+        """Consistent shape everywhere a proposal is returned to a
+        caller -- proposed_content always a parsed object, never a raw
+        JSON string a client would have to double-decode."""
+        return {**p,"proposed_content":json.loads(p["proposed_content"])}
+
+    @app.post("/api/changes/{cid}/spec-proposals")
+    def api_create_spec_proposal(cid:int,requirement_analysis_id:str=Form(""),provider:str=Form("claude")):
+        _change_row(cid)
+        ra_id=int(requirement_analysis_id) if requirement_analysis_id.strip().isdigit() else None
+        if ra_id is None:
+            wp=spec_lifecycle_service.get_requirement_analysis(cid)
+            if not wp: raise GitSafetyError("No Requirement Analysis exists for this Change yet -- run /requirements/analyze first")
+            ra_id=wp["id"]
+        result=spec_author_service.author(cid,ra_id,provider=provider)
+        if result["outcome"]=="READY":
+            spec_lifecycle_service.validate_proposal(result["proposal"]["id"])
+            result["proposal"]=_proposal_out(spec_lifecycle_service.get_proposal(result["proposal"]["id"]))
+        return result
+    @app.get("/api/changes/{cid}/spec-proposals")
+    def api_list_spec_proposals(cid:int):
+        _change_row(cid)
+        return spec_lifecycle_service.list_proposals(cid)
+    @app.get("/api/spec-proposals/{pid}")
+    def api_get_spec_proposal(pid:int):
+        p=_proposal_row(pid)
+        return {**_proposal_out(p),"human_decisions":spec_lifecycle_service.human_decisions_for(pid)}
+    @app.post("/api/spec-proposals/{pid}/review")
+    def api_review_spec_proposal(pid:int,provider:str=Form("claude")):
+        _proposal_row(pid)
+        review=spec_review_service.review(pid,provider=provider)
+        if review["outcome"]=="REVIEWED":
+            spec_lifecycle_service.finalize_after_review(pid,review["verdict"])
+        return review
+    @app.post("/api/spec-proposals/{pid}/refine")
+    def api_refine_spec_proposal(pid:int,provider:str=Form("claude")):
+        proposal=_proposal_row(pid)
+        findings=json.loads(proposal["review_result"] or "{}")
+        result=spec_author_service.refine(pid,findings,provider=provider)
+        if result["outcome"]=="READY":
+            spec_lifecycle_service.validate_proposal(result["proposal"]["id"])
+            result["proposal"]=_proposal_out(spec_lifecycle_service.get_proposal(result["proposal"]["id"]))
+        return result
+    @app.post("/api/spec-proposals/{pid}/apply")
+    def api_apply_spec_proposal(pid:int):
+        _proposal_row(pid)
+        return spec_lifecycle_service.apply_proposal(pid)
+    @app.get("/api/spec-proposals/{pid}/findings")
+    def api_spec_proposal_findings(pid:int):
+        p=_proposal_row(pid)
+        return json.loads(p["review_result"] or "{}").get("findings",[])
+    @app.get("/api/spec-proposals/{pid}/validation")
+    def api_spec_proposal_validation(pid:int):
+        p=_proposal_row(pid)
+        return json.loads(p["validation_result"] or "{}")
 
     @app.post("/api/workspaces/{wid}/builder-instructions")
     def save_builder_instructions(wid:int,builder_instructions:str=Form("")):
