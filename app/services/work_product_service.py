@@ -21,6 +21,10 @@ WORK_PRODUCT_KINDS = (
     "TECHNICAL_DESIGN", "UI_UX_DESIGN", "TEST_PLAN", "TEST_CASE_SET", "CODE_CHANGE",
     "REVIEW_REPORT", "VERIFICATION_REPORT", "RELEASE_MANIFEST", "DEPLOYMENT_RECORD",
     "INCIDENT_REPORT", "HUMAN_DECISION",
+    # Phase E4 (Dynamic Planner): a validated Plan becomes a durable,
+    # traceable WorkProduct in its own right -- Change -> Plan -> Plan
+    # WorkProduct -> Tasks. See app/services/planner_service.py.
+    "IMPLEMENTATION_PLAN",
 )
 WORK_PRODUCT_STATUSES = ("DRAFT", "PROPOSED", "APPROVED", "SUPERSEDED", "REJECTED")
 DIRECTIONS = ("INPUT", "OUTPUT")

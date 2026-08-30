@@ -858,6 +858,79 @@ CREATE INDEX IF NOT EXISTS idx_task_dependencies_task ON task_dependencies(task_
 CREATE INDEX IF NOT EXISTS idx_task_dependencies_dep ON task_dependencies(depends_on_task_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_task_type ON tasks(task_type);
 """),
+    # V21: Dynamic Planner (Phase E4). PLAN ARTIFACT storage, deliberately
+    # separate from PLANNER REASONING (nothing here is code -- the LLM
+    # call happens in app/services/planner_service.py, never stored as
+    # executable logic) and from TASK MATERIALIZATION (a materialized
+    # plan_item points at a real tasks(id) row via materialized_task_id;
+    # the tasks table itself, and every existing Task column, is
+    # untouched by this migration).
+    #
+    # History-friendly by construction (E4.1): a Plan is never UPDATEd
+    # to rewrite its own tasks/summary/raw_output after creation --
+    # replanning always INSERTs a new plans row (revision+1,
+    # supersedes_plan_id set), the same "never overwrite a historical
+    # decision, add a new row instead" discipline WorkProduct (E1)
+    # already established. status DOES transition in place
+    # (DRAFT->VALIDATED->MATERIALIZED, or ->REJECTED/SUPERSEDED) --
+    # that is bookkeeping about the SAME plan, never a rewrite of what
+    # it proposed.
+    (21, """
+CREATE TABLE IF NOT EXISTS plans(
+  id INTEGER PRIMARY KEY,
+  change_id INTEGER NOT NULL REFERENCES changes(id),
+  workflow_run_id INTEGER REFERENCES workflow_runs(id),
+  revision INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'DRAFT',
+  planner_provider TEXT NOT NULL,
+  planner_role TEXT NOT NULL DEFAULT 'PLANNER',
+  input_context_digest TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  assumptions TEXT NOT NULL DEFAULT '[]',
+  raw_output TEXT NOT NULL DEFAULT '{}',
+  validation_result TEXT NOT NULL DEFAULT '{}',
+  supersedes_plan_id INTEGER REFERENCES plans(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  materialized_at TEXT,
+  UNIQUE(change_id, revision)
+);
+CREATE TABLE IF NOT EXISTS plan_items(
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL REFERENCES plans(id),
+  item_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  task_type TEXT,
+  preferred_role TEXT,
+  depends_on_keys TEXT NOT NULL DEFAULT '[]',
+  required_inputs TEXT NOT NULL DEFAULT '[]',
+  expected_outputs TEXT NOT NULL DEFAULT '[]',
+  requirement_ids TEXT NOT NULL DEFAULT '[]',
+  scope_hints TEXT NOT NULL DEFAULT '[]',
+  rationale TEXT NOT NULL DEFAULT '',
+  optional INTEGER NOT NULL DEFAULT 0,
+  materialized_task_id INTEGER REFERENCES tasks(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(plan_id, item_key)
+);
+CREATE TABLE IF NOT EXISTS plan_human_decisions(
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL REFERENCES plans(id),
+  question TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  spec_change_signal TEXT NOT NULL DEFAULT 'NONE',
+  resolved INTEGER NOT NULL DEFAULT 0,
+  resolution_note TEXT,
+  resolved_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_plans_change ON plans(change_id);
+CREATE INDEX IF NOT EXISTS idx_plans_supersedes ON plans(supersedes_plan_id);
+CREATE INDEX IF NOT EXISTS idx_plan_items_plan ON plan_items(plan_id);
+CREATE INDEX IF NOT EXISTS idx_plan_items_task ON plan_items(materialized_task_id);
+CREATE INDEX IF NOT EXISTS idx_plan_human_decisions_plan ON plan_human_decisions(plan_id, resolved);
+"""),
 ]
 
 

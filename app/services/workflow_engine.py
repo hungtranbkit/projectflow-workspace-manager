@@ -325,7 +325,8 @@ class TaskDependencyService:
 # WORKFLOW INSTANCE + DERIVED STATE (E3.5 / E3.8)
 # ===================================================================
 class WorkflowService:
-    def __init__(self, db, catalog: WorkflowCatalogService, changes, work_products, decision, spec_compliance, dependencies: TaskDependencyService):
+    def __init__(self, db, catalog: WorkflowCatalogService, changes, work_products, decision, spec_compliance, dependencies: TaskDependencyService,
+                 human_decisions_pending=None):
         self.db = db
         self.catalog = catalog
         self.changes = changes
@@ -333,6 +334,14 @@ class WorkflowService:
         self.decision = decision
         self.spec_compliance = spec_compliance
         self.dependencies = dependencies
+        # Phase E4 (Dynamic Planner) additive hook: an optional
+        # Callable[[change_id], bool] a caller can wire in after both
+        # services exist (see app/main.py) so evaluate_workflow() can
+        # surface WAITING_HUMAN while a Plan has an unresolved WHAT-level
+        # decision, without WorkflowService importing anything from the
+        # Planner module -- None here (the default, and every E3 test's
+        # own construction) means zero behavior change.
+        self.human_decisions_pending = human_decisions_pending
 
     # ---- creation (E3.10) -----------------------------------------
     def create_workflow_for_change(self, change_id: int, profile_key: str | None = None, project_policy: dict | None = None) -> dict:
@@ -534,7 +543,12 @@ class WorkflowService:
                 if latest and latest["status"] in ("FAILED", "ROLLBACK_FAILED"):
                     failed_deploy = True
 
-        if blocked_tasks or any(self.decision.evaluate(t["id"])["blocking_reasons"] for t in tasks):
+        # E4.12: an unresolved WHAT-level Plan decision outranks every
+        # other signal -- no further execution/verification truth
+        # matters until a human resolves what is actually being built.
+        if self.human_decisions_pending and self.human_decisions_pending(change_id):
+            status = "WAITING_HUMAN"
+        elif blocked_tasks or any(self.decision.evaluate(t["id"])["blocking_reasons"] for t in tasks):
             status = "BLOCKED"
         elif failed_deploy:
             status = "FAILED"

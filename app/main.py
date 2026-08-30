@@ -45,6 +45,9 @@ from app.services.project_contract import load_engineering_policy
 from app.services.workflow_engine import (
     WorkflowCatalogService, TaskDependencyService, WorkflowService, WorkflowError,
 )
+from app.services.planner_service import (
+    PlannerAgentInvoker, PlannerContextBuilder, PlanValidator, PlannerService, PlannerError,
+)
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -91,6 +94,22 @@ def create_app(settings=None):
     workflow_catalog.seed()
     task_dependencies = TaskDependencyService(db)
     workflow_service = WorkflowService(db, workflow_catalog, changes, work_products, decision, spec_compliance, task_dependencies)
+    # Dynamic Planner (Phase E4): additive layer above Change/WorkProduct/
+    # Workflow/Role. PlannerService never launches a coding session --
+    # PlannerAgentInvoker's subprocess call is bounded, tool-less, and
+    # entirely separate from AgentSessionManager/_start_builder_session.
+    planner_context_builder = PlannerContextBuilder(db, changes, work_products, decision, workflow_catalog, workflow_service, roles_catalog, specs_root)
+    planner_invoker = PlannerAgentInvoker()
+    planner_validator = PlanValidator(workflow_catalog, roles_catalog)
+    planner_service = PlannerService(db, changes, work_products, decision, roles_catalog, workflow_catalog, workflow_service,
+                                      planner_context_builder, planner_invoker, planner_validator, specs_root, settings.root)
+    # E4.12: additive-only hook -- WorkflowService's own evaluate_workflow
+    # already defaults this to None (zero behavior change for anything
+    # that constructs WorkflowService without it, including every E3
+    # test); wiring it here is what makes a real Change's workflow state
+    # actually surface WAITING_HUMAN while a Plan has an unresolved
+    # WHAT-level decision.
+    workflow_service.human_decisions_pending = planner_service.human_decisions_pending
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
@@ -116,6 +135,7 @@ def create_app(settings=None):
     app.state.workflow_catalog = workflow_catalog
     app.state.task_dependencies = task_dependencies
     app.state.workflow_service = workflow_service
+    app.state.planner_service = planner_service
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -553,11 +573,12 @@ def create_app(settings=None):
     @app.exception_handler(ChangeError)
     @app.exception_handler(WorkProductError)
     @app.exception_handler(WorkflowError)
+    @app.exception_handler(PlannerError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3's Change/WorkProduct/Workflow API is a pure JSON
-        surface (E1.7: 'API/service correctness first, no large UI
-        yet') -- a clean 400 + message, never the HTML 'Action blocked'
-        page the older form-posting routes use."""
+        """Phase E1/E3/E4's Change/WorkProduct/Workflow/Plan API is a
+        pure JSON surface (E1.7: 'API/service correctness first, no
+        large UI yet') -- a clean 400 + message, never the HTML 'Action
+        blocked' page the older form-posting routes use."""
         return JSONResponse({"ok":False,"message":str(exc)},status_code=400)
 
     @app.get("/", response_class=HTMLResponse)
@@ -2307,6 +2328,57 @@ def create_app(settings=None):
         return {"depends_on":task_dependencies.dependencies_for(tid),
                 "dependents":task_dependencies.dependents_of(tid),
                 "readiness":task_dependencies.readiness(tid,decision)}
+
+    # -------------------------------------------------- Dynamic Planner (E4)
+    # PlannerService never launches a coding session -- see
+    # app/services/planner_service.py's module docstring for the four-way
+    # separation (reasoning / artifact / materialization / execution)
+    # this whole route group respects.
+    def _plan_row(pid:int):
+        row=planner_service.get_plan(pid)
+        if not row: raise HTTPException(404,"Plan not found")
+        return row
+
+    @app.post("/api/changes/{cid}/plan")
+    def api_plan_change(cid:int,provider:str=Form("claude"),materialize:bool=Form(False)):
+        _change_row(cid)
+        return planner_service.plan_change(cid,provider=provider,materialize=materialize)
+    @app.get("/api/changes/{cid}/plans")
+    def api_list_plans(cid:int):
+        _change_row(cid)
+        return planner_service.list_plans(cid)
+    @app.post("/api/changes/{cid}/replan")
+    def api_replan_change(cid:int,provider:str=Form("claude")):
+        _change_row(cid)
+        return planner_service.replan_change(cid,provider=provider)
+
+    @app.get("/api/plans/{pid}")
+    def api_get_plan(pid:int):
+        plan=_plan_row(pid)
+        return {**plan,"items":planner_service.plan_items(pid),"human_decisions":planner_service.human_decisions(pid)}
+    @app.post("/api/plans/{pid}/validate")
+    def api_validate_plan(pid:int):
+        _plan_row(pid)
+        return planner_service.validate_plan(pid)
+    @app.post("/api/plans/{pid}/materialize")
+    def api_materialize_plan(pid:int):
+        _plan_row(pid)
+        return planner_service.materialize_plan(pid)
+    @app.get("/api/plans/{pid}/validation")
+    def api_plan_validation(pid:int):
+        plan=_plan_row(pid)
+        return json.loads(plan["validation_result"] or "{}")
+    @app.get("/api/plans/{pid}/task-graph")
+    def api_plan_task_graph(pid:int):
+        _plan_row(pid)
+        items=planner_service.plan_items(pid)
+        return [{"key":it["item_key"],"title":it["title"],"task_type":it["task_type"],
+                 "preferred_role":it["preferred_role"],"depends_on":json.loads(it["depends_on_keys"] or "[]"),
+                 "materialized_task_id":it["materialized_task_id"]} for it in items]
+    @app.post("/api/plans/{pid}/human-decisions/{did}/resolve")
+    def api_resolve_human_decision(pid:int,did:int,resolution_note:str=Form(...)):
+        _plan_row(pid)
+        return planner_service.resolve_human_decision(did,resolution_note)
 
     @app.post("/api/workspaces/{wid}/builder-instructions")
     def save_builder_instructions(wid:int,builder_instructions:str=Form("")):
