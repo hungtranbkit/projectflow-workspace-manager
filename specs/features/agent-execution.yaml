@@ -1,0 +1,155 @@
+# Formalizes the already-implemented Agent Execution lifecycle
+# (Supervisor start -> live process -> exit/resume -> existing Review/QA/
+# Integration policy -> accepted/DONE) as an approved FeatureSpec, the
+# same way FEAT-SPEC-LAYER formalized the Spec Layer itself. Requirement/
+# acceptance/invariant ids use an "AE" prefix (registry ids must be
+# unique across the whole specs/ tree, not just within one file).
+schema_version: 1
+id: FEAT-AGENT-EXECUTION
+title: Agent Execution & Acceptance
+version: 1
+status: approved
+summary: >
+  A Builder Workspace's Agent runs as one real, PTY-backed process per
+  workspace, started only for a valid Task/Workspace/agent combination,
+  never duplicated while a live execution already exists, always given
+  an accurate task-context prompt, always recorded on exit (success or
+  failure), resumable without losing task/session identity, and routed
+  through ProjectFlow's existing Review/Runtime-Verification/Integration
+  gate policy -- a Task only reaches the accepted (DONE) state once every
+  gate its risk profile requires has actually PASSed.
+scope:
+  includes:
+    - Starting an Agent session for a Builder Workspace
+      (_start_builder_session / create_session / setup_and_start /
+      start_all_builders -- the Supervisor entry points)
+    - The single-execution-per-workspace lock
+      (_resume_builder_session's reuse guard)
+    - Builder Prompt composition and task-context accuracy
+      (render_agent_prompt / workspace_agent_prompt)
+    - Process exit capture (AgentSessionManager.start's on_exit,
+      reconcile_on_startup after a server restart)
+    - Resume/session identity preservation
+    - Routing a failed/blocked outcome through the existing Review/QA/
+      Integration gate policy (TaskDecisionService), never a separate
+      ad hoc failure path
+    - The DONE ("accepted") status computation gate
+  excludes:
+    - The PTY/WebSocket terminal transport itself (LivePtySession's read
+      loop, xterm.js rendering)
+    - Sandbox/Docker provisioning
+    - SpecGate's own mechanics (FEAT-SPEC-LAYER) -- Agent Execution
+      calls SpecGate as one of its start-time checks, it does not define
+      SpecGate itself
+    - Cross-repo integration/merge mechanics (task_integrations, GitHub
+      PR/CI) beyond reading their already-computed status
+requirements:
+  - id: REQ-AE-001
+    text: >
+      An Agent session may only be started for a Task and Builder
+      Workspace that actually exist and for an agent present in the
+      trusted launcher registry (and, when applicable, a Task whose
+      SpecGate outcome is PASS or NOT_APPLICABLE) -- never for an
+      unresolved Task id, an unknown workspace, or an arbitrary
+      caller-supplied agent/command.
+  - id: REQ-AE-002
+    text: >
+      At most one valid, live execution may exist per Builder Workspace
+      at a time. A start request while a session for that workspace is
+      already STARTING/RUNNING/WAITING_FOR_INPUT reuses that session
+      (redelivering the prompt only if it was never DELIVERED) instead
+      of spawning a second process.
+  - id: REQ-AE-003
+    text: >
+      The prompt delivered into a session must contain the Task's actual
+      context (title, and Implementation Prompt or the Task Title
+      fallback when none was given) composed server-side -- never a
+      blank, stale, or caller-substituted prompt.
+  - id: REQ-AE-004
+    text: >
+      Every real process exit (normal exit, non-zero exit, or a
+      spawn-time failure) must be persisted to agent_sessions
+      (status EXITED/FAILED, exited_at, exit_code) and its final
+      transcript saved, regardless of whether a browser was connected
+      to watch it.
+  - id: REQ-AE-005
+    text: >
+      Resuming a Builder Workspace's Agent always starts or reuses a
+      session tied to that exact same task_id/workspace_id -- resume
+      never attaches a new session to a different Task or Workspace.
+  - id: REQ-AE-006
+    text: >
+      A Builder failure (reviewer FIX_REQUIRED/BLOCKED, or a session
+      that EXITED/FAILED without a submitted report) is surfaced only
+      through TaskDecisionService's existing gate/blocking-reason
+      machinery -- never a second, parallel failure-handling path.
+  - id: REQ-AE-007
+    text: >
+      A Task may reach the accepted (DONE) status only once every gate
+      its risk profile requires (Review PASS for every builder; Runtime
+      Verification PASS-and-current when the risk profile requires QA;
+      Integration OK when the risk profile requires it) is actually
+      satisfied, on top of every required repository being MERGED.
+acceptance_criteria:
+  - id: AC-AE-001
+    text: >
+      Given a valid Task, a valid Builder Workspace, and an allowed
+      agent, starting it launches a real PTY-backed AgentSession
+      (status RUNNING) and delivers the composed Builder Prompt.
+  - id: AC-AE-002
+    text: >
+      Starting a session against a nonexistent Task, or with an agent
+      not in the trusted launcher registry, is rejected before any
+      process is spawned -- no agent_sessions row for a live process is
+      ever created.
+  - id: AC-AE-003
+    text: >
+      A second Start click while a session for the same workspace is
+      already live and its prompt already DELIVERED is a no-op that
+      returns the existing session id -- it never creates a second live
+      PTY process for that workspace.
+  - id: AC-AE-004
+    text: >
+      When a spawned process exits for any reason, agent_sessions.status
+      becomes EXITED (or FAILED for a spawn-time error) with exited_at
+      and exit_code recorded, and this happens even if no one was
+      subscribed to its output at the time.
+  - id: AC-AE-005
+    text: >
+      Resume after an EXITED/FAILED session without a submitted report
+      starts a fresh session against the identical task_id/workspace_id,
+      with any prior reviewer findings appended into the new prompt
+      delivery.
+  - id: AC-AE-006
+    text: >
+      When the Task's risk profile requires Runtime Verification and/or
+      Integration and that gate is not PASS/current, TaskDecisionService
+      never computes status DONE, no matter how many Builders report
+      ready.
+  - id: AC-AE-007
+    text: >
+      Once every required gate is satisfied and every required
+      repository is MERGED, the Task's computed status becomes DONE and
+      Close Task becomes available.
+invariants:
+  - id: INV-AE-001
+    text: >
+      A Task never reaches the accepted (DONE) status while a gate its
+      risk profile requires has not actually PASSed.
+  - id: INV-AE-002
+    text: >
+      An agent_sessions row's task_id/workspace_id are fixed at creation
+      and never reassigned to a different Task or Workspace afterward.
+  - id: INV-AE-003
+    text: >
+      Evidence already recorded (agent_sessions rows, transcript_tail,
+      verification_reports, review_runs, qa_runs, test_runs) is never
+      deleted or lost across a server restart -- reconcile_on_startup
+      only ever corrects a stale RUNNING/STARTING/WAITING_FOR_INPUT row
+      to FAILED, it never removes evidence.
+  - id: INV-AE-004
+    text: >
+      An Agent process failure or exit is never silently reinterpreted
+      as success -- an EXITED/FAILED session with no submitted READY
+      verification report keeps its Builder Workspace out of
+      ready/review_status=PASS.
