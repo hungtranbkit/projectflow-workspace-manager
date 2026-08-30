@@ -574,6 +574,121 @@ ALTER TABLE verification_reports ADD COLUMN spec_invariant_ids TEXT NOT NULL DEF
 -- model of its own.
 ALTER TABLE deployments ADD COLUMN spec_baseline_sha256 TEXT;
 """),
+    # V18: Engineering Domain Foundation (Phase E1). Adds Change and
+    # WorkProduct as first-class entities ABOVE the existing Task model,
+    # additive only -- every existing Task/Workspace/Spec/Evidence/
+    # Deployment table and column is untouched.
+    #
+    # Project identity (E1.6): ProjectFlow has no separate `projects`
+    # table -- `repositories` already IS the project boundary (one row
+    # per registered repo, each with its own PROJECT.yaml/specs root,
+    # already referenced this same way by tasks.repo_scope_id,
+    # sandboxes.repository_id, deployments.repository_id, ...). Reused
+    # directly as `project_id -> repositories(id)` rather than inventing
+    # a parallel concept; nullable, matching tasks.repo_scope_id's own
+    # optionality (a Change/WorkProduct may not be scoped to one repo
+    # yet, e.g. an early cross-repo intent).
+    #
+    # changes: one human/product intent that may produce many Tasks.
+    # lifecycle_state is stored, not derived (E1 explicitly defers
+    # automatic lifecycle derivation to a later phase) -- an Agent has
+    # no route that can set it to DONE in this phase (see change_service.py).
+    #
+    # tasks.change_id: nullable FK, so every existing Task (and every
+    # existing test fixture) keeps working completely unchanged with
+    # change_id NULL -- Change is additive, never mandatory in E1.
+    #
+    # work_products: a generic, typed-kind core table (never one table
+    # per WorkProduct kind) for durable engineering outputs (specs,
+    # designs, ADRs, code changes, review/verification reports, release
+    # manifests, ...). Content itself is never stored inline here --
+    # `content_ref` points at where the real content lives (a spec file
+    # path, a verification_reports.id, a deployments.id, a free-form
+    # URI, ...) and `content_metadata` carries small structured facts;
+    # this is a reference/index row, the same discipline the Spec Layer
+    # already established for tasks.spec_* (S1: "never a second copy of
+    # the real content"). History-friendly: a revision is a NEW row with
+    # `supersedes_id` pointing at the one it replaces -- no UPDATE ever
+    # overwrites another WorkProduct's historical content/status wholesale.
+    #
+    # task_work_product_links: Task -> WorkProduct as typed INPUT/OUTPUT
+    # references (E1.4) -- never large documents stored on the Task row
+    # itself.
+    #
+    # trace_links: a minimal, TYPED (not polymorphic-blob) source/target
+    # relationship table -- added only for the trace edges E1.5 requires
+    # that existing columns do not already express (Change -> Spec
+    # feature id, WorkProduct -> Release/Deployment). Every other
+    # required trace already has a clean, existing, typed mechanism and
+    # is deliberately NOT duplicated here: Requirement -> Task is
+    # tasks.spec_requirement_ids, Task -> WorkProduct is
+    # task_work_product_links, Task -> AgentSession is
+    # agent_sessions.task_id, Task -> Evidence is EvidenceStore over
+    # verification_reports/review_runs/qa_runs/test_runs (all already
+    # task_id-keyed).
+    (18, """
+CREATE TABLE IF NOT EXISTS changes(
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER REFERENCES repositories(id),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  change_type TEXT NOT NULL DEFAULT 'FEATURE',
+  risk_level TEXT NOT NULL DEFAULT 'NORMAL',
+  lifecycle_state TEXT NOT NULL DEFAULT 'NEW',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_changes_project ON changes(project_id);
+CREATE INDEX IF NOT EXISTS idx_changes_lifecycle ON changes(lifecycle_state);
+
+ALTER TABLE tasks ADD COLUMN change_id INTEGER REFERENCES changes(id);
+CREATE INDEX IF NOT EXISTS idx_tasks_change ON tasks(change_id);
+
+CREATE TABLE IF NOT EXISTS work_products(
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER REFERENCES repositories(id),
+  change_id INTEGER REFERENCES changes(id),
+  task_id INTEGER REFERENCES tasks(id),
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'DRAFT',
+  content_ref TEXT,
+  content_metadata TEXT NOT NULL DEFAULT '{}',
+  content_digest TEXT,
+  supersedes_id INTEGER REFERENCES work_products(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_wp_project ON work_products(project_id);
+CREATE INDEX IF NOT EXISTS idx_wp_change ON work_products(change_id);
+CREATE INDEX IF NOT EXISTS idx_wp_task ON work_products(task_id);
+CREATE INDEX IF NOT EXISTS idx_wp_kind ON work_products(kind);
+
+CREATE TABLE IF NOT EXISTS task_work_product_links(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  work_product_id INTEGER NOT NULL REFERENCES work_products(id),
+  direction TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(task_id, work_product_id, direction)
+);
+CREATE INDEX IF NOT EXISTS idx_twpl_task ON task_work_product_links(task_id, direction);
+CREATE INDEX IF NOT EXISTS idx_twpl_wp ON task_work_product_links(work_product_id);
+
+CREATE TABLE IF NOT EXISTS trace_links(
+  id INTEGER PRIMARY KEY,
+  source_type TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  relation TEXT NOT NULL DEFAULT 'RELATES_TO',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(source_type, source_id, target_type, target_id, relation)
+);
+CREATE INDEX IF NOT EXISTS idx_trace_source ON trace_links(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_trace_target ON trace_links(target_type, target_id);
+"""),
 ]
 
 

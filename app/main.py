@@ -37,6 +37,9 @@ from app.services.spec_registry import SpecRegistry, SpecError
 from app.services.spec_gate import SpecGate, spec_id_list, ALL_CLASSIFICATIONS
 from app.services.spec_compliance import SpecComplianceVerifier
 from app.services.evidence_store import EvidenceStore
+from app.services.change_service import ChangeService, ChangeError, CHANGE_TYPES, RISK_LEVELS as CHANGE_RISK_LEVELS, LIFECYCLE_STATES
+from app.services.work_product_service import WorkProductService, WorkProductError, WORK_PRODUCT_KINDS, WORK_PRODUCT_STATUSES, DIRECTIONS as WP_DIRECTIONS
+from app.services.trace_service import TraceService
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -60,6 +63,14 @@ def create_app(settings=None):
     spec_gate = SpecGate(specs_root)
     spec_compliance = SpecComplianceVerifier(db, decision, specs_root)
     evidence_store = EvidenceStore(db)
+    # Engineering Domain Foundation (Phase E1): additive layer above the
+    # existing Task model -- see app/services/change_service.py,
+    # work_product_service.py, trace_service.py for the "why reused vs
+    # new" reasoning. Nothing here replaces TaskDecisionService/
+    # EvidenceStore/SpecGate/_start_builder_session; they are untouched.
+    changes = ChangeService(db)
+    work_products = WorkProductService(db)
+    trace = TraceService(db)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
@@ -78,6 +89,9 @@ def create_app(settings=None):
     app.state.spec_gate = spec_gate
     app.state.spec_compliance = spec_compliance
     app.state.evidence_store = evidence_store
+    app.state.changes = changes
+    app.state.work_products = work_products
+    app.state.trace = trace
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -511,6 +525,15 @@ def create_app(settings=None):
         code = getattr(exc, "code", "SANDBOX_ERROR")
         if request.url.path.startswith("/api/"): return JSONResponse({"ok":False,"code":code,"message":str(exc)},status_code=409)
         return HTMLResponse(f"<h1>Sandbox action blocked</h1><pre>{code}: {str(exc)}</pre><a href='javascript:history.back()'>Back</a>", status_code=409)
+
+    @app.exception_handler(ChangeError)
+    @app.exception_handler(WorkProductError)
+    async def engineering_domain_error(request, exc):
+        """Phase E1's Change/WorkProduct API is a pure JSON surface
+        (E1.7: 'API/service correctness first, no large UI yet') -- a
+        clean 400 + message, never the HTML 'Action blocked' page the
+        older form-posting routes use."""
+        return JSONResponse({"ok":False,"message":str(exc)},status_code=400)
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request):
@@ -2014,6 +2037,79 @@ def create_app(settings=None):
     @app.get("/api/tasks/{tid}/evidence")
     def api_task_evidence(tid:int):
         task_row(tid); return evidence_store.for_task(tid)
+
+    # ---------------------------------------------- Engineering Domain (E1)
+    # Change -> Task, Change/Task -> WorkProduct, Task -> input/output
+    # WorkProduct. Additive layer above the existing Task model -- see
+    # app/services/change_service.py / work_product_service.py for the
+    # domain logic itself; these routes are thin HTTP adapters over it,
+    # the same shape every other API route in this file already has.
+    def change_row(cid:int):
+        row=changes.get(cid)
+        if not row: raise HTTPException(404,"Change not found")
+        return row
+    def work_product_row(wpid:int):
+        row=work_products.get(wpid)
+        if not row: raise HTTPException(404,"WorkProduct not found")
+        return row
+
+    @app.get("/api/changes")
+    def api_list_changes(project_id:int|None=None):
+        return changes.list(project_id=project_id)
+    @app.post("/api/changes")
+    def api_create_change(title:str=Form(...),description:str=Form(""),change_type:str=Form("FEATURE"),
+                           risk_level:str=Form("NORMAL"),project_id:str=Form("")):
+        pid=int(project_id) if project_id.strip().isdigit() else None
+        cid=changes.create(title=title,description=description,change_type=change_type,risk_level=risk_level,project_id=pid)
+        return change_row(cid)
+    @app.get("/api/changes/{cid}")
+    def api_get_change(cid:int):
+        return change_row(cid)
+    @app.post("/api/changes/{cid}/lifecycle")
+    def api_change_lifecycle(cid:int,state:str=Form(...)):
+        """Human-driven only (E1.1): no Supervisor/Agent code path in this
+        phase ever calls ChangeService.set_lifecycle_state -- an Agent
+        cannot arbitrarily mark a Change DONE."""
+        changes.set_lifecycle_state(cid,state)
+        return change_row(cid)
+    @app.get("/api/changes/{cid}/tasks")
+    def api_change_tasks(cid:int):
+        change_row(cid); return changes.list_tasks_for_change(cid)
+    @app.post("/api/changes/{cid}/tasks/{tid}/attach")
+    def api_attach_task_to_change(cid:int,tid:int):
+        changes.attach_task_to_change(cid,tid); return task_row(tid)
+    @app.get("/api/changes/{cid}/work-products")
+    def api_change_work_products(cid:int):
+        change_row(cid); return work_products.list_for_change(cid)
+
+    @app.post("/api/work-products")
+    def api_create_work_product(kind:str=Form(...),title:str=Form(...),project_id:str=Form(""),
+                                 change_id:str=Form(""),task_id:str=Form(""),status:str=Form("DRAFT"),
+                                 content_ref:str=Form(""),content_metadata:str=Form(""),
+                                 content_digest:str=Form(""),supersedes_id:str=Form("")):
+        try: metadata=json.loads(content_metadata) if content_metadata.strip() else {}
+        except (TypeError, ValueError): raise WorkProductError("content_metadata must be valid JSON")
+        wpid=work_products.create(
+            kind=kind,title=title,
+            project_id=int(project_id) if project_id.strip().isdigit() else None,
+            change_id=int(change_id) if change_id.strip().isdigit() else None,
+            task_id=int(task_id) if task_id.strip().isdigit() else None,
+            status=status,content_ref=content_ref.strip() or None,content_metadata=metadata,
+            content_digest=content_digest.strip() or None,
+            supersedes_id=int(supersedes_id) if supersedes_id.strip().isdigit() else None)
+        return work_product_row(wpid)
+    @app.get("/api/work-products/{wpid}")
+    def api_get_work_product(wpid:int):
+        return work_product_row(wpid)
+
+    @app.get("/api/tasks/{tid}/work-products")
+    def api_task_work_products(tid:int):
+        task_row(tid)
+        return {"inputs":work_products.inputs_for_task(tid),"outputs":work_products.outputs_for_task(tid)}
+    @app.post("/api/tasks/{tid}/work-products/{wpid}/link")
+    def api_link_task_work_product(tid:int,wpid:int,direction:str=Form(...)):
+        work_products.link_task(tid,wpid,direction)
+        return {"inputs":work_products.inputs_for_task(tid),"outputs":work_products.outputs_for_task(tid)}
 
     @app.post("/api/workspaces/{wid}/builder-instructions")
     def save_builder_instructions(wid:int,builder_instructions:str=Form("")):
