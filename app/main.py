@@ -64,6 +64,9 @@ from app.services.test_design_service import (
 )
 from app.services.change_overview import build_change_overview
 from app.services.change_control_surface import ChangeControlSurfaceService
+from app.services.autonomous_execution_service import (
+    AutonomousExecutionService, TaskExecutionContextBuilder, AutonomousExecutionError,
+)
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -222,6 +225,15 @@ def create_app(settings=None):
         workflow_service, spec_lifecycle_service, architecture_design_service,
         test_design_lifecycle_service, test_case_specs_store, executable_test_mapping_service,
         planner_service, human_decisions, specs_root, _resolve_project_policy_for_change)
+    # Phase E8 (Autonomous Implementation Orchestration): the Builder-
+    # prompt-context half only -- built here since it needs no closure
+    # defined later in this function. AutonomousExecutionService itself
+    # (the orchestrator) is constructed further down, once
+    # add_task_workspace/_start_builder_session exist -- it calls those
+    # EXACT closures to actually launch a Builder, never a second
+    # Supervisor (E8.10).
+    task_execution_context_builder = TaskExecutionContextBuilder(
+        db, work_products, trace, specs_root, test_case_specs_store, executable_test_mapping_service)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
@@ -270,6 +282,7 @@ def create_app(settings=None):
     app.state.executable_test_mapping_service = executable_test_mapping_service
     app.state.test_design_lifecycle_service = test_design_lifecycle_service
     app.state.change_control_surface = change_control_surface
+    app.state.task_execution_context_builder = task_execution_context_builder
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -599,6 +612,12 @@ def create_app(settings=None):
                 instr=(workspace.get("builder_instructions") or "").strip()
                 if instr: parts+=["## BUILDER INSTRUCTIONS (this workspace only)",instr,""]
             parts+=_spec_context_section(t)
+            # E8.8/E8.9: bounded architecture/design/test-contract slice
+            # for THIS Task's own governing PlanItem/requirement ids --
+            # never the whole project's engineering state. A Task with
+            # no change_id (every legacy/manual Task) or no materialized
+            # PlanItem gets nothing extra here (render_lines returns []).
+            parts+=task_execution_context_builder.render_lines(t["id"],t.get("change_id"))
             rules=None
             if repo_row:
                 try:
@@ -711,9 +730,10 @@ def create_app(settings=None):
     @app.exception_handler(SpecLifecycleError)
     @app.exception_handler(ArchitectureDesignError)
     @app.exception_handler(TestDesignError)
+    @app.exception_handler(AutonomousExecutionError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3/E4/E5/E6/E7's Change/WorkProduct/Workflow/Plan/
-        Spec-Proposal/Architecture/Design/Test-Design API is a pure JSON
+        """Phase E1/E3/E4/E5/E6/E7/E8's Change/WorkProduct/Workflow/Plan/
+        Spec-Proposal/Architecture/Design/Test-Design/Autonomous-Execution API is a pure JSON
         surface (E1.7: 'API/service correctness first, no large UI
         yet') -- a clean 400 + message, never the HTML 'Action
         blocked' page the older form-posting routes use."""
@@ -989,6 +1009,13 @@ def create_app(settings=None):
         if status_upper=="READY" and w["status"]!="READY":
             db.execute("UPDATE agent_workspaces SET status='READY',ready_for_integration=1,last_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,wid))
             db.event("agent",wid,"SUBMITTED_FOR_REVIEW",f"{head} source={ready_source}"); recompute_task_status(w.get("task_id"))
+            # E8.12: capture a durable CODE_CHANGE WorkProduct at the exact
+            # moment a Builder Workspace becomes READY -- same hook for a
+            # manual Submit-for-Review and an eventual autonomous one
+            # alike (autonomous_execution_service is constructed later in
+            # this same create_app() scope but only ever CALLED at request
+            # time, well after construction finishes).
+            autonomous_execution_service.record_code_change_work_product(w,t,head,files_changed)
     @app.post("/api/workspaces/{wid}/verification-report")
     def submit_workspace_report(wid:int,work_status:str=Form("READY"),what_changed:str=Form(""),files_changed:str=Form(""),tests_run:str=Form(""),automated_tests:str=Form(""),how_to_verify:str=Form(""),expected_result:str=Form(""),test_data:str=Form(""),runtime_requirements:str=Form("NONE"),risks:str=Form("")):
         """Submit for Review (section 14/15): the Builder completion
@@ -2321,6 +2348,12 @@ def create_app(settings=None):
         change_row(cid)
         header=change_control_surface.header(cid)
         overview=change_control_surface.overview(cid)
+        # E8.23: AUTONOMOUS EXECUTION card. Composed here at the route,
+        # not inside ChangeControlSurfaceService, since autonomous_execution_service
+        # is constructed later in create_app() (it needs add_task_workspace/
+        # _start_builder_session) -- both names resolve fine at request
+        # time regardless of definition order within this same closure.
+        overview["autonomous_execution"]=autonomous_execution_service.status(cid)
         return render(request,"change_detail.html",cid=cid,active_tab="",header=header,overview=overview)
     @app.get("/changes/{cid}/spec",response_class=HTMLResponse)
     def change_spec_tab(request:Request,cid:int):
@@ -2350,8 +2383,14 @@ def create_app(settings=None):
     @app.get("/changes/{cid}/tasks",response_class=HTMLResponse)
     def change_tasks_tab(request:Request,cid:int):
         change_row(cid)
+        data=change_control_surface.tasks_tab(cid)
+        # E8.23: per-row execution readiness (AUTO_READY/WAITING_.../
+        # STALE_PLAN/...) -- read-only annotation, same evaluate_task()
+        # the API/scheduler itself uses, never a second readiness engine.
+        for row in data["rows"]:
+            row["execution_readiness"]=autonomous_execution_service.evaluate_task(row["task"]["id"])
         return render(request,"change_tasks.html",cid=cid,active_tab="tasks",header=change_control_surface.header(cid),
-                      data=change_control_surface.tasks_tab(cid))
+                      data=data)
     @app.get("/changes/{cid}/reviews",response_class=HTMLResponse)
     def change_reviews_tab(request:Request,cid:int):
         change_row(cid)
@@ -2994,6 +3033,46 @@ def create_app(settings=None):
         sid=auto_create_sandbox(tid,repository_id,r["repo_path"],"AGENT_WORKSPACE",wid,role_clean or agent_s,branch,commit,path,profile_clean,t.get("default_sandbox_profile"))
         if sid: db.execute("UPDATE agent_workspaces SET sandbox_profile=(SELECT profile FROM sandboxes WHERE id=?) WHERE id=?",(sid,wid))
         return {"ok":True,"workspace_id":wid,"repo_name":r["repo_name"],"agent":agent_s}
+
+    # Autonomous Implementation Orchestration (Phase E8): constructed
+    # here, once add_task_workspace/_start_builder_session both exist --
+    # these are the EXACT closures the manual "Start Builder"/"New
+    # Workspace" actions already use (E8.10: no second Supervisor, no
+    # second shell-execution mechanism). tick()/run_change() are never
+    # called by anything in this file automatically -- only the explicit
+    # API routes below, matching E8.6/E8.27's own "opt-in, manual-tick
+    # only, no background daemon" requirement.
+    autonomous_execution_service=AutonomousExecutionService(
+        db,changes,work_products,decision,task_dependencies,workflow_service,human_decisions,spec_gate,
+        roles_catalog,planner_service,git,add_task_workspace,_start_builder_session,
+        _resolve_project_policy_for_change,settings,test_case_specs=test_case_specs_store)
+    app.state.autonomous_execution_service=autonomous_execution_service
+
+    @app.get("/api/changes/{cid}/autonomous-execution")
+    def api_autonomous_execution_status(cid:int):
+        change_row(cid)
+        return autonomous_execution_service.status(cid)
+    @app.get("/api/changes/{cid}/auto-ready-tasks")
+    def api_auto_ready_tasks(cid:int):
+        change_row(cid)
+        return autonomous_execution_service.list_auto_ready_tasks(cid)
+    @app.post("/api/changes/{cid}/autonomous-execution/tick")
+    def api_autonomous_execution_tick(cid:int):
+        change_row(cid)
+        return autonomous_execution_service.tick(cid)
+    @app.post("/api/tasks/{tid}/autonomous-start")
+    def api_task_autonomous_start(tid:int):
+        """Operator-triggered single-task run (E8.23's 'Run next ready
+        task' UI action) -- evaluates THIS Task specifically rather than
+        letting tick() pick whichever is first in DAG order, so an
+        operator testing one Task doesn't accidentally launch a
+        different one."""
+        task_row(tid)
+        return autonomous_execution_service.launch_task_if_ready(tid)
+    @app.get("/api/tasks/{tid}/execution-readiness")
+    def api_task_execution_readiness(tid:int):
+        task_row(tid)
+        return autonomous_execution_service.evaluate_task(tid)
 
     @app.post("/api/tasks/{tid}/workspaces")
     def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):

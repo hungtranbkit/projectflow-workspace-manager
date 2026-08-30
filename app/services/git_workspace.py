@@ -82,6 +82,13 @@ class GitWorkspaceService:
         path = self.validate_worktree(integration_path); self.validate_branch(source_branch)
         return self.git(path, "merge", "--no-ff", "--no-edit", source_branch, check=False)
     def conflict_files(self, path): return [x for x in self.git(self.validate_worktree(path), "diff", "--name-only", "--diff-filter=U", check=False).stdout.splitlines() if x]
+    def changed_files(self, path, base_commit):
+        """All paths that differ between base_commit and the current
+        worktree state (index + working tree combined) -- everything
+        touched since this Workspace was created, committed or not.
+        Used by Scope Guard (E8.18) to detect out-of-scope modifications
+        against a real diff, never a self-reported file list."""
+        return [x for x in self.git(self.validate_worktree(path), "diff", "--name-only", base_commit, check=False).stdout.splitlines() if x]
     def is_ancestor(self, path, commit): return self.git(self.validate_worktree(path), "merge-base", "--is-ancestor", commit, "HEAD", check=False).returncode == 0
     def create_baseline_probe(self, repo, commit):
         """A disposable, detached-HEAD worktree checked out at an exact

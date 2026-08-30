@@ -58,4 +58,38 @@
 <p><small>{{overview.change._tasks|length}} Task{{'s' if overview.change._tasks|length != 1 else ''}} — see the <a href="/changes/{{cid}}/tasks">Tasks tab</a> for operational detail.</small></p>
 {% endif %}
 
+<!-- AUTONOMOUS EXECUTION card (E8.23): a read-only view of
+     AutonomousExecutionService.status() plus one explicit
+     "Run next ready task" trigger for operator testing -- E8 never
+     enables automatic browser-triggered execution on its own. -->
+{% set ae = overview.autonomous_execution %}
+<section class="panel phase-card" aria-label="Autonomous Execution">
+<h3>Autonomous Execution</h3>
+<div class="wf-checklist">
+<div class="wf-check {{'wf-done' if ae.policy.enabled else 'wf-skipped'}}">
+<span class="wf-mark">{{'✓' if ae.policy.enabled else '—'}}</span>
+<span class="wf-label">{{'Enabled' if ae.policy.enabled else 'Disabled'}}</span>
+<small> — max {{ae.policy.max_concurrent_builders}} concurrent builder{{'s' if ae.policy.max_concurrent_builders != 1 else ''}}{% if not ae.policy.auto_start_ready_tasks %}, auto-start off{% endif %}</small>
+</div>
+<div class="wf-check {{'wf-current' if ae.ready_tasks else 'wf-future'}}">
+<span class="wf-mark">{{'●' if ae.ready_tasks else '○'}}</span>
+<span class="wf-label">{{ae.ready_tasks|length}} Ready Task{{'s' if ae.ready_tasks|length != 1 else ''}}</span>
+</div>
+<div class="wf-check {{'wf-current' if ae.running_builders else 'wf-future'}}">
+<span class="wf-mark">{{'●' if ae.running_builders else '○'}}</span>
+<span class="wf-label">{{ae.running_builders}} Running Builder{{'s' if ae.running_builders != 1 else ''}}</span>
+</div>
+<div class="wf-check {{'wf-done' if ae.last_orchestration_event else 'wf-skipped'}}">
+<span class="wf-mark">{{'✓' if ae.last_orchestration_event else '—'}}</span>
+<span class="wf-label">Last orchestration result</span>
+{% if ae.last_orchestration_event %}<small> — {{ae.last_orchestration_event.action}} ({{ae.last_orchestration_event.created_at}})</small>{% else %}<small> — none yet</small>{% endif %}
+</div>
+</div>
+{% if ae.policy.enabled %}
+<p><button type="button" onclick="runAutonomousTick({{cid}},this)">Run next ready task</button> <span data-tick-feedback class="launch-feedback"></span></p>
+{% else %}
+<p><small>Autonomous execution is disabled for this Change's project (PROJECT.yaml <code>engineering.autonomous_execution</code>).</small></p>
+{% endif %}
+</section>
+
 {% endblock %}

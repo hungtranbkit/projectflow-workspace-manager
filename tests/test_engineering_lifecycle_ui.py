@@ -26,7 +26,19 @@ def lifecycle_env(client, tmp_path):
     }, sort_keys=False))
     for name in ("test_design_context_builder", "test_review_service", "requirement_coverage_service",
                  "architecture_context_builder", "architecture_review_service", "technical_design_service",
-                 "ui_ux_design_service", "design_review_service"):
+                 "ui_ux_design_service", "design_review_service",
+                 # E5 services -- SpecLifecycleService.apply_proposal() is
+                 # the ONLY place that writes to specs/**/*.yaml, and this
+                 # fixture's own seeded_change() below calls exactly that
+                 # (via /api/spec-proposals/{id}/apply). Missing this one
+                 # override previously leaked a real, incrementing
+                 # specs/features/feat-kiosk.yaml into this repo's own
+                 # tree on every test run -- see
+                 # projectflow-specs-root-isolation-risk memory; this is
+                 # the exact same class of bug, this time inside a real
+                 # pytest fixture rather than an ad-hoc script.
+                 "requirement_analysis_service", "spec_author_service", "spec_proposal_validator",
+                 "spec_review_service", "spec_lifecycle_service"):
         getattr(client.app.state, name).specs_root = specs_root
     client.app.state.planner_service.specs_root = specs_root
     client.app.state.planner_service.context_builder.specs_root = specs_root

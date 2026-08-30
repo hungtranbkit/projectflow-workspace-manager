@@ -4,7 +4,7 @@
 <section class="panel"><h3>Tasks</h3>
 <p><small>Operational detail for debugging -- see the Overview tab for the human-facing lifecycle summary.</small></p>
 {% if data.rows %}
-<div class="table-scroll"><table><thead><tr><th>Task</th><th>Status</th><th>Stage</th><th>Next Action</th><th>Builders</th><th>Spec</th><th>Outputs</th></tr></thead><tbody>
+<div class="table-scroll"><table><thead><tr><th>Task</th><th>Status</th><th>Stage</th><th>Next Action</th><th>Builders</th><th>Spec</th><th>Outputs</th><th>Execution Readiness</th></tr></thead><tbody>
 {% for row in data.rows %}<tr>
 <td><a href="/tasks/{{row.task.id}}">{{row.task.title}}</a><br><small>{{row.task.slug}}</small></td>
 <td><span class="badge {{row.status|lower}}">{{row.status.replace('_',' ')}}</span></td>
@@ -13,6 +13,14 @@
 <td>{% for b in row.builders %}<span class="badge {{b.review_status|lower}}">{{b.agent}} · {{b.review_status}}</span> {% endfor %}{% if not row.builders %}—{% endif %}</td>
 <td>{% if row.spec_feature_id %}<code>{{row.spec_feature_id}}</code>{% else %}—{% endif %}</td>
 <td>{% for o in row.outputs %}<span class="trace-chip">{{o.kind}}</span>{% endfor %}{% if not row.outputs %}—{% endif %}</td>
+<td>
+{% set er = row.execution_readiness.readiness %}
+{% if er == 'AUTO_READY' %}<span class="badge ready">AUTO READY</span>
+<button type="button" onclick="runAutonomousStart({{row.task.id}},this)">Run now</button>
+{% elif er in ('WAITING_DEPENDENCY','WAITING_SPEC','WAITING_DESIGN','WAITING_TEST_DESIGN','WAITING_HUMAN','ALREADY_RUNNING') %}<span class="badge pending" title="{{row.execution_readiness.reason or ''}}">{{er.replace('_',' ')}}</span>
+{% elif er in ('COMPLETE','NOT_AUTONOMOUS_TASK') %}<span class="badge draft" title="{{row.execution_readiness.reason or ''}}">{{er.replace('_',' ')}}</span>
+{% else %}<span class="badge blocked" title="{{row.execution_readiness.reason or ''}}">{{er.replace('_',' ')}}</span>{% endif %}
+</td>
 </tr>{% endfor %}
 </tbody></table></div>
 {% else %}

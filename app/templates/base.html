@@ -33,6 +33,16 @@
 </nav><footer>Local only · v0.1.0</footer></aside>
 <main><header class="page-header-desktop"><div><span class="eyebrow">ONE AGENT · ONE BRANCH · ONE WORKTREE</span><h2>{% block title %}{% endblock %}</h2></div>{% block header_action %}{% endblock %}</header>{% block content %}{% endblock %}</main>
 <script>async function launchWorkspace(id,kind,button){let original=button.textContent;button.disabled=true;button.textContent=kind==='agent'?'Launching agent...':'Opening terminal...';let feedback=document.querySelector(`[data-launch-feedback="${id}"]`);try{let response=await fetch(`/api/workspaces/${id}/${kind==='agent'?'launch-agent':'open-terminal'}`,{method:'POST'}),data=await response.json();if(!response.ok)throw data;if(feedback){feedback.textContent=data.message+(data.fallback?` · Fallback: ${data.fallback}`:'');feedback.className='launch-feedback error'}else alert(data.message);button.textContent=data.ok?'Launch requested':original}catch(error){let message=error.message||'Không mở được terminal';if(feedback){feedback.textContent=message+(error.fallback?` · Fallback: ${error.fallback}`:'');feedback.className='launch-feedback error'}else alert(message);button.textContent=original}finally{setTimeout(()=>{button.disabled=false;button.textContent=original},1800)}}
+// E8.23: operator-testing trigger for one scheduling tick
+// (POST /api/changes/{id}/autonomous-execution/tick) -- picks at most
+// one ready Task through the exact same AutonomousExecutionService the
+// API/tests use, never a client-side scheduling decision. Reloads on
+// any outcome so the AUTONOMOUS EXECUTION card re-renders from the
+// server's own post-tick state rather than a stale snapshot.
+async function runAutonomousTick(cid,button){let original=button.textContent;button.disabled=true;button.textContent='Running...';let feedback=document.querySelector('[data-tick-feedback]');try{let response=await fetch(`/api/changes/${cid}/autonomous-execution/tick`,{method:'POST'}),data=await response.json(),outcome=(data.results&&data.results[0]&&data.results[0].outcome)||'unknown';if(feedback)feedback.textContent=`Result: ${outcome}`;setTimeout(()=>location.reload(),900)}catch(error){if(feedback)feedback.textContent=error.message||'Tick failed';button.disabled=false;button.textContent=original}}
+// Same operator-testing pattern, one specific Task
+// (POST /api/tasks/{id}/autonomous-start) -- Tasks tab's per-row "Run now".
+async function runAutonomousStart(tid,button){let original=button.textContent;button.disabled=true;button.textContent='Running...';try{let response=await fetch(`/api/tasks/${tid}/autonomous-start`,{method:'POST'}),data=await response.json();alert(`Result: ${data.outcome||JSON.stringify(data)}`);location.reload()}catch(error){alert(error.message||'Start failed');button.disabled=false;button.textContent=original}}
 // Action-button feedback (button-state-ux): every state-changing form can
 // carry data-loading-label -- on submit, its button is disabled and
 // relabeled INSTANTLY, client-side, before the network round trip even

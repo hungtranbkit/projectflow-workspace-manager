@@ -77,6 +77,10 @@ def load_engineering_policy(repo: Path) -> dict | None:
           require_for: [CONTROLLED]
         design:
           ui_ux_when_user_facing: true
+        autonomous_execution:
+          enabled: true
+          max_concurrent_builders: 1
+          auto_start_ready_tasks: true
 
     Returns None if the project declares no such block at all -- a
     project without one uses safe global defaults, the same convention
@@ -99,7 +103,20 @@ def load_engineering_policy(repo: Path) -> dict | None:
     ui_ux_when_user_facing` is an explicit override for UI/UX
     applicability detection (E6.10): true/false forces the decision;
     omitted leaves UiUxApplicabilityService's own structured-evidence
-    heuristic in charge."""
+    heuristic in charge.
+
+    Phase E8.1 addition: `autonomous_execution` controls whether
+    AutonomousExecutionService may ever launch a Builder for this
+    project's Changes at all. Absent entirely -> disabled (E8.27's own
+    safety requirement: autonomous execution is opt-in, never on by
+    default for a repository that never declared it). `enabled: false`
+    always wins regardless of anything else. `max_concurrent_builders`
+    defaults to 1 when the block exists but omits it -- this
+    installation never runs more than one autonomous Builder at a time
+    in E8 (E13 will handle real concurrency). `auto_start_ready_tasks`
+    is a secondary switch a caller may use to pause automatic task
+    SELECTION while still allowing an already-launched Builder to keep
+    running; defaults to true when the block exists."""
     path = repo / "PROJECT.yaml"
     if not path.is_file(): return None
     data = yaml.safe_load(path.read_text()) or {}
@@ -134,4 +151,16 @@ def load_engineering_policy(repo: Path) -> dict | None:
         ui_ux = design.get("ui_ux_when_user_facing")
         if ui_ux is not None and not isinstance(ui_ux, bool):
             raise ContractError("engineering.design.ui_ux_when_user_facing must be a boolean")
+    autonomous = block.get("autonomous_execution")
+    if autonomous is not None:
+        if not isinstance(autonomous, dict): raise ContractError("engineering.autonomous_execution must be a mapping")
+        enabled = autonomous.get("enabled")
+        if enabled is not None and not isinstance(enabled, bool):
+            raise ContractError("engineering.autonomous_execution.enabled must be a boolean")
+        max_conc = autonomous.get("max_concurrent_builders")
+        if max_conc is not None and (not isinstance(max_conc, int) or isinstance(max_conc, bool) or max_conc < 1):
+            raise ContractError("engineering.autonomous_execution.max_concurrent_builders must be a positive integer")
+        auto_start = autonomous.get("auto_start_ready_tasks")
+        if auto_start is not None and not isinstance(auto_start, bool):
+            raise ContractError("engineering.autonomous_execution.auto_start_ready_tasks must be a boolean")
     return block
