@@ -62,21 +62,29 @@ def deployment_config(repo: Path, environment: str) -> dict | None:
 def load_engineering_policy(repo: Path) -> dict | None:
     """Read PROJECT.yaml's optional `engineering:` block -- a
     repository-level NARROWING of the global Role & Capability Catalog
-    (app/services/engineering_catalog.py, E2 section 18), e.g.
-    restricting which providers may hold a given role:
+    (app/services/engineering_catalog.py, E2 section 18) and, since
+    Phase E3, of workflow profile selection
+    (app/services/workflow_engine.py, E3 section 12):
 
       engineering:
         roles:
           BUILDER:
             allowed_providers: [codex, claude]
+        workflow:
+          default_profile: AGENTIC_STANDARD
+          allowed_profiles: [AGENTIC_STANDARD, CONTROLLED]
 
     Returns None if the project declares no such block at all -- a
     project without one uses safe global defaults, the same convention
     load_sandbox_contract/deployment_config already use. Never a cloned
-    copy of the catalog: this is only ever consulted as an override a
-    caller ANDs together with the global catalog's own result -- it can
-    restrict a role/provider pair the global catalog already supports,
-    never expand beyond what a provider globally supports."""
+    copy of either catalog: this is only ever consulted as an override a
+    caller ANDs together with the global catalog's own result. It can
+    restrict a role/provider pair or a workflow profile choice the
+    global catalogs already support -- never expand beyond what they
+    support, and never touch a chosen profile's own stage/gate
+    requirements (there is no mechanism here that could weaken a
+    CONTROLLED profile's mandatory gates; only which profile may be
+    SELECTED is narrowable)."""
     path = repo / "PROJECT.yaml"
     if not path.is_file(): return None
     data = yaml.safe_load(path.read_text()) or {}
@@ -90,4 +98,13 @@ def load_engineering_policy(repo: Path) -> dict | None:
         allowed = cfg.get("allowed_providers")
         if allowed is not None and not isinstance(allowed, list):
             raise ContractError(f"engineering.roles.{role_key}.allowed_providers must be a list")
+    workflow = block.get("workflow")
+    if workflow is not None:
+        if not isinstance(workflow, dict): raise ContractError("engineering.workflow must be a mapping")
+        allowed_profiles = workflow.get("allowed_profiles")
+        if allowed_profiles is not None and not isinstance(allowed_profiles, list):
+            raise ContractError("engineering.workflow.allowed_profiles must be a list")
+        default_profile = workflow.get("default_profile")
+        if default_profile is not None and not isinstance(default_profile, str):
+            raise ContractError("engineering.workflow.default_profile must be a string")
     return block

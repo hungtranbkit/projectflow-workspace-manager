@@ -758,6 +758,106 @@ CREATE INDEX IF NOT EXISTS idx_role_capabilities_capability ON role_capabilities
 CREATE INDEX IF NOT EXISTS idx_agent_capabilities_provider ON agent_capabilities(provider);
 CREATE INDEX IF NOT EXISTS idx_agent_capabilities_capability ON agent_capabilities(capability_id);
 """),
+    # V20: Workflow / Process Engine (Phase E3). Structure only -- same
+    # discipline as V19: the actual catalog rows (stages/gates/profiles/
+    # profile-stage mapping/task types) are seeded idempotently by
+    # WorkflowCatalogService.seed() on every app startup
+    # (app/services/workflow_engine.py), not baked into this
+    # append-only migration.
+    #
+    # Three responsibilities, three table groups, deliberately never
+    # merged (E3's key architectural rule):
+    #   DEFINITION: workflow_stages, gate_requirements, workflow_profiles,
+    #     workflow_profile_stages, task_types -- declarative, global.
+    #   INSTANCE: workflow_runs -- one row per Change (change_id UNIQUE),
+    #     records ONLY identity (profile_key/version). No status/stage
+    #     column here at all -- WorkflowService.evaluate_workflow()
+    #     always derives those fresh from Tasks/gates/evidence, the same
+    #     "never a persisted status a route can forget to update"
+    #     discipline TaskDecisionService already uses for Task status.
+    #   EXECUTION: task_dependencies -- extends the existing Task model
+    #     (tasks table, untouched) with a first-class dependency graph;
+    #     TaskDecisionService/_start_builder_session remain the sole
+    #     source of a Task's own execution truth.
+    #
+    # tasks.task_type is nullable/optional (E3.1) -- every existing Task
+    # keeps working with it NULL, exactly the same backward-compatible
+    # pattern tasks.change_id (E1) and tasks.spec_* (Spec Layer) already
+    # established.
+    (20, """
+CREATE TABLE IF NOT EXISTS workflow_stages(
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  order_index INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS gate_requirements(
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  stage_id INTEGER NOT NULL REFERENCES workflow_stages(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS workflow_profiles(
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  version INTEGER NOT NULL DEFAULT 1,
+  system_defined INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS workflow_profile_stages(
+  id INTEGER PRIMARY KEY,
+  profile_id INTEGER NOT NULL REFERENCES workflow_profiles(id),
+  stage_id INTEGER NOT NULL REFERENCES workflow_stages(id),
+  requirement TEXT NOT NULL DEFAULT 'OPTIONAL',
+  condition_key TEXT,
+  UNIQUE(profile_id, stage_id)
+);
+CREATE TABLE IF NOT EXISTS task_types(
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  stage_key TEXT,
+  preferred_role_key TEXT,
+  compatible_role_keys TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE tasks ADD COLUMN task_type TEXT;
+
+CREATE TABLE IF NOT EXISTS workflow_runs(
+  id INTEGER PRIMARY KEY,
+  change_id INTEGER NOT NULL UNIQUE REFERENCES changes(id),
+  profile_key TEXT NOT NULL,
+  profile_version INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS task_dependencies(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  depends_on_task_id INTEGER NOT NULL REFERENCES tasks(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(task_id, depends_on_task_id)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_profile_stages_profile ON workflow_profile_stages(profile_id);
+CREATE INDEX IF NOT EXISTS idx_gate_requirements_stage ON gate_requirements(stage_id);
+CREATE INDEX IF NOT EXISTS idx_task_types_stage ON task_types(stage_key);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_change ON workflow_runs(change_id);
+CREATE INDEX IF NOT EXISTS idx_task_dependencies_task ON task_dependencies(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_dependencies_dep ON task_dependencies(depends_on_task_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_task_type ON tasks(task_type);
+"""),
 ]
 
 

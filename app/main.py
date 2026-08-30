@@ -42,6 +42,9 @@ from app.services.work_product_service import WorkProductService, WorkProductErr
 from app.services.trace_service import TraceService
 from app.services.engineering_catalog import RoleCapabilityService, is_known_provider
 from app.services.project_contract import load_engineering_policy
+from app.services.workflow_engine import (
+    WorkflowCatalogService, TaskDependencyService, WorkflowService, WorkflowError,
+)
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -79,6 +82,15 @@ def create_app(settings=None):
     # data load. See engineering_catalog.py's module docstring.
     roles_catalog = RoleCapabilityService(db, providers=settings.agents)
     roles_catalog.seed()
+    # Workflow / Process Engine (Phase E3): same idempotent-upsert
+    # seeding discipline as roles_catalog above. workflow_service is the
+    # one facade routes/tests use; catalog/dependencies stay separate
+    # objects internally (WORKFLOW DEFINITION vs TASK EXECUTION, E3's
+    # own key architectural rule) but are wired together here.
+    workflow_catalog = WorkflowCatalogService(db)
+    workflow_catalog.seed()
+    task_dependencies = TaskDependencyService(db)
+    workflow_service = WorkflowService(db, workflow_catalog, changes, work_products, decision, spec_compliance, task_dependencies)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
@@ -101,6 +113,9 @@ def create_app(settings=None):
     app.state.work_products = work_products
     app.state.trace = trace
     app.state.roles_catalog = roles_catalog
+    app.state.workflow_catalog = workflow_catalog
+    app.state.task_dependencies = task_dependencies
+    app.state.workflow_service = workflow_service
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -537,11 +552,12 @@ def create_app(settings=None):
 
     @app.exception_handler(ChangeError)
     @app.exception_handler(WorkProductError)
+    @app.exception_handler(WorkflowError)
     async def engineering_domain_error(request, exc):
-        """Phase E1's Change/WorkProduct API is a pure JSON surface
-        (E1.7: 'API/service correctness first, no large UI yet') -- a
-        clean 400 + message, never the HTML 'Action blocked' page the
-        older form-posting routes use."""
+        """Phase E1/E3's Change/WorkProduct/Workflow API is a pure JSON
+        surface (E1.7: 'API/service correctness first, no large UI
+        yet') -- a clean 400 + message, never the HTML 'Action blocked'
+        page the older form-posting routes use."""
         return JSONResponse({"ok":False,"message":str(exc)},status_code=400)
 
     @app.get("/", response_class=HTMLResponse)
@@ -2211,6 +2227,86 @@ def create_app(settings=None):
         try: policy=load_engineering_policy(Path(r["repo_path"]))
         except ContractError as exc: raise GitSafetyError(str(exc))
         return {"repository_id":rid,"policy":policy}
+
+    # -------------------------------------------- Workflow / Process Engine (E3)
+    def _change_row(cid:int):
+        row=changes.get(cid)
+        if not row: raise HTTPException(404,"Change not found")
+        return row
+    def _change_engineering_policy(change:dict):
+        """The Change's own repository's PROJECT.yaml engineering:
+        policy (E3.12), resolved via Change.project_id -- repositories
+        already IS the project boundary (E1.6); None if the Change has
+        no project_id or the repo declares no such block."""
+        if not change.get("project_id"): return None
+        r=db.one("SELECT repo_path FROM repositories WHERE id=?",(change["project_id"],))
+        if not r: return None
+        try: return load_engineering_policy(Path(r["repo_path"]))
+        except ContractError: return None
+
+    @app.get("/api/engineering/workflow-profiles")
+    def api_list_workflow_profiles():
+        return [{**p,"stages":workflow_catalog.profile_stages(p["key"])} for p in workflow_catalog.list_profiles()]
+    @app.get("/api/engineering/task-types")
+    def api_list_task_types():
+        return workflow_catalog.list_task_types()
+    @app.get("/api/engineering/task-types/{key}")
+    def api_get_task_type(key:str):
+        tt=workflow_catalog.get_task_type(key)
+        if not tt: raise HTTPException(404,"Unknown task type")
+        return tt
+
+    @app.get("/api/changes/{cid}/workflow")
+    def api_get_change_workflow(cid:int):
+        _change_row(cid)
+        run=workflow_service.get_workflow(cid)
+        if not run: raise HTTPException(404,"This Change has no workflow yet")
+        return run
+    @app.post("/api/changes/{cid}/workflow")
+    def api_create_change_workflow(cid:int,profile_key:str=Form("")):
+        change=_change_row(cid)
+        policy=_change_engineering_policy(change)
+        return workflow_service.create_workflow_for_change(cid,profile_key.strip() or None,policy)
+    @app.get("/api/changes/{cid}/workflow/state")
+    def api_change_workflow_state(cid:int):
+        _change_row(cid)
+        return workflow_service.evaluate_workflow(cid)
+    @app.get("/api/changes/{cid}/ready-tasks")
+    def api_change_ready_tasks(cid:int):
+        _change_row(cid)
+        return {"ready_tasks":workflow_service.list_ready_tasks(cid)}
+    @app.get("/api/changes/{cid}/unmet-gates")
+    def api_change_unmet_gates(cid:int):
+        _change_row(cid)
+        return {"unmet_gates":workflow_service.list_unmet_gates(cid)}
+
+    @app.post("/api/tasks/{tid}/task-type")
+    def api_set_task_type(tid:int,task_type:str=Form("")):
+        """Optional (E3.1) -- a Task never requires one; NULL/'' clears
+        it back to unset, exactly like spec_change_classification's own
+        write route. Validated against the seeded catalog, never a
+        free-text value that could silently drift from it."""
+        task_row(tid)
+        key=task_type.strip().upper() or None
+        if key and not workflow_catalog.get_task_type(key):
+            raise WorkflowError(f"Unknown task type: {key}")
+        db.execute("UPDATE tasks SET task_type=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(key,tid))
+        db.event("task",tid,"TASK_TYPE_SET",str(key))
+        return task_row(tid)
+
+    # ---- Task dependency graph (E3.6) ---------------------------------
+    @app.get("/api/tasks/{tid}/dependencies")
+    def api_task_dependencies(tid:int):
+        task_row(tid)
+        return {"depends_on":task_dependencies.dependencies_for(tid),
+                "dependents":task_dependencies.dependents_of(tid),
+                "readiness":task_dependencies.readiness(tid,decision)}
+    @app.post("/api/tasks/{tid}/dependencies")
+    def api_add_task_dependency(tid:int,depends_on_task_id:int=Form(...)):
+        task_dependencies.add_dependency(tid,depends_on_task_id)
+        return {"depends_on":task_dependencies.dependencies_for(tid),
+                "dependents":task_dependencies.dependents_of(tid),
+                "readiness":task_dependencies.readiness(tid,decision)}
 
     @app.post("/api/workspaces/{wid}/builder-instructions")
     def save_builder_instructions(wid:int,builder_instructions:str=Form("")):
