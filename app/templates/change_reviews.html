@@ -1,0 +1,24 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Reviews · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+<section class="panel"><h3>Reviews</h3>
+<p><small>Every independent review this Change has gone through -- Spec, Architecture, Design, Test, and (per-Task) Code Review -- in one place. Structured so a future Code/Security review can appear here without redesign.</small></p>
+{% if data.reviews %}
+<div class="table-scroll"><table><thead><tr><th>Kind</th><th>Verdict</th><th>When</th><th>Findings</th></tr></thead><tbody>
+{% for item in data.reviews %}<tr>
+<td>{{item.kind}}{% if item.task %} <small>({{item.task.title}})</small>{% endif %}</td>
+<td>{{ m.verdict_badge(item.verdict) }}</td>
+<td><small>{{item.created_at}}</small></td>
+<td>
+{% if item.findings is string %}{{item.findings or '—'}}
+{% elif item.findings %}{{item.findings|length}} finding{{'s' if item.findings|length != 1 else ''}}
+{% else %}—{% endif %}
+</td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+{{ m.empty('No reviews yet') }}
+{% endif %}
+</section>
+
+{% endblock %}

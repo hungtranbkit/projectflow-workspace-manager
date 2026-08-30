@@ -1,0 +1,54 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Architecture · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+<section class="panel tab-section"><h4>Architecture Analysis</h4>
+{% if data.current_analysis %}
+{% set a = data.current_analysis.content %}
+<p><span class="badge">{{(a.classification or 'UNCLASSIFIED').replace('_',' ')}}</span> <span class="badge {{'approved' if data.current_analysis.status=='APPROVED' else 'draft'}}">{{data.current_analysis.status}}</span></p>
+{% if a.classification_rationale %}<p>{{a.classification_rationale}}</p>{% endif %}
+{% if a.affected_components %}<p><small>Affected Components</small></p><ul>{% for c in a.affected_components %}<li>{{c}}</li>{% endfor %}</ul>{% endif %}
+{% if a.proposed_boundary_changes %}<p><small>Boundary Changes</small></p><ul>{% for c in a.proposed_boundary_changes %}<li>{{c}}</li>{% endfor %}</ul>{% endif %}
+{% if a.dependencies or a.integrations %}<p><small>Dependencies / Integrations</small></p><ul>{% for c in (a.dependencies or [])+(a.integrations or []) %}<li>{{c}}</li>{% endfor %}</ul>{% endif %}
+{% if a.data_ownership_impacts %}<p><small>Data Ownership Impact</small></p><ul>{% for c in a.data_ownership_impacts %}<li>{{c}}</li>{% endfor %}</ul>{% endif %}
+{% if a.api_impacts %}<p><small>API Impact</small></p><ul>{% for c in a.api_impacts %}<li>{{c}}</li>{% endfor %}</ul>{% endif %}
+{% if a.persistence_impacts %}<p><small>Persistence Impact</small></p><ul>{% for c in a.persistence_impacts %}<li>{{c}}</li>{% endfor %}</ul>{% endif %}
+{% if a.runtime_impacts or a.deployment_impacts %}<p><small>Runtime / Deployment Impact</small></p><ul>{% for c in (a.runtime_impacts or [])+(a.deployment_impacts or []) %}<li>{{c}}</li>{% endfor %}</ul>{% endif %}
+{% if a.security_impacts %}<p><small>Security Impact</small></p><ul>{% for c in a.security_impacts %}<li>{{c}}</li>{% endfor %}</ul>{% endif %}
+{% if a.migration_required %}<div class="stale-note"><b>Migration required</b>{{(a.rollback_considerations or [])|join('; ') or 'See rollback considerations in raw detail.'}}</div>{% endif %}
+{% if a.risks %}<p><small>Risks</small></p><ul>{% for c in a.risks %}<li>{{c}}</li>{% endfor %}</ul>{% endif %}
+{{ m.raw('Raw architecture analysis', a) }}
+{% else %}
+{{ m.empty('No architecture analysis yet', 'Optional for this WorkflowProfile unless PROJECT.yaml requires it.') }}
+{% endif %}
+</section>
+
+<section class="panel tab-section"><h4>Architecture Decision Records</h4>
+{% if data.adrs %}
+{% for adr in data.adrs %}
+<div class="hd-item">
+<b>{{adr.content.title}}</b> <span class="badge {{adr.status|lower}}">{{adr.status}}</span>
+{% if adr.content.context %}<p><small>Context</small><br>{{adr.content.context}}</p>{% endif %}
+<p><small>Decision</small><br>{{adr.content.decision}}</p>
+{% if adr.content.consequences %}<p><small>Consequences</small></p><ul>{% for c in adr.content.consequences %}<li>{{c}}</li>{% endfor %}</ul>{% endif %}
+{{ m.raw('Raw ADR', adr.content) }}
+</div>
+{% endfor %}
+{% else %}
+{{ m.empty('No ADR proposed', 'A durable decision worth remembering, when one exists, appears here.') }}
+{% endif %}
+</section>
+
+<section class="panel tab-section"><h4>Architecture Review</h4>
+{% if data.reviews %}
+{% for r in data.reviews|reverse %}
+<div class="hd-item">
+{{ m.verdict_badge(r.content.verdict) }} <small>{{r.created_at}}</small>
+{% for f in r.content.findings %}<p><span class="badge {{(f.severity or 'low')|lower}}">{{f.severity}}</span> {{f.description}}</p>{% endfor %}
+</div>
+{% endfor %}
+{% else %}
+{{ m.empty('No independent architecture review yet') }}
+{% endif %}
+</section>
+
+{% endblock %}

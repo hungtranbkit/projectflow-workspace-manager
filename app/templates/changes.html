@@ -1,0 +1,56 @@
+{% extends 'base.html' %}{% block title %}Changes{% endblock %}{% block header_action %}<a href="/help#spec-layer">? Spec Layer lifecycle</a>{% endblock %}{% block content %}
+
+{% if human_attention %}
+<section class="panel" style="border-left:4px solid var(--amber)"><h3>Human Attention</h3>
+<div class="table-scroll"><table><thead><tr><th>Change</th><th>Decisions Pending</th><th>Status</th></tr></thead><tbody>
+{% for c in human_attention %}<tr onclick="location.href='/changes/{{c.id}}/decisions'" style="cursor:pointer">
+<td><a href="/changes/{{c.id}}/decisions"><strong>{{c.title}}</strong></a></td>
+<td><span class="badge human_decision_required">{{c.human_decisions_pending}} pending</span></td>
+<td><span class="badge {{c.workflow_status|lower}}">{{c.workflow_status.replace('_',' ')}}</span></td>
+</tr>{% endfor %}
+</tbody></table></div>
+</section>
+{% endif %}
+
+<section class="panel"><h3>Recent Engineering Activity</h3>
+{% if recent %}
+<div class="table-scroll"><table><thead><tr><th>Change</th><th>Status</th><th>Updated</th></tr></thead><tbody>
+{% for c in recent %}<tr onclick="location.href='/changes/{{c.id}}'" style="cursor:pointer">
+<td><a href="/changes/{{c.id}}">{{c.title}}</a></td>
+<td><span class="badge {{c.workflow_status|lower}}">{{c.workflow_status.replace('_',' ')}}</span></td>
+<td><small>{{c.updated_at}}</small></td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+<div class="empty-state"><h4>No engineering activity yet</h4></div>
+{% endif %}
+</section>
+
+<section class="panel"><h3>Changes</h3>
+<p><small>The Change is the top-level unit the whole engineering pipeline governs -- Spec → Architecture → Design → Test Design → Implementation. Created via the API today (POST /api/changes); this page tracks progress once one exists.</small></p>
+
+<form method="get" class="filters">
+<select name="status" onchange="this.form.submit()"><option value="">All statuses</option>{% for s in ['PENDING','ACTIVE','WAITING_HUMAN','BLOCKED','FAILED','COMPLETE'] %}<option value="{{s}}" {{'selected' if filters.status==s else ''}}>{{s.replace('_',' ')}}</option>{% endfor %}</select>
+<select name="change_type" onchange="this.form.submit()"><option value="">All types</option>{% for t in change_types %}<option value="{{t}}" {{'selected' if filters.change_type==t else ''}}>{{t.replace('_',' ').title()}}</option>{% endfor %}</select>
+<select name="profile" onchange="this.form.submit()"><option value="">All workflows</option>{% for p in profiles %}<option value="{{p}}" {{'selected' if filters.profile==p else ''}}>{{p}}</option>{% endfor %}</select>
+{% if filters.status or filters.change_type or filters.profile %}<a class="ghost button" href="/changes">Clear</a>{% endif %}
+</form>
+
+{% if changes %}<div class="table-scroll"><table><thead><tr><th>Change</th><th>Status</th><th>Type</th><th>Risk</th><th>Workflow</th><th>Human Action</th><th>Tasks</th><th>Updated</th></tr></thead><tbody>
+{% for c in changes %}<tr onclick="location.href='/changes/{{c.id}}'" style="cursor:pointer">
+<td><a href="/changes/{{c.id}}"><strong>{{c.title}}</strong></a></td>
+<td><span class="badge {{c.workflow_status|lower}}">{{c.workflow_status.replace('_',' ')}}</span></td>
+<td class="cap">{{c.change_type|lower|replace('_',' ')}}</td>
+<td><span class="badge {{c.risk_level|lower}}">{{c.risk_level}}</span></td>
+<td>{{c.profile_key or '—'}}</td>
+<td>{% if c.human_decisions_pending %}<span class="badge human_decision_required">{{c.human_decisions_pending}}</span>{% else %}—{% endif %}</td>
+<td>{{c.task_count}}</td>
+<td><small>{{c.updated_at}}</small></td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% elif all_changes %}
+<div class="empty-state"><h4>No Changes match this filter</h4><a href="/changes">Clear filters</a></div>
+{% else %}<div class="empty-state"><h4>No Changes yet</h4><p>Create one via <code>POST /api/changes</code> to start the Spec → Architecture → Design → Test Design → Implementation pipeline.</p></div>{% endif %}
+</section>
+
+{% endblock %}

@@ -43,7 +43,7 @@ from app.services.trace_service import TraceService
 from app.services.engineering_catalog import RoleCapabilityService, is_known_provider
 from app.services.project_contract import load_engineering_policy, load_command
 from app.services.workflow_engine import (
-    WorkflowCatalogService, TaskDependencyService, WorkflowService, WorkflowError,
+    WorkflowCatalogService, TaskDependencyService, WorkflowService, WorkflowError, PROFILES,
 )
 from app.services.planner_service import (
     PlannerAgentInvoker, PlannerContextBuilder, PlanValidator, PlannerService, PlannerError,
@@ -62,6 +62,8 @@ from app.services.test_design_service import (
     TestCaseSpecStore, TestDesignContextBuilder, TestDesignService, RequirementCoverageService,
     TestReviewService, ExecutableTestMappingService, TestDesignLifecycleService, TestDesignError,
 )
+from app.services.change_overview import build_change_overview
+from app.services.change_control_surface import ChangeControlSurfaceService
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -212,6 +214,14 @@ def create_app(settings=None):
     # never changing its own verdict logic.
     spec_compliance.test_case_specs = test_case_specs_store
     spec_compliance.executable_mapping = executable_test_mapping_service
+    # Change Control Surface (Phase E7.5): the ONE aggregation layer the
+    # whole Engineering Lifecycle UI reads from -- composition only, see
+    # app/services/change_control_surface.py's own module docstring.
+    change_control_surface = ChangeControlSurfaceService(
+        db, changes, work_products, trace, decision, evidence_store, roles_catalog,
+        workflow_service, spec_lifecycle_service, architecture_design_service,
+        test_design_lifecycle_service, test_case_specs_store, executable_test_mapping_service,
+        planner_service, human_decisions, specs_root, _resolve_project_policy_for_change)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
@@ -259,6 +269,7 @@ def create_app(settings=None):
     app.state.test_review_service = test_review_service
     app.state.executable_test_mapping_service = executable_test_mapping_service
     app.state.test_design_lifecycle_service = test_design_lifecycle_service
+    app.state.change_control_surface = change_control_surface
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -2273,6 +2284,128 @@ def create_app(settings=None):
         row=work_products.get(wpid)
         if not row: raise HTTPException(404,"WorkProduct not found")
         return row
+
+    # ------------------------------------------------------ Change Overview (UI)
+    # The first UI surface for the whole E1-E7 engineering domain -- every
+    # phase through E7 was deliberately API-only. Nothing here computes a
+    # new status: build_change_overview (app/services/change_overview.py)
+    # only arranges what WorkflowService/ArchitectureDesignLifecycleService/
+    # TestDesignLifecycleService/SpecLifecycleService/HumanDecisionService
+    # already decided, the same "view-model over an existing decision,
+    # never a second one" discipline user_state_view.py established for
+    # Task (see task_detail.html's own status-hero/wf-checklist).
+    @app.get("/changes",response_class=HTMLResponse)
+    def changes_page(request:Request,status:str="",change_type:str="",profile:str=""):
+        """Project Overview (E7.5.1) + Change List (E7.5.2) combined --
+        Active Changes / Human Attention / filters, all derived from
+        WorkflowService/HumanDecisionService's own real state, never a
+        second status calculation."""
+        rows=changes.list()
+        for c in rows:
+            run=workflow_service.get_workflow(c["id"])
+            c["workflow_status"]=workflow_service.evaluate_workflow(c["id"])["status"] if run else "PENDING"
+            c["profile_key"]=run["profile_key"] if run else None
+            c["human_decisions_pending"]=len(human_decisions.list_pending_for_change(c["id"]))
+            c["task_count"]=len(changes.list_tasks_for_change(c["id"]))
+        human_attention=[c for c in rows if c["human_decisions_pending"]]
+        filtered=rows
+        if status: filtered=[c for c in filtered if c["workflow_status"]==status]
+        if change_type: filtered=[c for c in filtered if c["change_type"]==change_type]
+        if profile: filtered=[c for c in filtered if c["profile_key"]==profile]
+        recent=sorted(rows,key=lambda c:c["updated_at"],reverse=True)[:8]
+        return render(request,"changes.html",changes=filtered,all_changes=rows,human_attention=human_attention,
+                      recent=recent,filters={"status":status,"change_type":change_type,"profile":profile},
+                      change_types=CHANGE_TYPES,profiles=list(PROFILES))
+    @app.get("/changes/{cid}",response_class=HTMLResponse)
+    def change_detail(request:Request,cid:int):
+        change_row(cid)
+        header=change_control_surface.header(cid)
+        overview=change_control_surface.overview(cid)
+        return render(request,"change_detail.html",cid=cid,active_tab="",header=header,overview=overview)
+    @app.get("/changes/{cid}/spec",response_class=HTMLResponse)
+    def change_spec_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_spec.html",cid=cid,active_tab="spec",header=change_control_surface.header(cid),
+                      data=change_control_surface.spec_tab(cid))
+    @app.get("/changes/{cid}/architecture",response_class=HTMLResponse)
+    def change_architecture_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_architecture.html",cid=cid,active_tab="architecture",header=change_control_surface.header(cid),
+                      data=change_control_surface.architecture_tab(cid))
+    @app.get("/changes/{cid}/design",response_class=HTMLResponse)
+    def change_design_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_design.html",cid=cid,active_tab="design",header=change_control_surface.header(cid),
+                      data=change_control_surface.design_tab(cid))
+    @app.get("/changes/{cid}/tests",response_class=HTMLResponse)
+    def change_tests_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_tests.html",cid=cid,active_tab="tests",header=change_control_surface.header(cid),
+                      data=change_control_surface.tests_tab(cid))
+    @app.get("/changes/{cid}/plan",response_class=HTMLResponse)
+    def change_plan_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_plan.html",cid=cid,active_tab="plan",header=change_control_surface.header(cid),
+                      data=change_control_surface.plan_tab(cid))
+    @app.get("/changes/{cid}/tasks",response_class=HTMLResponse)
+    def change_tasks_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_tasks.html",cid=cid,active_tab="tasks",header=change_control_surface.header(cid),
+                      data=change_control_surface.tasks_tab(cid))
+    @app.get("/changes/{cid}/reviews",response_class=HTMLResponse)
+    def change_reviews_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_reviews.html",cid=cid,active_tab="reviews",header=change_control_surface.header(cid),
+                      data=change_control_surface.reviews_tab(cid))
+    @app.get("/changes/{cid}/decisions",response_class=HTMLResponse)
+    def change_decisions_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_decisions.html",cid=cid,active_tab="decisions",header=change_control_surface.header(cid),
+                      data=change_control_surface.decisions_tab(cid))
+    @app.get("/changes/{cid}/evidence",response_class=HTMLResponse)
+    def change_evidence_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_evidence.html",cid=cid,active_tab="evidence",header=change_control_surface.header(cid),
+                      data=change_control_surface.evidence_tab(cid))
+    @app.get("/changes/{cid}/release",response_class=HTMLResponse)
+    def change_release_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_release.html",cid=cid,active_tab="release",header=change_control_surface.header(cid),
+                      data=change_control_surface.release_tab(cid))
+    @app.get("/changes/{cid}/deploy",response_class=HTMLResponse)
+    def change_deploy_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_deploy.html",cid=cid,active_tab="deploy",header=change_control_surface.header(cid),
+                      data=change_control_surface.deploy_tab(cid))
+
+    @app.get("/api/changes/{cid}/control-surface")
+    def api_change_control_surface(cid:int):
+        """E7.5.19: one composed, read-only view across every existing
+        E1-E7 service for this Change -- composition only, never a new
+        business-state calculation. The HTML tab routes above call the
+        same ChangeControlSurfaceService methods directly (no internal
+        HTTP round-trip); this route exists for external/programmatic
+        callers that want the whole surface in one request."""
+        change_row(cid)
+        return {
+            "header": change_control_surface.header(cid), "overview": change_control_surface.overview(cid),
+            "spec": change_control_surface.spec_tab(cid), "architecture": change_control_surface.architecture_tab(cid),
+            "design": change_control_surface.design_tab(cid), "tests": change_control_surface.tests_tab(cid),
+            "plan": change_control_surface.plan_tab(cid), "tasks": change_control_surface.tasks_tab(cid),
+            "reviews": change_control_surface.reviews_tab(cid), "decisions": change_control_surface.decisions_tab(cid),
+            "evidence": change_control_surface.evidence_tab(cid), "release": change_control_surface.release_tab(cid),
+            "deploy": change_control_surface.deploy_tab(cid),
+        }
+
+    @app.post("/changes/{cid}/human-decisions/{did}/resolve")
+    def change_resolve_human_decision(cid:int,did:int,resolution_note:str=Form(...)):
+        """Form-friendly counterpart to the JSON /api/human-decisions/{did}/
+        resolve route (E5.11) -- same HumanDecisionService.resolve() call,
+        just a redirect back to this Change's Decisions tab (E7.5.13)
+        instead of a JSON body, so the page's inline Resolve form is a
+        real, working action rather than a read-only status mockup."""
+        change_row(cid); human_decisions.resolve(did,resolution_note)
+        return RedirectResponse(f"/changes/{cid}/decisions#pending",303)
 
     @app.get("/api/changes")
     def api_list_changes(project_id:int|None=None):

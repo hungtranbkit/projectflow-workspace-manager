@@ -1,0 +1,56 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Design · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+<section class="panel tab-section"><h4>Technical Design</h4>
+{% if data.technical_design %}
+{% set d = data.technical_design.content %}
+<p><span class="badge {{'approved' if data.technical_design.status=='APPROVED' else 'draft'}}">{{data.technical_design.status}}</span></p>
+<p>{{d.design_summary}}</p>
+{% for label,key in [('Components to Change','components_to_change'),('Interfaces','interfaces'),('API Contracts','api_contracts'),('Data Model Changes','data_model_changes'),('State Transitions','state_transitions'),('Validation Rules','validation_rules'),('Failure Modes','failure_modes'),('Error Handling','error_handling'),('Concurrency / Idempotency','concurrency_idempotency'),('Observability','observability'),('Configuration Changes','configuration_changes'),('Performance Considerations','performance_considerations'),('Security Considerations','security_considerations'),('Implementation Constraints','implementation_constraints'),('Test Implications','test_implications')] %}
+{% if d[key] %}<p><small>{{label}}</small></p><ul>{% for item in d[key] %}<li>{{item}}</li>{% endfor %}</ul>{% endif %}
+{% endfor %}
+{% if d.migration_plan %}<div class="stale-note"><b>Migration Plan</b>{{d.migration_plan}}</div>{% endif %}
+{% if d.rollback_strategy %}<p><small>Rollback Strategy</small><br>{{d.rollback_strategy}}</p>{% endif %}
+{% if d.backward_compatibility %}<p><small>Backward Compatibility</small><br>{{d.backward_compatibility}}</p>{% endif %}
+<p><small>Requirement Coverage</small><br>
+{% for r in d.covered_requirements %}<span class="trace-chip">✓ {{r}}</span>{% endfor %}
+{% for r in d.uncovered_requirements %}<span class="trace-chip" style="background:#f9e3e5;color:#922c38">✗ {{r}}</span>{% endfor %}
+{% if not d.covered_requirements and not d.uncovered_requirements %}—{% endif %}</p>
+{{ m.raw('Raw technical design', d) }}
+{% else %}
+{{ m.empty('No technical design yet') }}
+{% endif %}
+</section>
+
+<section class="panel tab-section"><h4>UI/UX Design</h4>
+{% if not data.ui_ux_applicability.applicable %}
+<div class="na-note">Not applicable — {{data.ui_ux_applicability.reason.replace('_',' ').lower() if data.ui_ux_applicability.reason else 'no user-facing evidence found'}}.</div>
+{% elif data.ui_ux_design %}
+{% set u = data.ui_ux_design.content %}
+<p><span class="badge {{'approved' if data.ui_ux_design.status=='APPROVED' else 'draft'}}">{{data.ui_ux_design.status}}</span></p>
+{% for label,key in [('User Goals','user_goals'),('User Flows','user_flows'),('Navigation','navigation'),('Interaction Rules','interaction_rules'),('Loading States','loading_states'),('Empty States','empty_states'),('Error States','error_states'),('Permission States','permission_states'),('Offline States','offline_states'),('Validation Feedback','validation_feedback'),('Accessibility','accessibility_considerations'),('Responsive','responsive_considerations'),('Edge Cases','edge_cases')] %}
+{% if u[key] %}<p><small>{{label}}</small></p><ul>{% for item in u[key] %}<li>{{item}}</li>{% endfor %}</ul>{% endif %}
+{% endfor %}
+{% if u.screens %}<p><small>Screens</small></p><ul>{% for s in u.screens %}<li><b>{{s.name}}</b> — {{s.purpose}}</li>{% endfor %}</ul>{% endif %}
+{% if u.acceptance_mapping %}<p><small>Acceptance Mapping</small></p><ul>{% for a in u.acceptance_mapping %}<li><code>{{a.acceptance_id}}</code> → {{a.covered_by}}</li>{% endfor %}</ul>{% endif %}
+{{ m.raw('Raw UI/UX design', u) }}
+{% else %}
+{{ m.empty('User-facing behavior changes, but no UI/UX design has been produced yet') }}
+{% endif %}
+</section>
+
+<section class="panel tab-section"><h4>Design Review</h4>
+{% if data.reviews %}
+{% for r in data.reviews|reverse %}
+<div class="hd-item">
+{{ m.verdict_badge(r.content.verdict) }} <small>{{r.created_at}}</small>
+{% if r.content.verdict == 'DESIGN_SPEC_CONFLICT' %}<p><span class="badge needs_refinement">{{r.content.conflict_classification}}</span> {% if r.content.conflict_classification=='HUMAN_SPEC_CHANGE_REQUIRED' %}This design cannot satisfy the approved spec as written — resolving it may require changing the spec itself (Spec tab / Decisions tab).{% else %}A different design choice can still satisfy the spec as written.{% endif %}</p>{% endif %}
+{% for f in r.content.findings %}<p><span class="badge {{(f.severity or 'low')|lower}}">{{f.severity}}</span> <small>{{f.dimension}}</small> {{f.description}}</p>{% endfor %}
+</div>
+{% endfor %}
+{% else %}
+{{ m.empty('No independent design review yet') }}
+{% endif %}
+</section>
+
+{% endblock %}

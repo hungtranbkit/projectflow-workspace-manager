@@ -1,0 +1,61 @@
+{% extends 'base.html' %}{% block title %}Change · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+
+{% include '_change_header.html' %}
+
+<!-- Full lifecycle stepper (E7.5.4) -- every dot's state comes straight
+     from WorkflowService.evaluate_workflow() via stage_timeline(),
+     never a frontend heuristic. -->
+<div class="stage-timeline" aria-label="Lifecycle stages">
+{% for s in overview.timeline %}
+<div class="stage-pill st-{{s.visual|lower}}" title="{{s.stage.replace('_',' ').title()}}{% if s.unmet_gates %} — waiting on: {{s.unmet_gates|join(', ')}}{% endif %}">
+<span class="stage-dot">{{ {'complete':'✓','active':'','waiting':'','waiting_human':'!','blocked':'!','failed':'!','not_applicable':'—'}[s.visual|lower] }}</span>
+<span class="stage-label">{{s.stage.replace('_',' ')}}</span>
+</div>
+{% endfor %}
+</div>
+
+<!-- Status hero -- state_class/headline come straight from
+     build_change_overview(), which itself only arranges WorkflowService.
+     evaluate_workflow()'s own real status; never a second, template-side
+     computation. -->
+<section class="status-hero state-{{overview.state_class}}" aria-label="Change status">
+<div class="hero-kicker">{{ {'working':'IN PROGRESS','waiting':'WAITING','action_required':'ACTION REQUIRED','complete':'COMPLETE'}[overview.state_class] }}</div>
+<h3>{{overview.headline}}</h3>
+{% if overview.human_decisions_pending %}
+<div class="hero-blocker"><b>{{overview.human_decisions_pending|length}} human decision{{'s' if overview.human_decisions_pending|length != 1 else ''}} pending</b>{{overview.human_decisions_pending[0].question}}{% if overview.human_decisions_pending|length > 1 %}<br><small>+ {{overview.human_decisions_pending|length - 1}} more — see Decisions tab</small>{% endif %}</div>
+<div class="hero-actions"><div class="hero-secondary"><a href="/changes/{{cid}}/decisions">Review pending decisions</a></div></div>
+{% endif %}
+</section>
+
+<!-- One card per pipeline phase -- Spec / Architecture / Design / Test
+     Design / Implementation -- each a wf-checklist exactly like the
+     Task status hero's own. auto-fit rather than a fixed 2-column
+     .grid: five phases never wrap cleanly into two columns. -->
+<div class="phase-grid">
+{% for section in overview.sections %}
+<section class="panel phase-card">
+<h3>{{section.title}}</h3>
+<div class="wf-checklist">
+{% for item in section.checks %}
+<div class="wf-check wf-{{item.state}}">
+<span class="wf-mark">{{ {'done':'✓','current':'●','future':'○','blocked':'!','skipped':'—'}[item.state] }}</span>
+<span class="wf-label">{{item.label}}</span>{% if item.note %}<small> — {{item.note}}</small>{% endif %}
+</div>
+{% endfor %}
+</div>
+</section>
+{% endfor %}
+</div>
+
+<div class="cards">
+<article class="{{'warn' if overview.human_decisions_pending else ''}}"><b>{{overview.human_decisions_pending|length}}</b><span>Human Decisions Pending</span></article>
+<article class="accent"><b>{{overview.agents_completed}}</b><span>Agents Completed</span></article>
+<article><b>{{overview.agents_running}}</b><span>Agents Running</span></article>
+<article class="{{'warn' if overview.spec_drift.stale else 'accent'}}"><b>{{overview.spec_drift.reason or 'NONE'}}</b><span>Spec Drift</span></article>
+</div>
+
+{% if overview.change._tasks %}
+<p><small>{{overview.change._tasks|length}} Task{{'s' if overview.change._tasks|length != 1 else ''}} — see the <a href="/changes/{{cid}}/tasks">Tasks tab</a> for operational detail.</small></p>
+{% endif %}
+
+{% endblock %}

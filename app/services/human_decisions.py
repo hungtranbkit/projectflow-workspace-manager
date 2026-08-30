@@ -44,6 +44,32 @@ class HumanDecisionService:
             ((resolution_note or "").strip(), decision_id))
         return self.get(decision_id)
 
+    def list_for_change(self, change_id: int) -> list[dict]:
+        """Same join logic as pending_for_change() below, but EVERY row
+        (pending and resolved alike) -- for the Decisions tab (E7.5.13),
+        which must show both sections."""
+        return self.db.all(
+            "SELECT * FROM human_decisions WHERE ("
+            "  (subject_type='change' AND subject_id=?)"
+            "  OR (subject_type='plan' AND subject_id IN (SELECT id FROM plans WHERE change_id=?))"
+            "  OR (subject_type='spec_proposal' AND subject_id IN (SELECT id FROM spec_proposals WHERE change_id=?))"
+            "  OR (subject_type='work_product' AND subject_id IN (SELECT id FROM work_products WHERE change_id=?))"
+            ") ORDER BY id DESC",
+            (change_id, change_id, change_id, change_id))
+
+    def list_pending_for_change(self, change_id: int) -> list[dict]:
+        """Same join logic as pending_for_change() below, but the real
+        rows instead of a bool -- for a Change-level overview that needs
+        to say HOW MANY, not just whether any exist."""
+        return self.db.all(
+            "SELECT * FROM human_decisions WHERE resolved=0 AND ("
+            "  (subject_type='change' AND subject_id=?)"
+            "  OR (subject_type='plan' AND subject_id IN (SELECT id FROM plans WHERE change_id=?))"
+            "  OR (subject_type='spec_proposal' AND subject_id IN (SELECT id FROM spec_proposals WHERE change_id=?))"
+            "  OR (subject_type='work_product' AND subject_id IN (SELECT id FROM work_products WHERE change_id=?))"
+            ") ORDER BY id",
+            (change_id, change_id, change_id, change_id))
+
     def pending_for_change(self, change_id: int) -> bool:
         """True if the Change itself, any of its Plans, any of its
         SpecProposals, or any of its WorkProducts (E6.14: architecture/

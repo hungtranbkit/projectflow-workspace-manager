@@ -1,0 +1,22 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Deploy · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+<section class="panel"><h3>Deploy</h3>
+<p><small>Real deployment status, traced Change → Task → required MergeRecord → deployments (the same join WorkflowService's DEPLOY_VERIFIED gate already uses) -- never invented linkage.</small></p>
+{% if data.linked %}
+<div class="table-scroll"><table><thead><tr><th>Repository</th><th>Environment</th><th>Status</th><th>Commit</th><th>Health</th><th>Requested</th></tr></thead><tbody>
+{% for d in data.deployments %}<tr>
+<td>{{d.repo_name}}</td>
+<td>{{d.environment}}</td>
+<td><span class="badge {{d.status|lower}}">{{d.status}}</span></td>
+<td><code>{{(d.source_commit or '—')[:10]}}</code></td>
+<td>{{d.health_status or '—'}}</td>
+<td><small>{{d.requested_at}}</small></td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+{{ m.empty('Not deployed yet', 'No repository this Change touches has a DEV deployment recorded against a merged Task yet.') }}
+{% endif %}
+</section>
+
+{% endblock %}

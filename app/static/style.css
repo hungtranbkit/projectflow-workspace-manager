@@ -169,3 +169,78 @@ button.is-loading::before,.button.is-loading::before{content:'';position:absolut
 
 /* -- Connection-lost banner (section 31). -- */
 .connection-lost{background:#fff2d9;color:#6b4a06;border-radius:8px;padding:10px 14px;margin:10px 0;font-size:13px}
+
+/* -- Change Overview (first UI for the E1-E7 engineering domain):
+   one phase-card per pipeline stage, each holding a wf-checklist --
+   auto-fit rather than the fixed 2-column .grid since five phases
+   never wrap cleanly into two columns at any width. -- */
+.phase-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:15px;margin-bottom:20px}
+.phase-card{margin-bottom:0}
+.phase-card h3{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.phase-card .wf-checklist{margin-bottom:0}
+.cards .warn{border-top:3px solid var(--amber)}
+.hd-item{padding:14px 0;border-bottom:1px solid var(--line)}
+.hd-item:last-child{border-bottom:0}
+.hd-item b{display:block;margin-bottom:4px}
+.hd-item .badge{margin-top:8px;margin-right:5px}
+.hd-item .mark-ready-form{margin:10px 0 0}
+.hd-item .mark-ready-form summary{background:#eef2f5;color:#34434e;padding:8px 14px;border-radius:6px;font-weight:650;font-size:13px}
+.hd-item .mark-ready-form summary:hover{background:#e2e8ec}
+.hd-item .mark-ready-form .button,.hd-item .mark-ready-form button{margin-top:4px}
+
+/* -- Change Detail shell: shared header + tab nav (E7.5.3). Tabs
+   horizontally scroll on narrow screens rather than wrapping/collapsing
+   -- a change with 12 tabs never has a clean 1-column mobile layout,
+   scrolling is the honest, standard pattern (E7.5.21). -- */
+.change-header{background:var(--panel);border:1px solid var(--line);border-radius:9px 9px 0 0;padding:18px 20px;border-bottom:0}
+.change-header-top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.change-header-top h3{margin:0;font-size:20px}
+.change-facts{margin-bottom:0}
+.change-tabs{display:flex;overflow-x:auto;gap:2px;background:var(--panel);border:1px solid var(--line);border-top:1px solid var(--line);border-radius:0 0 9px 9px;padding:0 12px;margin-bottom:20px;-webkit-overflow-scrolling:touch}
+.change-tab{flex:none;padding:12px 14px;color:var(--muted);text-decoration:none;font-weight:650;font-size:13px;border-bottom:3px solid transparent;white-space:nowrap}
+.change-tab:hover{color:var(--ink)}
+.change-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.tab-section{margin-bottom:20px}
+.tab-section h4{margin:0 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.stale-note{background:#fff2d9;color:#76500e;border-radius:8px;padding:10px 14px;margin:10px 0;font-size:13px}
+.stale-note b{display:block;margin-bottom:2px}
+.na-note{color:var(--muted);font-style:italic;padding:12px 0}
+.trace-chip{display:inline-block;background:#eef2f5;color:#43515d;border-radius:5px;padding:2px 7px;font-size:11px;font-weight:650;margin:2px 3px 2px 0}
+.dag-node{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:8px;background:var(--panel)}
+.dag-node .dag-deps{color:var(--muted);font-size:12px;margin-top:4px}
+.evidence-group{margin-bottom:18px}
+.evidence-group h4{margin:0 0 8px}
+
+/* -- Lifecycle stage timeline (E7.5.4): one pill per STAGE_ORDER stage,
+   visual state derived entirely from WorkflowService.evaluate_workflow()
+   -- see change_overview.py's stage_timeline(). -- */
+.stage-timeline{display:flex;overflow-x:auto;gap:0;margin-bottom:20px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:16px 12px;-webkit-overflow-scrolling:touch}
+.stage-pill{flex:none;display:flex;flex-direction:column;align-items:center;gap:6px;padding:0 16px;position:relative;min-width:84px}
+.stage-pill:not(:last-child)::after{content:'';position:absolute;top:9px;left:60%;width:80%;height:2px;background:var(--line)}
+.stage-pill .stage-dot{width:18px;height:18px;border-radius:50%;background:var(--line);border:2px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff;z-index:1;background:var(--panel)}
+.stage-pill .stage-label{font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);text-align:center;white-space:nowrap}
+.stage-pill.st-complete .stage-dot{background:var(--green);border-color:var(--green)}
+.stage-pill.st-complete:not(:last-child)::after{background:var(--green)}
+.stage-pill.st-complete .stage-label{color:var(--ink);font-weight:650}
+.stage-pill.st-active .stage-dot{background:var(--blue);border-color:var(--blue);box-shadow:0 0 0 3px #e2edff}
+.stage-pill.st-active .stage-label{color:var(--blue);font-weight:800}
+.stage-pill.st-waiting_human .stage-dot,.stage-pill.st-blocked .stage-dot,.stage-pill.st-failed .stage-dot{background:var(--amber);border-color:var(--amber);box-shadow:0 0 0 3px #fff2d9}
+.stage-pill.st-blocked .stage-dot,.stage-pill.st-failed .stage-dot{background:var(--red);border-color:var(--red);box-shadow:0 0 0 3px #f9e3e5}
+.stage-pill.st-waiting_human .stage-label,.stage-pill.st-blocked .stage-label,.stage-pill.st-failed .stage-label{color:var(--ink);font-weight:800}
+.stage-pill.st-not_applicable{opacity:.4}
+.stage-pill.st-not_applicable .stage-dot{border-style:dashed}
+@media(max-width:600px){.stage-pill{min-width:70px;padding:0 10px}}
+
+/* -- Verdict badges the Reviews/Spec/Architecture/Design/Tests tabs
+   share -- .badge.pass/.pending already existed. -- */
+.badge.reject,.badge.design_spec_conflict,.badge.fail,.badge.unimplemented{background:#f9e3e5;color:#922c38}
+.badge.needs_refinement,.badge.human_decision_required{background:#fff0d6;color:#865708}
+.badge.implemented{background:#e2edff;color:#1859ad}
+.badge.applied,.badge.approved{background:#dff4ea;color:#08734a}
+.badge.draft,.badge.proposed{background:#e7ebee;color:#53616b}
+/* -- Expandable raw/technical detail (E7.5 rule 8). -- */
+details.raw-json{margin:10px 0}
+details.raw-json summary{cursor:pointer;color:var(--blue);font-size:12px;font-weight:650;list-style:none}
+details.raw-json summary::-webkit-details-marker{display:none}
+details.raw-json summary::before{content:'{ } ';font-family:ui-monospace,monospace}
+details.raw-json pre{margin-top:8px}

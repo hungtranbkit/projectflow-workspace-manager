@@ -1,0 +1,35 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Evidence · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+<section class="panel"><h3>Evidence</h3>
+<p><small>Every real verification/review/QA/test record ProjectFlow already collected for this Change's Tasks -- grouped by Task, never a raw database dump.</small></p>
+{% if data.by_task %}
+{% for entry in data.by_task %}
+<div class="evidence-group">
+<h4><a href="/tasks/{{entry.task.id}}">{{entry.task.title}}</a></h4>
+{% if entry.evidence.verification_reports %}<p><small>Verification Reports ({{entry.evidence.verification_reports|length}})</small></p>
+<div class="table-scroll"><table><thead><tr><th>Work Status</th><th>What Changed</th><th>Spec</th><th>Created</th></tr></thead><tbody>
+{% for r in entry.evidence.verification_reports %}<tr><td><span class="badge {{r.work_status|lower}}">{{r.work_status}}</span></td><td>{{r.what_changed[:80]}}</td><td>{{r.spec_feature_id or '—'}}</td><td><small>{{r.created_at}}</small></td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+{% if entry.evidence.review_runs %}<p><small>Review Runs ({{entry.evidence.review_runs|length}})</small></p>
+<div class="table-scroll"><table><thead><tr><th>Status</th><th>Reviewer</th><th>Commit</th><th>Created</th></tr></thead><tbody>
+{% for r in entry.evidence.review_runs %}<tr><td><span class="badge {{r.status|lower}}">{{r.status}}</span></td><td>{{r.reviewer_agent or r.reviewer_type}}</td><td><code>{{(r.reviewed_commit or '—')[:10]}}</code></td><td><small>{{r.created_at}}</small></td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+{% if entry.evidence.qa_runs %}<p><small>QA Runs ({{entry.evidence.qa_runs|length}})</small></p>
+<div class="table-scroll"><table><thead><tr><th>Status</th><th>Tester</th><th>Created</th></tr></thead><tbody>
+{% for r in entry.evidence.qa_runs %}<tr><td><span class="badge {{r.status|lower}}">{{r.status}}</span></td><td>{{r.tester_agent or '—'}}</td><td><small>{{r.created_at}}</small></td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+{% if entry.evidence.test_runs %}<p><small>Test Runs ({{entry.evidence.test_runs|length}})</small></p>
+<div class="table-scroll"><table><thead><tr><th>Command</th><th>Status</th><th>Commit</th></tr></thead><tbody>
+{% for r in entry.evidence.test_runs %}<tr><td><code>{{r.command}}</code></td><td><span class="badge {{r.status|lower}}">{{r.status}}</span></td><td><code>{{(r.tested_commit or '—')[:10]}}</code></td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+{% if entry.evidence.manual_verifications %}<p><small>Manual Verifications ({{entry.evidence.manual_verifications|length}})</small></p>{% endif %}
+{{ m.raw('Raw evidence', entry.evidence) }}
+</div>
+{% endfor %}
+{% else %}
+{{ m.empty('No evidence recorded yet') }}
+{% endif %}
+</section>
+
+{% endblock %}

@@ -1,0 +1,72 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Tests · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+{% if data.staleness.test_spec_stale %}
+<div class="stale-note"><b>TEST_SPEC_STALE</b>The context that produced the current Test Design has changed. Recommended action: re-run Test Design.</div>
+{% endif %}
+{% if data.staleness.executable_test_mapping_stale %}
+<div class="stale-note"><b>EXECUTABLE_TEST_MAPPING_STALE</b>{{data.staleness.executable_test_mapping_stale|length}} executable mapping{{'s' if data.staleness.executable_test_mapping_stale|length != 1 else ''}} point at a superseded TestCaseSpec revision. Recommended action: remap the executable test.</div>
+{% endif %}
+
+<div class="cards">
+<article class="accent"><b>{{data.coverage.requirements_covered|length}}/{{data.coverage.requirements_total}}</b><span>Requirements Covered</span></article>
+<article class="accent"><b>{{data.coverage.acceptance_covered|length}}/{{data.coverage.acceptance_total}}</b><span>Acceptance Covered</span></article>
+<article class="accent"><b>{{data.coverage.invariants_covered|length}}/{{data.coverage.invariants_total}}</b><span>Invariants Covered</span></article>
+<article><b>{{data.coverage.test_case_count}}</b><span>Test Cases</span></article>
+</div>
+<div class="cards">
+<article><b>{{data.passed_count}}</b><span>Passed</span></article>
+<article class="{{'warn' if data.failed_count else ''}}"><b>{{data.failed_count}}</b><span>Failed</span></article>
+<article><b>{{data.no_evidence_count}}</b><span>Implemented, No Evidence</span></article>
+<article class="{{'warn' if data.unimplemented_count else ''}}"><b>{{data.unimplemented_count}}</b><span>Unimplemented</span></article>
+</div>
+
+{% if data.coverage.invalid_references %}
+<div class="stale-note"><b>{{data.coverage.invalid_references|length}} invalid reference(s)</b>A TestCaseSpec cited a requirement/acceptance/invariant id that does not resolve through SpecRegistry — silently excluded from coverage, never trusted.</div>
+{% endif %}
+
+<section class="panel tab-section"><h4>Test Plan</h4>
+{% if data.test_plan %}
+<p>{{data.test_plan.content.strategy_summary}}</p>
+{% if data.test_plan.content.untestable_or_ambiguous_items %}<p><small>Untestable / Ambiguous</small></p><ul>{% for i in data.test_plan.content.untestable_or_ambiguous_items %}<li>{{i}}</li>{% endfor %}</ul>{% endif %}
+{% if data.test_plan.content.implementation_spec_conflicts %}<p><small>Implementation/Spec Conflicts</small></p><ul>{% for i in data.test_plan.content.implementation_spec_conflicts %}<li>{{i}}</li>{% endfor %}</ul>{% endif %}
+{% else %}
+{{ m.empty('No test design yet') }}
+{% endif %}
+</section>
+
+<section class="panel tab-section"><h4>Test Cases</h4>
+{% if data.cases %}
+<div class="table-scroll"><table><thead><tr><th>Key</th><th>Title</th><th>Level</th><th>Type</th><th>REQ</th><th>AC</th><th>INV</th><th>Designed</th><th>Implementation</th></tr></thead><tbody>
+{% for c in data.cases %}<tr>
+<td><code>{{c.key}}</code></td>
+<td>{{c.title}}</td>
+<td><span class="badge">{{c.test_level}}</span></td>
+<td><span class="badge {{c.test_type|lower}}">{{c.test_type}}</span></td>
+<td>{% for r in c.requirement_ids %}<span class="trace-chip">{{r}}</span>{% endfor %}</td>
+<td>{% for a in c.acceptance_ids %}<span class="trace-chip">{{a}}</span>{% endfor %}</td>
+<td>{% for i in c.invariant_ids %}<span class="trace-chip">{{i}}</span>{% endfor %}</td>
+<td><span class="badge {{c.status|lower}}">{{c.status}}</span></td>
+<td><span class="badge {{c.implementation_status|lower}}">{{c.implementation_status.replace('_',' ')}}</span>{% if c.mapping and c.mapping.last_result_reference %}<br><small>{{c.mapping.last_result_reference}}</small>{% endif %}</td>
+</tr>{% endfor %}
+</tbody></table></div>
+<p><small>DESIGNED = a TestCaseSpec exists. IMPLEMENTED = mapped to real code. PASS/FAIL = it actually ran. These are four distinct facts, never collapsed into one.</small></p>
+{% else %}
+{{ m.empty('No TestCaseSpecs yet') }}
+{% endif %}
+</section>
+
+<section class="panel tab-section"><h4>Test Review</h4>
+{% if data.reviews %}
+{% for r in data.reviews|reverse %}
+<div class="hd-item">
+{{ m.verdict_badge(r.content.verdict) }} <small>{{r.created_at}}</small>
+{% for f in r.content.findings %}<p><span class="badge {{(f.severity or 'low')|lower}}">{{f.severity}}</span> {% if f.test_case_key %}<code>{{f.test_case_key}}</code>{% endif %} {{f.description}}</p>{% endfor %}
+</div>
+{% endfor %}
+{% else %}
+{{ m.empty('No independent test review yet') }}
+{% endif %}
+</section>
+
+{% endblock %}

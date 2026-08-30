@@ -1,0 +1,41 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Decisions · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+<section class="panel tab-section" id="pending"><h4>Pending ({{data.pending|length}})</h4>
+{% if data.pending %}
+{% for hd in data.pending %}
+<div class="hd-item">
+<b>{{hd.question}}</b>
+{% if hd.reason %}<p class="explanation">{{hd.reason}}</p>{% endif %}
+<span class="badge">{{hd.subject_type.replace('_',' ')}} #{{hd.subject_id}}</span>
+<span class="badge {{'human_decision_required' if hd.spec_change_signal=='HUMAN_SPEC_CHANGE_REQUIRED' else ''}}">{{hd.spec_change_signal.replace('_',' ')}}</span>
+{% if hd.spec_change_signal == 'HUMAN_SPEC_CHANGE_REQUIRED' %}<p class="explanation"><b>This decision changes product behavior/spec.</b></p>{% endif %}
+<p><small>Raised {{hd.created_at}}</small></p>
+<details class="mark-ready-form"><summary>Resolve</summary>
+<form method="post" action="/changes/{{header.change.id}}/human-decisions/{{hd.id}}/resolve" data-loading-label="Resolving...">
+<textarea name="resolution_note" rows="2" placeholder="Decision / resolution note..." required></textarea>
+<button class="success">Resolve</button>
+</form>
+</details>
+</div>
+{% endfor %}
+{% else %}
+{{ m.empty('No pending decisions', 'This Change is not waiting on any human input right now.') }}
+{% endif %}
+</section>
+
+<section class="panel tab-section" id="resolved"><h4>Resolved ({{data.resolved|length}})</h4>
+{% if data.resolved %}
+{% for hd in data.resolved %}
+<div class="hd-item">
+<b>{{hd.question}}</b>
+<p><small>{{hd.subject_type.replace('_',' ')}} #{{hd.subject_id}} · resolved {{hd.resolved_at}}</small></p>
+{% if hd.resolution_note %}<p class="explanation">{{hd.resolution_note}}</p>{% endif %}
+</div>
+{% endfor %}
+{% else %}
+{{ m.empty('No decisions resolved yet') }}
+{% endif %}
+</section>
+
+{% endblock %}

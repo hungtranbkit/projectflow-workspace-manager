@@ -1,0 +1,14 @@
+<!-- Shared across every /changes/{cid}/* tab -- E7.5 rule 8: "Technical
+     details should be expandable rather than always visible." Never the
+     default view; always a <details> a human opts into. -->
+{% macro raw(label, obj) %}
+<details class="raw-json"><summary>{{label}}</summary><pre>{{obj|tojson(indent=2)}}</pre></details>
+{% endmacro %}
+
+{% macro verdict_badge(verdict) %}
+<span class="badge {{(verdict or 'pending')|lower}}">{{(verdict or 'PENDING').replace('_',' ')}}</span>
+{% endmacro %}
+
+{% macro empty(title, hint) %}
+<div class="empty-state"><h4>{{title}}</h4>{% if hint %}<p>{{hint}}</p>{% endif %}</div>
+{% endmacro %}

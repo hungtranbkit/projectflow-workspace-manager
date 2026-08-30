@@ -1,0 +1,72 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Spec · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+{% if data.staleness.stale %}
+<div class="stale-note"><b>{{data.staleness.reason.replace('_',' ')}}</b>The spec baseline has changed since the current Plan was created. Recommended action: replan.</div>
+{% endif %}
+
+<section class="panel tab-section"><h4>Original Intent</h4>
+<p>{{data.original_intent or 'No description was given for this Change.'}}</p>
+</section>
+
+<section class="panel tab-section"><h4>Requirement Analysis</h4>
+{% if data.requirement_analysis %}
+{% set ra = data.requirement_analysis %}
+<p>{{ra.problem_statement}}</p>
+{% if ra.user_goals %}<p><small>Goals</small><br>{{ra.user_goals|join(' · ')}}</p>{% endif %}
+{% if ra.actors %}<p><small>Actors</small><br>{% for a in ra.actors %}<span class="trace-chip">{{a}}</span>{% endfor %}</p>{% endif %}
+{% if ra.functional_requirements %}<p><small>Functional Requirements</small></p><ul>{% for r in ra.functional_requirements %}<li>{{r}}</li>{% endfor %}</ul>{% endif %}
+{% if ra.non_functional_requirements %}<p><small>Non-Functional Requirements</small></p><ul>{% for r in ra.non_functional_requirements %}<li>{{r}}</li>{% endfor %}</ul>{% endif %}
+{% if ra.business_rules %}<p><small>Business Rules</small></p><ul>{% for r in ra.business_rules %}<li>{{r}}</li>{% endfor %}</ul>{% endif %}
+{% if ra.ambiguities %}<p><small>Ambiguities</small></p><ul>{% for a in ra.ambiguities %}<li><span class="badge">{{a.classification.replace('_',' ')}}</span> {{a.issue}}</li>{% endfor %}</ul>{% endif %}
+{{ m.raw('Raw requirement analysis', ra) }}
+{% else %}
+{{ m.empty('No requirement analysis yet', 'POST /api/changes/' ~ header.change.id ~ '/requirements/analyze to start the Spec Lifecycle.') }}
+{% endif %}
+</section>
+
+<section class="panel tab-section"><h4>Current Feature Spec</h4>
+{% if data.current_features %}
+{% for f in data.current_features %}
+<div class="hd-item">
+<b>{{f.id}}</b> — {{f.title}} <span class="badge {{f.status|lower}}">v{{f.version}} · {{f.status}}</span>
+<p>{{f.summary}}</p>
+<p><small>Requirements ({{f.requirements|length}})</small></p>
+<ul>{% for r in f.requirements %}<li><code>{{r.id}}</code> {{r.text}}</li>{% endfor %}</ul>
+<p><small>Acceptance Criteria ({{f.acceptance_criteria|length}})</small></p>
+<ul>{% for a in f.acceptance_criteria %}<li><code>{{a.id}}</code> {{a.text}}</li>{% endfor %}</ul>
+{% if f.invariants %}<p><small>Invariants ({{f.invariants|length}})</small></p><ul>{% for i in f.invariants %}<li><code>{{i.id}}</code> {{i.text}}</li>{% endfor %}</ul>{% endif %}
+</div>
+{% endfor %}
+{% else %}
+{{ m.empty('No approved Feature Spec governs this Change yet') }}
+{% endif %}
+</section>
+
+<section class="panel tab-section"><h4>Spec Proposal / Review History</h4>
+{% if data.proposals %}
+<div class="table-scroll"><table><thead><tr><th>Feature</th><th>Version</th><th>Status</th><th>Review verdict</th><th>Round</th></tr></thead><tbody>
+{% for p in data.proposals|reverse %}
+<tr>
+<td><code>{{p.feature_id}}</code></td>
+<td>v{{p.proposed_version}}</td>
+<td><span class="badge {{p.status|lower}}">{{p.status}}</span></td>
+<td>{{ m.verdict_badge(p.review.verdict) }}</td>
+<td>{{p.refinement_round}}</td>
+</tr>
+{% endfor %}
+</tbody></table></div>
+{% else %}
+{{ m.empty('No Spec Proposal has been authored yet') }}
+{% endif %}
+</section>
+
+{% if data.human_decisions %}
+<section class="panel tab-section"><h4>Related Human Decisions</h4>
+<div class="table-scroll"><table><thead><tr><th>Question</th><th>Status</th></tr></thead><tbody>
+{% for hd in data.human_decisions %}<tr><td>{{hd.question}}</td><td><span class="badge {{'pending' if not hd.resolved else 'approved'}}">{{'PENDING' if not hd.resolved else 'RESOLVED'}}</span></td></tr>{% endfor %}
+</tbody></table></div>
+</section>
+{% endif %}
+
+{% endblock %}

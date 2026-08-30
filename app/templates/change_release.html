@@ -1,0 +1,16 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Release · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+<section class="panel">
+{% if data.linked %}
+<h3>Release Manifests</h3>
+<div class="table-scroll"><table><thead><tr><th>Title</th><th>Status</th><th>Created</th></tr></thead><tbody>
+{% for m_ in data.manifests %}<tr><td>{{m_.title}}</td><td><span class="badge {{m_.status|lower}}">{{m_.status}}</span></td><td><small>{{m_.created_at}}</small></td></tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+<h3>Release</h3>
+{{ m.empty('Not linked yet', "ProjectFlow has no Release/artifact-versioning service wired to Change yet -- see the Deploy tab for real per-repository deployment status via this Change's merged Tasks.") }}
+{% endif %}
+</section>
+
+{% endblock %}

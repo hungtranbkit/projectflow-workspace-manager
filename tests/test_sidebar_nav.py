@@ -17,7 +17,7 @@ def register(client, repo, name):
 
 
 ADVANCED_HREFS = ["/workspaces", "/sandboxes", "/integrations", "/test-runs"]
-TOP_LEVEL_HREFS = ["/", "/tasks", "/kanban", "/agents/live", "/repositories", "/settings", "/help"]
+TOP_LEVEL_HREFS = ["/", "/tasks", "/changes", "/kanban", "/agents/live", "/repositories", "/settings", "/help"]
 
 
 def test_advanced_submenu_has_four_distinct_links_with_correct_hrefs(client, git_repo):

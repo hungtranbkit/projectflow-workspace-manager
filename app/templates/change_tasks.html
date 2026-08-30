@@ -1,0 +1,23 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Tasks · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+<section class="panel"><h3>Tasks</h3>
+<p><small>Operational detail for debugging -- see the Overview tab for the human-facing lifecycle summary.</small></p>
+{% if data.rows %}
+<div class="table-scroll"><table><thead><tr><th>Task</th><th>Status</th><th>Stage</th><th>Next Action</th><th>Builders</th><th>Spec</th><th>Outputs</th></tr></thead><tbody>
+{% for row in data.rows %}<tr>
+<td><a href="/tasks/{{row.task.id}}">{{row.task.title}}</a><br><small>{{row.task.slug}}</small></td>
+<td><span class="badge {{row.status|lower}}">{{row.status.replace('_',' ')}}</span></td>
+<td class="cap">{{row.stage|lower}}</td>
+<td><small>{{row.next_action.label or '—'}}</small></td>
+<td>{% for b in row.builders %}<span class="badge {{b.review_status|lower}}">{{b.agent}} · {{b.review_status}}</span> {% endfor %}{% if not row.builders %}—{% endif %}</td>
+<td>{% if row.spec_feature_id %}<code>{{row.spec_feature_id}}</code>{% else %}—{% endif %}</td>
+<td>{% for o in row.outputs %}<span class="trace-chip">{{o.kind}}</span>{% endfor %}{% if not row.outputs %}—{% endif %}</td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+{{ m.empty('No Tasks yet') }}
+{% endif %}
+</section>
+
+{% endblock %}

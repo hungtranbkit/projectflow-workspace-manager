@@ -1,0 +1,53 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Plan · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+{% if data.spec_staleness.stale %}<div class="stale-note"><b>{{data.spec_staleness.reason.replace('_',' ')}}</b>Recommended action: replan.</div>{% endif %}
+{% if data.design_staleness.stale %}<div class="stale-note"><b>{{data.design_staleness.reason.replace('_',' ')}}</b>Recommended action: replan.</div>{% endif %}
+{% if data.test_design_staleness.stale %}<div class="stale-note"><b>{{data.test_design_staleness.reason.replace('_',' ')}}</b>Recommended action: replan.</div>{% endif %}
+
+{% if data.current_plan %}
+{% set p = data.current_plan %}
+<div class="facts">
+<div><small>Revision</small><b>v{{p.revision}}</b></div>
+<div><small>Status</small><b><span class="badge {{p.status|lower}}">{{p.status}}</span></b></div>
+<div><small>Provider</small><b>{{p.planner_provider}}</b></div>
+<div><small>Context digest</small><b><code>{{p.input_context_digest[:12]}}</code></b></div>
+</div>
+<section class="panel tab-section"><h4>Summary</h4><p>{{p.summary}}</p>
+{% if p.assumptions_list %}<p><small>Assumptions</small></p><ul>{% for a in p.assumptions_list %}<li>{{a}}</li>{% endfor %}</ul>{% endif %}
+</section>
+
+{% if data.human_decisions %}
+<section class="panel tab-section"><h4>Plan Human Decisions</h4>
+<div class="table-scroll"><table><thead><tr><th>Question</th><th>Status</th></tr></thead><tbody>
+{% for hd in data.human_decisions %}<tr><td>{{hd.question}}</td><td><span class="badge {{'pending' if not hd.resolved else 'approved'}}">{{'PENDING' if not hd.resolved else 'RESOLVED'}}</span></td></tr>{% endfor %}
+</tbody></table></div>
+</section>
+{% endif %}
+
+<section class="panel tab-section"><h4>Task DAG ({{data.dag|length}} items)</h4>
+{% if data.dag %}
+{% for it in data.dag %}
+<div class="dag-node">
+<b>{{it.key}}</b> — {{it.title}} <span class="badge">{{it.task_type}}</span>{% if it.preferred_role %} <span class="badge">{{it.preferred_role}}</span>{% endif %}{% if it.optional %} <span class="badge">optional</span>{% endif %}
+{% if it.depends_on %}<div class="dag-deps">depends on: {% for d in it.depends_on %}<span class="trace-chip">{{d}}</span>{% endfor %}</div>{% endif %}
+{% if it.materialized_task_id %}<div class="dag-deps">→ <a href="/tasks/{{it.materialized_task_id}}">materialized as Task #{{it.materialized_task_id}}</a></div>{% else %}<div class="dag-deps">not materialized yet</div>{% endif %}
+</div>
+{% endfor %}
+{% else %}
+{{ m.empty('This Plan has no items') }}
+{% endif %}
+</section>
+
+{% if data.plans|length > 1 %}
+<section class="panel tab-section"><h4>Revision History</h4>
+<div class="table-scroll"><table><thead><tr><th>Revision</th><th>Status</th><th>Created</th></tr></thead><tbody>
+{% for pl in data.plans|reverse %}<tr><td>v{{pl.revision}}</td><td><span class="badge {{pl.status|lower}}">{{pl.status}}</span></td><td><small>{{pl.created_at}}</small></td></tr>{% endfor %}
+</tbody></table></div>
+</section>
+{% endif %}
+{% else %}
+<section class="panel">{{ m.empty('No Plan yet', 'POST /api/changes/' ~ header.change.id ~ '/plan to run the Planner.') }}</section>
+{% endif %}
+
+{% endblock %}

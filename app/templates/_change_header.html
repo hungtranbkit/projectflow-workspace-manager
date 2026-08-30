@@ -1,0 +1,23 @@
+<!-- Shared Change Detail header + tab nav (E7.5.3). Included by every
+     /changes/{cid}/* tab template so the header/tabs are identical no
+     matter which tab is active -- ONE partial, never copy-pasted per
+     tab. `header`/`cid`/`active_tab` are set by each tab's own route. -->
+<div class="change-header">
+<div class="change-header-top">
+<h3>{{header.change.title}}</h3>
+<span class="badge {{header.status|lower}}">{{header.status.replace('_',' ')}}</span>
+</div>
+<div class="facts change-facts">
+<div><small>Type</small><b class="cap">{{(header.change.change_type or '—')|lower|replace('_',' ')}}</b></div>
+<div><small>Risk</small><b class="cap">{{(header.change.risk_level or '—')|lower}}</b></div>
+<div><small>Workflow</small><b>{{header.profile_key or '—'}}</b></div>
+<div><small>Stage</small><b class="cap">{{(header.current_stage or '—')|lower|replace('_',' ')}}</b></div>
+<div><small>Spec baseline</small><b><code>{{header.spec_baseline or '—'}}</code></b></div>
+<div><small>Updated</small><b>{{header.change.updated_at}}</b></div>
+</div>
+</div>
+<nav class="change-tabs" aria-label="Change sections">
+{% for key,label in [('','Overview'),('spec','Spec'),('architecture','Architecture'),('design','Design'),('tests','Tests'),('plan','Plan'),('tasks','Tasks'),('reviews','Reviews'),('decisions','Decisions'),('evidence','Evidence'),('release','Release'),('deploy','Deploy')] %}
+<a class="change-tab{{' active' if active_tab==key else ''}}" href="/changes/{{cid}}{{'/'+key if key else ''}}">{{label}}</a>
+{% endfor %}
+</nav>
