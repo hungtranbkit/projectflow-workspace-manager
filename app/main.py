@@ -40,6 +40,8 @@ from app.services.evidence_store import EvidenceStore
 from app.services.change_service import ChangeService, ChangeError, CHANGE_TYPES, RISK_LEVELS as CHANGE_RISK_LEVELS, LIFECYCLE_STATES
 from app.services.work_product_service import WorkProductService, WorkProductError, WORK_PRODUCT_KINDS, WORK_PRODUCT_STATUSES, DIRECTIONS as WP_DIRECTIONS
 from app.services.trace_service import TraceService
+from app.services.engineering_catalog import RoleCapabilityService, is_known_provider
+from app.services.project_contract import load_engineering_policy
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -71,6 +73,12 @@ def create_app(settings=None):
     changes = ChangeService(db)
     work_products = WorkProductService(db)
     trace = TraceService(db)
+    # Role & Capability Catalog (Phase E2): seed() upserts the canonical
+    # Python-defined catalog on every startup -- idempotent/restart-safe
+    # by construction (ON CONFLICT DO UPDATE), never a one-shot migration
+    # data load. See engineering_catalog.py's module docstring.
+    roles_catalog = RoleCapabilityService(db, providers=settings.agents)
+    roles_catalog.seed()
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
@@ -92,6 +100,7 @@ def create_app(settings=None):
     app.state.changes = changes
     app.state.work_products = work_products
     app.state.trace = trace
+    app.state.roles_catalog = roles_catalog
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
     def repo(repo_id):
@@ -940,6 +949,18 @@ def create_app(settings=None):
         rid=db.execute("INSERT INTO review_runs(task_id,workspace_id,reviewer_type,reviewer_agent,brief_version,reviewed_commit,status,findings) VALUES(?,?,?,?,?,?,?,?)",
                         (w["task_id"],wid,"BUILDER_WORKSPACE",slugify(reviewer_agent),bv,head,"RUNNING",prompt))
         if t: db.execute("INSERT INTO prompts(task_id,workspace_id,prompt_type,brief_version,content) VALUES(?,?,?,?,?)",(t["id"],wid,"REVIEWER",bv,prompt))
+        # Role & Capability Catalog (E2 section 13): advisory only,
+        # never blocking -- reviewer_agent is, and stays, a free-text
+        # label (often a human name), and Start Review never actually
+        # launches a process for it (READ_ONLY, no worktree). Only
+        # worth checking -- and only worth an audit event -- when the
+        # label names a real, launchable provider this catalog actually
+        # knows about; an arbitrary human name is a HUMAN actor by
+        # definition and has nothing to validate against.
+        if is_known_provider(reviewer_agent):
+            check=roles_catalog.validate_assignment(reviewer_agent,"REVIEWER")
+            if not check["valid"]:
+                db.event("agent",wid,"ROLE_ASSIGNMENT_REJECTED",f"provider={reviewer_agent} role=REVIEWER missing={check['missing_required_capabilities']} (advisory, not blocked)")
         db.event("agent",wid,"REVIEW_STARTED",f"run={rid} reviewer={reviewer_agent}")
         return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/submit-review")
@@ -973,6 +994,16 @@ def create_app(settings=None):
         manifest=db.one("SELECT source_manifest_json FROM sandboxes WHERE id=?",(sandbox_id,))["source_manifest_json"] if sandbox_id else "{}"
         qid=db.execute("INSERT INTO qa_runs(task_id,brief_version,source_manifest,sandbox_id,tester_agent,status) VALUES(?,?,?,?,?,?)",
                         (tid,t["brief_version"],manifest,sandbox_id,slugify(tester_agent) if tester_agent else "qa","RUNNING"))
+        # Role & Capability Catalog (E2 section 15): QA in ProjectFlow is
+        # a human/manual verification by default (tester_agent defaults
+        # to "qa", a placeholder label, and no code path launches a
+        # process for it) -- advisory-only check, same reasoning as
+        # start_review, only when tester_agent actually names a known
+        # launchable provider.
+        if is_known_provider(tester_agent):
+            check=roles_catalog.validate_assignment(tester_agent,"QA_VERIFIER")
+            if not check["valid"]:
+                db.event("task",tid,"ROLE_ASSIGNMENT_REJECTED",f"provider={tester_agent} role=QA_VERIFIER missing={check['missing_required_capabilities']} (advisory, not blocked)")
         db.event("task",tid,"QA_STARTED",f"run={qid} tester={tester_agent}")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/submit-qa")
@@ -1036,8 +1067,34 @@ def create_app(settings=None):
         NO_BEHAVIOR_CHANGE) whose spec linkage doesn't PASS never gets
         an Agent started. A Task with no classification at all
         (NOT_APPLICABLE) is unaffected -- every existing/legacy workflow
-        keeps working exactly as before this feature existed."""
+        keeps working exactly as before this feature existed.
+
+        Role & Capability Catalog (E2): every Builder Workspace launch
+        through this function is, by definition, the BUILDER engineering
+        role -- there is no separate stored "role" field for this (never
+        confuse with agent_workspaces.role, a free-text component/team
+        label). codex/claude are seeded SUPPORTED for BUILDER's required
+        capabilities, so this is a no-op for every workflow that already
+        works; it only turns an already-failing case (an agent name with
+        no real launcher, e.g. gemini/aider/other -- previously only
+        caught later as a generic AGENT_UNSUPPORTED SessionError) into an
+        earlier, clearer message. Never blocks on a catalog/policy
+        lookup failure itself (fail-open) -- a broken PROJECT.yaml
+        engineering: block or catalog bug must never take down Start."""
         if w["agent"] not in settings.agents: raise GitSafetyError("Agent is not allowed")
+        try:
+            policy=load_engineering_policy(Path(w["repo_path"])) if w.get("repo_path") else None
+            assignment=roles_catalog.validate_assignment(w["agent"],"BUILDER",policy)
+        except Exception:
+            assignment=None
+        if assignment is not None and not assignment["valid"]:
+            db.event("agent",w["id"],"ROLE_ASSIGNMENT_REJECTED",
+                      f"provider={w['agent']} role=BUILDER missing={assignment['missing_required_capabilities']} policy_blocked={assignment['policy_blocked']}")
+            reason=assignment["warnings"][0] if assignment["policy_blocked"] and assignment["warnings"] else \
+                f"missing required capabilities: {', '.join(assignment['missing_required_capabilities'])}"
+            raise GitSafetyError(f"Cannot assign provider '{w['agent']}' as BUILDER -- {reason}")
+        elif assignment is not None:
+            db.event("agent",w["id"],"ROLE_ASSIGNMENT_VALIDATED",f"provider={w['agent']} role=BUILDER")
         if w.get("task_id"):
             t=task_row(w["task_id"])
             gate=spec_gate.evaluate(t)
@@ -2110,6 +2167,50 @@ def create_app(settings=None):
     def api_link_task_work_product(tid:int,wpid:int,direction:str=Form(...)):
         work_products.link_task(tid,wpid,direction)
         return {"inputs":work_products.inputs_for_task(tid),"outputs":work_products.outputs_for_task(tid)}
+
+    # ---------------------------------- Role & Capability Catalog (E2)
+    # Foundation-first, read-mostly API (E2 section 19/20): the catalog
+    # itself is seeded/code-defined, not writable through HTTP in this
+    # phase. validate-assignment is the one "action" endpoint, and it
+    # answers a question (is this allowed) rather than performing one --
+    # an invalid answer is still a normal 200, never a 4xx.
+    @app.get("/api/engineering/roles")
+    def api_list_roles():
+        return roles_catalog.list_roles()
+    @app.get("/api/engineering/roles/{key}")
+    def api_get_role(key:str):
+        role=roles_catalog.get_role(key)
+        if not role: raise HTTPException(404,"Unknown engineering role")
+        return {**role,"capabilities":roles_catalog.capabilities_for_role(key)}
+    @app.get("/api/engineering/capabilities")
+    def api_list_capabilities():
+        return roles_catalog.list_capabilities()
+    @app.get("/api/engineering/providers")
+    def api_list_providers():
+        return {p:roles_catalog.capabilities_for_provider(p) for p in roles_catalog.providers}
+    @app.post("/api/engineering/validate-assignment")
+    def api_validate_assignment(provider:str=Form(...),role_key:str=Form(...),repository_id:str=Form("")):
+        policy=None
+        if repository_id.strip().isdigit():
+            r=repo(int(repository_id))
+            try: policy=load_engineering_policy(Path(r["repo_path"]))
+            except ContractError as exc: raise GitSafetyError(str(exc))
+        # Diagnostic/advisory query, not an assignment action of its own
+        # (E2 section 24: never flood the audit log on a passive read) --
+        # the real ROLE_ASSIGNMENT_VALIDATED/REJECTED events are logged
+        # where an assignment actually takes effect (_start_builder_session,
+        # start_review, start_qa).
+        return roles_catalog.validate_assignment(provider,role_key,policy)
+    @app.get("/api/engineering/recommended-roles")
+    def api_recommended_roles(change_type:str="FEATURE",risk_level:str="NORMAL"):
+        return {"change_type":change_type.upper(),"risk_level":risk_level.upper(),
+                "recommended_roles":roles_catalog.recommended_roles_for_change(change_type,risk_level)}
+    @app.get("/api/repositories/{rid}/engineering-policy")
+    def api_repository_engineering_policy(rid:int):
+        r=repo(rid)
+        try: policy=load_engineering_policy(Path(r["repo_path"]))
+        except ContractError as exc: raise GitSafetyError(str(exc))
+        return {"repository_id":rid,"policy":policy}
 
     @app.post("/api/workspaces/{wid}/builder-instructions")
     def save_builder_instructions(wid:int,builder_instructions:str=Form("")):

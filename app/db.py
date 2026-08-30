@@ -689,6 +689,75 @@ CREATE TABLE IF NOT EXISTS trace_links(
 CREATE INDEX IF NOT EXISTS idx_trace_source ON trace_links(source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_trace_target ON trace_links(target_type, target_id);
 """),
+    # V19: Role & Capability Catalog (Phase E2). Structure only -- the
+    # actual catalog ROWS (which roles/capabilities exist, their
+    # descriptions, the role<->capability and provider<->capability
+    # mappings) are NOT seeded here as literal SQL. Unlike the rest of
+    # this file, that catalog is real application data that legitimately
+    # evolves (a capability's description gets clearer, a provider
+    # gains support) without being a schema change -- baking ~150 rows
+    # of it into an append-only, never-editable-after-release migration
+    # would make every future wording tweak require a brand new
+    # migration. Instead app/services/engineering_catalog.py holds the
+    # canonical Python definitions and RoleCapabilityService.seed()
+    # upserts them (ON CONFLICT DO UPDATE, keyed by the stable `key`/
+    # (provider,capability_id) columns below) every time the app starts
+    # -- idempotent and restart-safe by construction, the same
+    # discipline AGENT_LAUNCHERS already uses for provider definitions
+    # (a Python dict, not a table).
+    #
+    # GLOBAL vs PROJECT-SCOPED (E2 section 4): every table here is
+    # global/canonical -- no project_id anywhere. A repository-level
+    # override (allowed_providers per role, etc.) is modeled as a
+    # read-time PROJECT.yaml `engineering:` policy overlay
+    # (project_contract.load_engineering_policy), never cloned catalog
+    # rows -- see that function's docstring.
+    (19, """
+CREATE TABLE IF NOT EXISTS engineering_roles(
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'DELIVERY',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  system_defined INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS capabilities(
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'GENERAL',
+  sensitivity TEXT NOT NULL DEFAULT 'NORMAL',
+  system_defined INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS role_capabilities(
+  id INTEGER PRIMARY KEY,
+  role_id INTEGER NOT NULL REFERENCES engineering_roles(id),
+  capability_id INTEGER NOT NULL REFERENCES capabilities(id),
+  requirement TEXT NOT NULL DEFAULT 'REQUIRED',
+  UNIQUE(role_id, capability_id)
+);
+CREATE TABLE IF NOT EXISTS agent_capabilities(
+  id INTEGER PRIMARY KEY,
+  provider TEXT NOT NULL,
+  capability_id INTEGER NOT NULL REFERENCES capabilities(id),
+  support_level TEXT NOT NULL DEFAULT 'UNSUPPORTED',
+  source TEXT NOT NULL DEFAULT 'BUILTIN',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(provider, capability_id)
+);
+CREATE INDEX IF NOT EXISTS idx_role_capabilities_role ON role_capabilities(role_id);
+CREATE INDEX IF NOT EXISTS idx_role_capabilities_capability ON role_capabilities(capability_id);
+CREATE INDEX IF NOT EXISTS idx_agent_capabilities_provider ON agent_capabilities(provider);
+CREATE INDEX IF NOT EXISTS idx_agent_capabilities_capability ON agent_capabilities(capability_id);
+"""),
 ]
 
 

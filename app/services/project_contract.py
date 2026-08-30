@@ -57,3 +57,37 @@ def deployment_config(repo: Path, environment: str) -> dict | None:
     except ContractError: return None
     block = (data.get("deployment") or {}).get(key)
     return block if isinstance(block, dict) else None
+
+
+def load_engineering_policy(repo: Path) -> dict | None:
+    """Read PROJECT.yaml's optional `engineering:` block -- a
+    repository-level NARROWING of the global Role & Capability Catalog
+    (app/services/engineering_catalog.py, E2 section 18), e.g.
+    restricting which providers may hold a given role:
+
+      engineering:
+        roles:
+          BUILDER:
+            allowed_providers: [codex, claude]
+
+    Returns None if the project declares no such block at all -- a
+    project without one uses safe global defaults, the same convention
+    load_sandbox_contract/deployment_config already use. Never a cloned
+    copy of the catalog: this is only ever consulted as an override a
+    caller ANDs together with the global catalog's own result -- it can
+    restrict a role/provider pair the global catalog already supports,
+    never expand beyond what a provider globally supports."""
+    path = repo / "PROJECT.yaml"
+    if not path.is_file(): return None
+    data = yaml.safe_load(path.read_text()) or {}
+    block = data.get("engineering")
+    if not block: return None
+    if not isinstance(block, dict): raise ContractError("engineering: must be a mapping")
+    roles = block.get("roles") or {}
+    if not isinstance(roles, dict): raise ContractError("engineering.roles must be a mapping")
+    for role_key, cfg in roles.items():
+        if not isinstance(cfg, dict): raise ContractError(f"engineering.roles.{role_key} must be a mapping")
+        allowed = cfg.get("allowed_providers")
+        if allowed is not None and not isinstance(allowed, list):
+            raise ContractError(f"engineering.roles.{role_key}.allowed_providers must be a list")
+    return block
