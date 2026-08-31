@@ -1,0 +1,417 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ProjectFlow Runtime Architecture",
+    "subtitle": "workspace-manager \u00b7 single-process FastAPI \u00b7 SQLite \u00b7 B0.1/B0.2 AuthN+Tenants implemented",
+    "output": "projectflow-runtime.architecture.html",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1120,
+      1040
+    ],
+    "repository": {
+      "url": "https://github.com/hungtranbkit/projectflow-workspace-manager",
+      "revision": "67f9751c9c6b7f846d25c51f45a347283b1d600a"
+    },
+    "views": [
+      {
+        "id": "request-path",
+        "label": "Primary request path",
+        "focus": [
+          "client",
+          "api_entry",
+          "auth_session",
+          "repo_service",
+          "database"
+        ],
+        "note": "A request enters the one FastAPI process, is identified (or not, under AUTH_MODE=none), and reaches the E1-E13 services backed by SQLite."
+      },
+      {
+        "id": "tenant-boundary",
+        "label": "AuthN + tenant boundary (B0.1/B0.2, implemented)",
+        "focus": [
+          "api_entry",
+          "auth_session",
+          "org_tenant",
+          "authz_csrf",
+          "database"
+        ],
+        "note": "Shipped: session/API-token identity (B0.1) and org membership (B0.2), server-enforced. General per-route AuthZ is B0.3, not built."
+      },
+      {
+        "id": "agent-execution",
+        "label": "Agent supervisor & external integration",
+        "focus": [
+          "api_entry",
+          "supervisor",
+          "sandbox_runtime",
+          "github_integration",
+          "background"
+        ],
+        "note": "How a Builder session runs: launched by the Supervisor, optionally verified in Docker, merged via the host's own gh CLI (pre-B0.7)."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "Browser / API client",
+      "sublabel": "cookie or Bearer token",
+      "pos": [
+        40,
+        500
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "api_entry",
+      "type": "backend",
+      "label": "FastAPI App",
+      "sublabel": "create_app() \u00b7 route handlers",
+      "pos": [
+        300,
+        500
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/main.py",
+          "line": 98,
+          "label": "create_app()"
+        }
+      ]
+    },
+    {
+      "id": "auth_session",
+      "type": "security",
+      "label": "AuthN & Sessions",
+      "sublabel": "B0.1 \u00b7 magic-link + API tokens",
+      "tag": "IMPLEMENTED",
+      "pos": [
+        560,
+        60
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/services/auth_service.py",
+          "line": 50,
+          "label": "AuthService"
+        }
+      ]
+    },
+    {
+      "id": "authz_csrf",
+      "type": "security",
+      "label": "CSRF Guard",
+      "sublabel": "route AuthZ sweep: PLANNED B0.3",
+      "tag": "PARTIAL",
+      "pos": [
+        560,
+        300
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/services/csrf.py",
+          "line": 43,
+          "label": "require_csrf()"
+        }
+      ]
+    },
+    {
+      "id": "repo_service",
+      "type": "backend",
+      "label": "Change / Repository Services",
+      "sublabel": "E1-E13 engineering lifecycle",
+      "pos": [
+        560,
+        540
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/services/change_service.py",
+          "line": 50,
+          "label": "ChangeService"
+        }
+      ]
+    },
+    {
+      "id": "supervisor",
+      "type": "backend",
+      "label": "Agent Supervisor",
+      "sublabel": "task selection \u00b7 Builder launch",
+      "pos": [
+        560,
+        780
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/services/autonomous_execution_service.py",
+          "line": 205,
+          "label": "AutonomousExecutionService"
+        },
+        {
+          "path": "app/launchers.py",
+          "line": 5,
+          "label": "AgentLauncher"
+        }
+      ]
+    },
+    {
+      "id": "org_tenant",
+      "type": "backend",
+      "label": "Organizations & Tenants",
+      "sublabel": "B0.2 \u00b7 membership, invitations",
+      "tag": "IMPLEMENTED",
+      "pos": [
+        830,
+        60
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/services/organization_service.py",
+          "line": 59,
+          "label": "OrganizationService"
+        }
+      ]
+    },
+    {
+      "id": "database",
+      "type": "database",
+      "label": "SQLite",
+      "sublabel": "one file \u00b7 fresh connection/call",
+      "pos": [
+        850,
+        540
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/db.py",
+          "line": 1517,
+          "label": "Database"
+        }
+      ]
+    },
+    {
+      "id": "background",
+      "type": "backend",
+      "label": "Background Workers",
+      "sublabel": "cleanup poll \u00b7 agent PTY sessions",
+      "pos": [
+        830,
+        700
+      ],
+      "size": [
+        190,
+        60
+      ],
+      "sources": [
+        {
+          "path": "app/services/cleanup_worker.py",
+          "line": 10,
+          "label": "CleanupWorker"
+        },
+        {
+          "path": "app/services/agent_session_manager.py",
+          "line": 122,
+          "label": "AgentSessionManager"
+        }
+      ]
+    },
+    {
+      "id": "sandbox_runtime",
+      "type": "cloud",
+      "label": "Docker Sandbox Runtime",
+      "sublabel": "opt-in today, mandatory: B0.6",
+      "tag": "PARTIAL",
+      "pos": [
+        830,
+        820
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/services/sandbox_manager.py",
+          "line": 46,
+          "label": "SandboxManager"
+        }
+      ]
+    },
+    {
+      "id": "github_integration",
+      "type": "external",
+      "label": "GitHub",
+      "sublabel": "host gh CLI now, App: B0.7",
+      "tag": "PARTIAL",
+      "pos": [
+        830,
+        940
+      ],
+      "size": [
+        220,
+        64
+      ],
+      "sources": [
+        {
+          "path": "app/services/github_merge_service.py",
+          "line": 40,
+          "label": "GitHubMergeService"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "ProjectFlow process \u2014 127.0.0.1:8765 only",
+      "wraps": [
+        "api_entry",
+        "auth_session",
+        "org_tenant",
+        "authz_csrf",
+        "repo_service",
+        "supervisor",
+        "database",
+        "background",
+        "sandbox_runtime"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "client-to-api",
+      "from": "client",
+      "to": "api_entry",
+      "label": "HTTP",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "api-to-auth",
+      "from": "api_entry",
+      "to": "auth_session",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "api-to-csrf",
+      "from": "api_entry",
+      "to": "authz_csrf",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "api-to-repo",
+      "from": "api_entry",
+      "to": "repo_service",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "api-to-supervisor",
+      "from": "api_entry",
+      "to": "supervisor",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "auth-to-org",
+      "from": "auth_session",
+      "to": "org_tenant",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "repo-to-db",
+      "from": "repo_service",
+      "to": "database",
+      "label": "read/write",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "supervisor-to-background",
+      "from": "supervisor",
+      "to": "background",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "supervisor-to-sandbox",
+      "from": "supervisor",
+      "to": "sandbox_runtime",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "supervisor-to-github",
+      "from": "supervisor",
+      "to": "github_integration",
+      "fromSide": "right",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Implemented (current HEAD)",
+      "items": [
+        "AuthN: email magic-link, API tokens, self-hosted bootstrap (B0.1)",
+        "Organizations/tenants: membership, roles, invitations (B0.2)",
+        "CSRF on every new B0.1/B0.2 mutating route",
+        "AUTH_MODE=none: zero new surface, the permanent self-hosted default (ADR-004)",
+        "Every service (auth, orgs, repos, background workers) reads/writes the one SQLite file directly"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Planned, not yet built (B0.3-B0.7)",
+      "items": [
+        "General per-route AuthZ (require_role() across the 143 pre-existing routes) -- B0.3",
+        "Rate-limiting middleware beyond the B0.1 login endpoint -- B0.5",
+        "Mandatory (not opt-in) sandboxing for tenant-supplied code -- B0.6",
+        "Encrypted secret storage + GitHub App architecture (ADR-001) -- B0.7"
+      ]
+    }
+  ]
+}

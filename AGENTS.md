@@ -419,3 +419,44 @@ fix:
   ID/version trace pointers into it, never a second authoritative copy
   -- edit specs by editing the YAML under `specs/`, not by reasoning
   from a Task's stored linkage alone.
+
+## Architecture Visualization (Archify)
+
+- [Archify](https://github.com/tt-a1i/archify) (`tt-a1i/archify`) is
+  installed project-local at `.agents/skills/archify/` (canonical copy,
+  pinned at upstream v2.16.0 / commit `2bfb47132c057195d8dddb3e25ae966dd7c7a72e`,
+  `test/` intentionally excluded -- see its own `skill-release.json`).
+  `.claude/skills/archify` is a symlink to that same copy -- there is
+  only ONE installed copy; do not `cp` a second one for a different agent
+  surface. It has zero runtime npm dependencies (`doctor`/`validate`/
+  `deliver`/`guide` need no `npm install`); do not add it to
+  `pyproject.toml` or touch application runtime dependencies for it.
+- Use it when: reviewing or explaining ProjectFlow's own architecture,
+  tracing a request/data flow before a cross-cutting change, or
+  documenting a new security/tenant boundary (e.g. a future B0.3+ sub-
+  phase) -- not for routine single-file work.
+- Standard mapping prompt for regenerating the current diagram: read
+  `.agents/skills/archify/SKILL.md`, then author/update
+  `docs/architecture/projectflow-runtime.architecture.json` (schema
+  `architecture`) grounded in the actual code at the repo's current
+  HEAD commit, and validate + render with:
+  `node .agents/skills/archify/bin/archify.mjs validate architecture docs/architecture/projectflow-runtime.architecture.json --quality showcase --repo-root . --json`
+  then
+  `node .agents/skills/archify/bin/archify.mjs deliver architecture docs/architecture/projectflow-runtime.architecture.json docs/architecture/projectflow-runtime.architecture.html --quality showcase --repo-root . --json`.
+  Run `node .agents/skills/archify/bin/archify.mjs doctor` first if
+  either command errors unexpectedly.
+- Grounding rule: every component's `sources[]` must cite a real
+  `path`/`line` that exists at `meta.repository.revision` (set to the
+  actual commit SHA being diagrammed) -- `--repo-root .` makes Archify
+  verify this against real Git blame, not trust the author. Never add a
+  component just because it appears on the B0 roadmap; only diagram what
+  the source at that revision actually shows. Tag anything not fully
+  built as `PARTIAL` or omit the `IMPLEMENTED` tag, and say in a
+  `sublabel`/card which future sub-phase (e.g. "B0.3", "B0.6") will
+  complete it -- never present a planned boundary as already enforced.
+- The current diagram (`docs/architecture/projectflow-runtime.architecture.json`
+  + rendered `.html`) reflects B0.1/B0.2 (AuthN, Organizations/Tenants)
+  as implemented and B0.3-B0.7 as explicitly planned/not-yet-built; it is
+  now stale evidence the moment a later B0 sub-phase, or any other
+  structural change, ships -- regenerate it then, don't leave it
+  describing a superseded HEAD.
