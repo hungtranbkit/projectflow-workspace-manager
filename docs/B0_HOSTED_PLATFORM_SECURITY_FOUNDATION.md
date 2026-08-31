@@ -151,17 +151,24 @@ mechanism itself (`sandbox_manager.py`/`sandbox_runtime.py`/
 `sandbox_contract.py`) is reused unmodified.
 
 ### B0.5 CSRF
-No existing middleware to extend (this app registers none today) —
-add one lightweight double-submit-cookie CSRF token, validated by a
-shared dependency applied to every mutating route, alongside B0.2's
-own route sweep.
+**Resolved — see ADR-003** below: in-house double-submit-cookie CSRF
+token, validated by a shared FastAPI dependency applied to every
+mutating, session-cookie-authenticated route (never Bearer-token or
+webhook routes, which are structurally CSRF-immune), alongside B0.2's
+own AuthZ route sweep — the same mechanical pass, since both are the
+first `Depends()`-based guards this codebase has ever carried.
 
 ### B0.6 Rate limiting
-An in-house, minimal per-IP/per-user token-bucket middleware —
-recommended over adopting `slowapi`/`fastapi-limiter` given this app
-has zero existing middleware infrastructure to extend and a
-demonstrated preference for a small dependency footprint; revisit if
-the in-house version proves insufficient under real load.
+**Resolved — see ADR-003** below: a maintained library from the
+`limits`-backed ecosystem family (e.g. `slowapi`), in-memory backend
+at launch, specifically *because* an in-house in-memory limiter breaks
+silently the moment hosted mode adds a second process/machine — the
+one B0 sub-area where this document departs from its own
+dependency-minimalism default, for a stated, narrow reason (distributed
+correctness), not a general preference reversal. A narrow instance of
+this same rate limiter must exist for the magic-link request endpoint
+by B0.1's own launch (ADR-002), ahead of this sub-area's general
+middleware rollout.
 
 ### B0.7 Secrets boundary
 The current GitHub-integration design (delegate to the host's own
@@ -568,6 +575,261 @@ default):
   and worth doing, but less urgent than for a password system (no
   static secret to protect against reuse), deferred to a B0.1.x pass.
 
+## ADR-003: In-house vs library for CSRF and rate limiting
+
+**Status: DECIDED (design only — not implemented).** Resolves Open
+Decision #2 below.
+
+### Grounding (evidence, not assumptions)
+
+- **Zero middleware registered today**: `grep -n "middleware\|add_middleware"
+  app/main.py` returns nothing — whatever ships here is the *first*
+  middleware this app has ever carried.
+- **Zero `Depends()` usage today**: `app/main.py` (4,319 lines) uses no
+  FastAPI dependency-injection guards anywhere — CSRF verification (and
+  B0.3's own AuthZ guard) would be the first introduction of that
+  pattern into this codebase. Both naturally land in the **same
+  mechanical sweep**, already sequenced adjacently in Phasing
+  (B0.3 AuthZ then B0.4 CSRF, "same route sweep").
+- **Real CSRF migration footprint, counted, not estimated**: 143
+  POST/PUT/DELETE routes in `app/main.py`; 129 `<form method="post">`
+  occurrences across 14 templates (`task_detail.html` alone: 69;
+  `sandbox_detail.html`: 12; `workspace_detail.html`: 21); **no shared
+  form macro exists** in `app/templates/_macros.html` to centralize a
+  hidden CSRF field through — each form needs the field added
+  individually, though the consistent `<form method="post"` pattern
+  makes this a scriptable, mechanical sweep, not 129 bespoke edits.
+  Separately, `base.html`'s own shared JS (`runAutonomousTick`,
+  `runReleaseAction`, `launchWorkspace`, `runAutonomousStart`) issues
+  `fetch(..., {method:'POST'})` calls with no CSRF header today — a
+  *smaller* migration surface than the forms (4 shared functions, not
+  129 sites), but a real one.
+- **Single-process deployment today**: `scripts/start.sh:47` runs
+  `uvicorn app.main:app --host 127.0.0.1 --port 8765` with no
+  `--workers` flag — one process, one instance, in-memory state is
+  trivially correct today. This is the load-bearing fact for the
+  "when must this evolve" question below.
+- **No reverse proxy exists anywhere in the repo** (confirmed in the
+  original audit) — hosted mode's eventual proxy/load-balancer
+  topology, and therefore its `X-Forwarded-For` trust boundary, is
+  **undesigned**, not merely unimplemented. Flagged as a residual risk
+  below, not invented here.
+- **ADR-002 already created a launch-blocking, endpoint-specific rate
+  limit requirement** (the magic-link request endpoint) that "cannot
+  wait for B0.6's general middleware." Whatever B0.4/B0.5 design is
+  chosen here must supply that primitive in time for B0.1's own
+  launch, not just as a general B0.5/B0.6 deliverable — a real
+  cross-ADR dependency, not a hypothetical one.
+- **Bearer-token (API/service-account, from ADR-002) and webhook
+  (`POST /webhooks/github`, from ADR-001) requests are structurally
+  immune to CSRF** — CSRF exploits a browser automatically attaching
+  *cookies* to a cross-site request; a request authenticated via an
+  `Authorization: Bearer <token>` header or an HMAC signature carries
+  no ambient credential a malicious page could ride on. CSRF
+  verification must apply **only** to session-cookie-authenticated
+  (browser) requests — applying it to Bearer/webhook routes would be
+  both incorrect and would break legitimate API/CI/webhook traffic.
+- **Dependency list remains minimal** (`pyproject.toml`): fastapi,
+  uvicorn, jinja2, python-multipart, PyYAML, websockets, ruamel.yaml —
+  same 7 core dependencies referenced in the original audit and both
+  prior ADRs.
+
+### Options compared
+
+**CSRF:**
+
+| | In-house (double-submit token) | Library (e.g. a Starlette/FastAPI CSRF middleware from the ecosystem) |
+|---|---|---|
+| Security correctness | Correct if implemented carefully (constant-time compare, SameSite cookie, verified on every state-changing method) — but the burden of getting every detail right (and keeping it right as routes are added) falls entirely on this project | A maintained library has already had these details reviewed/exercised by a wider user base — lower first-implementation risk, but only as good as its own upkeep |
+| Bypass risk | Real if a future route is added without remembering the guard — same class of risk B0.2's AuthZ sweep already carries, mitigated the same way (a test asserting every mutating route carries the dependency, not spot-checked) | Same bypass risk shape (a forgotten route is a forgotten route either way) — the library doesn't remove the need for a completeness test, it only reduces bugs *within* the check itself |
+| Same-site/cookie implications | Full control — can set `SameSite=Lax` (or `Strict`) directly alongside the session cookie from B0.1, tuned to this app's own login/redirect flows (magic-link verify is itself a cross-site-ish redirect from an email client, worth testing explicitly) | Depends on the library's own defaults and how configurable they are; still needs the same explicit testing against the magic-link redirect flow either way |
+| Testability | Trivial with this project's own established `TestClient`-based test style (`tests/conftest.py`'s `client` fixture) — a plain function, easy to unit-test in isolation and to assert against in integration tests | Same `TestClient` compatibility (any real Starlette middleware/dependency is testable that way) — not a differentiator given this project's existing test infra already fits either |
+| Dependency maintenance/CVEs | None — nothing to track | A small, less-widely-used CSRF library for FastAPI adds a dependency whose maintenance cadence and CVE history this project has not audited live in this pass (see Residual risks) — a real, if modest, ongoing-maintenance and supply-chain surface P0's own audit already flagged generally (`docs/PRODUCTIZATION_AUDIT.md`'s "Dependency/supply-chain audit: CAN_WAIT (flagged, not scored)") |
+| Operational complexity | Low — one dependency function + one template-global, matching the project's own existing `templates.env.globals["pf_t"]` pattern from Track A1 | Low-to-moderate — one more `pip install`, one more version to track through future Python/FastAPI upgrades |
+| Migration cost | Same either way — the 129-form + 4-JS-function sweep above is identical regardless of who wrote the verification logic | Same |
+
+**Rate limiting:**
+
+| | In-house (token bucket) | Library (e.g. `slowapi` or similar ecosystem middleware) |
+|---|---|---|
+| Security correctness | Straightforward algorithm (token bucket / sliding window), well-understood, easy to get right for the simple per-key cases this app needs | A maintained library likely covers more edge cases (burst handling, multiple simultaneous limit tiers) out of the box |
+| Persistence/backend needs | In-memory dict is correct **only** as long as deployment stays single-process (true today, see Grounding) | The common libraries in this ecosystem (e.g. `slowapi`, built on the `limits` package) support pluggable backends including in-memory *and* Redis — meaning adopting one now costs nothing extra today but removes a later migration step if horizontal scale arrives |
+| Distributed/multi-instance behavior | **Breaks silently** the moment a second process or machine is added — each instance enforces its own independent limit, effectively multiplying the real limit by instance count, with no error, no crash, just a quietly-wrong security control | A library with a Redis (or similar shared-store) backend is correct across instances *if* that backend is actually configured — still requires standing up Redis (or equivalent) for hosted mode, which is new infrastructure either way |
+| Trusted proxy/IP handling | Must be built explicitly — deciding which header (if any) to trust for the real client IP behind a future reverse proxy is unresolved regardless of in-house vs library (see Grounding: no proxy topology exists yet) | Same unresolved dependency — a library doesn't invent a trust boundary this project hasn't decided on; most libraries expose a configurable "IP extraction" hook but someone still has to decide what to trust |
+| Tenant/user/IP/key dimensions | Straightforward to key on whatever's needed (IP for anonymous/pre-auth requests like magic-link requests, user id or org id post-auth, API token id for service accounts) — this app's own multi-dimension needs (anonymous vs authenticated vs API-token traffic) are simple enough not to need a general-purpose framework | Equally capable, usually with a cleaner declarative syntax for "N requests per M seconds per key-function" |
+| Endpoint-specific limits | Needs its own small per-route configuration mechanism, built once | Typically a first-class, well-tested feature (per-route decorators/limits) |
+| Failure behavior | Whatever this project chooses to build — must be decided explicitly (see Recommendation) | Typically returns HTTP 429 with a `Retry-After` header by convention — a sensible default this project can simply adopt regardless of which implementation is chosen |
+| Operational complexity | Low today (in-memory, no new infra); **hidden complexity deferred to whenever horizontal scale arrives**, at which point it becomes a forced rewrite under pressure rather than a planned migration | Slightly higher upfront (one more dependency + eventually Redis for hosted mode) but the multi-instance-correct path is already paved when that day comes |
+| Dependency maintenance/CVEs | None | Same caveat as CSRF above — not live-audited in this pass |
+
+### Recommendation
+
+**In-house for CSRF. Library (specifically the `limits`-package-backed
+family, e.g. `slowapi`) for rate limiting, with the in-memory backend
+at B0 launch.** This is the justified hybrid from the options list —
+not a default toward "in-house is simpler" across the board, and not a
+default toward "always adopt a library" either; the two concerns have
+genuinely different risk shapes once grounded in this project's actual
+deployment reality.
+
+### Rationale
+
+1. **CSRF's correctness surface is small and fully owned by this
+   project's own routing/templating conventions** (Jinja templates via
+   the same `pf_t`-style global pattern Track A1 already established;
+   FastAPI dependencies for the JSON/fetch-based mutation routes) — a
+   double-submit-cookie check is a few dozen lines with no external
+   state, no backend, and a bypass risk that a completeness test (not
+   library choice) is what actually closes. Adding a dependency here
+   buys little beyond what careful, tested in-house code already
+   provides, at the cost of one more supply-chain surface for a
+   security-critical, easy-to-get-right primitive.
+2. **Rate limiting's correctness surface is NOT small once multi-
+   instance deployment is real** — an in-house in-memory limiter is
+   correct today (single process, confirmed in Grounding) but becomes
+   **silently, dangerously wrong** the moment hosted mode scales
+   horizontally, with no error to signal the break. A library already
+   built around a pluggable backend (memory now, Redis later) converts
+   a future forced-rewrite-under-pressure into a planned backend swap
+   — the asymmetry in downside risk (CSRF: a caught bug vs. rate
+   limiting: a silent security-control failure at exactly the moment
+   real scale makes it matter most) is what tips this one toward
+   adopting a maintained implementation despite the project's
+   otherwise-consistent dependency-minimalism (already the stated
+   reasoning in ADR-001 and ADR-002, not abandoned here — see Residual
+   risks for the honest tension this creates).
+3. **The in-memory backend is the correct default at launch either
+   way** — today's single-process reality (Grounding) means adopting a
+   library does not require standing up Redis on day one; it only
+   means the *option* to swap the backend exists without a rewrite
+   when it's actually needed (see "When this must evolve" below).
+
+### Exact boundary: what is in-house vs. adopted dependency
+
+- **In-house**: CSRF token generation/verification (double-submit
+  cookie + a FastAPI dependency + the `pf_t`-pattern template global
+  for the hidden field), the CSRF-exemption logic for Bearer-token and
+  webhook-signature-authenticated routes (see Grounding), and the
+  route-completeness test asserting every mutating route carries the
+  guard.
+- **Adopted dependency**: one rate-limiting library from the
+  `limits`-backed ecosystem family (e.g. `slowapi`), configured with
+  its in-memory backend at launch. The exact package is a Phasing-time
+  choice (not pinned by this ADR) — the requirement this ADR states is
+  "pluggable backend supporting both in-memory and a shared store,"
+  not a specific package name.
+- **In-house, built early, shared by both**: the *narrow* rate limiter
+  needed for the magic-link request endpoint by B0.1's own launch
+  (ADR-002's own requirement) should use the **same library**, applied
+  to that one route ahead of B0.5's general middleware rollout — not a
+  second, separate implementation. This is the one point where B0.1
+  and B0.5 must ship in close coordination (see Phasing note below).
+
+### Configuration defaults
+
+- CSRF: `SameSite=Lax` on the session cookie (from B0.1) and the CSRF
+  cookie itself; token verified on every state-changing method (POST/
+  PUT/PATCH/DELETE) for session-cookie-authenticated requests only;
+  GET/HEAD/OPTIONS never require it (never state-changing by this
+  app's own routing convention).
+- Rate limiting: per-IP limits for unauthenticated endpoints (the
+  magic-link request endpoint chief among them), per-user (or
+  per-organization, once B0.3 exists) limits for authenticated
+  endpoints, per-API-token limits for service/automation traffic
+  (ADR-002) — three distinct key dimensions, not one global limit.
+  Specific numeric thresholds are deliberately **not** invented here;
+  they belong in implementation-time tuning informed by real traffic,
+  not asserted as a made-up default in a design document.
+
+### Failure behavior
+
+- CSRF failure: HTTP 403 with a machine-readable reason (matching this
+  app's own existing `GitHubIntegrationError`-style typed-error
+  convention — see ADR-001), never a silent pass-through.
+- Rate-limit exceeded: HTTP 429 with a `Retry-After` header (the
+  library's own conventional default, adopted rather than reinvented).
+- Both failure paths must be exercised by a real test, not asserted by
+  inspection — consistent with this program's own "no security
+  theater" design principle.
+
+### When the design must evolve for horizontal scale
+
+**The exact trigger, stated precisely, not left vague**: the moment
+hosted-mode deployment adds a second `uvicorn` worker/process or a
+second machine — i.e., the moment `scripts/start.sh`'s own current
+single-process invocation (Grounding) is no longer literally true for
+a given deployment — the rate-limiting backend **must** move from
+in-memory to a shared store (Redis or equivalent) before that
+deployment change ships, not after. This ADR's library choice exists
+specifically so that transition is a configuration change (swap the
+backend) rather than a rewrite. In-house CSRF does not have an
+equivalent multi-instance failure mode (it depends only on the
+request's own cookie/header, never on cross-request shared state), so
+it carries no analogous trigger.
+
+### Self-hosted compatibility
+
+Both are `AUTH_MODE`-scoped the same way as every other B0 sub-area:
+`AUTH_MODE=none` (today's default, unaffected) never constructs a
+session cookie in the first place, so CSRF verification (which only
+applies to session-cookie-authenticated requests, see Grounding) has
+nothing to guard — the dependency is simply never invoked. Rate
+limiting is more permissive to apply even under `AUTH_MODE=none` for
+its own sake (protecting a self-hosted instance from accidental
+runaway automation is a reasonable default regardless of auth mode),
+but is **not required** to, and default thresholds — if enabled at all
+in that mode — must be generous enough never to interfere with today's
+real, already-verified single-user production usage (Track A1's own
+live-verification pass).
+
+### Observability/auditability
+
+Both should log a structured event on rejection (route, key dimension,
+identity where available) — reusing this app's own existing
+`workspace_events`-style append-only audit convention (`app/db.py:22`)
+is a natural fit for CSRF/rate-limit rejections specifically, though
+whether they belong in that exact table or a dedicated one is an
+implementation-time decision, not resolved here.
+
+### Non-goals (of this decision)
+
+- Specific numeric rate-limit thresholds — implementation-time tuning.
+- The exact rate-limiting package name — a Phasing-time choice within
+  the stated "pluggable backend" requirement.
+- Designing the reverse-proxy/`X-Forwarded-For` trust boundary itself
+  — flagged as a residual risk below, not resolved here.
+- A general-purpose "any number of limit tiers" framework — this
+  app's own three key dimensions (IP / user-or-org / API-token) are
+  sufficient; nothing more elaborate is justified by evidence gathered
+  so far.
+
+### Residual risks / open questions
+
+- **Dependency CVE/maintenance history for the recommended rate-
+  limiting library family was not live-audited in this pass** — stated
+  as a factor, not verified against a current advisory database;
+  implementation-time must do that check before pinning a version,
+  consistent with P0's own flagged-but-not-scored "dependency/supply-
+  chain audit" item.
+- **Reverse-proxy topology and `X-Forwarded-For` trust are genuinely
+  undesigned** (Grounding) — both CSRF's `SameSite` reasoning and rate
+  limiting's per-IP keying assume a direct connection or a *trusted*
+  proxy; if hosted mode ends up behind an untrusted or misconfigured
+  proxy, IP-based keying is spoofable. This needs its own design pass
+  before hosted-mode rate limiting can be trusted in production, not
+  assumed solved by this ADR.
+- **This ADR chose a library for rate limiting specifically because of
+  the distributed-correctness asymmetry**, a narrower justification
+  than "libraries are generally better" — worth re-examining if this
+  project's own dependency-minimalism preference (ADR-001, ADR-002)
+  turns out to weigh more heavily in practice than this ADR assumes;
+  the in-house alternative remains viable if that preference wins out,
+  provided the multi-instance trigger above is treated as a hard
+  blocker on horizontal scale, not a known gap left unaddressed.
+- **The 129-form CSRF sweep's actual mechanical cost was counted, not
+  time-estimated** — a real implementation-planning input for
+  whichever engineer picks up B0.4, not resolved further here.
+
 ## Phasing
 
 Each phase independently shippable and testable, mirroring E1–E13's
@@ -598,10 +860,14 @@ decided by this document:
    concrete, evidence-based recommendation now exists," not "silently
    approved" — still needs explicit human sign-off before B0.1
    implementation starts.
-2. **In-house vs adopt a library** for CSRF/rate-limiting (this
-   document recommends in-house for both, given zero existing
-   middleware and the project's dependency-minimalism, but that's a
-   recommendation, not a decision made on the user's behalf).
+2. ~~**In-house vs adopt a library** for CSRF/rate-limiting.~~
+   **RESOLVED — see ADR-003** (above): in-house for CSRF (small,
+   fully-owned correctness surface); a maintained pluggable-backend
+   library for rate limiting specifically because an in-house
+   in-memory limiter breaks silently under horizontal scale — a
+   deliberate hybrid, not a uniform default either direction. As with
+   ADR-001/002, still needs explicit human sign-off before B0.4/B0.5/
+   B0.6 implementation starts.
 3. ~~**GitHub auth architecture** once multi-org hosting means
    "delegate to the host's own `gh` CLI" no longer holds.~~
    **RESOLVED — see ADR-001** (above, in the B0.7 section): GitHub App
