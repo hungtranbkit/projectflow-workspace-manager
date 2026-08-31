@@ -66,15 +66,19 @@ audit, and path traversal are `CAN_WAIT (flagged, not scored)`.
 Matching this program's own named focus areas exactly:
 
 - **B0.1 AuthN** — real user accounts, login/logout, sessions.
-- **B0.2 AuthZ** — coarse role-based route guards.
-- **B0.3 Organizations/Tenants** — a real tenant boundary and per-tenant
+- **B0.2 Organizations/Tenants** — a real tenant boundary and per-tenant
   data isolation.
-- **B0.4 Sandbox boundary** — mandatory (not opt-in) sandboxing once
+- **B0.3 AuthZ** — coarse role-based route guards.
+- **B0.4 CSRF** — token issuance/validation on every mutating route.
+- **B0.5 Rate limiting** — per-identity/per-IP throttling.
+- **B0.6 Sandbox boundary** — mandatory (not opt-in) sandboxing once
   tenant-supplied code executes.
-- **B0.5 CSRF** — token issuance/validation on every mutating route.
-- **B0.6 Rate limiting** — per-identity/per-IP throttling.
 - **B0.7 Secrets boundary** — encrypted, tenant-scoped secret storage +
   log/transcript redaction.
+
+*(Numbering corrected during B0.2 implementation — see the note at the
+top of "Proposed architecture per sub-area" below for what was wrong
+and why.)*
 
 ## Non-goals / explicit deferrals
 
@@ -108,7 +112,7 @@ Matching this program's own named focus areas exactly:
      that transitively tenant-scopes the entire existing schema,
      without touching 50 other tables' own FKs.
    - `SandboxManager`/`SandboxRuntimeService`'s actual sandboxing
-     mechanism is reused as-is; B0.4 only flips the opt-in policy check
+     mechanism is reused as-is; B0.6 only flips the opt-in policy check
      to mandatory when `AUTH_MODE=required`.
    - Prefer a small number of shared, reusable primitives (in the same
      spirit as A1's own `RequestMemo`) over hand-editing every route —
@@ -119,6 +123,20 @@ Matching this program's own named focus areas exactly:
    P0/A1 already established), not asserted by inspection alone.
 
 ## Proposed architecture per sub-area
+
+**Numbering correction, made during B0.2 implementation (real evidence,
+not a style change)**: this section's own sub-headers originally read
+B0.1 AuthN / B0.2 AuthZ / B0.3 Organizations / B0.4 Sandbox / B0.5 CSRF
+/ B0.6 Rate limiting / B0.7 Secrets — inconsistent with the canonical
+`## Phasing` list below (B0.2 Organizations / B0.3 AuthZ / B0.4 CSRF /
+B0.5 Rate limiting / B0.6 Sandbox), which several ADR passages already
+correctly followed (e.g. ADR-003's own "B0.3 AuthZ then B0.4 CSRF")
+while others incorrectly followed this section's original, wrong
+numbering — a real, internal inconsistency spanning both this section
+and scattered ADR cross-references, not merely a cosmetic mismatch.
+Corrected here (this section reordered/relabeled to match Phasing) and
+at every affected cross-reference throughout the document; no
+technical content changed, only which number each sub-area is called.
 
 ### B0.1 AuthN -- IMPLEMENTED
 Login mechanism **resolved — see ADR-002** below: email magic-link at
@@ -141,38 +159,31 @@ short-lived login token itself. Login/verify/logout routes; a
 required`; a no-op fallback (today's exact
 behavior) wherever it's `none`.
 
-### B0.2 AuthZ
+### B0.2 Organizations/Tenants -- IMPLEMENTED
+New tables `organizations(id, name, slug, created_at)` and
+`organization_members(org_id, user_id, role)`; `repositories.
+organization_id` FK (see Design Principles #3 for why this is the
+single leverage point). Every list/read query needs an
+`organization_id` filter added at the query layer — via one reusable
+scoping helper, not 50 hand-edited call sites. See the B0.2
+implementation report for the full file/test map.
+
+### B0.3 AuthZ
 Coarse per-organization roles (OWNER/ADMIN/MEMBER/VIEWER). One
 `require_role(min_role)` dependency wraps every mutating route (there
 are roughly 100+ POST/PUT/DELETE routes in `app/main.py` today — this
 needs a systematic sweep, not a handful of spot fixes, tracked as its
 own sub-phase).
 
-### B0.3 Organizations/Tenants
-New tables `organizations(id, name, slug, created_at)` and
-`organization_members(org_id, user_id, role)`; `repositories.
-organization_id` FK (see Design Principles #3 for why this is the
-single leverage point). Every list/read query needs an
-`organization_id` filter added at the query layer — via one reusable
-scoping helper, not 50 hand-edited call sites.
-
-### B0.4 Sandbox boundary
-Flip `SandboxManager`'s opt-in policy to mandatory when `AUTH_MODE=
-required`: every Builder workspace's command execution (today's
-`shell=True` call sites, see the audit table) must run inside a
-container once tenant-supplied code is involved. The sandboxing
-mechanism itself (`sandbox_manager.py`/`sandbox_runtime.py`/
-`sandbox_contract.py`) is reused unmodified.
-
-### B0.5 CSRF
+### B0.4 CSRF
 **Resolved — see ADR-003** below: in-house double-submit-cookie CSRF
 token, validated by a shared FastAPI dependency applied to every
 mutating, session-cookie-authenticated route (never Bearer-token or
-webhook routes, which are structurally CSRF-immune), alongside B0.2's
+webhook routes, which are structurally CSRF-immune), alongside B0.3's
 own AuthZ route sweep — the same mechanical pass, since both are the
 first `Depends()`-based guards this codebase has ever carried.
 
-### B0.6 Rate limiting
+### B0.5 Rate limiting
 **Resolved — see ADR-003** below: a maintained library from the
 `limits`-backed ecosystem family (e.g. `slowapi`), in-memory backend
 at launch, specifically *because* an in-house in-memory limiter breaks
@@ -184,6 +195,14 @@ this same rate limiter must exist for the magic-link request endpoint
 by B0.1's own launch (ADR-002), ahead of this sub-area's general
 middleware rollout.
 
+### B0.6 Sandbox boundary
+Flip `SandboxManager`'s opt-in policy to mandatory when `AUTH_MODE=
+required`: every Builder workspace's command execution (today's
+`shell=True` call sites, see the audit table) must run inside a
+container once tenant-supplied code is involved. The sandboxing
+mechanism itself (`sandbox_manager.py`/`sandbox_runtime.py`/
+`sandbox_contract.py`) is reused unmodified.
+
 ### B0.7 Secrets boundary
 The current GitHub-integration design (delegate to the host's own
 `gh` CLI, never store a token) **does not survive multi-org hosting** —
@@ -192,9 +211,9 @@ session across tenants. This is the single largest unresolved
 architectural question this audit surfaced (see Open Decisions below);
 B0.7 is scoped to build the *general* encrypted, org-scoped secret-
 storage primitive, with the GitHub-specific redesign as its first real
-consumer once B0.3 exists. A redaction layer for agent transcripts/
+consumer once B0.2 exists. A redaction layer for agent transcripts/
 logs (flagged `CAN_WAIT` in P0, still open) is scoped here too, since
-transcripts become multi-tenant-visible surface once B0.3 ships.
+transcripts become multi-tenant-visible surface once B0.2 ships.
 GitHub-integration architecture itself is **resolved** — see ADR-001
 below.
 
@@ -202,7 +221,7 @@ below.
 
 **Status: DECIDED (design only — not implemented).** Resolves Open
 Decision #3 below. Scope: how `GitHubMergeService` authenticates once
-`AUTH_MODE=required` and B0.3's organizations exist; `AUTH_MODE=none`
+`AUTH_MODE=required` and B0.2's organizations exist; `AUTH_MODE=none`
 is unaffected (see its own section below) and needs no ADR.
 
 ### Grounding: what GitHubMergeService actually does today
@@ -275,7 +294,7 @@ flow or a raw access token handled by this app"
 genuinely hosted, multi-org, multi-user scenarios that self-hosted BYOC
 structurally cannot serve (a hosted tenant expects to click "install,"
 not run `gh auth login` on infrastructure they don't control). It
-natively matches B0.3's organization boundary, mints tokens on demand
+natively matches B0.2's organization boundary, mints tokens on demand
 rather than storing per-tenant secrets (minimizing B0.7's burden to
 exactly one app-wide key), has a real install/uninstall lifecycle for
 clean offboarding, and scales API budget per-installation instead of
@@ -329,7 +348,7 @@ sharing one global limit across every tenant.
 
 `organizations.github_installation_id` (nullable — an org may exist
 without GitHub connected, or use self-hosted BYOC instead).
-`repositories.organization_id` (already B0.3's own column) resolves a
+`repositories.organization_id` (already B0.2's own column) resolves a
 repo to its org, and the org to its installation — one more hop on the
 existing `project_id -> repositories.id` chain (E1.6's own
 convention). A separate `github_installations` join table (for one
@@ -364,7 +383,7 @@ today (see Grounding), nothing broader requested "just in case."
 
 - **Install:** org admin uses GitHub's own App-install URL, selects
   org + repos, GitHub redirects back with the new `installation_id`;
-  a B0.2-guarded (admin-only) callback route stores it on the matching
+  a B0.3-guarded (admin-only) callback route stores it on the matching
   `organizations` row.
 - **Revoke, org-initiated:** admin uninstalls from GitHub's side ->
   `installation.deleted` webhook -> ProjectFlow clears
@@ -480,7 +499,7 @@ dependency-minimalism reason; that pattern carries into this decision.
 | Operational burden | Hashing library + brute-force rate limiting on failed attempts + a reset-email sender | Email sender + rate limiting on link *requests* (anti-email-bombing) — no hashing, no separate reset flow | OAuth flow correctness (redirect/state/token exchange) + no email sender needed |
 | Auditability | Equivalent — a login event either way | Equivalent | Equivalent, plus a free correlation to the user's real GitHub identity |
 | Session lifecycle | Identical once established — not a differentiator between options | Identical once established | Identical once established |
-| Rate-limiting implications | Must rate-limit failed-login attempts per account/IP (brute force) | Must rate-limit link *requests* per email/IP (inbox-bombing, timing-based enumeration) — needs to exist even before B0.6's general middleware ships, or launch has an open email-bombing vector | Mostly upstream (the IdP's own login throttling); ProjectFlow still needs to rate-limit its own callback endpoint |
+| Rate-limiting implications | Must rate-limit failed-login attempts per account/IP (brute force) | Must rate-limit link *requests* per email/IP (inbox-bombing, timing-based enumeration) — needs to exist even before B0.5's general middleware ships, or launch has an open email-bombing vector | Mostly upstream (the IdP's own login throttling); ProjectFlow still needs to rate-limit its own callback endpoint |
 | Account enumeration | Solved by the standard "invalid email or password" (never reveal which) pattern — familiar, well-understood | Needs equal care: the "check your email" response must be **identical** regardless of whether the account exists, or the request-link endpoint itself becomes an enumeration oracle | Not applicable in the same way — the IdP handles its own account existence privately |
 | Service/non-human accounts | Not naturally suited (a shared service password is an anti-pattern) | Not naturally suited (CI can't click an email) | Not naturally suited |
 | Enterprise readiness | Neutral-to-negative — many enterprise security policies now actively discourage bare passwords given credential-stuffing prevalence | Neutral-to-positive as a bridge; true enterprise readiness is SSO/SAML federation (already a B0 non-goal) | A reasonable bridge given this product's GitHub-centric domain, but couples account identity to a third-party provider outages/renames can disrupt, and doesn't satisfy "the org's own IdP" the way real SSO would |
@@ -565,7 +584,7 @@ default):
   normal-lifetime, e.g. 30-day, refreshed-on-activity session, not
   re-derived from the short-lived login token).
 - A minimal, launch-blocking rate limit on the link-*request* endpoint
-  specifically (per-email and per-IP) — this cannot wait for B0.6's
+  specifically (per-email and per-IP) — this cannot wait for B0.5's
   general middleware, since an unthrottled link-request endpoint is
   both an inbox-bombing vector and a timing-based enumeration oracle
   from day one.
@@ -630,9 +649,9 @@ Decision #2 below.
   below, not invented here.
 - **ADR-002 already created a launch-blocking, endpoint-specific rate
   limit requirement** (the magic-link request endpoint) that "cannot
-  wait for B0.6's general middleware." Whatever B0.4/B0.5 design is
+  wait for B0.5's general middleware." Whatever B0.4/B0.5 design is
   chosen here must supply that primitive in time for B0.1's own
-  launch, not just as a general B0.5/B0.6 deliverable — a real
+  launch, not just as a general B0.4/B0.5 deliverable — a real
   cross-ADR dependency, not a hypothetical one.
 - **Bearer-token (API/service-account, from ADR-002) and webhook
   (`POST /webhooks/github`, from ADR-001) requests are structurally
@@ -655,7 +674,7 @@ Decision #2 below.
 | | In-house (double-submit token) | Library (e.g. a Starlette/FastAPI CSRF middleware from the ecosystem) |
 |---|---|---|
 | Security correctness | Correct if implemented carefully (constant-time compare, SameSite cookie, verified on every state-changing method) — but the burden of getting every detail right (and keeping it right as routes are added) falls entirely on this project | A maintained library has already had these details reviewed/exercised by a wider user base — lower first-implementation risk, but only as good as its own upkeep |
-| Bypass risk | Real if a future route is added without remembering the guard — same class of risk B0.2's AuthZ sweep already carries, mitigated the same way (a test asserting every mutating route carries the dependency, not spot-checked) | Same bypass risk shape (a forgotten route is a forgotten route either way) — the library doesn't remove the need for a completeness test, it only reduces bugs *within* the check itself |
+| Bypass risk | Real if a future route is added without remembering the guard — same class of risk B0.3's AuthZ sweep already carries, mitigated the same way (a test asserting every mutating route carries the dependency, not spot-checked) | Same bypass risk shape (a forgotten route is a forgotten route either way) — the library doesn't remove the need for a completeness test, it only reduces bugs *within* the check itself |
 | Same-site/cookie implications | Full control — can set `SameSite=Lax` (or `Strict`) directly alongside the session cookie from B0.1, tuned to this app's own login/redirect flows (magic-link verify is itself a cross-site-ish redirect from an email client, worth testing explicitly) | Depends on the library's own defaults and how configurable they are; still needs the same explicit testing against the magic-link redirect flow either way |
 | Testability | Trivial with this project's own established `TestClient`-based test style (`tests/conftest.py`'s `client` fixture) — a plain function, easy to unit-test in isolation and to assert against in integration tests | Same `TestClient` compatibility (any real Starlette middleware/dependency is testable that way) — not a differentiator given this project's existing test infra already fits either |
 | Dependency maintenance/CVEs | None — nothing to track | A small, less-widely-used CSRF library for FastAPI adds a dependency whose maintenance cadence and CVE history this project has not audited live in this pass (see Residual risks) — a real, if modest, ongoing-maintenance and supply-chain surface P0's own audit already flagged generally (`docs/PRODUCTIZATION_AUDIT.md`'s "Dependency/supply-chain audit: CAN_WAIT (flagged, not scored)") |
@@ -748,7 +767,7 @@ deployment reality.
   app's own routing convention).
 - Rate limiting: per-IP limits for unauthenticated endpoints (the
   magic-link request endpoint chief among them), per-user (or
-  per-organization, once B0.3 exists) limits for authenticated
+  per-organization, once B0.2 exists) limits for authenticated
   endpoints, per-API-token limits for service/automation traffic
   (ADR-002) — three distinct key dimensions, not one global limit.
   Specific numeric thresholds are deliberately **not** invented here;
@@ -959,7 +978,7 @@ by their own nature and are never expected to make sense under
 - **Hosted-only, never backported**: GitHub App installation flow
   (ADR-001 — a single-user, single-`gh`-auth deployment has no
   "installation" concept to speak of), organization/tenant management
-  UI (B0.3 — there is exactly one implicit "tenant" in single-user
+  UI (B0.2 — there is exactly one implicit "tenant" in single-user
   mode), any future billing/multi-seat feature.
 - **Universal, must always work in both modes**: the core engineering
   lifecycle (E1–E13, entirely unaffected by B0 regardless of this
@@ -1044,8 +1063,8 @@ decided by this document:
    library for rate limiting specifically because an in-house
    in-memory limiter breaks silently under horizontal scale — a
    deliberate hybrid, not a uniform default either direction. As with
-   ADR-001/002, still needs explicit human sign-off before B0.4/B0.5/
-   B0.6 implementation starts.
+   ADR-001/002, still needs explicit human sign-off before B0.4/B0.5
+   implementation starts.
 3. ~~**GitHub auth architecture** once multi-org hosting means
    "delegate to the host's own `gh` CLI" no longer holds.~~
    **RESOLVED — see ADR-001** (above, in the B0.7 section): GitHub App
@@ -1076,10 +1095,10 @@ Mirroring A1's own finish-conditions discipline:
   each, cross-org access attempts) proves actual data isolation — not
   merely asserted by code inspection.
 - Full existing regression suite (`pytest tests/ -k "not real_"`, 891
-  tests as of Track A1) still passes unmodified with `AUTH_MODE=none`
+  tests as of Track A1, 915 as of B0.1) still passes unmodified with `AUTH_MODE=none`
   — the existing single-user experience must never regress.
 - Every new mutating route added or touched carries both an AuthZ
-  guard (B0.2+) and a CSRF check (B0.4+) — swept systematically, with
+  guard (B0.3+) and a CSRF check (B0.4+) — swept systematically, with
   a test asserting the sweep is complete (e.g. enumerating registered
   routes and checking each mutating one carries the dependency), not
   spot-checked.
