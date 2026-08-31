@@ -74,6 +74,7 @@ from app.services.security_review_service import SecurityApplicabilityService, S
 from app.services.review_fix_orchestrator import ReviewFixOrchestratorService, ReviewFixError
 from app.services.integration_service import IntegrationService, IntegrationError
 from app.services.release_service import ReleaseService, ReleaseError
+from app.services.product_acceptance_service import ProductAcceptanceService, ProductAcceptanceError
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -759,13 +760,15 @@ def create_app(settings=None):
     @app.exception_handler(ReviewFixError)
     @app.exception_handler(IntegrationError)
     @app.exception_handler(ReleaseError)
+    @app.exception_handler(ProductAcceptanceError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5/E9/E10's Change/WorkProduct/
+        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5/E9/E10/E11's Change/WorkProduct/
         Workflow/Plan/Spec-Proposal/Architecture/Design/Test-Design/
-        Autonomous-Execution/Worktree/Review-Fix/Integration/Release
-        API is a pure JSON surface (E1.7: 'API/service correctness
-        first, no large UI yet') -- a clean 400 + message, never the
-        HTML 'Action blocked' page the older form-posting routes use."""
+        Autonomous-Execution/Worktree/Review-Fix/Integration/Release/
+        Product-Acceptance API is a pure JSON surface (E1.7: 'API/service
+        correctness first, no large UI yet') -- a clean 400 + message,
+        never the HTML 'Action blocked' page the older form-posting
+        routes use."""
         return JSONResponse({"ok":False,"message":str(exc)},status_code=400)
 
     @app.get("/", response_class=HTMLResponse)
@@ -2375,7 +2378,16 @@ def create_app(settings=None):
             c["profile_key"]=run["profile_key"] if run else None
             c["human_decisions_pending"]=len(human_decisions.list_pending_for_change(c["id"]))
             c["task_count"]=len(changes.list_tasks_for_change(c["id"]))
-        human_attention=[c for c in rows if c["human_decisions_pending"]]
+            # E11.19: PRODUCT REVIEW REQUIRED is distinct from DECISION
+            # REQUIRED -- a WHAT-level ambiguity (HumanDecisionService)
+            # is never the same signal as "the live product is waiting
+            # on your review" (ProductAcceptanceService). Only computed
+            # for Changes with at least one Task (matches
+            # release_deploy_summary's own scope -- no evidence to
+            # review without one).
+            c["product_review_pending"]=bool(
+                c["task_count"] and product_acceptance_service.overview_status(c["id"])=="PENDING")
+        human_attention=[c for c in rows if c["human_decisions_pending"] or c["product_review_pending"]]
         filtered=rows
         if status: filtered=[c for c in filtered if c["workflow_status"]==status]
         if change_type: filtered=[c for c in filtered if c["change_type"]==change_type]
@@ -2457,6 +2469,11 @@ def create_app(settings=None):
         change_row(cid)
         return render(request,"change_deploy.html",cid=cid,active_tab="deploy",header=change_control_surface.header(cid),
                       data=change_control_surface.deploy_tab(cid))
+    @app.get("/changes/{cid}/acceptance",response_class=HTMLResponse)
+    def change_acceptance_tab(request:Request,cid:int):
+        change_row(cid)
+        return render(request,"change_acceptance.html",cid=cid,active_tab="acceptance",header=change_control_surface.header(cid),
+                      data=change_control_surface.acceptance_tab(cid))
 
     @app.get("/api/changes/{cid}/control-surface")
     def api_change_control_surface(cid:int):
@@ -2474,7 +2491,7 @@ def create_app(settings=None):
             "plan": change_control_surface.plan_tab(cid), "tasks": change_control_surface.tasks_tab(cid),
             "reviews": change_control_surface.reviews_tab(cid), "decisions": change_control_surface.decisions_tab(cid),
             "evidence": change_control_surface.evidence_tab(cid), "release": change_control_surface.release_tab(cid),
-            "deploy": change_control_surface.deploy_tab(cid),
+            "deploy": change_control_surface.deploy_tab(cid), "acceptance": change_control_surface.acceptance_tab(cid),
         }
 
     @app.post("/changes/{cid}/human-decisions/{did}/resolve")
@@ -3133,6 +3150,18 @@ def create_app(settings=None):
     change_control_surface.integration_service=integration_service
     change_control_surface.release_service=release_service
 
+    # ---- E11: Human Product Acceptance & Production Outcome Review ----
+    product_acceptance_service=ProductAcceptanceService(
+        db,changes,work_products,release_service,architecture_design_service,
+        test_case_specs_store,human_decisions,workflow_service,_resolve_project_policy_for_change)
+    app.state.product_acceptance_service=product_acceptance_service
+    # E11.13: same additive-hook pattern as review_gate/deploy_verified_gate
+    # above -- HUMAN_ACCEPTANCE now consults real ProductAcceptance
+    # evidence, falls back to the exact legacy approved-HUMAN_DECISION
+    # check otherwise.
+    workflow_service.human_acceptance_gate=product_acceptance_service
+    change_control_surface.product_acceptance_service=product_acceptance_service
+
     @app.get("/api/changes/{cid}/autonomous-execution")
     def api_autonomous_execution_status(cid:int):
         change_row(cid)
@@ -3294,6 +3323,34 @@ def create_app(settings=None):
         r=release_service.get(rid)
         if not r: raise HTTPException(404,"Release not found")
         return release_service.rollback_production(rid)
+
+    # ---- E11.21: Human Product Acceptance API ----------------------
+    @app.get("/api/changes/{cid}/acceptance")
+    def api_change_acceptance(cid:int):
+        change_row(cid)
+        pa=product_acceptance_service.get_current_for_change(cid)
+        return {"eligibility":product_acceptance_service.eligibility(cid),
+                "acceptance":pa,"checklist":product_acceptance_service.checklist(pa["id"]) if pa else [],
+                "context":product_acceptance_service.context(cid)}
+    @app.post("/api/changes/{cid}/acceptance/request")
+    def api_change_acceptance_request(cid:int,requested_by:str=Form("human")):
+        change_row(cid)
+        return product_acceptance_service.request(cid,requested_by=requested_by)
+    @app.post("/api/product-acceptances/{paid}/checklist/{item_id}")
+    def api_acceptance_checklist_item(paid:int,item_id:int,status:str=Form(...),note:str=Form(""),checked_by:str=Form("human")):
+        return product_acceptance_service.check_item(paid,item_id,status,note,checked_by)
+    @app.post("/api/product-acceptances/{paid}/accept")
+    def api_acceptance_accept(paid:int,actor:str=Form("human"),note:str=Form("")):
+        return product_acceptance_service.accept(paid,actor,note)
+    @app.post("/api/product-acceptances/{paid}/request-change")
+    def api_acceptance_request_change(paid:int,actor:str=Form("human"),feedback:str=Form(...),classification:str=Form("PRODUCT_ADJUSTMENT")):
+        return product_acceptance_service.request_change(paid,actor,feedback,classification)
+    @app.post("/api/product-acceptances/{paid}/reject")
+    def api_acceptance_reject(paid:int,actor:str=Form("human"),reason:str=Form(...),classification:str=Form("")):
+        return product_acceptance_service.reject(paid,actor,reason,classification.strip() or None)
+    @app.get("/api/product-acceptances/{paid}/evidence")
+    def api_acceptance_evidence(paid:int):
+        return product_acceptance_service.evidence(paid)
 
     @app.post("/api/tasks/{tid}/workspaces")
     def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):

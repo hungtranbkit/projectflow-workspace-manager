@@ -512,7 +512,29 @@ def test_waiting_human_when_only_human_acceptance_remains(client, git_repo):
     assert state["current_stage"] == "HUMAN_ACCEPTANCE"
     assert state["status"] == "WAITING_HUMAN"
 
-    client.app.state.work_products.create(kind="HUMAN_DECISION", title="Accepted", change_id=cid, status="APPROVED")
+    # E11: HUMAN_ACCEPTANCE is now satisfied by a real, ACCEPTED
+    # ProductAcceptance bound to the exact current production Release/
+    # artifact -- a generic approved HUMAN_DECISION WorkProduct (the
+    # pre-E11 placeholder) no longer satisfies it, by design (E11.13:
+    # "never a default PASS merely because production is healthy").
+    # Minimal-but-real production evidence: a VERIFIED PRODUCTION
+    # deployment + a PRODUCTION_VERIFIED Release referencing it, linked
+    # to this Change's own Task via release_tasks (the exact join
+    # ProductAcceptanceService._current_release() uses).
+    db = client.app.state.db
+    dep_id = db.execute(
+        "INSERT INTO deployments(repository_id,environment,source_branch,source_commit,status,artifact_version,artifact_digest) "
+        "VALUES(?,?,?,?,?,?,?)", (rid, "PRODUCTION", "main", head, "VERIFIED", "v1", "sha256:testdigest"))
+    release_id = db.execute(
+        "INSERT INTO releases(repository_id,version,source_commit,status,production_deployment_id,artifact_digest,artifact_version) "
+        "VALUES(?,?,?,?,?,?,?)", (rid, "v1", head, "PRODUCTION_VERIFIED", dep_id, "sha256:testdigest", "v1"))
+    db.execute("INSERT INTO release_tasks(release_id,task_id,merged_commit) VALUES(?,?,?)", (release_id, tid, head))
+
+    pas = client.app.state.product_acceptance_service
+    pa = pas.request(cid, requested_by="human")
+    accepted = pas.accept(pa["id"], "human", "Looks good")
+    assert accepted["status"] == "ACCEPTED"
+
     state2 = client.get(f"/api/changes/{cid}/workflow/state").json()
     assert state2["status"] == "COMPLETE"
     assert state2["current_stage"] is None

@@ -1251,6 +1251,60 @@ CREATE TABLE IF NOT EXISTS repository_integration_locks(
 CREATE INDEX IF NOT EXISTS idx_releases_repo ON releases(repository_id);
 CREATE INDEX IF NOT EXISTS idx_release_tasks_task ON release_tasks(task_id);
 """),
+    # V28 (Phase E11: Human Product Acceptance & Production Outcome
+    # Review). ProductAcceptance binds to the EXACT deployed artifact
+    # being reviewed (release_id/deployment_id/artifact_digest/
+    # observed_version), never only to a Change -- so a new production
+    # deployment always makes a prior acceptance request stale (E11.11).
+    # Checklist items are their own rows (not JSON inside
+    # product_acceptances) so each one can carry a real trace reference
+    # (test_case_spec_id) and be checked independently, mirroring
+    # test_case_specs' own "one row per checkable thing" shape.
+    # changes.parent_change_id is the same direct-FK lineage convention
+    # tasks.fix_of_task_id already established for Fix Tasks (E9) --
+    # never a generic trace_links row for a first-class structural
+    # relationship the UI needs to query cheaply and often.
+    (28, """
+CREATE TABLE IF NOT EXISTS product_acceptances(
+  id INTEGER PRIMARY KEY,
+  change_id INTEGER NOT NULL REFERENCES changes(id),
+  release_id INTEGER REFERENCES releases(id),
+  deployment_id INTEGER REFERENCES deployments(id),
+  artifact_digest TEXT,
+  observed_version TEXT,
+  spec_baseline_digest TEXT,
+  ui_ux_design_work_product_id INTEGER REFERENCES work_products(id),
+  applicability TEXT NOT NULL DEFAULT 'USER_FACING',
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  requested_by TEXT NOT NULL DEFAULT 'system',
+  decided_at TEXT,
+  decided_by TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  work_product_id INTEGER REFERENCES work_products(id),
+  follow_up_change_id INTEGER REFERENCES changes(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS product_acceptance_checklist_items(
+  id INTEGER PRIMARY KEY,
+  product_acceptance_id INTEGER NOT NULL REFERENCES product_acceptances(id),
+  item_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  expected_behavior TEXT NOT NULL DEFAULT '',
+  source_type TEXT NOT NULL DEFAULT 'ACCEPTANCE_CRITERION',
+  source_ref TEXT,
+  test_case_spec_id INTEGER REFERENCES test_case_specs(id),
+  status TEXT NOT NULL DEFAULT 'UNCHECKED',
+  note TEXT NOT NULL DEFAULT '',
+  checked_at TEXT,
+  UNIQUE(product_acceptance_id, item_key)
+);
+ALTER TABLE changes ADD COLUMN parent_change_id INTEGER REFERENCES changes(id);
+CREATE INDEX IF NOT EXISTS idx_product_acceptance_change ON product_acceptances(change_id);
+CREATE INDEX IF NOT EXISTS idx_product_acceptance_checklist_pa ON product_acceptance_checklist_items(product_acceptance_id);
+CREATE INDEX IF NOT EXISTS idx_changes_parent ON changes(parent_change_id);
+"""),
 ]
 
 

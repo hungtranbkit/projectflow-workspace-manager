@@ -1,0 +1,130 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Acceptance · {{header.change.title}}{% endblock %}{% block header_action %}<a href="/changes">← All Changes</a>{% endblock %}{% block content %}
+{% include '_change_header.html' %}
+
+{% if not data.wired %}
+<section class="panel">{{ m.empty('Not available', 'Human Product Acceptance is not wired for this deployment.') }}</section>
+{% else %}
+{% set ctx = data.context %}
+{% set pa = data.acceptance %}
+{% set elig = data.eligibility %}
+
+{% if pa and pa.status == 'PENDING' %}
+<section class="panel readybox" aria-label="Product ready for review">
+<h3>Product ready for review</h3>
+<p><small>What you asked for</small></p>
+<p>{{ctx.what_you_asked_for or 'No description recorded on this Change.'}}</p>
+{% if ctx.what_changed %}
+<p><small>What changed</small></p>
+<ul>{% for flow in ctx.what_changed %}<li>{{flow}}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if ctx.live_url %}
+<p><a class="button success" href="{{ctx.live_url}}" target="_blank" rel="noopener">Open Live App</a></p>
+{% else %}
+<p><small>No public URL recorded for this deployment. Runtime target: {{ctx.runtime_target.environment or '—'}} (repository #{{ctx.runtime_target.repository_id or '—'}}).</small></p>
+{% endif %}
+
+<h4>Please verify</h4>
+{% if data.checklist %}
+<div class="table-scroll"><table><thead><tr><th>Check</th><th>Expected</th><th>Status</th><th></th></tr></thead><tbody>
+{% for item in data.checklist %}<tr>
+<td><b>{{item.title}}</b>{% if item.source_type=='MANUAL_TEST_CASE' %}<br><small>Manual test case</small>{% elif item.source_type=='ACCEPTANCE_CRITERION' %}<br><small>Acceptance criterion {{item.source_ref}}</small>{% endif %}</td>
+<td><small>{{item.expected_behavior or '—'}}</small></td>
+<td><span class="badge {{'pass' if item.status=='PASS' else ('fail' if item.status=='FAIL' else '')}}">{{item.status}}</span>{% if item.note %}<br><small>{{item.note}}</small>{% endif %}</td>
+<td class="actions">
+<button type="button" class="success" onclick="runReleaseAction('/api/product-acceptances/{{pa.id}}/checklist/{{item.id}}',this,{status:'PASS'})">Pass</button>
+<button type="button" class="danger" onclick="runReleaseAction('/api/product-acceptances/{{pa.id}}/checklist/{{item.id}}',this,{status:'FAIL'})">Fail</button>
+<button type="button" class="ghost" onclick="runReleaseAction('/api/product-acceptances/{{pa.id}}/checklist/{{item.id}}',this,{status:'NOT_APPLICABLE'})">N/A</button>
+</td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+<p><small>No specific checklist items were derived from the Spec/UI-UX Design/manual test cases -- review the live app directly.</small></p>
+{% endif %}
+
+<div class="actions">
+<button type="button" class="success" onclick="runReleaseAction('/api/product-acceptances/{{pa.id}}/accept',this,{actor:'human'})">Accept Product</button>
+<details class="mark-ready-form"><summary class="button ghost">Request Change</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/product-acceptances/{{pa.id}}/request-change',this.querySelector('button'),{actor:'human',feedback:this.feedback.value,classification:this.classification.value})">
+<label>What should be different?<textarea name="feedback" rows="3" required placeholder="e.g. Save button should be below the form"></textarea></label>
+<label>Classification<select name="classification"><option value="PRODUCT_ADJUSTMENT">Product adjustment</option><option value="UX_CHANGE">UX change</option><option value="BUG">Bug</option><option value="SPEC_CHANGE">Spec change</option></select></label>
+<button type="submit">Submit feedback</button>
+</form></details>
+<details class="mark-ready-form"><summary class="button danger">Reject</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/product-acceptances/{{pa.id}}/reject',this.querySelector('button'),{actor:'human',reason:this.reason.value})">
+<label>Reason (required)<textarea name="reason" rows="3" required placeholder="The delivered product does not satisfy the intended outcome because..."></textarea></label>
+<button type="submit" class="danger">Reject</button>
+</form></details>
+</div>
+
+<details class="mark-ready-form"><summary>Technical confidence</summary>
+<div class="wf-checklist">
+{% for label,key in [('Production healthy','production_healthy'),('Tests passed','tests_passed'),('Code review passed','review_passed'),('Security review passed','security_passed')] %}
+<div class="wf-check {{'wf-done' if ctx.technical_confidence[key] else ('wf-blocked' if ctx.technical_confidence[key]==False else 'wf-future')}}">
+<span class="wf-mark">{{'✓' if ctx.technical_confidence[key] else ('✗' if ctx.technical_confidence[key]==False else '—')}}</span>
+<span class="wf-label">{{label}}</span>
+</div>
+{% endfor %}
+</div>
+</details>
+</section>
+
+{% elif elig and elig.eligible %}
+<section class="panel">
+<h3>Ready to request Product Acceptance</h3>
+<p><small>Production deployment verified for release {{elig.release.version}}. Applicability: {{elig.applicability}}.</small></p>
+<button type="button" onclick="runReleaseAction('/api/changes/{{cid}}/acceptance/request',this,{requested_by:'human'})">Request Product Acceptance</button>
+</section>
+
+{% else %}
+<section class="panel">
+{% if pa and pa.status == 'ACCEPTED' %}
+{{ m.empty('Product accepted', 'This Change\'s current production release was accepted on ' + (pa.decided_at or '') + '.') }}
+{% elif pa and pa.status == 'CHANGE_REQUESTED' %}
+{{ m.empty('Change requested', 'The human asked for a change -- see the follow-up Change below.') }}
+{% elif pa and pa.status == 'REJECTED' %}
+{{ m.empty('Product rejected', pa.note or 'The delivered product was rejected.') }}
+{% elif elig and elig.reason == 'NOT_APPLICABLE' %}
+{{ m.empty('Not applicable', 'This Change is backend/operational-only -- no human product review is required.') }}
+{% elif elig and elig.reason == 'NO_PRODUCTION_RELEASE' %}
+{{ m.empty('Nothing to review yet', 'This Change has no production Release yet -- see the Release/Deploy tabs.') }}
+{% elif elig and elig.reason == 'PRODUCTION_NOT_VERIFIED' %}
+{{ m.empty('Not deployed yet', 'The current Release has not reached a verified Production deployment yet.') }}
+{% elif elig and elig.reason == 'UNRESOLVED_HUMAN_DECISION' %}
+{{ m.empty('Blocked on a decision', 'An unresolved human decision must be answered first -- see the Decisions tab.') }}
+{% elif elig and elig.reason == 'NOT_REQUIRED_BY_POLICY' %}
+{{ m.empty('Not required', 'This project\'s Workflow Profile/policy does not require human product acceptance for this Change.') }}
+{% else %}
+{{ m.empty('Nothing to review yet') }}
+{% endif %}
+</section>
+{% endif %}
+
+{% if data.history|length > 1 %}
+<section class="panel"><h3>History</h3>
+<div class="table-scroll"><table><thead><tr><th>Status</th><th>Release</th><th>Requested</th><th>Decided</th><th>By</th></tr></thead><tbody>
+{% for h in data.history %}<tr>
+<td><span class="badge {{'pass' if h.status=='ACCEPTED' else ('fail' if h.status=='REJECTED' else '')}}">{{h.status.replace('_',' ')}}</span></td>
+<td>#{{h.release_id or '—'}}</td>
+<td><small>{{h.requested_at}}</small></td>
+<td><small>{{h.decided_at or '—'}}</small></td>
+<td>{{h.decided_by or '—'}}</td>
+</tr>{% endfor %}
+</tbody></table></div>
+</section>
+{% endif %}
+
+{% if data.children %}
+<section class="panel"><h3>Follow-up Changes</h3>
+<div class="table-scroll"><table><thead><tr><th>Title</th><th>Type</th><th>State</th></tr></thead><tbody>
+{% for c in data.children %}<tr onclick="location.href='/changes/{{c.id}}'" style="cursor:pointer">
+<td><a href="/changes/{{c.id}}">{{c.title}}</a></td>
+<td class="cap">{{c.change_type|lower|replace('_',' ')}}</td>
+<td class="cap">{{c.lifecycle_state|lower|replace('_',' ')}}</td>
+</tr>{% endfor %}
+</tbody></table></div>
+</section>
+{% endif %}
+{% endif %}
+
+{% endblock %}

@@ -16,6 +16,13 @@ with its own PROJECT.yaml). Reused as-is."""
 CHANGE_TYPES = (
     "FEATURE", "BUG", "IMPROVEMENT", "REFACTOR", "ARCHITECTURE_CHANGE",
     "SECURITY_CHANGE", "HOTFIX", "OPERATIONS",
+    # Phase E11 (Human Product Acceptance): a follow-up Change created
+    # from human product feedback needs its own classification --
+    # extends the existing vocabulary, never a second Change model.
+    # BUG already existed above and is reused as-is for that
+    # classification; PRODUCT_ADJUSTMENT/SPEC_CHANGE/UX_CHANGE are the
+    # genuinely new ones (see product_acceptance_service.py).
+    "PRODUCT_ADJUSTMENT", "SPEC_CHANGE", "UX_CHANGE",
 )
 # Same risk vocabulary Task.risk_profile already uses (RISK_PROFILES in
 # task_decision_service.py) -- one risk vocabulary in this codebase, not
@@ -25,6 +32,13 @@ LIFECYCLE_STATES = (
     "NEW", "ANALYZING", "SPECIFYING", "DESIGNING", "PLANNING", "BUILDING",
     "REVIEWING", "VERIFYING", "RELEASING", "DEPLOYING", "HUMAN_ACCEPTANCE",
     "DONE", "BLOCKED", "CANCELLED",
+    # Phase E11.9: a Change whose product was delivered and reviewed,
+    # but the human asked for something different -- distinct from
+    # BLOCKED (nothing here is stuck on missing evidence) and from DONE
+    # (the intent was not accepted as-is). Not terminal: the follow-up
+    # Change carries the work forward, but this row's own history is
+    # never rewritten/reopened to reflect it (E11.9's own explicit rule).
+    "DELIVERED_BUT_CHANGE_REQUESTED",
 )
 _TERMINAL_STATES = ("DONE", "CANCELLED")
 
@@ -38,7 +52,8 @@ class ChangeService:
         self.db = db
 
     def create(self, *, title: str, description: str = "", change_type: str = "FEATURE",
-               risk_level: str = "NORMAL", project_id: int | None = None) -> int:
+               risk_level: str = "NORMAL", project_id: int | None = None,
+               parent_change_id: int | None = None) -> int:
         title = (title or "").strip()
         if not title:
             raise ChangeError("Change title is required")
@@ -50,11 +65,14 @@ class ChangeService:
             raise ChangeError(f"Unknown risk_level: {risk_level} (must be one of {RISK_LEVELS})")
         if project_id is not None and not self.db.one("SELECT id FROM repositories WHERE id=?", (project_id,)):
             raise ChangeError(f"Unknown project_id: {project_id}")
+        if parent_change_id is not None and not self.get(parent_change_id):
+            raise ChangeError(f"Unknown parent_change_id: {parent_change_id}")
         cid = self.db.execute(
-            "INSERT INTO changes(project_id,title,description,change_type,risk_level,lifecycle_state) VALUES(?,?,?,?,?,'NEW')",
-            (project_id, title, (description or "").strip(), change_type, risk_level),
+            "INSERT INTO changes(project_id,title,description,change_type,risk_level,lifecycle_state,parent_change_id) VALUES(?,?,?,?,?,'NEW',?)",
+            (project_id, title, (description or "").strip(), change_type, risk_level, parent_change_id),
         )
-        self.db.event("change", cid, "CHANGE_CREATED", f"type={change_type} risk={risk_level}")
+        self.db.event("change", cid, "CHANGE_CREATED", f"type={change_type} risk={risk_level}"
+                       + (f" parent={parent_change_id}" if parent_change_id else ""))
         return cid
 
     def get(self, change_id: int) -> dict | None:
@@ -64,6 +82,12 @@ class ChangeService:
         if project_id is not None:
             return self.db.all("SELECT * FROM changes WHERE project_id=? ORDER BY id DESC", (project_id,))
         return self.db.all("SELECT * FROM changes ORDER BY id DESC")
+
+    def list_children(self, change_id: int) -> list[dict]:
+        """E11.9/E11.22: follow-up Changes created from human product
+        feedback on this Change -- direct-FK lineage, never a generic
+        trace_links row (see product_acceptance_service.py)."""
+        return self.db.all("SELECT * FROM changes WHERE parent_change_id=? ORDER BY id", (change_id,))
 
     def set_lifecycle_state(self, change_id: int, state: str) -> None:
         """E1: no automatic derivation yet (deliberately deferred to a

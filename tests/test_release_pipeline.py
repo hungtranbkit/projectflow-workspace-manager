@@ -527,6 +527,12 @@ def test_full_production_promotion_verified(client, git_repo, tmp_path):
     deploy_data = change_control_surface.deploy_tab(cid)
     assert deploy_data["releases"][0]["production_deployment"]["health_status"] == "PASS"
     summary = change_control_surface.release_deploy_summary(cid)
+    # E11 added a 5th "acceptance" field to this same summary dict --
+    # asserted narrowly here (a Change with no ProductAcceptance request
+    # yet is PENDING-if-eligible or NOT_APPLICABLE, never a crash) so
+    # this E10 test stays about E10's own 4 fields.
+    assert summary["acceptance"] in ("PENDING", "NOT_APPLICABLE")
+    del summary["acceptance"]
     assert summary == {"integration": "INTEGRATED", "release": "ready", "test": "verified", "production": "verified"}
 
     rel_page = client.get(f"/changes/{cid}/release")

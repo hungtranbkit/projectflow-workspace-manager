@@ -92,7 +92,7 @@ GATES = {
     "DEPLOY_VERIFIED": {"name": "Deploy verified", "stage": "DEPLOY",
         "description": "Every repository this Change touches has a VERIFIED DEV deployment."},
     "HUMAN_ACCEPTANCE": {"name": "Human acceptance", "stage": "HUMAN_ACCEPTANCE",
-        "description": "An approved HUMAN_DECISION WorkProduct exists for this Change."},
+        "description": "A human reviewed the live production outcome and marked it ACCEPTED for this exact Release/artifact (Phase E11), or applicability says no human product review is required."},
 }
 GATES_BY_STAGE: dict[str, list[str]] = {}
 for _gk, _g in GATES.items():
@@ -120,6 +120,12 @@ PROFILE_STAGES = {
         "VERIFY": ("REQUIRED", None),
         "REVIEW": ("OPTIONAL", None),
         "DEPLOY": ("REQUIRED_IF", "DEPLOYMENT_REQUESTED"),
+        # E11.3: "optional/configurable" -- off by default (Product
+        # Acceptance's own is_required() returns False for VIBE unless a
+        # project explicitly opts in via policy), so this resolves to
+        # NOT_APPLICABLE and never blocks VIBE's own minimal-process
+        # completion, exactly like its prior total absence did.
+        "HUMAN_ACCEPTANCE": ("REQUIRED_IF", "HUMAN_ACCEPTANCE_APPLICABLE"),
     },
     "AGENTIC_STANDARD": {
         "ANALYSIS": ("OPTIONAL", None),
@@ -132,7 +138,11 @@ PROFILE_STAGES = {
         "VERIFY": ("REQUIRED", None),
         "RELEASE": ("OPTIONAL", None),
         "DEPLOY": ("REQUIRED_IF", "DEPLOYMENT_REQUESTED"),
-        "HUMAN_ACCEPTANCE": ("OPTIONAL", None),
+        # E11.3: "recommended/default after Production deploy when
+        # user-facing behavior changed" -- REQUIRED only when
+        # ProductAcceptanceService's applicability says USER_FACING/
+        # MIXED (or policy forces it either way).
+        "HUMAN_ACCEPTANCE": ("REQUIRED_IF", "HUMAN_ACCEPTANCE_APPLICABLE"),
     },
     "CONTROLLED": {
         "ANALYSIS": ("OPTIONAL", None),
@@ -399,6 +409,14 @@ class WorkflowService:
         # only deployments check below, zero behavior change for any
         # pre-E10 construction.
         self.deploy_verified_gate = None
+        # E11: same pattern again -- an optional object exposing
+        # .gate_status(change_id)->bool and .applicable_for_condition(
+        # change_id)->bool (wired in app/main.py once
+        # ProductAcceptanceService exists). None means "no real
+        # ProductAcceptance evidence to consult" -- falls back to the
+        # exact legacy approved-HUMAN_DECISION check below, zero
+        # behavior change for any pre-E11 construction.
+        self.human_acceptance_gate = None
 
     # ---- creation (E3.10) -----------------------------------------
     def create_workflow_for_change(self, change_id: int, profile_key: str | None = None, project_policy: dict | None = None) -> dict:
@@ -459,6 +477,15 @@ class WorkflowService:
         return self._approved_work_product_exists(change_id, ("TECHNICAL_DESIGN", "UI_UX_DESIGN"))
 
     def _gate_human_acceptance(self, change_id: int, tasks: list[dict]) -> bool:
+        """E11.13: real ProductAcceptance truth when human_acceptance_gate
+        is wired -- PASS only for an ACCEPTED, non-stale ProductAcceptance
+        bound to the exact current production Release/artifact, or when
+        deterministic applicability says no human product review is
+        required at all (never a default PASS merely because production
+        is healthy). Falls back to the exact legacy approved-
+        HUMAN_DECISION check when unwired."""
+        if self.human_acceptance_gate is not None:
+            return bool(self.human_acceptance_gate.gate_status(change_id))
         return self._approved_work_product_exists(change_id, ("HUMAN_DECISION",))
 
     def _gate_test_design_ready(self, change_id: int, tasks: list[dict]) -> bool:
@@ -608,6 +635,16 @@ class WorkflowService:
         current status."""
         if condition_key == "DEPLOYMENT_REQUESTED":
             return any(self.db.one("SELECT id FROM deployments WHERE task_id=?", (t["id"],)) for t in tasks)
+        if condition_key == "HUMAN_ACCEPTANCE_APPLICABLE":
+            # E11.3: VIBE/AGENTIC_STANDARD's HUMAN_ACCEPTANCE stage is
+            # REQUIRED only when ProductAcceptanceService says so
+            # (profile/policy/user-facing-applicability aware) --
+            # unwired means "no evidence to require it", the same
+            # conservative-but-non-blocking default every other unwired
+            # hook in this class uses.
+            if self.human_acceptance_gate is not None:
+                return bool(self.human_acceptance_gate.applicable_for_condition(change_id))
+            return False
         return False
 
     # ---- derived state (E3.8) --------------------------------------

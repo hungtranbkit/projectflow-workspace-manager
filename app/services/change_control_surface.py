@@ -46,6 +46,7 @@ class ChangeControlSurfaceService:
         # to the exact honest "not linked yet" behavior when unwired.
         self.integration_service = None
         self.release_service = None
+        self.product_acceptance_service = None  # E11: wired by main.py once ProductAcceptanceService exists
 
     # ---- shared helpers -------------------------------------------------
     def _change(self, change_id: int) -> dict | None:
@@ -403,6 +404,24 @@ class ChangeControlSurfaceService:
                 "can_create_release": bool(self.release_service and integrated_task_ids and repository_id and not releases),
                 "repository_id": repository_id, "integrated_task_ids": integrated_task_ids}
 
+    # ---- E11.17: Acceptance tab -- composition only over
+    # ProductAcceptanceService's own already-computed truth, no second
+    # eligibility/applicability/checklist logic here. -------------------
+    def acceptance_tab(self, change_id: int) -> dict:
+        change = self._change(change_id)
+        if not self.product_acceptance_service:
+            return {"change": change, "wired": False, "eligibility": None, "acceptance": None,
+                    "checklist": [], "context": None, "history": [], "children": []}
+        eligibility = self.product_acceptance_service.eligibility(change_id)
+        pa = self.product_acceptance_service.get_current_for_change(change_id)
+        return {
+            "change": change, "wired": True, "eligibility": eligibility, "acceptance": pa,
+            "checklist": self.product_acceptance_service.checklist(pa["id"]) if pa else [],
+            "context": self.product_acceptance_service.context(change_id),
+            "history": self.product_acceptance_service.list_for_change(change_id),
+            "children": self.changes.list_children(change_id),
+        }
+
     # ---- E10.29: compact Integration/Release/TEST/PRODUCTION summary,
     # for the Change Overview page -- every field is read straight off
     # IntegrationService/ReleaseService's own already-computed state
@@ -423,7 +442,15 @@ class ChangeControlSurfaceService:
     def release_deploy_summary(self, change_id: int) -> dict:
         tasks = self.changes.list_tasks_for_change(change_id)
         task_ids = [t["id"] for t in tasks]
-        summary = {"integration": None, "release": None, "test": None, "production": None}
+        summary = {"integration": None, "release": None, "test": None, "production": None, "acceptance": None}
+        if self.product_acceptance_service:
+            # E11.18: PENDING/ACCEPTED/CHANGE_REQUESTED/REJECTED/SUPERSEDED
+            # or NOT_APPLICABLE, read straight from ProductAcceptanceService's
+            # own already-computed truth -- never re-derived here.
+            try:
+                summary["acceptance"] = self.product_acceptance_service.overview_status(change_id)
+            except Exception:
+                summary["acceptance"] = None
         if not tasks:
             return summary
 

@@ -17,7 +17,7 @@
 </div>
 </div>
 <nav class="change-tabs" aria-label="Change sections">
-{% for key,label in [('','Overview'),('spec','Spec'),('architecture','Architecture'),('design','Design'),('tests','Tests'),('plan','Plan'),('tasks','Tasks'),('reviews','Reviews'),('decisions','Decisions'),('evidence','Evidence'),('release','Release'),('deploy','Deploy')] %}
+{% for key,label in [('','Overview'),('spec','Spec'),('architecture','Architecture'),('design','Design'),('tests','Tests'),('plan','Plan'),('tasks','Tasks'),('reviews','Reviews'),('decisions','Decisions'),('evidence','Evidence'),('release','Release'),('deploy','Deploy'),('acceptance','Acceptance')] %}
 <a class="change-tab{{' active' if active_tab==key else ''}}" href="/changes/{{cid}}{{'/'+key if key else ''}}">{{label}}</a>
 {% endfor %}
 </nav>

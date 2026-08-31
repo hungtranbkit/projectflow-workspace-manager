@@ -52,6 +52,10 @@ WORK_PRODUCT_KINDS = (
     # trace chain link that had no existing typed evidence.
     "INTEGRATED_CHANGE", "BUILD_ARTIFACT", "DEPLOYMENT_EVIDENCE",
     "RUNTIME_VERIFICATION", "ROLLBACK_EVIDENCE",
+    # Phase E11 (Human Product Acceptance & Production Outcome Review):
+    # the durable evidence record for one ProductAcceptance decision --
+    # see app/services/product_acceptance_service.py.
+    "PRODUCT_ACCEPTANCE",
 )
 WORK_PRODUCT_STATUSES = ("DRAFT", "PROPOSED", "APPROVED", "SUPERSEDED", "REJECTED")
 DIRECTIONS = ("INPUT", "OUTPUT")

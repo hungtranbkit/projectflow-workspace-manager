@@ -2,10 +2,13 @@
 
 {% if human_attention %}
 <section class="panel" style="border-left:4px solid var(--amber)"><h3>Human Attention</h3>
-<div class="table-scroll"><table><thead><tr><th>Change</th><th>Decisions Pending</th><th>Status</th></tr></thead><tbody>
-{% for c in human_attention %}<tr onclick="location.href='/changes/{{c.id}}/decisions'" style="cursor:pointer">
-<td><a href="/changes/{{c.id}}/decisions"><strong>{{c.title}}</strong></a></td>
-<td><span class="badge human_decision_required">{{c.human_decisions_pending}} pending</span></td>
+<div class="table-scroll"><table><thead><tr><th>Change</th><th>Attention Needed</th><th>Status</th></tr></thead><tbody>
+{% for c in human_attention %}<tr onclick="location.href='/changes/{{c.id}}/{{'acceptance' if c.product_review_pending and not c.human_decisions_pending else 'decisions'}}'" style="cursor:pointer">
+<td><a href="/changes/{{c.id}}"><strong>{{c.title}}</strong></a></td>
+<td>
+{% if c.human_decisions_pending %}<a href="/changes/{{c.id}}/decisions"><span class="badge human_decision_required">{{c.human_decisions_pending}} decision{{'s' if c.human_decisions_pending != 1 else ''}} pending</span></a>{% endif %}
+{% if c.product_review_pending %}<a href="/changes/{{c.id}}/acceptance"><span class="badge created">Product review required</span></a>{% endif %}
+</td>
 <td><span class="badge {{c.workflow_status|lower}}">{{c.workflow_status.replace('_',' ')}}</span></td>
 </tr>{% endfor %}
 </tbody></table></div>
