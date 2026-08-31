@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "ProjectFlow Runtime Architecture",
-    "subtitle": "workspace-manager \u00b7 single-process FastAPI \u00b7 SQLite \u00b7 B0.1-B0.7 all implemented",
+    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0.1-B0.7 all implemented",
     "output": "projectflow-runtime.architecture.html",
     "animation": "trace",
     "visual_preset": "signal-flow",
@@ -14,7 +14,7 @@
     ],
     "repository": {
       "url": "https://github.com/hungtranbkit/projectflow-workspace-manager",
-      "revision": "67f9751c9c6b7f846d25c51f45a347283b1d600a"
+      "revision": "c2800336c7f9023c623092c4c337ecef733b50b1"
     },
     "views": [
       {
@@ -74,7 +74,7 @@
       "id": "api_entry",
       "type": "backend",
       "label": "FastAPI App",
-      "sublabel": "create_app() \u00b7 route handlers",
+      "sublabel": "create_app() · route handlers",
       "pos": [
         300,
         500
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "app/main.py",
-          "line": 98,
+          "line": 102,
           "label": "create_app()"
         }
       ]
@@ -95,7 +95,7 @@
       "id": "auth_session",
       "type": "security",
       "label": "AuthN & Sessions",
-      "sublabel": "B0.1 \u00b7 magic-link + API tokens",
+      "sublabel": "B0.1 · magic-link + API tokens",
       "tag": "IMPLEMENTED",
       "pos": [
         560,
@@ -170,7 +170,7 @@
       "id": "supervisor",
       "type": "backend",
       "label": "Agent Supervisor",
-      "sublabel": "task selection \u00b7 Builder launch",
+      "sublabel": "task selection · Builder launch",
       "pos": [
         560,
         780
@@ -196,7 +196,7 @@
       "id": "org_tenant",
       "type": "backend",
       "label": "Organizations & Tenants",
-      "sublabel": "B0.2 members \u00b7 B0.7 secrets",
+      "sublabel": "B0.2 members · B0.7 secrets",
       "tag": "IMPLEMENTED",
       "pos": [
         830,
@@ -223,7 +223,7 @@
       "id": "database",
       "type": "database",
       "label": "SQLite",
-      "sublabel": "one file \u00b7 fresh connection/call",
+      "sublabel": "one file · fresh connection/call",
       "pos": [
         850,
         540
@@ -235,7 +235,7 @@
       "sources": [
         {
           "path": "app/db.py",
-          "line": 1517,
+          "line": 1555,
           "label": "Database"
         }
       ]
@@ -244,7 +244,7 @@
       "id": "background",
       "type": "backend",
       "label": "Background Workers",
-      "sublabel": "cleanup poll \u00b7 agent PTY sessions",
+      "sublabel": "cleanup poll · agent PTY sessions",
       "pos": [
         830,
         700
@@ -261,7 +261,7 @@
         },
         {
           "path": "app/services/agent_session_manager.py",
-          "line": 122,
+          "line": 123,
           "label": "AgentSessionManager"
         }
       ]
@@ -283,7 +283,7 @@
       "sources": [
         {
           "path": "app/services/sandboxed_exec.py",
-          "line": 32,
+          "line": 33,
           "label": "SandboxedCommandRunner"
         },
         {
@@ -310,7 +310,7 @@
       "sources": [
         {
           "path": "app/services/github_merge_service.py",
-          "line": 40,
+          "line": 117,
           "label": "GitHubMergeService"
         }
       ]
@@ -319,7 +319,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "ProjectFlow process \u2014 127.0.0.1:8765 only",
+      "label": "ProjectFlow process — 127.0.0.1:8765 only",
       "wraps": [
         "api_entry",
         "auth_session",
