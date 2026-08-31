@@ -20,11 +20,6 @@ than assume this register is still accurate elsewhere without checking.
   create a new Task rather than reuse the old one — is proven and
   documented (ARCHITECTURE.md), but it is a real constraint a future
   UI/automation layer must design around, not assume away.
-- **`releases._next_version()` SELECT-then-INSERT race** (same class
-  as the two fixed in P0.9), lower frequency (needs two concurrent
-  `create_release()` calls with no explicit version for the same
-  repository). Add the same bounded-retry pattern if ever observed in
-  practice.
 - **Real-provider structured-invocation layer still has a bounded,
   not unlimited, failure surface** — P0.8's retry (this audit) handles
   one class of transient failure; a persistently-unavailable provider
@@ -44,10 +39,53 @@ than assume this register is still accurate elsewhere without checking.
   which predates E9's own `SecurityReviewService`. Cosmetic.
 - **UI complexity**: 13 Change Detail tabs, no Simple/Advanced mode
   split yet (P0.12 proposal only, not implemented).
+- **`pytest` 8.4.2 has one known advisory** (PYSEC-2026-1845 /
+  GHSA-6w46-j5rx-g56g), fixed in 9.0.3 — a test-only dependency, never
+  shipped in the running app, but `pyproject.toml`'s own `test =
+  ["pytest>=8,<9", ...]` caps below the fix; a major-version bump is a
+  real compatibility decision (B2's own audit, `pip-audit`), not made
+  unilaterally here. `pip` itself (the installer, not a `pyproject.
+  toml`-declared dependency) had 7 known advisories in this venv's
+  25.1.1 — upgraded locally to 26.2.1 during B2's audit (an environment
+  fix, not a repo change; a fresh venv bootstrap picks up whatever pip
+  it starts with, not something this repo pins).
+
+## ALREADY_RESOLVED (B2, 2026-09 — see docs/B2_RELEASE_CONCURRENCY_AND_RESIDUAL_SECURITY.md)
+
+- **`releases._next_version()` SELECT-then-INSERT race** — B2.1, fixed
+  with the same bounded-retry-on-collision pattern already proven for
+  `plans.revision`/`execution_waves.wave_number` (both P0.9): the
+  COUNT-based auto-increment fallback retries fresh on collision (up to
+  5 attempts); a deterministic version (explicit param, `VERSION` file,
+  or `PROJECT.yaml`'s `project.version`) raises a clean `ReleaseError`
+  on collision instead — including on the race window itself, not only
+  the sequential pre-check — never a raw `sqlite3` exception either
+  way. Proven with real `threading.Thread` concurrency (`tests/
+  test_b2_release_concurrency.py`), not merely asserted.
 - **`\|safe` usage in `workspace_detail.html`/`task_detail.html`**
-  (`resume_form`/`block_form`) not re-audited line-by-line for
-  user-controlled substrings in this pass — worth a dedicated,
-  narrowly-scoped follow-up read.
+  (`resume_form`/`block_form`) — B2.2, direct code audit (not
+  assumption): both are built entirely inside a Jinja `{% set %}...
+  {% endset %}` block, which autoescapes its own interior `{{ }}`
+  output exactly like any other template output; `|safe` only skips
+  re-escaping the already-safe result. The only interpolated values are
+  `w.agent` (gated by `w.agent in ['codex','claude']` before any
+  output — constrained to two fixed literals) and `w.repository_id`/
+  `w.id` (INTEGER FK columns, never attacker-supplied text).
+  **Confirmed: no real XSS vector.** A regression test proves the
+  guard holds even when `agent_workspaces.agent` is tampered with
+  directly (bypassing the normal create-time validation).
+- **Dependency/supply-chain audit** — B2.3, first real `pip-audit` run
+  against this project (`docs/PRODUCTIZATION_AUDIT.md` P0.17: "not
+  performed in this pass"). Found 4 real advisories against
+  `cryptography` 46.0.7 (PYSEC-2026-3552/3553/3554, GHSA-537c-gmf6-
+  5ccf) — none in APIs this app actually calls (only `Fernet`/
+  `MultiFernet`, never the affected PKCS7/x509-verification code), but
+  fixed anyway since a real fix existed with zero code changes needed:
+  `pyproject.toml`'s pin moved from `<47` to `<51`, installed version
+  now 50.0.1, re-audited clean (0 remaining advisories), `test_b07_
+  secrets.py`'s full 28-test suite re-run and unaffected. `pip`/
+  `pytest` findings noted separately above (environment tool / test-
+  only dependency, neither shipped in the running app).
 
 ## ALREADY_RESOLVED (B0/B1, 2026-08/09 — see docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md, docs/B1_HOSTED_SERVICE_READ_ISOLATION.md)
 

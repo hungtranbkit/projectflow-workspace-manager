@@ -28,7 +28,14 @@ dependencies = ["fastapi>=0.110,<1", "uvicorn>=0.27,<1", "jinja2>=3.1,<4", "pyth
     # audited Python crypto library -- the same justified, narrow
     # dependency-minimalism exception ADR-003 already set precedent for
     # (slowapi/itsdangerous), not a general policy reversal.
-    "cryptography>=42,<47"]
+    # B2.3 (docs/B2_RELEASE_CONCURRENCY_AND_RESIDUAL_SECURITY.md):
+    # pip-audit found 4 real advisories against 46.0.7 (PYSEC-2026-3552/
+    # 3553/3554, GHSA-537c-gmf6-5ccf) -- none in APIs this app actually
+    # calls (Fernet/MultiFernet only; the advisories are PKCS7 decrypt
+    # and x509 chain/name-constraint verification, both unused here),
+    # but a real fix exists with no code change needed, so the pin
+    # moved forward rather than left resting on "not reachable today."
+    "cryptography>=42,<51"]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9", "httpx>=0.27,<1"]

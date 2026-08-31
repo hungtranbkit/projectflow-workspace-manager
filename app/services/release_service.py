@@ -56,7 +56,16 @@ class ReleaseService:
             "SELECT rt.*, t.title FROM release_tasks rt JOIN tasks t ON t.id=rt.task_id WHERE rt.release_id=? ORDER BY rt.task_id", (release_id,))
 
     # ---- E10.8: versioning -- reuse the project's own convention -----
-    def _next_version(self, repo_path: str, repository_id: int) -> str:
+    def _next_version(self, repo_path: str, repository_id: int) -> str | None:
+        """Deterministic version identity, when one exists: `VERSION`
+        file content, else `PROJECT.yaml`'s `project.version`. None
+        means no deterministic source exists -- the caller falls back
+        to _auto_increment_version(), the only path with an actual
+        read-then-write race (B2.1, docs/B2_RELEASE_CONCURRENCY_AND_
+        RESIDUAL_SECURITY.md): a file-backed or caller-supplied version
+        is the same string every time it's resolved, so a genuine
+        collision on it is a real duplicate, never a race artifact --
+        retrying it would just recompute the identical value forever."""
         vf = Path(repo_path) / "VERSION"
         if vf.is_file() and vf.read_text().strip():
             return vf.read_text().strip()
@@ -68,6 +77,9 @@ class ReleaseService:
                 return str(v)
         except Exception:
             pass
+        return None
+
+    def _auto_increment_version(self, repository_id: int) -> str:
         n = self.db.one("SELECT COUNT(*) c FROM releases WHERE repository_id=?", (repository_id,))["c"]
         return f"v{n + 1}"
 
@@ -85,21 +97,68 @@ class ReleaseService:
                 raise ReleaseError(f"Task {tid} is not INTEGRATED (MERGED) into this repository yet")
             merges.append(m)
         source_commit = merges[-1]["merged_commit"]
-        version = version or self._next_version(repo["repo_path"], repository_id)
-        if self.db.one("SELECT id FROM releases WHERE repository_id=? AND version=?", (repository_id, version)):
-            raise ReleaseError(f"Version {version!r} already exists for this repository -- a Release version must be unique per artifact digest")
+
+        # B2.1: a deterministic version (explicit param, VERSION file, or
+        # PROJECT.yaml's project.version) resolves to the SAME string on
+        # every attempt -- a collision on it is a real duplicate, so it
+        # gets exactly one pre-check and one insert attempt, same as
+        # before this fix (never a pointless 5x retry of an identical
+        # value). Only the COUNT-based auto-increment fallback is
+        # genuinely racy (two concurrent callers can read the same
+        # COUNT before either commits) and gets the bounded-retry-on-
+        # collision treatment -- the SAME pattern already proven for
+        # plans.(change_id,revision) and execution_waves.wave_number
+        # (both P0.9).
+        deterministic_version = version or self._next_version(repo["repo_path"], repository_id)
+        release_id = None
+        resolved_version = None
+        attempts = 1 if deterministic_version is not None else 5
+        for _attempt in range(attempts):
+            this_version = deterministic_version or self._auto_increment_version(repository_id)
+            if self.db.one("SELECT id FROM releases WHERE repository_id=? AND version=?", (repository_id, this_version)):
+                if deterministic_version is not None:
+                    raise ReleaseError(f"Version {this_version!r} already exists for this repository -- a Release version must be unique per artifact digest")
+                # Auto-increment path: a concurrent caller's insert
+                # landed between our own read and this check -- exactly
+                # the race this loop exists to absorb. Recompute fresh
+                # and retry, never raise for a value nothing but our own
+                # stale read ever "chose".
+                continue
+            try:
+                release_id = self.db.execute(
+                    "INSERT INTO releases(repository_id,version,source_commit,spec_baseline_work_product_id,design_baseline_work_product_id,"
+                    "test_design_baseline_work_product_id,status,work_product_id) VALUES(?,?,?,?,?,?,?,?)",
+                    (repository_id, this_version, source_commit, None, None, None, "DRAFT", None))
+                resolved_version = this_version
+                break
+            except Exception as exc:
+                if deterministic_version is not None:
+                    # The race window on a deterministic value: another
+                    # caller's insert landed between our pre-check and
+                    # our own insert. Same clear error the pre-check
+                    # itself gives -- never a generic retry-exhausted
+                    # message for something that IS a real duplicate.
+                    raise ReleaseError(
+                        f"Version {this_version!r} already exists for this repository -- a Release version must be unique per artifact digest") from exc
+                continue
+        if release_id is None:
+            raise ReleaseError("Could not allocate a Release version (concurrent creation contention) -- please retry")
+        version = resolved_version
 
         t0 = self.db.one("SELECT change_id FROM tasks WHERE id=?", (task_ids[0],))
         change_id = t0["change_id"] if t0 else None
         baselines = self._baseline_wp_ids(change_id) if change_id else {}
+        # Built AFTER the version race is fully resolved -- never inside
+        # the retry loop above, so a collision-retry can never leave an
+        # orphaned WorkProduct behind, and this title always reflects
+        # the version that actually won (never one that lost the race).
         wp_id = self.work_products.create(
             kind="RELEASE_MANIFEST", title=f"Release {version} ({repo['repo_name']})", change_id=change_id, status="DRAFT",
             content_metadata={"repository_id": repository_id, "version": version, "source_commit": source_commit, "task_ids": task_ids})
-        release_id = self.db.execute(
-            "INSERT INTO releases(repository_id,version,source_commit,spec_baseline_work_product_id,design_baseline_work_product_id,"
-            "test_design_baseline_work_product_id,status,work_product_id) VALUES(?,?,?,?,?,?,?,?)",
-            (repository_id, version, source_commit, baselines.get("spec"), baselines.get("design"), baselines.get("test_design"),
-             "DRAFT", wp_id))
+        self.db.execute(
+            "UPDATE releases SET spec_baseline_work_product_id=?,design_baseline_work_product_id=?,"
+            "test_design_baseline_work_product_id=?,work_product_id=? WHERE id=?",
+            (baselines.get("spec"), baselines.get("design"), baselines.get("test_design"), wp_id, release_id))
         for tid, m in zip(task_ids, merges):
             self.db.execute("INSERT INTO release_tasks(release_id,task_id,merged_commit) VALUES(?,?,?)", (release_id, tid, m["merged_commit"]))
         self.db.event("release", release_id, "RELEASE_CREATED", f"version={version} tasks={task_ids}")
