@@ -1,16 +1,20 @@
 # B0 — Hosted Platform Security Foundation (spec, 2026-08)
 
 **Status: ADR-001 through ADR-004 approved as current product/
-engineering decisions. B0.1 (AuthN foundation) is IMPLEMENTED** —
-email magic-link login, self-hosted first-user console-token
-bootstrap, API tokens, in-house CSRF (ADR-003) applied to B0.1's own
-new routes, slowapi rate limiting (ADR-003) on the launch-blocking
-login-request endpoint (ADR-002). See the B0.1 implementation report
-(delivered alongside this update) for full acceptance-criteria
-coverage, test evidence (24 new tests, `tests/test_b01_authn.py`, plus
-the full 915-test regression suite passing unmodified), and residual
-risks. **B0.2 and later are NOT started — do not begin them
-automatically**; each still needs the same explicit go-ahead B0.1
+engineering decisions. B0.1 (AuthN foundation) and B0.2 (Organizations/
+Tenants) are IMPLEMENTED** — email magic-link login, self-hosted
+first-user console-token bootstrap, API tokens, in-house CSRF (ADR-003)
+applied to B0.1/B0.2's own new routes, slowapi rate limiting (ADR-003)
+on the launch-blocking login-request endpoint (ADR-002); real
+organizations/membership/coarse roles/invitations, `repositories.
+organization_id` as the one tenant-scoping lever (Design Principle #3),
+and an idempotent, evidence-tested B0.1→B0.2 bootstrap-to-org migration.
+See the B0.1 and B0.2 implementation reports (delivered alongside each
+update) for full acceptance-criteria coverage, test evidence (24 tests
+each, `tests/test_b01_authn.py` + `tests/test_b02_organizations.py`,
+plus the full 939-test regression suite passing unmodified), and
+residual risks. **B0.3 and later are NOT started — do not begin them
+automatically**; each still needs the same explicit go-ahead B0.1/B0.2
 received.
 
 Track A1 (Performance Foundation & Simple Mode) is complete and verified
@@ -160,13 +164,32 @@ required`; a no-op fallback (today's exact
 behavior) wherever it's `none`.
 
 ### B0.2 Organizations/Tenants -- IMPLEMENTED
-New tables `organizations(id, name, slug, created_at)` and
-`organization_members(org_id, user_id, role)`; `repositories.
-organization_id` FK (see Design Principles #3 for why this is the
-single leverage point). Every list/read query needs an
-`organization_id` filter added at the query layer — via one reusable
-scoping helper, not 50 hand-edited call sites. See the B0.2
-implementation report for the full file/test map.
+New tables (migration 33, `app/db.py`): `organizations(id, name, slug,
+created_at, created_by_user_id)`, `organization_members(org_id,
+user_id, role)` (role is a real, enforced `CHECK` constraint --
+OWNER/ADMIN/MEMBER/VIEWER), `organization_invitations` (hashed,
+single-use, 7-day TTL, mirroring `login_tokens`' own discipline
+exactly); `repositories.organization_id` FK, nullable (see Design
+Principles #3 for why this is the single leverage point -- no other
+table gained an `organization_id` column). Implemented in `app/
+services/organization_service.py` (`OrganizationService`: org
+creation, membership, invite/accept/revoke, role changes with a
+last-owner-can-never-be-removed invariant, and repository link/unlink
+with cross-org-conflict rejection) and the `/orgs/*` routes in
+`app/main.py`. `OrganizationService.member_role()` is the one
+data-layer boundary primitive every `/orgs/{id}/*` route's own guard
+is built on -- a non-member gets 404 (existence-hiding), never a
+403 that would confirm the org id is even valid. `_require_manage_role`
+(OWNER/ADMIN only) gates invite/remove/link actions at the service
+layer itself, never only hidden in the template. An idempotent
+`migrate_existing_data()` backfills a pre-existing B0.1 single user
+(and their repositories) into a personal organization on first
+`AUTH_MODE=required` startup after this migration ships -- and
+explicitly refuses to guess (leaves data untouched, logs a warning)
+if ownership is ever ambiguous. See the B0.2 implementation report for
+the full file/test map and the exact B0.2/B0.3 boundary this session
+drew (no retrofit of the 143 pre-existing engineering-lifecycle
+routes -- that general per-route AuthZ sweep stays B0.3's own scope).
 
 ### B0.3 AuthZ
 Coarse per-organization roles (OWNER/ADMIN/MEMBER/VIEWER). One

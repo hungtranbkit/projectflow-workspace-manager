@@ -1,5 +1,6 @@
 {% extends 'base.html' %}{% block title %}Account{% endblock %}{% block content %}
 <section class="panel"><h3>Signed in as {{user.email}}</h3>
+<p><a href="/orgs">Your organizations →</a></p>
 <form method="post" action="/auth/logout"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><button type="submit" class="ghost">Sign out</button></form>
 </section>
 

@@ -1464,6 +1464,53 @@ CREATE TABLE IF NOT EXISTS api_tokens(
 );
 CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
 """),
+    # B0.2 (Organizations/Tenants -- see docs/B0_HOSTED_PLATFORM_SECURITY_
+    # FOUNDATION.md's Design Principle #3): `repositories.organization_id`
+    # is the ONE scoping lever that transitively tenant-scopes the entire
+    # existing E1-E13 schema (every other table already FKs through
+    # `project_id` -> `repositories.id`, E1.6's own convention) -- no
+    # `organization_id` column is added to any of the other 50 tables.
+    # Nullable: a pre-B0.2 repository (or any repository registered under
+    # `AUTH_MODE=none`, which has no organizations at all) is valid with
+    # no organization. `organization_invitations` mirrors `login_tokens`'
+    # own "hashed at rest, single-use, short TTL" discipline exactly (see
+    # app/services/auth_service.py) -- never a raw, reusable token
+    # persisted anywhere.
+    (33, """
+CREATE TABLE IF NOT EXISTS organizations(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by_user_id INTEGER REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS organization_members(
+  id INTEGER PRIMARY KEY,
+  org_id INTEGER NOT NULL REFERENCES organizations(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  role TEXT NOT NULL CHECK(role IN ('OWNER','ADMIN','MEMBER','VIEWER')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(org_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_members_org ON organization_members(org_id);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id);
+CREATE TABLE IF NOT EXISTS organization_invitations(
+  id INTEGER PRIMARY KEY,
+  org_id INTEGER NOT NULL REFERENCES organizations(id),
+  email TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('OWNER','ADMIN','MEMBER','VIEWER')),
+  token_hash TEXT NOT NULL UNIQUE,
+  invited_by_user_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at TEXT NOT NULL,
+  accepted_at TEXT,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_org_invitations_org ON organization_invitations(org_id);
+CREATE INDEX IF NOT EXISTS idx_org_invitations_email ON organization_invitations(email);
+ALTER TABLE repositories ADD COLUMN organization_id INTEGER REFERENCES organizations(id);
+CREATE INDEX IF NOT EXISTS idx_repositories_org ON repositories(organization_id);
+"""),
 ]
 
 

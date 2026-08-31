@@ -1,0 +1,14 @@
+{% extends 'base.html' %}{% block title %}Organizations{% endblock %}
+{% block header_action %}<a class="button" href="/orgs/new">+ New organization</a>{% endblock %}
+{% block content %}
+<section class="panel"><h3>Your organizations</h3>
+{% if orgs %}<div class="table-scroll"><table><thead><tr><th>Name</th><th>Your role</th><th>Created</th></tr></thead><tbody>
+{% for o in orgs %}<tr onclick="location.href='/orgs/{{o.id}}'" style="cursor:pointer">
+<td><a href="/orgs/{{o.id}}"><strong>{{o.name}}</strong></a></td>
+<td><span class="badge">{{o.role}}</span></td>
+<td><small>{{o.created_at}}</small></td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}<div class="empty-state"><h4>No organizations yet</h4><a href="/orgs/new">Create one</a></div>{% endif %}
+</section>
+{% endblock %}

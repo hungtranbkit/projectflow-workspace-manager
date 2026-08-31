@@ -67,6 +67,13 @@ class AuthService:
         self.db.event("user", uid, "USER_CREATED", email.strip().lower())
         return self.get_user(uid)
 
+    def get_or_create_user(self, email: str) -> dict:
+        """B0.2's own entry point (OrganizationService.accept_invitation())
+        for the ONLY other place a user account is ever created besides
+        the B0.1 bootstrap flow -- public, unlike _create_user(), since
+        it's a cross-service call, not an internal implementation detail."""
+        return self.get_user_by_email(email) or self._create_user(email)
+
     # ---- magic-link login (ADR-002) --------------------------------
     def request_login(self, email: str) -> None:
         """ADR-002's own enumeration mitigation: this method NEVER

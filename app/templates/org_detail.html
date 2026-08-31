@@ -1,0 +1,68 @@
+{% extends 'base.html' %}{% block title %}{{org.name}}{% endblock %}
+{% block header_action %}<a href="/orgs">← All organizations</a>{% endblock %}
+{% block content %}
+<section class="panel"><h3>{{org.name}} <span class="badge">{{role}}</span></h3>
+<p><small>Created {{org.created_at}}</small></p>
+{% if error %}<div class="alert">{{error}}</div>{% endif %}
+</section>
+
+<div class="grid">
+
+<section class="panel"><h3>Members</h3>
+<div class="table-scroll"><table><thead><tr><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead><tbody>
+{% for m in members %}<tr>
+<td>{{m.email}}</td>
+<td>{% if role in ('OWNER',) and m.user_id != user.id %}
+<form method="post" action="/orgs/{{org.id}}/members/{{m.user_id}}/role" style="display:inline">
+<input type="hidden" name="csrf_token" value="{{csrf_token}}">
+<select name="role" onchange="this.form.submit()">{% for r in roles %}<option value="{{r}}" {{'selected' if r==m.role else ''}}>{{r}}</option>{% endfor %}</select>
+</form>
+{% else %}<span class="badge">{{m.role}}</span>{% endif %}</td>
+<td><small>{{m.joined_at}}</small></td>
+<td>{% if role in ('OWNER','ADMIN') and m.user_id != user.id %}
+<form method="post" action="/orgs/{{org.id}}/members/{{m.user_id}}/remove">
+<input type="hidden" name="csrf_token" value="{{csrf_token}}">
+<button type="submit" class="danger">Remove</button>
+</form>{% endif %}</td>
+</tr>{% endfor %}
+</tbody></table></div>
+
+{% if role in ('OWNER','ADMIN') %}
+<form method="post" action="/orgs/{{org.id}}/invite">
+<input type="hidden" name="csrf_token" value="{{csrf_token}}">
+<label>Invite by email<input type="email" name="email" required placeholder="teammate@example.com"></label>
+<label>Role<select name="role">{% for r in roles %}<option value="{{r}}" {{'selected' if r=='MEMBER' else ''}}>{{r}}</option>{% endfor %}</select></label>
+<button type="submit">Send invitation</button>
+</form>
+{% endif %}
+</section>
+
+<section class="panel"><h3>Pending invitations</h3>
+{% if invitations %}<div class="table-scroll"><table><thead><tr><th>Email</th><th>Role</th><th>Expires</th><th></th></tr></thead><tbody>
+{% for i in invitations %}<tr>
+<td>{{i.email}}</td><td><span class="badge">{{i.role}}</span></td><td><small>{{i.expires_at}}</small></td>
+<td>{% if role in ('OWNER','ADMIN') %}<form method="post" action="/orgs/{{org.id}}/invitations/{{i.id}}/revoke">
+<input type="hidden" name="csrf_token" value="{{csrf_token}}"><button type="submit" class="ghost">Revoke</button></form>{% endif %}</td>
+</tr>{% endfor %}
+</tbody></table></div>{% else %}<p class="empty">No pending invitations.</p>{% endif %}
+</section>
+
+</div>
+
+<section class="panel"><h3>Repositories</h3>
+{% if repos %}<div class="table-scroll"><table><thead><tr><th>Repository</th><th></th></tr></thead><tbody>
+{% for r in repos %}<tr><td>{{r.repo_name}}</td>
+<td>{% if role in ('OWNER','ADMIN') %}<form method="post" action="/orgs/{{org.id}}/repositories/{{r.id}}/unlink">
+<input type="hidden" name="csrf_token" value="{{csrf_token}}"><button type="submit" class="ghost">Unlink</button></form>{% endif %}</td>
+</tr>{% endfor %}
+</tbody></table></div>{% else %}<p class="empty">No repositories linked yet.</p>{% endif %}
+
+{% if role in ('OWNER','ADMIN') and unlinked_repos %}
+<form method="post" action="/orgs/{{org.id}}/repositories/link">
+<input type="hidden" name="csrf_token" value="{{csrf_token}}">
+<label>Link an existing repository<select name="repo_id">{% for r in unlinked_repos %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
+<button type="submit">Link</button>
+</form>
+{% endif %}
+</section>
+{% endblock %}

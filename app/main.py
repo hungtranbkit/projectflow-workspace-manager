@@ -45,6 +45,7 @@ from app.services.change_service import ChangeService, ChangeError, CHANGE_TYPES
 from app.services.change_list_summary_service import ChangeListSummaryService
 from app.services.simple_view_service import SimpleViewService, t as simple_t
 from app.services.auth_service import AuthService, AuthError
+from app.services.organization_service import OrganizationService, OrganizationError, ROLES as ORG_ROLES
 from app.services.email_sender import EmailSenderService
 from app.services.csrf import issue_csrf_token, require_csrf
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -369,6 +370,33 @@ def create_app(settings=None):
                 "FIRST_USER_SETUP: no users exist yet on this instance. "
                 "Visit /auth/bootstrap?token=%s to create the first account.", raw_bootstrap_token)
 
+    # ---- B0.2: Organizations/Tenants -----------------------------------
+    # docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md, Design Principle #3:
+    # repositories.organization_id is the ONE scoping lever that
+    # transitively tenant-scopes the whole existing E1-E13 schema -- no
+    # organization_id column anywhere else, no retrofit of the 143
+    # pre-existing routes (that general per-route AuthZ sweep stays
+    # B0.3's own scope). Constructed regardless of AUTH_MODE (cheap,
+    # inert) but its migration and routes only ever run/exist under
+    # AUTH_MODE=required, matching B0.1's own established pattern.
+    org_service = OrganizationService(db, auth_service, email_sender)
+    app.state.org_service = org_service
+    if settings.auth_mode == "required":
+        # Idempotent, safe, backward-compatible bootstrap-to-org backfill
+        # -- see OrganizationService.migrate_existing_data()'s own
+        # docstring for the exact, evidence-grounded rule (only ever acts
+        # when ownership is unambiguous). Runs on every startup, not just
+        # the first, since it is a genuine no-op once already migrated.
+        migration_result = org_service.migrate_existing_data()
+        app.state.b02_migration_result = migration_result
+        auth_logger = logging.getLogger("projectflow.auth")
+        if migration_result["action"] == "MIGRATED":
+            auth_logger.warning(
+                "B0.2_MIGRATION: created organization %s for the existing single user, linked %d "
+                "existing repositories to it.", migration_result["org_id"], migration_result["repositories_linked"])
+        elif migration_result["action"] == "SKIPPED_AMBIGUOUS":
+            auth_logger.warning("B0.2_MIGRATION: %s -- no repository was auto-assigned.", migration_result["reason"])
+
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx):
         resp = templates.TemplateResponse(request=request, name=name, context={"settings": settings, "mode": _ui_mode(request), **ctx})
@@ -542,6 +570,149 @@ def create_app(settings=None):
         return {"auth_mode": settings.auth_mode,
                 "authenticated": bool(user),
                 "email": user["email"] if user else None}
+
+    # ---- B0.2: Organizations/Tenants routes -----------------------------
+    def _org_context(request: Request, org_id: int):
+        """Shared membership guard every /orgs/{id}/* route below goes
+        through -- not logged in redirects to login (same UX as
+        /account); logged in but NOT a member of this specific org is a
+        404, not a 403 (existence-hiding: a non-member never learns an
+        org id is even valid, matching how a private repository behaves
+        elsewhere). This is the real, data-layer cross-org isolation
+        boundary this track's own instructions require -- never merely a
+        hidden UI link."""
+        user = _require_login_redirect(request)
+        if not isinstance(user, dict): return user
+        role = org_service.member_role(org_id, user["id"])
+        if not role: raise HTTPException(404)
+        return user, role
+
+    @app.get("/orgs", response_class=HTMLResponse)
+    def orgs_list(request: Request):
+        user = _require_login_redirect(request)
+        if not isinstance(user, dict): return user
+        return render(request, "orgs_list.html", user=user, orgs=org_service.list_orgs_for_user(user["id"]))
+
+    @app.get("/orgs/new", response_class=HTMLResponse)
+    def orgs_new_page(request: Request):
+        user = _require_login_redirect(request)
+        if not isinstance(user, dict): return user
+        return render(request, "orgs_new.html", error=None, csrf_token=issue_csrf_token(request))
+
+    @app.post("/orgs", response_class=HTMLResponse)
+    def orgs_create(request: Request, name: str = Form(...), csrf: None = Depends(require_csrf)):
+        user = _require_login_redirect(request)
+        if not isinstance(user, dict): return user
+        try:
+            org = org_service.create_org(name, user["id"])
+        except OrganizationError as e:
+            return render(request, "orgs_new.html", error=str(e), csrf_token=issue_csrf_token(request))
+        return RedirectResponse(f"/orgs/{org['id']}", 303)
+
+    @app.get("/orgs/{org_id}", response_class=HTMLResponse)
+    def org_detail(request: Request, org_id: int):
+        ctx = _org_context(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, role = ctx
+        org = org_service.get_org(org_id)
+        return render(request, "org_detail.html", org=org, role=role, user=user,
+                      members=org_service.list_members(org_id),
+                      invitations=org_service.list_pending_invitations(org_id),
+                      repos=org_service.list_org_repositories(org_id),
+                      unlinked_repos=org_service.list_unlinked_repositories(),
+                      csrf_token=issue_csrf_token(request), roles=list(ORG_ROLES),
+                      new_invitation=None, error=None)
+
+    @app.post("/orgs/{org_id}/invite", response_class=HTMLResponse)
+    def org_invite(request: Request, org_id: int, email: str = Form(...), role: str = Form("MEMBER"),
+                    csrf: None = Depends(require_csrf)):
+        ctx = _org_context(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, actor_role = ctx
+        org = org_service.get_org(org_id)
+        try:
+            result = org_service.invite_member(org_id, user["id"], email, role)
+        except OrganizationError as e:
+            # INSUFFICIENT_ROLE is a real authorization failure -- the
+            # same 403 every other org-management route raises on it,
+            # never a 200 (even a 200 that shows an error message is the
+            # wrong signal to a scripted/API caller, though the
+            # underlying rejection itself was never bypassed -- the
+            # service layer already refused the actual invite either
+            # way). Everything else here is ordinary form-validation
+            # feedback (bad email/role), rendered inline at 200.
+            if e.code == "INSUFFICIENT_ROLE": raise HTTPException(403, str(e))
+            return render(request, "org_detail.html", org=org, role=actor_role, user=user,
+                          members=org_service.list_members(org_id),
+                          invitations=org_service.list_pending_invitations(org_id),
+                          repos=org_service.list_org_repositories(org_id),
+                          unlinked_repos=org_service.list_unlinked_repositories(),
+                          csrf_token=issue_csrf_token(request), roles=list(ORG_ROLES),
+                          new_invitation=None, error=str(e))
+        return RedirectResponse(f"/orgs/{org_id}", 303)
+
+    @app.post("/orgs/{org_id}/invitations/{invitation_id}/revoke")
+    def org_revoke_invitation(request: Request, org_id: int, invitation_id: int, csrf: None = Depends(require_csrf)):
+        ctx = _org_context(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, _role = ctx
+        try: org_service.revoke_invitation(org_id, invitation_id, user["id"])
+        except OrganizationError as e: raise HTTPException(403, str(e))
+        return RedirectResponse(f"/orgs/{org_id}", 303)
+
+    @app.post("/orgs/{org_id}/members/{member_user_id}/remove")
+    def org_remove_member(request: Request, org_id: int, member_user_id: int, csrf: None = Depends(require_csrf)):
+        ctx = _org_context(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, _role = ctx
+        try: org_service.remove_member(org_id, member_user_id, user["id"])
+        except OrganizationError as e: raise HTTPException(403, str(e))
+        return RedirectResponse(f"/orgs/{org_id}", 303)
+
+    @app.post("/orgs/{org_id}/members/{member_user_id}/role")
+    def org_change_member_role(request: Request, org_id: int, member_user_id: int, role: str = Form(...),
+                                 csrf: None = Depends(require_csrf)):
+        ctx = _org_context(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, _role = ctx
+        try: org_service.change_member_role(org_id, member_user_id, role, user["id"])
+        except OrganizationError as e: raise HTTPException(403, str(e))
+        return RedirectResponse(f"/orgs/{org_id}", 303)
+
+    @app.post("/orgs/{org_id}/repositories/link")
+    def org_link_repository(request: Request, org_id: int, repo_id: int = Form(...), csrf: None = Depends(require_csrf)):
+        ctx = _org_context(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, _role = ctx
+        try: org_service.link_repository(org_id, repo_id, user["id"])
+        except OrganizationError as e: raise HTTPException(403, str(e))
+        return RedirectResponse(f"/orgs/{org_id}", 303)
+
+    @app.post("/orgs/{org_id}/repositories/{repo_id}/unlink")
+    def org_unlink_repository(request: Request, org_id: int, repo_id: int, csrf: None = Depends(require_csrf)):
+        ctx = _org_context(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, _role = ctx
+        try: org_service.unlink_repository(org_id, repo_id, user["id"])
+        except OrganizationError as e: raise HTTPException(403, str(e))
+        return RedirectResponse(f"/orgs/{org_id}", 303)
+
+    @app.get("/orgs/invitations/{token}", response_class=HTMLResponse)
+    def org_invitation_accept_page(request: Request, token: str):
+        if settings.auth_mode != "required": raise HTTPException(404)
+        row = org_service.peek_invitation(token)
+        return render(request, "org_invitation_accept.html", token=token,
+                      org_name=row["org_name"] if row else None, role=row["role"] if row else None, valid=bool(row))
+
+    @app.post("/orgs/invitations/{token}")
+    def org_invitation_accept_confirm(request: Request, token: str):
+        if settings.auth_mode != "required": raise HTTPException(404)
+        try:
+            org_user, org = org_service.accept_invitation(token)
+        except OrganizationError:
+            return render(request, "org_invitation_accept.html", token=token, org_name=None, role=None, valid=False)
+        request.session.clear(); request.session["user_id"] = org_user["id"]
+        return RedirectResponse(f"/orgs/{org['id']}", 303)
 
     def repo(repo_id):
         row = db.one("SELECT * FROM repositories WHERE id=? AND enabled=1", (repo_id,))

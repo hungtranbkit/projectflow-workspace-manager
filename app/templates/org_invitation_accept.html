@@ -1,0 +1,14 @@
+{% extends 'base.html' %}{% block title %}Organization invitation{% endblock %}{% block content %}
+<section class="panel" style="max-width:420px;margin:0 auto">
+{% if valid %}
+<h3>Join {{org_name}}?</h3>
+<p>You've been invited to join <b>{{org_name}}</b> as <b>{{role}}</b>.</p>
+<form method="post" action="/orgs/invitations/{{token}}">
+<button type="submit">Accept &amp; sign in</button>
+</form>
+{% else %}
+<h3>Invitation invalid or expired</h3>
+<p>This invitation is invalid, expired, revoked, or has already been used.</p>
+{% endif %}
+</section>
+{% endblock %}

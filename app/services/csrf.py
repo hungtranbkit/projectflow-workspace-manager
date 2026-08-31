@@ -47,7 +47,20 @@ async def require_csrf(request: Request) -> None:
     functions) against the session-bound value. 403, never a silent
     pass-through, on any mismatch -- including "no session-bound token
     at all" (a request arriving before issue_csrf_token() was ever
-    called for this session is treated as unverifiable, not trusted)."""
+    called for this session is treated as unverifiable, not trusted).
+
+    Real bug found and fixed during B0.2 implementation, retroactively
+    also fixing B0.1's own routes that share this dependency: under
+    `AUTH_MODE=none` SessionMiddleware is never installed at all (by
+    design -- see ADR-004), so `request.session` doesn't exist yet as a
+    scope key; touching it unconditionally raised an unhandled
+    AssertionError (a real 500, not the clean 404 every B0.1/B0.2 GET
+    route under `AUTH_MODE=none` already returns) for ANY POST route
+    guarded by this dependency -- reachable by any stray/scanning
+    request, not merely a theoretical gap. Checked first, before ever
+    touching `request.session`."""
+    if "session" not in request.scope:
+        raise HTTPException(404)
     expected = request.session.get(_SESSION_KEY)
     if not expected:
         raise HTTPException(403, "CSRF_TOKEN_MISSING")

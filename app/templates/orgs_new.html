@@ -1,0 +1,11 @@
+{% extends 'base.html' %}{% block title %}New organization{% endblock %}{% block content %}
+<section class="panel" style="max-width:420px;margin:0 auto">
+<h3>New organization</h3>
+{% if error %}<div class="alert">{{error}}</div>{% endif %}
+<form method="post" action="/orgs">
+<input type="hidden" name="csrf_token" value="{{csrf_token}}">
+<label>Organization name<input type="text" name="name" required autofocus placeholder="e.g. Acme Inc"></label>
+<button type="submit">Create</button>
+</form>
+</section>
+{% endblock %}
