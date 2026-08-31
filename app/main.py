@@ -75,6 +75,10 @@ from app.services.review_fix_orchestrator import ReviewFixOrchestratorService, R
 from app.services.integration_service import IntegrationService, IntegrationError
 from app.services.release_service import ReleaseService, ReleaseError
 from app.services.product_acceptance_service import ProductAcceptanceService, ProductAcceptanceError
+from app.services.incident_service import (
+    IncidentService, IncidentError, STATUSES as INCIDENT_STATUSES, CLASSIFICATIONS as INCIDENT_CLASSIFICATIONS,
+    SOURCES as INCIDENT_SOURCES, SEVERITIES as INCIDENT_SEVERITIES,
+)
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -761,11 +765,13 @@ def create_app(settings=None):
     @app.exception_handler(IntegrationError)
     @app.exception_handler(ReleaseError)
     @app.exception_handler(ProductAcceptanceError)
+    @app.exception_handler(IncidentError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5/E9/E10/E11's Change/WorkProduct/
-        Workflow/Plan/Spec-Proposal/Architecture/Design/Test-Design/
-        Autonomous-Execution/Worktree/Review-Fix/Integration/Release/
-        Product-Acceptance API is a pure JSON surface (E1.7: 'API/service
+        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5/E9/E10/E11/E12's Change/
+        WorkProduct/Workflow/Plan/Spec-Proposal/Architecture/Design/
+        Test-Design/Autonomous-Execution/Worktree/Review-Fix/
+        Integration/Release/Product-Acceptance/Incident API is a pure
+        JSON surface (E1.7: 'API/service
         correctness first, no large UI yet') -- a clean 400 + message,
         never the HTML 'Action blocked' page the older form-posting
         routes use."""
@@ -2475,6 +2481,31 @@ def create_app(settings=None):
         return render(request,"change_acceptance.html",cid=cid,active_tab="acceptance",header=change_control_surface.header(cid),
                       data=change_control_surface.acceptance_tab(cid))
 
+    # ------------------------------------------------------ Incidents (E12 UI)
+    @app.get("/incidents",response_class=HTMLResponse)
+    def incidents_page(request:Request,status:str="",project_id:str=""):
+        pid=int(project_id) if project_id.strip().isdigit() else None
+        rows=incident_service.list(project_id=pid,status=status.strip() or None)
+        for r in rows:
+            r["change"]=changes.get(r["change_id"]) if r["change_id"] else None
+        open_rows=[r for r in rows if r["status"] not in ("CLOSED",)]
+        return render(request,"incidents.html",incidents=rows,open_incidents=open_rows,
+                      filters={"status":status,"project_id":project_id},statuses=INCIDENT_STATUSES,
+                      repos=db.all("SELECT * FROM repositories WHERE enabled=1"))
+    @app.get("/incidents/{iid}",response_class=HTMLResponse)
+    def incident_detail(request:Request,iid:int):
+        row=incident_row(iid)
+        change=changes.get(row["change_id"]) if row["change_id"] else None
+        workflow_state=workflow_service.evaluate_workflow(row["change_id"]) if row["change_id"] else None
+        release=incident_service._current_release(row["change_id"]) if row["change_id"] else None
+        governing_features=[l["target_id"] for l in trace.for_source("change",row["change_id"])
+                              if l["target_type"]=="spec_feature"] if row["change_id"] else []
+        return render(request,"incident_detail.html",incident=row,change=change,workflow_state=workflow_state,
+                      release=release,governing_features=governing_features,
+                      regression_history=incident_service.regression_history(iid),
+                      classifications=INCIDENT_CLASSIFICATIONS,sources=INCIDENT_SOURCES,severities=INCIDENT_SEVERITIES,
+                      test_case_specs=test_case_specs_store.list_for_change(row["change_id"]) if row["change_id"] else [])
+
     @app.get("/api/changes/{cid}/control-surface")
     def api_change_control_surface(cid:int):
         """E7.5.19: one composed, read-only view across every existing
@@ -3162,6 +3193,12 @@ def create_app(settings=None):
     workflow_service.human_acceptance_gate=product_acceptance_service
     change_control_surface.product_acceptance_service=product_acceptance_service
 
+    # ---- E12: Bug / Incident Closed Loop -------------------------------
+    incident_service=IncidentService(
+        db,changes,work_products,trace,spec_lifecycle_service,test_case_specs_store,
+        workflow_service,release_service,specs_root)
+    app.state.incident_service=incident_service
+
     @app.get("/api/changes/{cid}/autonomous-execution")
     def api_autonomous_execution_status(cid:int):
         change_row(cid)
@@ -3351,6 +3388,71 @@ def create_app(settings=None):
     @app.get("/api/product-acceptances/{paid}/evidence")
     def api_acceptance_evidence(paid:int):
         return product_acceptance_service.evidence(paid)
+
+    # ---- E12: Bug / Incident Closed Loop API ----------------------
+    def incident_row(iid:int):
+        row=incident_service.get(iid)
+        if not row: raise HTTPException(404,"Incident not found")
+        return row
+    @app.post("/api/incidents")
+    def api_report_incident(title:str=Form(...),description:str=Form(""),source:str=Form("MANUAL"),
+                             severity:str=Form("MEDIUM"),reported_by:str=Form("system"),project_id:str=Form("")):
+        pid=int(project_id) if project_id.strip().isdigit() else None
+        return incident_service.report(title,description,source,severity,reported_by,pid)
+    @app.get("/api/incidents")
+    def api_list_incidents(project_id:str="",status:str=""):
+        pid=int(project_id) if project_id.strip().isdigit() else None
+        return incident_service.list(project_id=pid,status=status.strip() or None)
+    @app.get("/api/incidents/{iid}")
+    def api_get_incident(iid:int):
+        row=incident_row(iid)
+        return {**row,"regression_history":incident_service.regression_history(iid)}
+    @app.post("/api/incidents/{iid}/classify")
+    def api_classify_incident(iid:int,classification:str=Form(...),severity:str=Form("")):
+        incident_row(iid)
+        return incident_service.classify(iid,classification,severity.strip() or None)
+    @app.post("/api/incidents/{iid}/link-spec")
+    def api_link_incident_spec(iid:int,feature_id:str=Form(...),requirement_ids:str=Form(""),acceptance_ids:str=Form("")):
+        incident_row(iid)
+        def _ids(raw): return [x.strip() for x in raw.replace(",","\n").splitlines() if x.strip()]
+        return incident_service.link_spec(iid,feature_id,_ids(requirement_ids),_ids(acceptance_ids))
+    @app.post("/api/incidents/{iid}/spec-gap")
+    def api_incident_spec_gap(iid:int,note:str=Form("")):
+        incident_row(iid)
+        return incident_service.mark_spec_gap(iid,note)
+    @app.post("/api/incidents/{iid}/sync")
+    def api_sync_incident(iid:int):
+        incident_row(iid)
+        incident_service.sync_spec_gap(iid)
+        return incident_service.sync_status(iid)
+    @app.post("/api/incidents/{iid}/reproduction/start")
+    def api_incident_reproduction_start(iid:int):
+        incident_row(iid)
+        return incident_service.start_reproduction(iid)
+    @app.post("/api/incidents/{iid}/reproduction/record")
+    def api_incident_reproduction_record(iid:int,reproduced:bool=Form(...),note:str=Form(""),commit:str=Form("")):
+        incident_row(iid)
+        return incident_service.record_reproduction(iid,reproduced,note,commit.strip() or None)
+    @app.post("/api/incidents/{iid}/regression-test")
+    def api_incident_regression_test(iid:int,test_case_spec_id:int=Form(...)):
+        incident_row(iid)
+        return incident_service.add_regression_test(iid,test_case_spec_id)
+    @app.post("/api/incidents/{iid}/regression-result")
+    def api_incident_regression_result(iid:int,status:str=Form(...),tested_commit:str=Form(...),command:str=Form("")):
+        incident_row(iid)
+        return incident_service.record_regression_result(iid,status,tested_commit,command)
+    @app.post("/api/incidents/{iid}/verify-resolved")
+    def api_incident_verify_resolved(iid:int):
+        incident_row(iid)
+        return incident_service.verify_resolved(iid)
+    @app.post("/api/incidents/{iid}/close")
+    def api_incident_close(iid:int,closed_by:str=Form("human"),note:str=Form("")):
+        incident_row(iid)
+        return incident_service.close(iid,closed_by,note)
+    @app.post("/api/incidents/{iid}/reopen")
+    def api_incident_reopen(iid:int,reason:str=Form(...)):
+        incident_row(iid)
+        return incident_service.reopen(iid,reason)
 
     @app.post("/api/tasks/{tid}/workspaces")
     def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):

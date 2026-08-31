@@ -213,11 +213,21 @@ def test_accept_requires_checklist_then_binds_and_closes_gate(client, git_repo):
     cid = _user_facing_change(client, rid)
     tid, _ = materialize_task(client, cid)
     _link_spec_layer_feature(client, cid)
+    # A real MANUAL_ACCEPTANCE TestCaseSpec too -- so the checklist has
+    # at least one MANUAL_TEST_CASE item, actually exercising the
+    # test_case_spec_id-linked manual-evidence write below (not just the
+    # ACCEPTANCE_CRITERION items, which never carry a test_case_spec_id).
+    _db(client).execute(
+        "INSERT INTO test_case_specs(change_id,item_key,requirement_ids,test_level,test_type,title,expected_results,status) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (cid, "TC-MANUAL-1", json.dumps(["REQ-001"]), "MANUAL", "MANUAL_ACCEPTANCE",
+         "Visual check", "Looks right", "APPROVED"))
     _seed_production_release(client, rid, cid, tid)
     pas = client.app.state.product_acceptance_service
     pa = pas.request(cid, requested_by="human")
     assert pa["status"] == "PENDING"
     assert pa["artifact_digest"] == "sha256:testdigest"
+    assert any(i["test_case_spec_id"] for i in pas.checklist(pa["id"]))
 
     try:
         pas.accept(pa["id"], "human")

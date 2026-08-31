@@ -328,11 +328,18 @@ class ProductAcceptanceService:
         tr_status = {"PASS": "PASS", "FAIL": "FAIL"}.get(status)
         if not tr_status:
             return
+        # test_case_spec_id set directly in the INSERT -- Database.
+        # execute() opens a fresh connection per call (app/db.py), so a
+        # follow-up UPDATE keyed on SQL last_insert_rowid() would read
+        # that NEW connection's own (empty) insert history, not the
+        # INSERT above's, and would silently leave test_case_spec_id
+        # NULL. Found while building E12's own equivalent evidence
+        # write (app/services/incident_service.py).
         self.db.execute(
-            "INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit,started_at,finished_at) "
-            "VALUES('product_acceptance',?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
-            (pa["id"], f"manual acceptance check: {item['title'][:200]}", "ACCEPTANCE", tr_status, pa.get("artifact_digest") or ""))
-        self.db.execute("UPDATE test_runs SET test_case_spec_id=? WHERE id=last_insert_rowid()", (item["test_case_spec_id"],))
+            "INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit,test_case_spec_id,started_at,finished_at) "
+            "VALUES('product_acceptance',?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
+            (pa["id"], f"manual acceptance check: {item['title'][:200]}", "ACCEPTANCE", tr_status,
+             pa.get("artifact_digest") or "", item["test_case_spec_id"]))
 
     def check_item(self, pa_id: int, item_id: int, status: str, note: str = "", checked_by: str = "") -> dict:
         status = (status or "").strip().upper()

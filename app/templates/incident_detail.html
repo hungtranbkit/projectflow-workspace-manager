@@ -1,0 +1,138 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}{{incident.title}}{% endblock %}{% block header_action %}<a href="/incidents">← All Incidents</a>{% endblock %}{% block content %}
+
+{% set flow = ['REPORTED','CLASSIFIED','SPEC_LINKED','REPRODUCED','REGRESSION_TEST_ADDED','FIX_PLANNED','FIX_REVIEWED','DEPLOYED','VERIFIED','CLOSED'] %}
+{% set alt_map = {'SPEC_GAP_PENDING':'SPEC_LINKED','REPRODUCING':'REPRODUCED','CANNOT_REPRODUCE':'REPRODUCED','VERIFICATION_FAILED':'DEPLOYED','REOPENED':'REPRODUCED'} %}
+{% set effective = alt_map.get(incident.status, incident.status) %}
+{% set cur_idx = flow.index(effective) if effective in flow else -1 %}
+
+<section class="status-hero state-{{'complete' if incident.status=='CLOSED' else ('action_required' if incident.status in ('VERIFICATION_FAILED','CANNOT_REPRODUCE','REOPENED') else 'working')}}" aria-label="Incident status">
+<div class="hero-kicker">{{incident.status.replace('_',' ')}}</div>
+<h3>{{incident.title}}</h3>
+<p>{{incident.description or 'No description.'}}</p>
+<div class="wf-checklist">
+{% for step in flow %}
+<div class="wf-check {{'wf-done' if loop.index0 < cur_idx or incident.status=='CLOSED' else ('wf-current' if loop.index0 == cur_idx else 'wf-future')}}">
+<span class="wf-mark">{{'✓' if loop.index0 < cur_idx or incident.status=='CLOSED' else ('●' if loop.index0 == cur_idx else '○')}}</span>
+<span class="wf-label">{{step.replace('_',' ')|title}}</span>
+</div>
+{% endfor %}
+</div>
+{% if incident.status == 'SPEC_GAP_PENDING' %}<p><small>Waiting on a spec proposal for the fix Change (Spec tab) -- <button type="button" onclick="runReleaseAction('/api/incidents/{{incident.id}}/sync',this)">Sync</button></small></p>{% endif %}
+{% if incident.status in ('CANNOT_REPRODUCE',) %}<p><small>Could not be reproduced.</small></p>{% endif %}
+{% if incident.status == 'VERIFICATION_FAILED' %}<p><small>The regression test did not PASS against the resolving deployment's own commit -- record a fresh PASS result, then Verify Resolved again.</small></p>{% endif %}
+</section>
+
+<div class="cards">
+<article><b>{{incident.severity}}</b><span>Severity</span></article>
+<article><b class="cap">{{(incident.classification or '—')|lower}}</b><span>Classification</span></article>
+<article><b class="cap">{{incident.source|lower|replace('_',' ')}}</b><span>Source</span></article>
+<article><b>{% if change %}<a href="/changes/{{change.id}}">{{change.title}}</a>{% else %}—{% endif %}</b><span>Fix Change</span></article>
+</div>
+
+<section class="panel"><h3>Actions</h3>
+<div class="actions">
+{% if incident.status in ('REPORTED','CLASSIFIED','REOPENED') %}
+<details class="mark-ready-form"><summary class="button">Classify</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/incidents/{{incident.id}}/classify',this.querySelector('button'),{classification:this.classification.value,severity:this.severity.value})">
+<label>Classification<select name="classification">{% for c in classifications %}<option value="{{c}}">{{c.replace('_',' ')|title}}</option>{% endfor %}</select></label>
+<label>Severity (optional override)<select name="severity"><option value="">—</option>{% for s in severities %}<option value="{{s}}">{{s}}</option>{% endfor %}</select></label>
+<button type="submit">Classify</button>
+</form></details>
+{% endif %}
+
+{% if incident.status == 'CLASSIFIED' %}
+<details class="mark-ready-form"><summary class="button">Link Spec</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/incidents/{{incident.id}}/link-spec',this.querySelector('button'),{feature_id:this.feature_id.value,requirement_ids:this.requirement_ids.value,acceptance_ids:this.acceptance_ids.value})">
+<label>Feature id<input name="feature_id" placeholder="FEAT-..." required></label>
+<label>Requirement ids<input name="requirement_ids" placeholder="REQ-001, REQ-002"></label>
+<label>Acceptance ids<input name="acceptance_ids" placeholder="AC-001"></label>
+<button type="submit">Link</button>
+</form></details>
+<button type="button" class="ghost" onclick="runReleaseAction('/api/incidents/{{incident.id}}/spec-gap',this,{})">No existing spec covers this -- raise a spec gap</button>
+{% endif %}
+
+{% if incident.status == 'SPEC_LINKED' %}
+<button type="button" onclick="runReleaseAction('/api/incidents/{{incident.id}}/reproduction/start',this)">Start Reproduction</button>
+{% endif %}
+{% if incident.status == 'REPRODUCING' %}
+<details class="mark-ready-form"><summary class="button">Record Reproduction Result</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/incidents/{{incident.id}}/reproduction/record',this.querySelector('button'),{reproduced:this.reproduced.value,note:this.note.value,commit:this.commit.value})">
+<label>Result<select name="reproduced"><option value="true">Reproduced</option><option value="false">Could not reproduce</option></select></label>
+<label>Note<textarea name="note" rows="2"></textarea></label>
+<label>Commit (optional)<input name="commit"></label>
+<button type="submit">Record</button>
+</form></details>
+{% endif %}
+
+{% if incident.status == 'REPRODUCED' %}
+<details class="mark-ready-form"><summary class="button">Attach Regression Test</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/incidents/{{incident.id}}/regression-test',this.querySelector('button'),{test_case_spec_id:this.test_case_spec_id.value})">
+<label>TestCaseSpec (on the fix Change)<select name="test_case_spec_id" required>
+{% for tc in test_case_specs %}<option value="{{tc.id}}">{{tc.item_key}} — {{tc.title}}</option>{% endfor %}
+</select></label>
+<button type="submit">Attach</button>
+</form></details>
+{% if not test_case_specs %}<p><small>No TestCaseSpecs exist yet for the fix Change -- create one from the Tests tab.</small></p>{% endif %}
+{% endif %}
+
+{% if incident.regression_test_case_spec_id and incident.status in ('REGRESSION_TEST_ADDED','FIX_PLANNED','FIX_REVIEWED','DEPLOYED','VERIFICATION_FAILED') %}
+<details class="mark-ready-form"><summary class="button ghost">Record Regression Test Result</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/incidents/{{incident.id}}/regression-result',this.querySelector('button'),{status:this.status.value,tested_commit:this.tested_commit.value,command:this.command.value})">
+<label>Result<select name="status"><option value="FAIL">FAIL (before fix)</option><option value="PASS">PASS (after fix)</option></select></label>
+<label>Tested commit<input name="tested_commit" required placeholder="the commit/artifact this result was tested against"></label>
+<label>Command (optional)<input name="command"></label>
+<button type="submit">Record</button>
+</form></details>
+{% endif %}
+
+{% if incident.status in ('REGRESSION_TEST_ADDED','FIX_PLANNED','FIX_REVIEWED','DEPLOYED') %}
+<button type="button" class="ghost" onclick="runReleaseAction('/api/incidents/{{incident.id}}/sync',this)">Sync from fix Change</button>
+{% endif %}
+{% if incident.status == 'DEPLOYED' %}
+<button type="button" class="success" onclick="runReleaseAction('/api/incidents/{{incident.id}}/verify-resolved',this)">Verify Resolved</button>
+{% endif %}
+{% if incident.status == 'VERIFICATION_FAILED' %}
+<button type="button" onclick="runReleaseAction('/api/incidents/{{incident.id}}/verify-resolved',this)">Retry Verify Resolved</button>
+{% endif %}
+
+{% if incident.status in ('VERIFIED','CANNOT_REPRODUCE') %}
+<details class="mark-ready-form"><summary class="button success">Close</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/incidents/{{incident.id}}/close',this.querySelector('button'),{closed_by:this.closed_by.value,note:this.note.value})">
+<label>Closed by<input name="closed_by" value="human" required></label>
+<label>Note<textarea name="note" rows="2"></textarea></label>
+<button type="submit">Close</button>
+</form></details>
+{% endif %}
+{% if incident.status in ('CLOSED','VERIFIED','VERIFICATION_FAILED') %}
+<details class="mark-ready-form"><summary class="button danger">Reopen</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/incidents/{{incident.id}}/reopen',this.querySelector('button'),{reason:this.reason.value})">
+<label>Reason (required)<textarea name="reason" rows="2" required></textarea></label>
+<button type="submit" class="danger">Reopen</button>
+</form></details>
+{% endif %}
+</div>
+</section>
+
+<section class="panel"><h3>Regression Test Evidence</h3>
+{% if regression_history %}
+<div class="table-scroll"><table><thead><tr><th>Result</th><th>Commit</th><th>When</th></tr></thead><tbody>
+{% for r in regression_history %}<tr>
+<td><span class="badge {{'pass' if r.status=='PASS' else 'fail'}}">{{r.status}}</span></td>
+<td><code>{{(r.tested_commit or '—')[:12]}}</code></td>
+<td><small>{{r.created_at if r.created_at is defined else r.started_at}}</small></td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+{{ m.empty('No regression test evidence recorded yet') }}
+{% endif %}
+</section>
+
+{% if release %}
+<section class="panel"><h3>Resolving Release</h3>
+<div class="facts"><div><small>Version</small><b>{{release.version}}</b></div><div><small>Status</small><b class="cap">{{release.status|lower}}</b></div>
+<div><small>Source commit</small><code>{{(release.source_commit or '—')[:12]}}</code></div>
+<div><small>Artifact digest</small><code>{{(release.artifact_digest or '—')[:19]}}</code></div></div>
+</section>
+{% endif %}
+
+{% endblock %}

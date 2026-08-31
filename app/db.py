@@ -1305,6 +1305,49 @@ CREATE INDEX IF NOT EXISTS idx_product_acceptance_change ON product_acceptances(
 CREATE INDEX IF NOT EXISTS idx_product_acceptance_checklist_pa ON product_acceptance_checklist_items(product_acceptance_id);
 CREATE INDEX IF NOT EXISTS idx_changes_parent ON changes(parent_change_id);
 """),
+    # V29 (Phase E12: Bug/Incident Closed Loop). An Incident is a thin
+    # orchestration/tracking layer OVER a Change (fix_change_id) --
+    # exactly the same relationship ProductAcceptance already has to
+    # Release/Deployment (E11): it never re-implements Spec/Plan/Task/
+    # Review/Release/Deploy, it composes them and adds only what's
+    # genuinely incident-specific (reproduction evidence, a regression
+    # test that must go FAIL-before-fix / PASS-after-fix, and a final
+    # "verify incident resolved" check bound to the exact resolving
+    # Release/Deployment -- same artifact-binding discipline E11 used).
+    (29, """
+CREATE TABLE IF NOT EXISTS incidents(
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER REFERENCES repositories(id),
+  change_id INTEGER REFERENCES changes(id),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'MANUAL',
+  severity TEXT NOT NULL DEFAULT 'MEDIUM',
+  classification TEXT,
+  status TEXT NOT NULL DEFAULT 'REPORTED',
+  spec_feature_id TEXT,
+  requirement_ids TEXT NOT NULL DEFAULT '[]',
+  acceptance_ids TEXT NOT NULL DEFAULT '[]',
+  spec_gap_proposal_id INTEGER REFERENCES spec_proposals(id),
+  reproduction_note TEXT NOT NULL DEFAULT '',
+  reproduced_commit TEXT,
+  regression_test_case_spec_id INTEGER REFERENCES test_case_specs(id),
+  resolved_release_id INTEGER REFERENCES releases(id),
+  resolved_deployment_id INTEGER REFERENCES deployments(id),
+  verification_note TEXT NOT NULL DEFAULT '',
+  verified_at TEXT,
+  work_product_id INTEGER REFERENCES work_products(id),
+  reported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reported_by TEXT NOT NULL DEFAULT 'system',
+  closed_at TEXT,
+  closed_by TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_change ON incidents(change_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
+CREATE INDEX IF NOT EXISTS idx_incidents_project ON incidents(project_id);
+"""),
 ]
 
 

@@ -1,0 +1,53 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Incidents{% endblock %}{% block content %}
+
+{% set status_badge = {'REPORTED':'created','CLASSIFIED':'running','SPEC_GAP_PENDING':'created','SPEC_LINKED':'running',
+   'REPRODUCING':'running','REPRODUCED':'fail','CANNOT_REPRODUCE':'',
+   'REGRESSION_TEST_ADDED':'running','FIX_PLANNED':'running','FIX_REVIEWED':'running','DEPLOYED':'ready',
+   'VERIFIED':'pass','VERIFICATION_FAILED':'fail','CLOSED':'done','REOPENED':'fail'} %}
+{% set severity_badge = {'CRITICAL':'fail','HIGH':'fix_required','MEDIUM':'created','LOW':''} %}
+
+<section class="panel">
+<h3>Report an Incident</h3>
+<p><small>Production/User Feedback/Monitoring -> Incident/Bug -> Classify -> Link Spec -> Reproduce -> Regression Test -> Fix -> Review -> Deploy -> Verify -> Close.</small></p>
+<details class="mark-ready-form"><summary class="button">Report Incident</summary>
+<form onsubmit="event.preventDefault();runReleaseAction('/api/incidents',this.querySelector('button'),{title:this.title.value,description:this.description.value,source:this.source.value,severity:this.severity.value,project_id:this.project_id.value,reported_by:this.reported_by.value})">
+<label>Title<input name="title" required></label>
+<label>Description<textarea name="description" rows="3"></textarea></label>
+<div class="grid">
+<label>Source<select name="source">{% for s in sources %}<option value="{{s}}">{{s.replace('_',' ')|title}}</option>{% endfor %}</select></label>
+<label>Severity<select name="severity"><option value="MEDIUM" selected>Medium</option><option value="LOW">Low</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option></select></label>
+</div>
+<label>Project<select name="project_id"><option value="">—</option>{% for r in repos %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>
+<label>Reported by<input name="reported_by" value="human"></label>
+<button type="submit">Report</button>
+</form></details>
+</section>
+
+<section class="panel"><h3>Open Incidents ({{open_incidents|length}})</h3>
+{% if open_incidents %}
+<div class="table-scroll"><table><thead><tr><th>Title</th><th>Status</th><th>Severity</th><th>Classification</th><th>Fix Change</th><th>Reported</th></tr></thead><tbody>
+{% for i in open_incidents %}<tr onclick="location.href='/incidents/{{i.id}}'" style="cursor:pointer">
+<td><strong>{{i.title}}</strong></td>
+<td><span class="badge {{status_badge.get(i.status,'')}}">{{i.status.replace('_',' ')}}</span></td>
+<td><span class="badge {{severity_badge.get(i.severity,'')}}">{{i.severity}}</span></td>
+<td class="cap">{{(i.classification or '—')|lower}}</td>
+<td>{% if i.change %}<a href="/changes/{{i.change.id}}">{{i.change.title}}</a>{% else %}—{% endif %}</td>
+<td><small>{{i.reported_at}}</small></td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+{{ m.empty('No open incidents', 'Nothing reported, or everything is closed.') }}
+{% endif %}
+</section>
+
+{% if incidents|length > open_incidents|length %}
+<section class="panel"><h3>Closed</h3>
+<div class="table-scroll"><table><thead><tr><th>Title</th><th>Severity</th><th>Closed</th></tr></thead><tbody>
+{% for i in incidents if i.status == 'CLOSED' %}<tr onclick="location.href='/incidents/{{i.id}}'" style="cursor:pointer">
+<td>{{i.title}}</td><td><span class="badge {{severity_badge.get(i.severity,'')}}">{{i.severity}}</span></td><td><small>{{i.closed_at}}</small></td>
+</tr>{% endfor %}
+</tbody></table></div>
+</section>
+{% endif %}
+
+{% endblock %}
