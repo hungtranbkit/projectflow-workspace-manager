@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "ProjectFlow Runtime Architecture",
-    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0.1-B0.7 all implemented",
+    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0.1-B0.7 + B1.1-B1.2 implemented",
     "output": "projectflow-runtime.architecture.html",
     "animation": "trace",
     "visual_preset": "signal-flow",
@@ -14,7 +14,7 @@
     ],
     "repository": {
       "url": "https://github.com/hungtranbkit/projectflow-workspace-manager",
-      "revision": "c2800336c7f9023c623092c4c337ecef733b50b1"
+      "revision": "b69d656fc0ba9ae481e116e6d196f2ba698ec74f"
     },
     "views": [
       {
@@ -39,7 +39,7 @@
           "authz_csrf",
           "database"
         ],
-        "note": "Shipped: identity (B0.1), org membership (B0.2), a require_role() sweep across 157 routes (B0.3), CSRF folded into it (B0.4)."
+        "note": "Shipped: identity (B0.1), org membership (B0.2), a require_role()/CSRF sweep on writes (B0.3/4), require_read_role() on reads (B1.1)."
       },
       {
         "id": "agent-execution",
@@ -117,7 +117,7 @@
       "id": "authz_csrf",
       "type": "security",
       "label": "AuthZ + CSRF Guard",
-      "sublabel": "B0.3 role sweep + B0.4 CSRF",
+      "sublabel": "B0.3 write sweep + B1.1 read sweep",
       "tag": "IMPLEMENTED",
       "pos": [
         560,
@@ -135,13 +135,13 @@
         },
         {
           "path": "app/main.py",
-          "line": 535,
+          "line": 542,
           "label": "require_role()"
         },
         {
-          "path": "app/services/csrf.py",
-          "line": 43,
-          "label": "require_csrf()"
+          "path": "app/main.py",
+          "line": 608,
+          "label": "require_read_role()"
         }
       ]
     },
@@ -270,7 +270,7 @@
       "id": "sandbox_runtime",
       "type": "cloud",
       "label": "Docker Sandbox Runtime",
-      "sublabel": "B0.6 · mandatory when required",
+      "sublabel": "B0.6 mandatory exec · B1.2 SSRF guard",
       "tag": "IMPLEMENTED",
       "pos": [
         830,
@@ -290,6 +290,11 @@
           "path": "app/services/sandbox_runtime.py",
           "line": 111,
           "label": "run_ephemeral()"
+        },
+        {
+          "path": "app/services/ssrf_guard.py",
+          "line": 47,
+          "label": "check_url()"
         }
       ]
     },
@@ -414,7 +419,7 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "Implemented (current HEAD) -- B0.1 through B0.7",
+      "title": "Implemented (current HEAD) -- B0.1-B0.7 + B1.1-B1.2",
       "items": [
         "AuthN: email magic-link, API tokens, self-hosted bootstrap (B0.1)",
         "Organizations/tenants: membership, roles, invitations (B0.2)",
@@ -423,6 +428,8 @@
         "Rate limiting on named abuse-sensitive auth/org/token routes (B0.5)",
         "Mandatory ephemeral-container sandboxing for tenant PROJECT.yaml commands (B0.6)",
         "Encrypted org-scoped secret store + transcript/log redaction (B0.7)",
+        "GET-route cross-org read isolation: require_read_role() + list filtering (B1.1)",
+        "SSRF guard on tenant health-check URLs, AUTH_MODE=required only (B1.2)",
         "AUTH_MODE=none: zero new surface, the permanent self-hosted default (ADR-004)"
       ]
     },
@@ -430,8 +437,9 @@
       "dot": "amber",
       "title": "Known, explicitly deferred residual gaps",
       "items": [
-        "B0.3's AuthZ sweep covers mutating routes only -- GET-route cross-org read isolation is unscoped future work",
-        "B0.7's GitHub consumer is a simplified per-org PAT, not ADR-001's full GitHub-App/JWT/installation-token design"
+        "B0.7's GitHub consumer is a simplified per-org PAT, not ADR-001's full GitHub-App/JWT/installation-token design",
+        "Dashboard's running-sandbox/cleanup-pending counts stay unfiltered aggregate counts (B1.1 residual, low severity)",
+        "releases._next_version() SELECT-then-INSERT race -- real, deferred to B2+ per TECHNICAL_DEBT.md"
       ]
     }
   ]
