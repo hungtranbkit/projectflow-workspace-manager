@@ -92,7 +92,9 @@ Matching this program's own named focus areas exactly:
    none|required`, defaulting to `none` (today's real, exact behavior:
    the same zero-AuthN experience the current production instance
    already runs). This is not a flag day; both modes are real,
-   supported deployment targets from B0.1 onward.
+   **permanently** supported deployment targets, not merely "from
+   B0.1 onward" — see ADR-004 (below) for the resolved decision and
+   its exact scope.
 3. **Reuse existing infrastructure over inventing new mechanisms**:
    - `repositories` is already the one place every other table's
      `project_id` FKs through (E1.6's own convention) — adding a single
@@ -830,6 +832,170 @@ implementation-time decision, not resolved here.
   time-estimated** — a real implementation-planning input for
   whichever engineer picks up B0.4, not resolved further here.
 
+## ADR-004: Is self-hosted single-user mode (`AUTH_MODE=none`) permanent or transitional?
+
+**Status: DECIDED (design only — not implemented).** Resolves Open
+Decision #4 below. Scope: whether `AUTH_MODE=none` is a permanently
+supported product mode or an eventually-deprecated bootstrap/onboarding
+convenience. This decision governs how much long-term weight every
+other B0 sub-area's own dual-mode design (Design Principle #2,
+restated in every prior ADR's own "self-hosted compatibility" section)
+is actually worth carrying — it is the one decision that, if answered
+differently, would require revisiting language already committed
+across ADR-001, ADR-002, and ADR-003.
+
+### Grounding (evidence, not product opinion)
+
+- **Real, active production usage already exists under `AUTH_MODE=
+  none`'s exact real-world equivalent** (today, before B0 exists at
+  all): Track A1's own live-verification pass found 7 real Tasks with
+  genuine Vietnamese-language titles ("Update password default cho
+  mesflow la Admin@123456", "Fix giao diện qa-"), 5 real repositories,
+  and real agent-session history in the single production database —
+  see `docs/TRACK_A1_PERFORMANCE_AND_SIMPLE_MODE.md`'s own live
+  verification report. This is not a hypothetical "someone might
+  self-host" scenario; it is confirmed, active, real usage happening
+  in this exact deployment right now.
+- **The project's own packaging metadata states "local-only" as its
+  primary identity, not a caveat**: `pyproject.toml:9`, `description =
+  "Local-only agent worktree and integration readiness manager"`. This
+  is the project's own self-description, not an external observation.
+- **Every prior ADR has already repeatedly promised permanence**, not
+  merely "initial" support: ADR-001's "How `AUTH_MODE=none` stays
+  isolated" section states self-hosted operators "never need a GitHub
+  App... or any B0.7 dependency" (unqualified by time); ADR-002 built
+  a first-admin console-token bootstrap *specifically* so self-hosted
+  operators "never need SMTP" (a permanent design accommodation, not a
+  transitional one); ADR-003's "Self-hosted compatibility" section
+  states rate-limit defaults "must be generous enough never to
+  interfere with today's real, already-verified single-user production
+  usage." Answering this decision "transitional" now would require
+  walking back committed language in three already-pushed documents —
+  a real consistency cost this ADR weighs directly, not incidentally.
+- **Network-boundary enforcement for `AUTH_MODE=none`'s equivalent
+  today is already triple-layered and simple** (original audit,
+  unchanged by B0): `scripts/start.sh:13-20` hard-refuses any host but
+  `127.0.0.1`, `app/config.py:34` defaults to it, the systemd unit's
+  own comment reasons about staying local-only. This is a mature,
+  already-proven security boundary, not new scaffolding B0 must
+  invent.
+
+### Options compared
+
+| | Permanent, first-class mode | Transitional/bootstrap-only mode |
+|---|---|---|
+| Product | Two real, supported product shapes forever (free/simple local tool + hosted multi-tenant SaaS) — a proven dual-mode pattern used by comparable self-hosted/cloud products in this space | Single-user mode exists only for onboarding/evaluation/dev use, with an explicit sunset; long-run product is hosted-only |
+| Architecture | Every future auth-gated feature permanently needs a working, tested no-op/bypass branch for `AUTH_MODE=none` — an ongoing tax on all future work, not just B0 | Eventually simplifies to one code path — but only *after* a real deprecation event; near-term architecture cost during the transitional window is identical to the permanent option, not smaller |
+| Security boundary | Stays exactly as simple as it is today (network-only, triple-enforced, already proven) — nothing new accumulates on this path since no auth code ever runs in this mode | Same boundary during the transitional window; disappears only after full sunset, at which point it's replaced by the hosted AuthN/AuthZ boundary entirely |
+| Auth/RBAC implications | RBAC code must always tolerate "no `current_user` at all" as a legitimate, permanent state — a discipline every future contributor must maintain indefinitely | RBAC eventually becomes mandatory everywhere once single-user mode is retired, removing the permanent no-op-branch requirement — but only realized after a successful migration of every existing install |
+| Upgrade/migration path | No self-hoster is ever forced to adopt hosted-style auth to get a version upgrade — directly continues the promise already made in ADR-001/002/003 | Requires building **both** a real `AUTH_MODE=none -> required` data-migration tool (converting a single-user install into, effectively, a personal organization of one) **and** a deprecation communication/timeline plan — real, non-trivial scope beyond B0 itself, not free |
+| Operational burden (on maintainers) | Ongoing, indefinite: both modes tested and supported forever, across every future feature | Lower *eventually* (one path only) but adds a *new*, one-time-or-multi-year burden the permanent option never has: managing the deprecation process itself, including support during the transition and the real risk of a self-hosted install base that simply refuses to migrate, fragmenting on the last supported version (a known failure mode when open-source tools attempt forced cloud-only pivots) |
+| Backward compatibility | The whole point of the option — real production users (the one already confirmed above) never have to change how they use the tool, ever | Broken by design, eventually — directly contradicts the unqualified "unaffected"/"never" language already committed in ADR-001/002/003 unless those are revised to add an expiration caveat, weakening this document's own prior commitments |
+| Hosted-platform convergence | Never fully converges — the codebase permanently carries two deployment shapes, requiring an ongoing (not one-time) product decision about which features are hosted-only vs. universal | Full convergence eventually (one codebase, one mode) — the architecturally cleanest long-term shape, *conditional on* the migration succeeding without alienating the self-hosted base |
+| Testing | Permanently two states to cover (`AUTH_MODE=none` / `required`) for every relevant test, indefinitely | Same two-state burden during the transitional window; only reduces to one state after a successful, completed sunset |
+| Documentation | A stable, permanent "self-hosted mode" doc section, written once and kept accurate | Needs an explicit, actively-maintained deprecation notice and timeline — extra, ongoing documentation burden the permanent option never carries |
+| Long-term maintenance | Higher in steady state (two paths forever) but bounded and predictable — no migration event ever required | Lower after a successful sunset, but the sunset itself is a real, risky, one-time (or multi-year) project with its own failure modes — not a free simplification |
+
+### Recommendation
+
+**Self-hosted single-user mode (`AUTH_MODE=none`) is a PERMANENT,
+first-class, indefinitely supported product mode — not a transitional
+bootstrap, not deprecated on any timeline.** This is a confirmation and
+formalization of what Design Principle #2 and every prior ADR's own
+"self-hosted compatibility" section already assumed, not a new
+direction — see Grounding above for why treating it as anything else
+now would require walking back already-committed, already-pushed
+language.
+
+### Rationale
+
+1. **Real users already depend on it, today, not hypothetically.** A1's
+   own live-verification pass is direct, first-party evidence — not a
+   projected future user, an actual one, in this exact deployment.
+   Choosing "transitional" would mean this specific, already-confirmed
+   real user is on a product roadmap toward eventual forced migration
+   or feature freeze, which nothing in this program's own instructions
+   has ever asked for.
+2. **It's the project's own stated identity, not an accommodation.**
+   `pyproject.toml`'s own description leads with "local-only" — this
+   isn't a hosted product that happens to also support self-hosting as
+   a courtesy; local-only is foundational to what this project already
+   is.
+3. **The transitional option's "eventual simplification" is not free —
+   it's a deferred, larger, riskier cost** (a real data-migration tool
+   plus a deprecation program plus the real risk of install-base
+   fragmentation), while its near-term cost during the transitional
+   window is *identical* to the permanent option's steady-state cost.
+   There is no scenario in which choosing "transitional" saves
+   engineering effort sooner than choosing "permanent" — only a
+   scenario where it defers a cost and adds new ones.
+4. **Internal consistency**: three already-committed ADRs (001, 002,
+   003) already promise unqualified, indefinite self-hosted
+   compatibility. Confirming permanence here is what keeps this
+   document truthful to itself, per this decision's own explicit
+   instruction to remain internally consistent — the alternative would
+   require going back and re-qualifying language already pushed to
+   `origin/main`.
+
+### What "permanent" means precisely (scope boundary, not a blank check)
+
+Permanent support does **not** mean permanent feature parity with
+hosted mode — some B0-and-beyond features are legitimately hosted-only
+by their own nature and are never expected to make sense under
+`AUTH_MODE=none`:
+
+- **Hosted-only, never backported**: GitHub App installation flow
+  (ADR-001 — a single-user, single-`gh`-auth deployment has no
+  "installation" concept to speak of), organization/tenant management
+  UI (B0.3 — there is exactly one implicit "tenant" in single-user
+  mode), any future billing/multi-seat feature.
+- **Universal, must always work in both modes**: the core engineering
+  lifecycle (E1–E13, entirely unaffected by B0 regardless of this
+  decision), Track A1's Simple Mode and performance work, and anything
+  B0 itself adds that isn't inherently about multi-party coordination
+  (e.g., CSRF/rate-limiting infrastructure exists in the codebase
+  either way, simply unexercised when no session cookie is ever
+  issued — see ADR-003's own "self-hosted compatibility" section).
+- **What "permanent" commits to**: `AUTH_MODE=none` keeps working,
+  unmodified in its own observable behavior, for as long as the E1–E13
+  engineering lifecycle itself is maintained — not a fixed version
+  number or calendar date. It does **not** commit to every future
+  hosted-platform feature being made available in single-user mode.
+
+### Consistency updates this decision requires elsewhere in this document
+
+To keep the document internally consistent (this decision's own
+explicit requirement), Design Principle #2's phrasing ("both modes are
+real, supported deployment targets from B0.1 onward") is tightened
+below to remove the ambiguity between "supported starting at B0.1" and
+"supported starting at B0.1 and never revisited" — this ADR resolves
+that ambiguity toward the latter, explicitly.
+
+### Residual risks / open questions
+
+- **This is a product commitment, not merely a technical one** — it
+  constrains future product/business decisions (e.g., a future
+  monetization strategy cannot assume every user eventually converts
+  to hosted mode). Worth surfacing explicitly to whoever owns
+  ProjectFlow's product direction, not just its engineering, before
+  B0.1 implementation starts.
+- **"Permanent" was scoped above to mean "as long as E1–E13 itself is
+  maintained,"** not literally forever in an absolute sense — a
+  deliberately honest hedge rather than an unfalsifiable promise; if
+  the whole project is ever sunset, this mode is sunset with it, which
+  is not a meaningful exception.
+- **The hosted-only feature list above (GitHub App flow, org
+  management UI) is illustrative, not exhaustive** — each future B0+
+  feature still needs its own explicit "does this apply to
+  `AUTH_MODE=none`?" judgment call at implementation time; this ADR
+  establishes the principle, not a complete enumeration.
+- **No opposing product/business argument for a transitional posture
+  was raised during this pass** (e.g., a hypothetical case that
+  maintaining two modes forever meaningfully slows hosted-platform
+  velocity) — if such a case exists, it was not evaluated here and
+  would warrant revisiting this ADR specifically, not silently
+  overriding it in a later implementation decision.
+
 ## Phasing
 
 Each phase independently shippable and testable, mirroring E1–E13's
@@ -876,11 +1042,19 @@ decided by this document:
    own recommendation before B0.7 implementation starts — "resolved"
    here means "a concrete, evidence-based recommendation now exists,"
    not "silently approved."
-4. **Whether self-hosted single-user mode (`AUTH_MODE=none`) is a
+4. ~~**Whether self-hosted single-user mode (`AUTH_MODE=none`) is a
    permanent, supported deployment target**, or an eventually-
-   deprecated transitional one. Affects how much long-term test/
-   maintenance weight the dual-mode design in Design Principle #2 is
-   worth carrying.
+   deprecated transitional one.~~ **RESOLVED — see ADR-004** (above):
+   permanent, for as long as the E1–E13 engineering lifecycle itself is
+   maintained — not a fixed date, not a transitional bootstrap. Hosted-
+   only features (e.g. the GitHub App install flow, org-management UI)
+   are explicitly never expected to be backported, but `AUTH_MODE=none`
+   itself is never sunset. As with ADR-001/002/003, still a
+   recommendation requiring explicit human sign-off — this decision
+   also carries a genuine product/business commitment beyond the
+   purely technical ones in ADR-001–003 (see ADR-004's own residual
+   risks), worth a deliberate look from whoever owns ProjectFlow's
+   product direction before it's treated as final.
 
 ## Acceptance criteria template (per sub-program)
 
