@@ -113,15 +113,19 @@ Matching this program's own named focus areas exactly:
 ## Proposed architecture per sub-area
 
 ### B0.1 AuthN
-New tables `users(id, email, password_hash, created_at, ...)` and
-`sessions(id, user_id, token_hash, created_at, expires_at)`, **or**
-Starlette's built-in `SessionMiddleware` (itsdangerous, already
-transitively available, zero new dependency) for a signed-cookie
-session — recommended default for the MVP given the project's
-demonstrated dependency-minimalism, revisited once real multi-device/
-revocation needs are known. Login/logout routes; a `current_user`
-FastAPI dependency injected wherever `AUTH_MODE=required`; a no-op
-fallback (today's exact behavior) wherever it's `none`.
+Login mechanism **resolved — see ADR-002** below: email magic-link at
+launch, `password_hash` kept nullable on `users` for a purely-additive
+password option later, API tokens for service/automation accounts, and
+a self-hosted first-admin console-token bootstrap so `AUTH_MODE=
+required` never hard-requires SMTP just to get started. New tables
+`users(id, email, password_hash, created_at, ...)` and `login_tokens
+(id, user_id, token_hash, created_at, expires_at, used_at)`; session
+issuance via Starlette's built-in `SessionMiddleware` (itsdangerous,
+already transitively available, zero new dependency) for the signed
+session cookie — separate from the short-lived login token itself.
+Login/verify/logout routes; a `current_user` FastAPI dependency
+injected wherever `AUTH_MODE=required`; a no-op fallback (today's exact
+behavior) wherever it's `none`.
 
 ### B0.2 AuthZ
 Coarse per-organization roles (OWNER/ADMIN/MEMBER/VIEWER). One
@@ -420,6 +424,150 @@ seam this migration needs.
   per-tenant secret-storage burden for that subset of tenants and needs
   its own dedicated threat-model pass.
 
+## ADR-002: Password vs passwordless authentication for B0.1
+
+**Status: DECIDED (design only — not implemented).** Resolves Open
+Decision #1 below. Scope: how a human establishes their first
+authenticated session under `AUTH_MODE=required`. `AUTH_MODE=none` is
+unaffected — no login of any kind exists in that mode, unchanged.
+
+### Grounding
+
+Same dependency-minimalism evidence B0's own audit and ADR-001 both
+already established: `pyproject.toml`'s 7 core dependencies include no
+password-hashing library (no `passlib`/`bcrypt`/`argon2-cffi`) and no
+OAuth client library, but Starlette's `SessionMiddleware` (itsdangerous,
+signed cookies) ships transitively via FastAPI, unused today — usable
+for session issuance at zero new-dependency cost regardless of which
+login mechanism is chosen. ADR-001 already recommended in-house
+implementations over new libraries twice for the same
+dependency-minimalism reason; that pattern carries into this decision.
+
+### Options compared
+
+| | Password + hashing + reset | Email magic-link (passwordless) | External OIDC/social (e.g. "Sign in with GitHub") |
+|---|---|---|---|
+| Threat model | Attacker needs the password itself: breach, brute force, or credential stuffing | No static secret exists to steal, breach, or reuse | Delegates credential custody entirely to the IdP; ProjectFlow never touches a secret |
+| Account takeover risk | Structurally the highest — inherits whatever password-reuse habits the human has, the dominant real-world breach vector industry-wide | Structurally the lowest of the three login-only options — nothing to reuse across sites | Low, inherited from the IdP's own account-security posture |
+| Phishing/replay | Phishable and, once phished, reusable indefinitely until changed | Phishable in principle, but single-use + short TTL bounds the damage to one session; **real failure mode**: corporate email-security scanners auto-"click" links to pre-scan them, silently consuming a single-use link before the real user does — must be mitigated by an explicit confirm-click landing page, not auto-auth on raw GET | Mature OAuth phishing surface (fake consent screens); well-tooled mitigations exist (state, PKCE) |
+| Email dependency | Only for account recovery — login itself keeps working if outbound email is down | **Hard dependency for every login**, not just recovery | None for login itself |
+| Credential storage | New: a real password-hashing library (argon2id/bcrypt) + `password_hash` column | None: single-use tokens, hashed at rest, short TTL — no persistent secret | None: only OAuth state/session data |
+| Recovery | Needs a full separate "forgot password" flow — which is itself basically a magic-link mechanism bolted on as a second path | Login **is** the recovery flow, always — no separate mechanism to build | Recovery is the IdP's own responsibility |
+| MFA compatibility | Most standard/familiar layering (password + TOTP/WebAuthn) | Fully compatible but a less common UX pattern (challenge after link-click); less urgent since there's no static secret to protect | Inherited from the IdP for free — the strongest MFA story of the three, at zero implementation cost to ProjectFlow |
+| Tenant admin onboarding | Needs an initial-password or temp-password-plus-forced-reset step | "Enter your email" only — lowest friction | "Click sign in with GitHub" — comparably low friction, plus likely overlap with users who already have a GitHub account (this product's own domain) |
+| Self-hosted usability | **Works with zero external dependency** — no SMTP needed at all | Needs a self-hoster to configure outbound SMTP/a transactional-email service even to log in the first admin — a real, concrete setup burden this project's self-hosted-first identity should weigh heavily | Needs an OAuth App registration with the provider — comparable setup shape to ADR-001's own GitHub App step, so not a new kind of burden for an operator already doing that |
+| Operational burden | Hashing library + brute-force rate limiting on failed attempts + a reset-email sender | Email sender + rate limiting on link *requests* (anti-email-bombing) — no hashing, no separate reset flow | OAuth flow correctness (redirect/state/token exchange) + no email sender needed |
+| Auditability | Equivalent — a login event either way | Equivalent | Equivalent, plus a free correlation to the user's real GitHub identity |
+| Session lifecycle | Identical once established — not a differentiator between options | Identical once established | Identical once established |
+| Rate-limiting implications | Must rate-limit failed-login attempts per account/IP (brute force) | Must rate-limit link *requests* per email/IP (inbox-bombing, timing-based enumeration) — needs to exist even before B0.6's general middleware ships, or launch has an open email-bombing vector | Mostly upstream (the IdP's own login throttling); ProjectFlow still needs to rate-limit its own callback endpoint |
+| Account enumeration | Solved by the standard "invalid email or password" (never reveal which) pattern — familiar, well-understood | Needs equal care: the "check your email" response must be **identical** regardless of whether the account exists, or the request-link endpoint itself becomes an enumeration oracle | Not applicable in the same way — the IdP handles its own account existence privately |
+| Service/non-human accounts | Not naturally suited (a shared service password is an anti-pattern) | Not naturally suited (CI can't click an email) | Not naturally suited |
+| Enterprise readiness | Neutral-to-negative — many enterprise security policies now actively discourage bare passwords given credential-stuffing prevalence | Neutral-to-positive as a bridge; true enterprise readiness is SSO/SAML federation (already a B0 non-goal) | A reasonable bridge given this product's GitHub-centric domain, but couples account identity to a third-party provider outages/renames can disrupt, and doesn't satisfy "the org's own IdP" the way real SSO would |
+| Migration path | Additive either way — a nullable `password_hash` column doesn't block adding magic-link later, or vice versa | Additive either way | Additive; can be layered on once B0.1's session-issuance plumbing exists regardless of which login method shipped first |
+| Dependency footprint | New: a real hashing library not currently in `pyproject.toml` | None beyond stdlib `secrets` + the already-available `itsdangerous`/`SessionMiddleware` | A small OAuth client (a modest library, or in-house state/PKCE handling — comparable to magic-link's footprint, more moving parts than pure magic-link) |
+
+A fourth, genuinely justified hybrid is the actual recommendation below
+— not merely "offer all three."
+
+### Recommendation
+
+**Email magic-link as B0.1's only human-login mechanism at launch.**
+Password authentication is explicitly **deferred**, not rejected
+forever (see "What B0.1 defers" below). External OIDC/social login
+("Sign in with GitHub") is explicitly **deferred** despite being a
+strong domain fit, in favor of shipping the simpler mechanism first.
+
+Two service-non-human-account gaps neither option solves are called
+out explicitly and included in B0.1's scope regardless of the human-
+login decision:
+
+- **API tokens for service/automation use** (CI pipelines, scripted
+  API access) — a third, separate mechanism (`Authorization: Bearer
+  <token>`, checked independently of the human-session cookie), issued
+  per-user, revocable, never a shared credential. In scope for B0.1
+  from the start, since it's needed no matter which human-login option
+  is chosen.
+- **Self-hosted first-admin bootstrap without requiring SMTP** — a
+  one-time setup token printed to the process's own stdout/log on
+  first boot when `AUTH_MODE=required` and no users exist yet (the
+  same pattern several other well-known self-hosted tools use for
+  their own first-admin setup) — so a self-hoster choosing hosted-style
+  auth for their own instance is never forced to stand up email
+  delivery just to create the first account.
+
+### Rationale
+
+Weighing the comparison above against this specific project's own
+already-demonstrated constraints (not a generic best-practice
+default):
+
+1. **Dependency-minimalism, established twice already** (the audit's
+   own findings, then ADR-001's own recommendation): magic-link adds
+   zero new dependencies (stdlib `secrets` + the already-available
+   `SessionMiddleware`); password auth requires a real hashing library
+   this project has never needed before.
+2. **Removes the dominant real-world account-takeover vector
+   structurally**: credential stuffing/reuse is the single most common
+   breach pattern industry-wide, and magic-link has no static secret
+   for it to act on at all — a stronger default security posture than
+   password + hashing, without needing to get hashing-parameter/reset-
+   flow details right.
+3. **Recovery is free**: a password system needs a whole second
+   secret-delivery mechanism (forgot-password) that is itself
+   basically a magic-link bolted on — building magic-link as the
+   primary path means never building that second mechanism at all.
+4. **The self-hosted-SMTP cost is real and is explicitly paid down**,
+   not ignored: the first-admin console-token bootstrap (above) means
+   a self-hoster never *needs* SMTP just to start using
+   `AUTH_MODE=required` — they can configure email later, once real
+   multi-user usage justifies it, or never if `AUTH_MODE=none` remains
+   their permanent choice (the default, unaffected either way).
+5. **Social login is a good idea, not yet a necessary one**: "Sign in
+   with GitHub" is a strong fit for this product's domain and is worth
+   real consideration in a later B0.1.x pass, but it adds OAuth-flow
+   complexity (redirect handling, state/PKCE, third-party outage
+   coupling) that isn't justified when magic-link already satisfies
+   B0.1's actual requirement with less moving parts.
+
+### What B0.1 should include now vs. defer
+
+**Include now:**
+- Magic-link request/verify flow, with the phishing mitigation above
+  (explicit confirm-click landing page, never auto-authenticate on a
+  raw GET request) and the enumeration mitigation above (identical
+  response whether or not the email is registered).
+- Login tokens stored **hashed**, single-use, short TTL (minutes, not
+  hours) — the same "never store the raw secret" discipline ADR-001
+  already applied to GitHub installation tokens.
+- Session cookie via Starlette's `SessionMiddleware` once
+  authenticated (separate concern from the login token itself — a
+  normal-lifetime, e.g. 30-day, refreshed-on-activity session, not
+  re-derived from the short-lived login token).
+- A minimal, launch-blocking rate limit on the link-*request* endpoint
+  specifically (per-email and per-IP) — this cannot wait for B0.6's
+  general middleware, since an unthrottled link-request endpoint is
+  both an inbox-bombing vector and a timing-based enumeration oracle
+  from day one.
+- API tokens for service/automation accounts (see Recommendation
+  above) — needed regardless of the human-login mechanism.
+- The self-hosted first-admin console-token bootstrap (see
+  Recommendation above).
+
+**Defer:**
+- Password authentication as an *additional*, optional login method —
+  worth adding later if real users specifically request it (e.g. for
+  password-manager/enterprise-policy compatibility), at the cost of
+  the hashing dependency and a real reset flow. The `users` table
+  should keep `password_hash` nullable from the start so this remains
+  purely additive whenever it happens, not a schema migration fight.
+- External OIDC/social login ("Sign in with GitHub" or others) — a
+  strong later candidate, plausibly bundled with, or immediately
+  following, true enterprise SSO/SAML work (already a stated B0
+  non-goal).
+- MFA (TOTP/WebAuthn) as a second factor on top of magic-link — real
+  and worth doing, but less urgent than for a password system (no
+  static secret to protect against reuse), deferred to a B0.1.x pass.
+
 ## Phasing
 
 Each phase independently shippable and testable, mirroring E1–E13's
@@ -442,10 +590,14 @@ completion beyond what's noted:
 These are real, unresolved architectural choices — not silently
 decided by this document:
 
-1. **Password vs passwordless (magic-link) authentication** for B0.1.
-   A passwordless flow avoids needing a password-hashing dependency
-   and its own attack surface entirely; a password flow is more
-   familiar/portable. No default is assumed here.
+1. ~~**Password vs passwordless (magic-link) authentication** for
+   B0.1.~~ **RESOLVED — see ADR-002** (above): email magic-link at
+   launch; password kept as a purely-additive future option
+   (`password_hash` nullable from the start); social/OIDC login and
+   MFA explicitly deferred. As with ADR-001, "resolved" means "a
+   concrete, evidence-based recommendation now exists," not "silently
+   approved" — still needs explicit human sign-off before B0.1
+   implementation starts.
 2. **In-house vs adopt a library** for CSRF/rate-limiting (this
    document recommends in-house for both, given zero existing
    middleware and the project's dependency-minimalism, but that's a
