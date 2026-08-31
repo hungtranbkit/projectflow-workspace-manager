@@ -1,5 +1,22 @@
 {% extends 'base.html' %}{% block title %}Changes{% endblock %}{% block header_action %}<a href="/help#spec-layer">? Spec Layer lifecycle</a>{% endblock %}{% block content %}
 
+<!-- A1.19: Simple Create Change -- one freeform box, no Spec/Plan/Task
+     vocabulary required. Posts to /changes (create_change_simple),
+     which derives a title from the first line and keeps the full text
+     as the description. -->
+<section class="panel"><h3>New Change</h3>
+<form method="post" action="/changes">
+<label>What do you want to change or build?<textarea name="what" required placeholder="e.g. Add a CSV export button to the reports page"></textarea></label>
+{% if mode=='advanced' %}
+<div class="grid">
+<label>Type<select name="change_type">{% for ct in change_types %}<option value="{{ct}}">{{ct.replace('_',' ').title()}}</option>{% endfor %}</select></label>
+{% if repos %}<label>Project<select name="project_id"><option value="">— none —</option>{% for r in repos %}<option value="{{r.id}}">{{r.repo_name}}</option>{% endfor %}</select></label>{% endif %}
+</div>
+{% endif %}
+<button type="submit">Start</button>
+</form>
+</section>
+
 {% if human_attention %}
 <section class="panel" style="border-left:4px solid var(--amber)"><h3>Human Attention</h3>
 <div class="table-scroll"><table><thead><tr><th>Change</th><th>Attention Needed</th><th>Status</th></tr></thead><tbody>
@@ -9,7 +26,7 @@
 {% if c.human_decisions_pending %}<a href="/changes/{{c.id}}/decisions"><span class="badge human_decision_required">{{c.human_decisions_pending}} decision{{'s' if c.human_decisions_pending != 1 else ''}} pending</span></a>{% endif %}
 {% if c.product_review_pending %}<a href="/changes/{{c.id}}/acceptance"><span class="badge created">Product review required</span></a>{% endif %}
 </td>
-<td><span class="badge {{c.workflow_status|lower}}">{{c.workflow_status.replace('_',' ')}}</span></td>
+<td><span class="badge {{c.workflow_status|lower}}">{{ pf_t('status.'+c.workflow_status) if mode=='simple' else c.workflow_status.replace('_',' ') }}</span></td>
 </tr>{% endfor %}
 </tbody></table></div>
 </section>
@@ -20,7 +37,7 @@
 <div class="table-scroll"><table><thead><tr><th>Change</th><th>Status</th><th>Updated</th></tr></thead><tbody>
 {% for c in recent %}<tr onclick="location.href='/changes/{{c.id}}'" style="cursor:pointer">
 <td><a href="/changes/{{c.id}}">{{c.title}}</a></td>
-<td><span class="badge {{c.workflow_status|lower}}">{{c.workflow_status.replace('_',' ')}}</span></td>
+<td><span class="badge {{c.workflow_status|lower}}">{{ pf_t('status.'+c.workflow_status) if mode=='simple' else c.workflow_status.replace('_',' ') }}</span></td>
 <td><small>{{c.updated_at}}</small></td>
 </tr>{% endfor %}
 </tbody></table></div>
@@ -42,7 +59,7 @@
 {% if changes %}<div class="table-scroll"><table><thead><tr><th>Change</th><th>Status</th><th>Type</th><th>Risk</th><th>Workflow</th><th>Human Action</th><th>Tasks</th><th>Updated</th></tr></thead><tbody>
 {% for c in changes %}<tr onclick="location.href='/changes/{{c.id}}'" style="cursor:pointer">
 <td><a href="/changes/{{c.id}}"><strong>{{c.title}}</strong></a></td>
-<td><span class="badge {{c.workflow_status|lower}}">{{c.workflow_status.replace('_',' ')}}</span></td>
+<td><span class="badge {{c.workflow_status|lower}}">{{ pf_t('status.'+c.workflow_status) if mode=='simple' else c.workflow_status.replace('_',' ') }}</span></td>
 <td class="cap">{{c.change_type|lower|replace('_',' ')}}</td>
 <td><span class="badge {{c.risk_level|lower}}">{{c.risk_level}}</span></td>
 <td>{{c.profile_key or '—'}}</td>
@@ -54,6 +71,14 @@
 {% elif all_changes %}
 <div class="empty-state"><h4>No Changes match this filter</h4><a href="/changes">Clear filters</a></div>
 {% else %}<div class="empty-state"><h4>No Changes yet</h4><p>Create one via <code>POST /api/changes</code> to start the Spec → Architecture → Design → Test Design → Implementation pipeline.</p></div>{% endif %}
+
+{% if total_pages and total_pages > 1 %}
+<nav class="pagination" style="display:flex;gap:.5rem;align-items:center;margin-top:.75rem">
+<small>Page {{page}} of {{total_pages}} · {{total}} Change{{'s' if total != 1 else ''}}</small>
+{% if page > 1 %}<a class="ghost button" href="/changes?{{filter_qs}}{{'&' if filter_qs else ''}}page={{page-1}}&page_size={{page_size}}">‹ Prev</a>{% endif %}
+{% if page < total_pages %}<a class="ghost button" href="/changes?{{filter_qs}}{{'&' if filter_qs else ''}}page={{page+1}}&page_size={{page_size}}">Next ›</a>{% endif %}
+</nav>
+{% endif %}
 </section>
 
 {% endblock %}

@@ -244,3 +244,18 @@ details.raw-json summary{cursor:pointer;color:var(--blue);font-size:12px;font-we
 details.raw-json summary::-webkit-details-marker{display:none}
 details.raw-json summary::before{content:'{ } ';font-family:ui-monospace,monospace}
 details.raw-json pre{margin-top:8px}
+/* Track A1.12: mode toggle */
+.mode-toggle{display:flex;gap:4px;background:#0f1a21;border-radius:8px;padding:4px;margin:10px 8px 4px}
+.mode-toggle-opt{flex:1;text-align:center;padding:7px 4px;border-radius:6px;color:#9fb0ba;text-decoration:none;font-size:12px;font-weight:650}
+.mode-toggle-opt.active{background:#253945;color:#fff}
+/* Track A1.13/A1.16: Simple Mode change detail */
+.attention-banner{border-left:4px solid var(--blue)}
+.attention-banner.attn-yes{border-left-color:var(--amber);background:#fff8ec}
+.attention-banner.attn-no{border-left-color:var(--green)}
+.simple-steps{display:flex;align-items:center;flex-wrap:wrap;gap:0;margin-bottom:8px}
+.simple-step{display:flex;align-items:center;gap:6px;padding:6px 4px;font-size:13px;color:var(--muted)}
+.simple-step-dot{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:2px solid var(--line);font-size:11px}
+.simple-step.step-done{color:var(--ink)}.simple-step.step-done .simple-step-dot{background:var(--green);border-color:var(--green);color:#fff}
+.simple-step.step-current{color:var(--ink);font-weight:700}.simple-step.step-current .simple-step-dot{border-color:var(--blue);color:var(--blue)}
+.simple-step-line{width:20px;height:2px;background:var(--line);margin:0 2px}
+@media(max-width:600px){.simple-steps{gap:2px}.simple-step-line{width:8px}.simple-step span:last-child{display:none}.simple-step.step-current span:last-child{display:inline}}

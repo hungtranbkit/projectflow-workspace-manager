@@ -31,7 +31,18 @@
 <a class="nav-item{{ ' active' if _path == '/repositories' else '' }}" href="/repositories">Repositories</a>
 <a class="nav-item{{ ' active' if _path == '/settings' else '' }}" href="/settings">Settings</a>
 <a class="nav-item{{ ' active' if _path == '/help' else '' }}" href="/help">Hướng dẫn</a>
-</nav><footer>Local only · v0.1.0</footer></aside>
+</nav>
+<!-- A1.12: Simple/Advanced mode toggle, one click either way, visible
+     on every page (not just Changes) since Simple Mode is a whole-app
+     presentation preference. `mode` comes from render()'s own context
+     (app/main.py's _ui_mode()); the link just re-requests the current
+     page with ?mode=... swapped, which render() also persists back into
+     the pf_mode cookie. -->
+<div class="mode-toggle" role="group" aria-label="Display mode">
+<a class="mode-toggle-opt{{' active' if mode=='simple' else ''}}" href="?mode=simple">{{pf_t('mode.simple')}}</a>
+<a class="mode-toggle-opt{{' active' if mode=='advanced' else ''}}" href="?mode=advanced">{{pf_t('mode.advanced')}}</a>
+</div>
+<footer>Local only · v0.1.0</footer></aside>
 <main><header class="page-header-desktop"><div><span class="eyebrow">ONE AGENT · ONE BRANCH · ONE WORKTREE</span><h2>{% block title %}{% endblock %}</h2></div>{% block header_action %}{% endblock %}</header>{% block content %}{% endblock %}</main>
 <script>async function launchWorkspace(id,kind,button){let original=button.textContent;button.disabled=true;button.textContent=kind==='agent'?'Launching agent...':'Opening terminal...';let feedback=document.querySelector(`[data-launch-feedback="${id}"]`);try{let response=await fetch(`/api/workspaces/${id}/${kind==='agent'?'launch-agent':'open-terminal'}`,{method:'POST'}),data=await response.json();if(!response.ok)throw data;if(feedback){feedback.textContent=data.message+(data.fallback?` · Fallback: ${data.fallback}`:'');feedback.className='launch-feedback error'}else alert(data.message);button.textContent=data.ok?'Launch requested':original}catch(error){let message=error.message||'Không mở được terminal';if(feedback){feedback.textContent=message+(error.fallback?` · Fallback: ${error.fallback}`:'');feedback.className='launch-feedback error'}else alert(message);button.textContent=original}finally{setTimeout(()=>{button.disabled=false;button.textContent=original},1800)}}
 // E8.23: operator-testing trigger for one scheduling tick

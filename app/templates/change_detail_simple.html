@@ -1,0 +1,70 @@
+{% extends 'base.html' %}{% block title %}{{view.change.title}}{% endblock %}
+{% block header_action %}<a href="/changes">← All Changes</a> <a class="ghost button" href="/changes/{{cid}}?mode=advanced">{{pf_t('mode.advanced')}} view →</a>{% endblock %}
+{% block content %}
+
+<!-- A1.16: DO YOU NEED ME? -- always the first thing on the page. -->
+<section class="panel attention-banner attn-{{'yes' if view.human_attention.needs_you else 'no'}}">
+<h3>{{view.human_attention.headline}}</h3>
+{% if view.human_attention.detail %}<p>{{view.human_attention.detail}}</p>{% endif %}
+{% if view.human_attention.link %}<a class="button" href="{{view.human_attention.link}}">Go to it →</a>{% endif %}
+</section>
+
+<!-- A1.14: the ~6-step Simple lifecycle, mapped only from WorkflowService
+     truth (see simple_view_service.py's SIMPLE_STEPS). -->
+<section class="panel">
+<div class="simple-steps" aria-label="Progress">
+{% for s in view.lifecycle.steps %}
+<div class="simple-step step-{{s.state}}"><span class="simple-step-dot">{{ {'done':'✓','current':'●','future':'○'}[s.state] }}</span><span>{{s.label}}</span></div>
+{% if not loop.last %}<div class="simple-step-line"></div>{% endif %}
+{% endfor %}
+</div>
+<p><b>{{view.lifecycle.status_text}}</b> — {{view.lifecycle.headline}}</p>
+</section>
+
+<div class="grid">
+
+<section class="panel"><h3>Product</h3>
+<p><small>What was requested</small><br>{{view.product.requested or '—'}}</p>
+{% if view.product.delivered %}<p><small>What's delivered</small></p><ul>{% for f in view.product.delivered %}<li>{{f}}</li>{% endfor %}</ul>{% endif %}
+{% if view.product.live_url %}<p><small>Live application</small><br><a href="{{view.product.live_url}}" target="_blank" rel="noopener">{{view.product.live_url}}</a></p>{% endif %}
+<div class="facts">
+<div><small>Version</small><b>{{view.product.version or '—'}}</b></div>
+<div><small>Health</small><b>{{view.product.health}}</b></div>
+<div><small>Product review</small><b class="cap">{{(view.product.review or '—')|lower|replace('_',' ')}}</b></div>
+</div>
+</section>
+
+<section class="panel"><h3>Build</h3>
+<p><small>Progress</small><br>{{view.build.progress_text}} · {{view.build.task_count}} task{{'s' if view.build.task_count != 1 else ''}}</p>
+<p><small>Active AI agents</small><br>{{view.build.agents_text}}</p>
+<a href="/changes/{{cid}}/tasks?mode=advanced">See build steps →</a>
+</section>
+
+<section class="panel"><h3>Review</h3>
+<p><small>Integration</small><br>{{(view.review.integration_text or 'Not started yet')|lower|replace('_',' ')|capitalize}}</p>
+{% if view.review.human_attention %}<p><small>Decisions pending</small><br>{{view.review.human_attention|length}}</p>{% else %}<p>No open review questions.</p>{% endif %}
+<a href="/changes/{{cid}}/reviews?mode=advanced">See tests &amp; review detail →</a>
+</section>
+
+<section class="panel"><h3>Deploy</h3>
+<p><small>Release</small><br>{{view.deploy.release_text}}</p>
+<div class="facts">
+<div><small>{{view.deploy.test.label}}</small><b>{{view.deploy.test.text or '—'}}</b></div>
+<div><small>{{view.deploy.production.label}}</small><b>{{view.deploy.production.text or '—'}}</b></div>
+</div>
+</section>
+
+</div>
+
+<section class="panel"><h3>History</h3>
+{% if view.history.parent_change %}<p><small>Follow-up to</small><br><a href="/changes/{{view.history.parent_change.id}}">{{view.history.parent_change.title}}</a></p>{% endif %}
+{% if view.history.incidents %}<p><small>Incidents</small></p><ul>{% for i in view.history.incidents %}<li><a href="/incidents/{{i.id}}">{{i.title}}</a> — <span class="badge {{i.status|lower}}">{{i.status}}</span></li>{% endfor %}</ul>{% endif %}
+{% if view.history.follow_up_changes %}<p><small>Follow-up Changes</small></p><ul>{% for c in view.history.follow_up_changes %}<li><a href="/changes/{{c.id}}">{{c.title}}</a></li>{% endfor %}</ul>{% endif %}
+{% if view.history.events %}
+<div class="timeline">
+{% for e in view.history.events[:10] %}<div><b>{{e.action.replace('_',' ')|title}}</b><br><small>{{e.created_at}}{% if e.details %} — {{e.details}}{% endif %}</small></div>{% endfor %}
+</div>
+{% else %}<p class="empty">No history yet.</p>{% endif %}
+</section>
+
+{% endblock %}

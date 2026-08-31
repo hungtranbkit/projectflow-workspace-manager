@@ -2,12 +2,42 @@ from __future__ import annotations
 from pathlib import Path
 import yaml
 
+from app.services.request_memo import RequestMemo
+
 class ContractError(ValueError): pass
 
-def _read(repo: Path) -> dict:
+# Track A1 (A1.4/A1.5/A1.6) perf fix, found by profiling (not guessed --
+# see scripts/benchmark_changes_list.py's own cProfile run): every reader
+# in this module re-reads AND re-parses PROJECT.yaml from disk on every
+# single call, with zero caching. ProductAcceptanceService.overview_status()
+# alone (via _resolve_project_policy_for_change -> load_engineering_policy)
+# was reloading it several times per Change -- for 100 Changes this cost
+# MORE wall-clock time than every SQLite query GET /changes made
+# combined. `_load_yaml` is the one shared, request-scoped-memoizable
+# read+parse every function below goes through now; caching is opt-in
+# (`with project_contract.memoize(): ...`, unmemoized -- exactly today's
+# always-fresh-read behavior -- when no scope is open), so a route that
+# writes PROJECT.yaml (the Contract Editor) is never wrapped in this and
+# always sees a live read.
+_memo = RequestMemo()
+
+def memoize():
+    """`with project_contract.memoize(): ...` around one read-only HTTP
+    request/composition operation. See request_memo.py."""
+    return _memo.scope()
+
+def _load_yaml(repo: Path) -> dict | None:
+    return _memo.get(str(repo), lambda: _load_yaml_uncached(repo))
+
+def _load_yaml_uncached(repo: Path) -> dict | None:
     path = repo / "PROJECT.yaml"
-    if not path.is_file(): raise ContractError("Managed repository has no PROJECT.yaml")
+    if not path.is_file(): return None
     return yaml.safe_load(path.read_text()) or {}
+
+def _read(repo: Path) -> dict:
+    data = _load_yaml(repo)
+    if data is None: raise ContractError("Managed repository has no PROJECT.yaml")
+    return data
 
 def load_contract(repo: Path):
     data = _read(repo)
@@ -117,9 +147,8 @@ def load_engineering_policy(repo: Path) -> dict | None:
     is a secondary switch a caller may use to pause automatic task
     SELECTION while still allowing an already-launched Builder to keep
     running; defaults to true when the block exists."""
-    path = repo / "PROJECT.yaml"
-    if not path.is_file(): return None
-    data = yaml.safe_load(path.read_text()) or {}
+    data = _load_yaml(repo)
+    if data is None: return None
     block = data.get("engineering")
     if not block: return None
     if not isinstance(block, dict): raise ContractError("engineering: must be a mapping")

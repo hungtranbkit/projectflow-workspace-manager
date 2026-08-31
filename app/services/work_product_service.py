@@ -1,6 +1,8 @@
 from __future__ import annotations
 import json
 
+from app.services.request_memo import RequestMemo
+
 """Engineering Domain Foundation (Phase E1.3/E1.4): WorkProduct is a
 durable engineering output -- a generic, typed-kind core representation
 (never one table per kind, per the E1 spec). Content itself is never
@@ -68,6 +70,11 @@ class WorkProductError(ValueError):
 class WorkProductService:
     def __init__(self, db):
         self.db = db
+        self._memo = RequestMemo()
+
+    def memoize(self):
+        """`with work_products.memoize(): ...` -- see request_memo.py."""
+        return self._memo.scope()
 
     def create(self, *, kind: str, title: str, project_id: int | None = None, change_id: int | None = None,
                task_id: int | None = None, status: str = "DRAFT", content_ref: str | None = None,
@@ -124,7 +131,16 @@ class WorkProductService:
         return self.get(wp_id)
 
     def list_for_change(self, change_id: int) -> list[dict]:
-        return self.db.all("SELECT * FROM work_products WHERE change_id=? ORDER BY id", (change_id,))
+        # Track A1 (A1.4/A1.5): memoized the same way TaskDecisionService.
+        # evaluate() is -- WorkflowService.evaluate_workflow() calls this
+        # 3x per Change with an identical change_id (SPEC/ARCHITECTURE/
+        # DESIGN gates each ask _approved_work_product_exists() fresh).
+        # Only ever collapses calls made inside an open memoize() scope
+        # (evaluate_workflow() itself opens one -- see workflow_engine.py);
+        # unmemoized elsewhere, so nothing changes for any caller that
+        # mutates work_products and re-reads in the same request.
+        return self._memo.get(("list_for_change", change_id),
+                               lambda: self.db.all("SELECT * FROM work_products WHERE change_id=? ORDER BY id", (change_id,)))
 
     def list_for_task(self, task_id: int) -> list[dict]:
         return self.db.all("SELECT * FROM work_products WHERE task_id=? ORDER BY id", (task_id,))

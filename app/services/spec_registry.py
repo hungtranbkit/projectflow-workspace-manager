@@ -5,6 +5,29 @@ from pathlib import Path
 
 import yaml
 
+from app.services.request_memo import RequestMemo
+
+# Track A1 (A1.4/A1.5/A1.6) perf fix, found by profiling (not guessed):
+# every caller that needs the spec tree does `SpecRegistry(specs_root).
+# load()` -- a BRAND NEW instance each time, so even an instance-level
+# cache would do nothing. product_acceptance_service.py/
+# architecture_design_service.py alone construct-and-load one 3-4 times
+# per Change; at 100 Changes that is hundreds of full specs/ tree
+# re-reads+re-parses for one GET /changes. `_memo` is keyed by specs_root
+# path (a real cache, not per-instance) and is opt-in -- SpecRegistry's
+# own documented "always re-reads from disk, so an on-disk spec edit is
+# picked up without a process restart" promise stays literally true
+# whenever no `with spec_registry.memoize():` scope is open (unmemoized
+# by default), and even inside one, only ever collapses repeat loads of
+# the SAME specs_root made within that one request/composition -- never
+# held open across requests.
+_memo = RequestMemo()
+
+def memoize():
+    """`with spec_registry.memoize(): ...` around one read-only HTTP
+    request/composition operation. See request_memo.py."""
+    return _memo.scope()
+
 """Spec Layer V1 (S1-S3): SpecRegistry is the ONE place that reads and
 resolves the canonical specification (specs/ -- see specs/SPEC.yaml).
 Deliberately independent of HTTP/DB (S3: "Keep registry logic
@@ -49,7 +72,17 @@ class SpecRegistry:
         Raises SpecError (never a partial/silent load, INV-003) on any
         problem. Safe to call repeatedly -- each call re-reads from
         disk, so an on-disk spec edit is picked up without a process
-        restart, matching "the file tree is the canonical contract"."""
+        restart, matching "the file tree is the canonical contract" --
+        UNLESS a `with spec_registry.memoize():` scope is open (Track
+        A1), in which case a repeat load() of the same specs_root within
+        that one request/composition reuses the first real read."""
+        cached = _memo.get(str(self.root), lambda: self._load_uncached())
+        if cached is not self:
+            self.manifest, self.features, self.requirements, self.acceptance, self.invariants, self._loaded = (
+                cached.manifest, cached.features, cached.requirements, cached.acceptance, cached.invariants, cached._loaded)
+        return self
+
+    def _load_uncached(self) -> "SpecRegistry":
         errors: list[str] = []
         manifest_path = self.root / "SPEC.yaml"
         if not manifest_path.is_file():

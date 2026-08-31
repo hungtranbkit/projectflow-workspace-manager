@@ -677,6 +677,21 @@ class WorkflowService:
 
     # ---- derived state (E3.8) --------------------------------------
     def evaluate_workflow(self, change_id: int) -> dict:
+        # Track A1 (A1.4/A1.5) perf fix: open one request/composition-
+        # scoped memoize() window for this whole evaluate_workflow() call
+        # -- every _gate_* method below (and TaskDependencyService.
+        # readiness()) calls self.decision.evaluate()/self.work_products.
+        # list_for_change() on the exact same task_id/change_id several
+        # times each; this collapses that duplication for every caller of
+        # evaluate_workflow(), not only /changes. Reentrant (RequestMemo.
+        # scope()), so a caller like changes_page that ALSO opens its own
+        # outer scope across many Changes shares one cache with no double
+        # bookkeeping, and nothing here changes any returned value --
+        # memoization only ever skips recomputing an identical read.
+        with self.decision.memoize(), self.work_products.memoize():
+            return self._evaluate_workflow_uncached(change_id)
+
+    def _evaluate_workflow_uncached(self, change_id: int) -> dict:
         run = self.get_workflow(change_id)
         if not run:
             return {"change_id": change_id, "workflow": None, "profile_key": None, "status": "PENDING",

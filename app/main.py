@@ -38,6 +38,8 @@ from app.services.spec_gate import SpecGate, spec_id_list, ALL_CLASSIFICATIONS
 from app.services.spec_compliance import SpecComplianceVerifier
 from app.services.evidence_store import EvidenceStore
 from app.services.change_service import ChangeService, ChangeError, CHANGE_TYPES, RISK_LEVELS as CHANGE_RISK_LEVELS, LIFECYCLE_STATES
+from app.services.change_list_summary_service import ChangeListSummaryService
+from app.services.simple_view_service import SimpleViewService, t as simple_t
 from app.services.work_product_service import WorkProductService, WorkProductError, WORK_PRODUCT_KINDS, WORK_PRODUCT_STATUSES, DIRECTIONS as WP_DIRECTIONS
 from app.services.trace_service import TraceService
 from app.services.engineering_catalog import RoleCapabilityService, is_known_provider
@@ -252,6 +254,17 @@ def create_app(settings=None):
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
     templates.env.filters["humanize_blocker"] = humanize_blocker
+    # A1.20/A1.21: the one translation-key lookup every template can call
+    # -- {{ pf_t('key') }} -- so a future language file swap is "point
+    # this at a second dict", not a template rewrite. See
+    # simple_view_service.py's own module docstring. Named `pf_t`, not
+    # the shorter `t`/`tr` -- both those names are ALREADY real per-route
+    # context variables in this codebase (`t`=the current Task row in
+    # task_detail.html and others, `tr`=a test_runs row in main.py) and
+    # would silently shadow this global with a dict/row on any page that
+    # passes one, turning `{{t('key')}}` into a real TypeError (caught
+    # live by the full regression run, not guessed).
+    templates.env.globals["pf_t"] = simple_t
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
     app.state.settings, app.state.db, app.state.git, app.state.runner, app.state.launcher = settings, db, git, runner, launcher
     app.state.sandboxes, app.state.ports, app.state.sandbox_runtime, app.state.cleanup_worker = sandboxes, ports, sandbox_runtime, cleanup_worker
@@ -298,7 +311,38 @@ def create_app(settings=None):
     app.state.change_control_surface = change_control_surface
     app.state.task_execution_context_builder = task_execution_context_builder
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
-    def render(request, name, **ctx): return templates.TemplateResponse(request=request, name=name, context={"settings": settings, **ctx})
+    def render(request, name, **ctx):
+        resp = templates.TemplateResponse(request=request, name=name, context={"settings": settings, "mode": _ui_mode(request), **ctx})
+        _apply_mode_cookie(request, resp)
+        return resp
+
+    # ---- Track A1.11/A1.12: Simple/Advanced mode selection -----------
+    # ProjectFlow has no full AuthN user model yet (A1.12's own explicit
+    # constraint) -- a plain cookie is the acceptable initial approach
+    # named there. Simple Mode is fully built and one click away
+    # (?mode=simple, persisted back into the cookie so it sticks across
+    # navigation, same as the existing filter-preserving convention
+    # elsewhere in this file) -- but the NO-SIGNAL default below is
+    # Advanced, not Simple, deliberately deviating from A1.12's own
+    # literal "Default: Simple Mode ... if safe" suggestion. Evidence,
+    # not a guess: defaulting a zero-signal /changes/{id} request to
+    # Simple broke 6 real, pre-existing tests (test_autonomous_execution.
+    # py, test_change_overview.py, test_product_acceptance.py,
+    # test_release_pipeline.py) that assert specific Advanced-page
+    # content with no mode cookie/param set -- exactly A1.27's own
+    # "current APIs still work" requirement, which this track's own GIT
+    # POLICY ("full regression must pass") makes non-negotiable, unlike
+    # A1.12's own explicitly qualified default suggestion.
+    _MODE_COOKIE = "pf_mode"
+    def _ui_mode(request: Request) -> str:
+        q = (request.query_params.get("mode") or "").strip().lower()
+        if q in ("simple", "advanced"): return q
+        c = (request.cookies.get(_MODE_COOKIE) or "").strip().lower()
+        return c if c in ("simple", "advanced") else "advanced"
+    def _apply_mode_cookie(request: Request, response) -> None:
+        q = (request.query_params.get("mode") or "").strip().lower()
+        if q in ("simple", "advanced"):
+            response.set_cookie(_MODE_COOKIE, q, max_age=60*60*24*365, samesite="lax")
     def repo(repo_id):
         row = db.one("SELECT * FROM repositories WHERE id=? AND enabled=1", (repo_id,))
         if not row: raise HTTPException(404, "Enabled repository not found")
@@ -2250,8 +2294,9 @@ def create_app(settings=None):
             # live gate_status so the checklist says PASS WITH N BASELINE
             # WAIVER, never a silent, indistinguishable-from-real PASS.
             waived_count=sum(1 for r in ti_repos for f in ((r.get("gate_status") or {}).get("failures") or []) if f["classification"]=="WAIVED")
-            note=f"PASS WITH {waived_count} BASELINE WAIVER" if waived_count and decision.integration_healthy(ti,ti_repos) else None
-            gates.append({"label":"Integration healthy, tests PASS, no conflicts","ok":decision.integration_healthy(ti,ti_repos),"note":note})
+            all_merged_gate=bool(d["merge_records"]) and all(m["merge_status"]=="MERGED" for m in d["merge_records"] if m["required"])
+            note=f"PASS WITH {waived_count} BASELINE WAIVER" if waived_count and decision.integration_healthy(ti,ti_repos,all_merged_gate) else None
+            gates.append({"label":"Integration healthy, tests PASS, no conflicts","ok":decision.integration_healthy(ti,ti_repos,all_merged_gate),"note":note})
         else:
             gates.append({"label":"Integration","ok":True,"note":"NOT_REQUIRED for this risk profile"})
         gates.append({"label":"No blocking findings","ok":not d["blocking_reasons"]})
@@ -2375,39 +2420,46 @@ def create_app(settings=None):
     # never a second one" discipline user_state_view.py established for
     # Task (see task_detail.html's own status-hero/wf-checklist).
     @app.get("/changes",response_class=HTMLResponse)
-    def changes_page(request:Request,status:str="",change_type:str="",profile:str=""):
+    def changes_page(request:Request,status:str="",change_type:str="",profile:str="",page:int=1,page_size:int=25):
         """Project Overview (E7.5.1) + Change List (E7.5.2) combined --
         Active Changes / Human Attention / filters, all derived from
         WorkflowService/HumanDecisionService's own real state, never a
-        second status calculation."""
-        rows=changes.list()
-        for c in rows:
-            run=workflow_service.get_workflow(c["id"])
-            c["workflow_status"]=workflow_service.evaluate_workflow(c["id"])["status"] if run else "PENDING"
-            c["profile_key"]=run["profile_key"] if run else None
-            c["human_decisions_pending"]=len(human_decisions.list_pending_for_change(c["id"]))
-            c["task_count"]=len(changes.list_tasks_for_change(c["id"]))
-            # E11.19: PRODUCT REVIEW REQUIRED is distinct from DECISION
-            # REQUIRED -- a WHAT-level ambiguity (HumanDecisionService)
-            # is never the same signal as "the live product is waiting
-            # on your review" (ProductAcceptanceService). Only computed
-            # for Changes with at least one Task (matches
-            # release_deploy_summary's own scope -- no evidence to
-            # review without one).
-            c["product_review_pending"]=bool(
-                c["task_count"] and product_acceptance_service.overview_status(c["id"])=="PENDING")
-        human_attention=[c for c in rows if c["human_decisions_pending"] or c["product_review_pending"]]
-        filtered=rows
-        if status: filtered=[c for c in filtered if c["workflow_status"]==status]
-        if change_type: filtered=[c for c in filtered if c["change_type"]==change_type]
-        if profile: filtered=[c for c in filtered if c["profile_key"]==profile]
-        recent=sorted(rows,key=lambda c:c["updated_at"],reverse=True)[:8]
-        return render(request,"changes.html",changes=filtered,all_changes=rows,human_attention=human_attention,
-                      recent=recent,filters={"status":status,"change_type":change_type,"profile":profile},
-                      change_types=CHANGE_TYPES,profiles=list(PROFILES))
+        second status calculation.
+
+        Track A1 (A1.2/A1.3/A1.5/A1.6/A1.8) perf fix: composition moved
+        into ChangeListSummaryService, which (a) only computes the
+        expensive WorkflowService.evaluate_workflow() per row for rows
+        actually about to be SHOWN with it (the current page / Human
+        Attention / Recent Activity -- see that service's own docstring),
+        never for the full Change set on every request once it grows
+        past one page, and (b) wraps the remaining composition in one
+        db.memoize() scope so whatever IS computed doesn't re-issue
+        identical reads. Confirmed live by scripts/benchmark_changes_list.py:
+        ~140 TaskDecisionService.evaluate() calls and 1400+ DB connections
+        for just 100 Changes before this fix. Read-only route: safe to
+        memoize end-to-end, never wrap a route that writes in this scope."""
+        summary=change_list_summary_service.build(
+            status=status,change_type=change_type,profile=profile,page=page,page_size=page_size)
+        filter_qs=urlencode({k:v for k,v in {"status":status,"change_type":change_type,"profile":profile}.items() if v})
+        return render(request,"changes.html",changes=summary["rows"],all_changes=summary["all_changes"],
+                      human_attention=summary["human_attention"],recent=summary["recent"],
+                      filters={"status":status,"change_type":change_type,"profile":profile},filter_qs=filter_qs,
+                      change_types=CHANGE_TYPES,profiles=list(PROFILES),
+                      page=summary["page"],page_size=summary["page_size"],
+                      total=summary["total"],total_pages=summary["total_pages"],
+                      repos=db.all("SELECT id,repo_name FROM repositories WHERE enabled=1 ORDER BY repo_name"))
     @app.get("/changes/{cid}",response_class=HTMLResponse)
     def change_detail(request:Request,cid:int):
         change_row(cid)
+        # Track A1.11-A1.13: Simple Mode replaces this hub page's
+        # rendering only -- every Advanced tab route below (spec/
+        # architecture/design/tests/plan/tasks/reviews/decisions/
+        # evidence/release/deploy/acceptance) is completely untouched
+        # and stays one click away (A1.12/A1.27), reached via this same
+        # page's Advanced link or directly by URL.
+        if _ui_mode(request)=="simple":
+            return render(request,"change_detail_simple.html",cid=cid,
+                          view=simple_view_service.build(cid))
         header=change_control_surface.header(cid)
         overview=change_control_surface.overview(cid)
         # E8.23: AUTONOMOUS EXECUTION card. Composed here at the route,
@@ -2550,6 +2602,15 @@ def create_app(settings=None):
             "deploy": change_control_surface.deploy_tab(cid), "acceptance": change_control_surface.acceptance_tab(cid),
         }
 
+    @app.get("/api/changes/{cid}/simple-view")
+    def api_change_simple_view(cid:int):
+        """A1.23: the one Simple Mode composition endpoint -- same
+        no-duplicate-truth discipline as control-surface above, built on
+        top of it (SimpleViewService only ever reads ChangeControlSurfaceService's
+        already-composed output). No duplicate persisted state anywhere."""
+        change_row(cid)
+        return simple_view_service.build(cid)
+
     @app.post("/changes/{cid}/human-decisions/{did}/resolve")
     def change_resolve_human_decision(cid:int,did:int,resolution_note:str=Form(...)):
         """Form-friendly counterpart to the JSON /api/human-decisions/{did}/
@@ -2569,6 +2630,26 @@ def create_app(settings=None):
         pid=int(project_id) if project_id.strip().isdigit() else None
         cid=changes.create(title=title,description=description,change_type=change_type,risk_level=risk_level,project_id=pid)
         return change_row(cid)
+    @app.post("/changes")
+    def create_change_simple(request:Request,what:str=Form(...),change_type:str=Form("FEATURE"),project_id:str=Form("")):
+        """A1.19: the Simple Create Change entry -- one big "what do you
+        want to change or build?" box, no Spec/Plan/Task vocabulary
+        required. Reuses ChangeService.create() exactly (never a second
+        creation path/second source of truth); the freeform text becomes
+        BOTH description (kept in full) and title (first line, truncated
+        to a sane length -- same "intent is always resolvable" fallback
+        discipline task_decision_service.py's effective_task_prompt()
+        already established for Task Title). Advanced fields (risk_level,
+        project_id, an exact separate title) remain available via the
+        existing POST /api/changes JSON route -- this is additive, not a
+        replacement."""
+        what=(what or "").strip()
+        if not what:
+            raise HTTPException(422,"Tell us what you want to change or build.")
+        title=what.splitlines()[0].strip()[:120] or what[:120]
+        pid=int(project_id) if project_id.strip().isdigit() else None
+        cid=changes.create(title=title,description=what,change_type=change_type,project_id=pid)
+        return RedirectResponse(f"/changes/{cid}",303)
     @app.get("/api/changes/{cid}")
     def api_get_change(cid:int):
         return change_row(cid)
@@ -3217,6 +3298,21 @@ def create_app(settings=None):
     # check otherwise.
     workflow_service.human_acceptance_gate=product_acceptance_service
     change_control_surface.product_acceptance_service=product_acceptance_service
+
+    # Track A1.3: ChangeListSummaryService -- composed here, same
+    # construction-order reason as autonomous_execution_service on the
+    # Change Detail route above (product_acceptance_service doesn't exist
+    # yet earlier in create_app()). GET /changes resolves the name at
+    # request time, well after create_app() has finished running.
+    change_list_summary_service=ChangeListSummaryService(
+        db,changes,workflow_service,human_decisions,product_acceptance_service)
+    app.state.change_list_summary_service=change_list_summary_service
+
+    # Track A1.11-A1.18/A1.23: Simple Mode composition -- presentation
+    # only, over change_control_surface's own already-composed truth
+    # (see that service's and simple_view_service.py's own docstrings).
+    simple_view_service=SimpleViewService(db,change_control_surface,changes)
+    app.state.simple_view_service=simple_view_service
 
     # ---- E12: Bug / Incident Closed Loop -------------------------------
     incident_service=IncidentService(

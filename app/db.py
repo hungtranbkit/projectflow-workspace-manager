@@ -4,6 +4,8 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+from app.services.request_memo import RequestMemo
+
 # Versioned, additive migrations. Each entry is (version, sql). Applied in
 # order, once, tracked in schema_migrations -- a fresh DB applies all of
 # them; an existing local dev DB only applies whichever versions it is
@@ -1400,11 +1402,53 @@ CREATE INDEX IF NOT EXISTS idx_execution_waves_change ON execution_waves(change_
 CREATE INDEX IF NOT EXISTS idx_execution_wave_tasks_wave ON execution_wave_tasks(wave_id);
 CREATE INDEX IF NOT EXISTS idx_execution_wave_tasks_task ON execution_wave_tasks(task_id);
 """),
+    # Track A1.7: query index audit. Additive only, measured (never
+    # guessed) -- workspace_events(entity_type,entity_id) is queried by
+    # several already-existing hot paths with no supporting index at all
+    # (autonomous_execution_service.py's own recent-AUTO_* lookback,
+    # app/main.py's repository-contract/integration-events history, the
+    # TASK_COMPLETED dedupe check, and this track's own new Simple Mode
+    # History section, simple_view_service.py) -- every one of them a
+    # full table scan of an append-only, whole-app-wide audit log that
+    # only ever grows. Every other column this track's own /changes
+    # profiling+cProfile run actually touched (tasks.change_id,
+    # work_products.change_id, human_decisions' subject_type/subject_id
+    # composite, product_acceptances.change_id, incidents.change_id,
+    # agent_workspaces.task_id, qa_runs.task_id, merge_records.task_id,
+    # workflow_runs.change_id) already had a supporting index -- see
+    # docs/TRACK_A1_PERFORMANCE_AND_SIMPLE_MODE.md for the full audit.
+    (31, """
+CREATE INDEX IF NOT EXISTS idx_workspace_events_entity ON workspace_events(entity_type, entity_id);
+"""),
 ]
 
 
 class Database:
-    def __init__(self, path: Path): self.path = path
+    def __init__(self, path: Path):
+        self.path = path
+        # Track A1 (A1.2/A1.5/A1.6) perf fix: OPT-IN, request-scoped
+        # memoization of read queries -- explicitly NOT the "long-lived
+        # shared connection" change A1.2 forbids without proof of safety
+        # (connection-per-call semantics below are completely unchanged;
+        # every cache miss still opens a fresh connection exactly as
+        # before). Callers must explicitly open `with db.memoize():`
+        # around ONE read-only request/composition (e.g. GET /changes) --
+        # never wrap a route that writes, since execute()/event() are
+        # deliberately NOT memoized (a write's result, and any read made
+        # after it, must always be live). This is what finally collapses
+        # the remaining N+1 fan-out A1.1's benchmark showed surviving
+        # TaskDecisionService.evaluate()'s own memoization: identical
+        # per-task SELECTs issued from separate accessor methods
+        # (dependencies_for, the DEPLOYMENT_REQUESTED condition check,
+        # deploy-failure detection, ProductAcceptanceService's own
+        # sub-queries, ...) without threading a prefetch context through
+        # every one of their signatures.
+        self._memo = RequestMemo()
+    def memoize(self):
+        """`with db.memoize(): ...` around one read-only HTTP
+        request/composition operation. See RequestMemo for the
+        reentrant/thread-isolation contract."""
+        return self._memo.scope()
     def init(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
@@ -1424,8 +1468,12 @@ class Database:
             db.commit()
         finally: db.close()
     def all(self, sql, args=()):
+        return self._memo.get(("all", sql, tuple(args)), lambda: self._all_uncached(sql, args))
+    def _all_uncached(self, sql, args=()):
         with self.connect() as db: return [dict(r) for r in db.execute(sql, args)]
     def one(self, sql, args=()):
+        return self._memo.get(("one", sql, tuple(args)), lambda: self._one_uncached(sql, args))
+    def _one_uncached(self, sql, args=()):
         with self.connect() as db:
             row = db.execute(sql, args).fetchone()
             return dict(row) if row else None

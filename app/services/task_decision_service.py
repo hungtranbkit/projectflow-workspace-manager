@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.services.failure_classifier import fingerprint as fingerprint_of, parse_failures, parse_summary
 from app.services.project_contract import ContractError, load_contract
+from app.services.request_memo import RequestMemo
 from app.services.sandbox_contract import SandboxContractError, load_sandbox_contract
 
 # Task Lifecycle & Gate Model Refactor -- the single authoritative source
@@ -181,6 +182,24 @@ class TaskDecisionService:
     def __init__(self, db, git):
         self.db = db
         self.git = git
+        # Track A1 (A1.4/A1.5) perf fix: request-scoped memoization of
+        # evaluate(), NOT a global/app-lifetime cache. evaluate_workflow()
+        # calls evaluate() on the same task_id several times per Change
+        # (once inside readiness(), again inside _gate_tests_pass, again
+        # inside _gate_release_ready, _gate_review_pass, _gate_security_pass,
+        # and once more in its own blocked_tasks check) -- confirmed live
+        # by scripts/benchmark_changes_list.py at ~2.8x calls per Task.
+        # Safe because nothing mutates the DB between reads within one
+        # synchronous composition call (the exact justification A1.4 asks
+        # for before adding caching instead of threading `self.decision`
+        # through every _gate_* method -- P0's own audit flagged that
+        # deeper refactor as real but not LOW-RISK).
+        self._memo = RequestMemo()
+
+    def memoize(self):
+        """`with decision.memoize(): ...` -- see RequestMemo for the
+        reentrant/thread-isolation contract."""
+        return self._memo.scope()
 
     # ---- policy -------------------------------------------------------
     def risk_profile_for(self, task_row) -> str:
@@ -346,6 +365,20 @@ class TaskDecisionService:
 
     # ---- the decision ---------------------------------------------------
     def evaluate(self, task_id: int) -> dict:
+        return self._memo.get(task_id, lambda: self._evaluate_uncached(task_id))
+
+    def evaluate_many(self, task_ids) -> dict[int, dict]:
+        """A1.4 batch entry point. Deliberately NOT a second decision
+        implementation -- it calls the exact same evaluate() per task_id,
+        just inside one memoize() scope, so this always returns exactly
+        what calling evaluate(task_id) individually would (memoization
+        never changes a result, only avoids recomputing an identical one:
+        nothing mutates the DB between reads within this call). Duplicate
+        ids are evaluated once."""
+        with self.memoize():
+            return {tid: self.evaluate(tid) for tid in dict.fromkeys(task_ids)}
+
+    def _evaluate_uncached(self, task_id: int) -> dict:
         t = self.db.one("SELECT * FROM tasks WHERE id=?", (task_id,))
         if not t:
             raise ValueError(f"Task {task_id} not found")
@@ -383,9 +416,9 @@ class TaskDecisionService:
         all_builders_ready = bool(builders) and all(b["ready"] for b in builders)
         all_reviews_current_pass = bool(builders) and all(b["review_status"] == "PASS" for b in builders)
         qa_ok = (not self.requires_qa(risk)) or (qa is not None and qa["status"] == "PASS" and self._qa_current(qa, t))
-        integration_ok = (not self.requires_integration(risk)) or self._integration_ok(ti, ti_repos)
-        gates_ok = all_reviews_current_pass and qa_ok and integration_ok and not blocking
         all_merged = bool(required_merges) and all(m["merge_status"] == "MERGED" for m in required_merges)
+        integration_ok = (not self.requires_integration(risk)) or self._integration_ok(ti, ti_repos, all_merged)
+        gates_ok = all_reviews_current_pass and qa_ok and integration_ok and not blocking
 
         stage = self._stage(builders, all_builders_ready, all_reviews_current_pass, qa, qa_ok, risk, ti, integration_ok, gates_ok, all_merged)
         ready_for_main = gates_ok and not all_merged
@@ -425,6 +458,15 @@ class TaskDecisionService:
             return None  # not part of the 8-step wizard
         if status == "BACKLOG":
             return "TASK"
+        # Real incident: same ordering bug as _next_action -- a DONE
+        # Task's Builder/Integration Workspaces are commonly closed
+        # afterward, which reads as "not ready"/"not healthy" to the
+        # checks below and would otherwise send the wizard step back to
+        # AGENT_RUNNING or INTEGRATION for a Task that has already fully
+        # merged. `status` is computed once in evaluate() before either
+        # workspace is touched, so it wins outright here too.
+        if status == "DONE":
+            return "DONE"
         if not builders:
             return "SETUP"
         # A reviewer's FIX_REQUIRED sends the whole Task back to the
@@ -443,7 +485,7 @@ class TaskDecisionService:
             return "REVIEW"
         if self.requires_qa(risk) and not (qa and qa["status"] == "PASS" and self._qa_current(qa, t)):
             return "TEST_QA"
-        if self.requires_integration(risk) and not self._integration_ok(ti, ti_repos):
+        if self.requires_integration(risk) and not self._integration_ok(ti, ti_repos, all_merged):
             return "INTEGRATION"
         if all_merged:
             return "DONE"
@@ -478,7 +520,15 @@ class TaskDecisionService:
         latest = {}
         for r in rows:
             latest.setdefault(r["stage"], r)  # first seen per stage, DESC id -> most recent
-        if required == 0 or len(latest) < required:
+        if required == 0:
+            # No PROJECT.yaml at all, or one that declares zero required CI
+            # stages: nothing is required, so there is nothing to wait on --
+            # NOT_RUN would otherwise be permanent (Run Integration Tests
+            # has no stages to queue, so test_runs/tested_commit rows are
+            # never written and this branch would never be left).
+            return {"tests_pass": True, "tests_status": "PASS", "failures": [], "tests_required": 0,
+                     "tests_passed": 0, "head": head, "summary": {}}
+        if len(latest) < required:
             return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required,
                      "tests_passed": sum(1 for v in latest.values() if v["status"] == "PASS"), "head": head, "summary": {}}
         failures = []
@@ -645,7 +695,7 @@ class TaskDecisionService:
                 blockers.append("SOURCE_STALE")
         return {"eligible": not blockers, "blockers": blockers, "source_branch": branch, "current_commit": commit}
 
-    def _integration_ok(self, ti, ti_repos):
+    def _integration_ok(self, ti, ti_repos, all_merged=False):
         """Healthy AND verified -- 'TESTING' means tests are only in
         flight, not proof of anything yet, so only an explicit
         READY_FOR_MAIN on every participating repo's Integration
@@ -666,7 +716,19 @@ class TaskDecisionService:
         decision layer itself self-healing: the invariant 'Integration
         READY_FOR_MAIN implies current HEAD == verified HEAD' now holds
         no matter which route asks, never only the one that happens to
-        also run the DB-write side effect."""
+        also run the DB-write side effect.
+
+        Real incident: once every required repo is actually MERGED,
+        pre-merge integration health (worktree state, live gate_status)
+        stops mattering at all -- the exact same philosophy
+        merge_gate_status() already applies to a MergeRecord that has
+        reached MERGED (never re-evaluates pre-merge concepts again).
+        Without this bypass, closing an Integration Workspace once its
+        Task is fully merged -- there being nothing left to do with it --
+        flips an already-DONE Task back to ACTIVE/BLOCKED purely because
+        the now-CLOSED row's own `status` column no longer reads
+        READY_FOR_MAIN, even though nothing about the real merge changed."""
+        if all_merged: return True
         if not ti or ti["status"] == "CONFLICT": return False
         if not ti_repos: return False
         for r in ti_repos:
@@ -683,11 +745,16 @@ class TaskDecisionService:
     def qa_current(self, qa, t):
         return bool(qa) and self._qa_current(qa, t)
 
-    def integration_healthy(self, ti, ti_repos):
-        return self._integration_ok(ti, ti_repos)
+    def integration_healthy(self, ti, ti_repos, all_merged=False):
+        return self._integration_ok(ti, ti_repos, all_merged)
 
     def _stage(self, builders, all_ready, all_reviews_pass, qa, qa_ok, risk, ti, integration_ok, gates_ok, all_merged):
         if not builders: return "PLANNING"
+        # Real incident: a Builder Workspace closed after its Task already
+        # fully merged reads as "not ready" below -- all_merged (proof the
+        # ladder already succeeded once) must win outright, same as
+        # _next_action/_current_step's own DONE short-circuit.
+        if all_merged: return "COMPLETE"
         if not all_ready: return "DEVELOPMENT"
         if not all_reviews_pass: return "REVIEW"
         if self.requires_qa(risk) and not qa_ok: return "QA"
@@ -704,6 +771,18 @@ class TaskDecisionService:
 
     def _next_action(self, t, builders, qa, ti, ti_repos, required_merges, risk, ready_for_main, blocking, status):
         tid = t["id"]
+        # Real incident: a DONE Task's builder/integration workspaces are
+        # commonly closed afterward (nothing left to do with them) --
+        # `ready = w["status"] == "READY"` then reads a closed Builder
+        # Workspace as "not ready" and this ladder's very first loop
+        # below sends an already-merged Task back to "Review result:
+        # <agent>"/"Start <agent>" instead of Close Task. Checked here,
+        # before any builder/integration re-litigation, so a DONE status
+        # (computed once in evaluate(), before either workspace was
+        # touched) always wins outright -- nothing about a Task that has
+        # already fully merged should ever be re-asked of the operator.
+        if status == "DONE":
+            return _action("CLOSE_TASK", "Close Task", "All required repos merged.", f"/api/tasks/{tid}/close")
         if not builders:
             # Task Title fallback: intent is always resolvable (title is
             # mandatory at creation), so there is nothing left to gate on
@@ -808,7 +887,8 @@ class TaskDecisionService:
                 # actual Integrator page, never a scroll-and-guess.
                 conflict_target = f"/integrations/{ti_repos[0]['id']}" if ti_repos else f"/tasks/{tid}#integration"
                 return _action("RESOLVE_CONFLICT", "Resolve Conflict", "Integration has a merge conflict.", conflict_target)
-            if not self._integration_ok(ti, ti_repos):
+            all_merged = bool(required_merges) and all(m["merge_status"] == "MERGED" for m in required_merges)
+            if not self._integration_ok(ti, ti_repos, all_merged):
                 # Section 19/20: the exact same per-repo ladder the
                 # Integration page itself uses (integration_next_action)
                 # -- one authoritative ordering, never two.
@@ -845,8 +925,9 @@ class TaskDecisionService:
                 return action
         if status == "BLOCKED":
             return _action("NONE", "Blocked", blocking[0] if blocking else "Blocked.", None)
-        if status == "DONE":
-            return _action("CLOSE_TASK", "Close Task", "All required repos merged.", f"/api/tasks/{tid}/close")
+        # status == "DONE" is handled at the very top of this function now
+        # (see the comment there for why it must run before any
+        # builder/integration re-litigation).
         if ready_for_main:
             pending = [m for m in required_merges if m["merge_status"] != "MERGED"]
             not_started = [m for m in pending if m["merge_status"] == "NOT_STARTED"]
@@ -890,7 +971,11 @@ class TaskDecisionService:
         if status == "BACKLOG":
             return [item("TASK", "current")] + [item(k, "future") for k in CHECKLIST_STEPS[1:]]
         items = [item("TASK", "done")]
-        items.append(item("BUILDER", "done" if all_builders_ready else ("current" if current_step in ("SETUP", "AGENT_RUNNING") else "future")))
+        # Real incident: all_builders_ready reads w["status"]=="READY",
+        # which a Builder Workspace closed after its Task already merged
+        # no longer satisfies -- all_merged (the ladder already succeeded
+        # once) must keep this checked, same fix as _stage/_next_action.
+        items.append(item("BUILDER", "done" if (all_builders_ready or all_merged) else ("current" if current_step in ("SETUP", "AGENT_RUNNING") else "future")))
         test_states = [self.builder_tests_status(b) for b in builders] if builders else []
         if builders and all(s == "PASS" for s in test_states):
             items.append(item("AUTOMATED_TESTS", "done"))
@@ -947,9 +1032,9 @@ class TaskDecisionService:
         all_builders_ready = bool(builders) and all(b["ready"] for b in builders)
         all_reviews_current_pass = bool(builders) and all(b["review_status"] == "PASS" for b in builders)
         qa_ok = (not self.requires_qa(risk)) or (qa is not None and qa["status"] == "PASS" and self._qa_current(qa, t))
-        integration_ok = (not self.requires_integration(risk)) or self._integration_ok(ti, ti_repos)
         required_merges = [m for m in merges if m["required"]]
         all_merged = bool(required_merges) and all(m["merge_status"] == "MERGED" for m in required_merges)
+        integration_ok = (not self.requires_integration(risk)) or self._integration_ok(ti, ti_repos, all_merged)
         return {
             "task": t, "status": status, "stage": stage, "risk_profile": risk, "next_action": next_action,
             "blocking_reasons": blocking, "test_readiness": test_readiness, "ready_for_main": ready_for_main,
