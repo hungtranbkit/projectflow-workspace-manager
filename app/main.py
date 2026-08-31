@@ -118,7 +118,14 @@ def create_app(settings=None):
             "before this app will start.")
     secrets_service = SecretsService(db, list(settings.secret_encryption_keys))
     git = GitWorkspaceService(settings.root, worktree_root=settings.worktree_root); launcher = TerminalLauncherService(settings, git)
-    sandbox_runtime = SandboxRuntimeService(); ports = PortAllocatorService(db)
+    # B1.2 (docs/B1_HOSTED_SERVICE_READ_ISOLATION.md, app/services/
+    # ssrf_guard.py): a tenant's own PROJECT.yaml health-check URL is
+    # validated (loopback/private/link-local/metadata-address rejected)
+    # only once this process is actually hosting multiple tenants --
+    # AUTH_MODE=none keeps today's exact behavior (a self-hosted
+    # operator's own DEV target legitimately IS 127.0.0.1/an internal
+    # address).
+    sandbox_runtime = SandboxRuntimeService(enforce_ssrf_guard=(settings.auth_mode == "required")); ports = PortAllocatorService(db)
     # ---- B0.6: mandatory sandboxing for tenant-supplied command execution
     # docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md -- the two real,
     # audited shell=True call sites (TestRunner's preflight/test stages,
@@ -143,7 +150,7 @@ def create_app(settings=None):
     github_merge = (GitHubMergeService(runner=make_hosted_runner(db, secrets_service))
                      if settings.auth_mode == "required" else GitHubMergeService())
     ops = OperationService(db)
-    deployer = DeploymentService(db, git)
+    deployer = DeploymentService(db, git, enforce_ssrf_guard=(settings.auth_mode == "required"))
     contract_editor = RepositoryContractEditor(git)
     # Spec Layer V1 (S1-S10): specs/ lives in THIS repo (the ProjectFlow
     # tool's own source), never settings.root (the managed-repos
@@ -596,6 +603,95 @@ def create_app(settings=None):
             # (require_csrf_unless_bearer's own docstring).
             await require_csrf_unless_bearer(request)
         return _dep
+
+    # ---- B1.1(a): GET-route counterpart -- no CSRF, VIEWER default -------
+    def require_read_role(kind: str, param: str, min_role: str = "VIEWER"):
+        """docs/B1_HOSTED_SERVICE_READ_ISOLATION.md's per-id read guard --
+        identical AuthzService resolution and 401/404/403 fail-closed
+        semantics as require_role() above, deliberately WITHOUT the CSRF
+        check: GET is safe/idempotent, and CSRF only ever guards a
+        state-changing request (require_csrf_unless_bearer's own
+        docstring) -- folding it in here would require every plain page
+        navigation and fetch() GET to carry a token, which nothing does
+        and nothing should. Default min_role is VIEWER (the lowest real
+        role) since reading is a strictly weaker requirement than the
+        MEMBER default require_role() uses for a mutation."""
+        min_level = ROLE_LEVEL[min_role]
+
+        async def _dep(request: Request) -> None:
+            if settings.auth_mode != "required":
+                return
+            user = current_user(request)
+            if not user:
+                raise HTTPException(401, "AUTHENTICATION_REQUIRED")
+            raw = request.path_params.get(param)
+            if raw is None:
+                raise HTTPException(404)
+            try:
+                entity_id = int(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(404)
+            org_ids = authz_service.resolve_organization_ids(kind, entity_id)
+            if not org_ids:
+                raise HTTPException(404)
+            for org_id in org_ids:
+                role = org_service.member_role(org_id, user["id"])
+                if not role:
+                    raise HTTPException(404)
+                if ROLE_LEVEL[role] < min_level:
+                    raise HTTPException(403, "INSUFFICIENT_ROLE")
+        return _dep
+
+    def _visible_repo_ids(request: Request) -> set[int] | None:
+        """B1.1(b)'s list-route filter base. None means unrestricted --
+        AUTH_MODE=none (today's exact self-hosted behavior, zero new
+        query overhead) -- every call site below checks for None and
+        skips filtering entirely in that case. A real, authenticated-but-
+        empty set() is a different, valid, fail-closed answer ("sees
+        nothing") and must never be treated the same as None."""
+        if settings.auth_mode != "required":
+            return None
+        user = current_user(request)
+        if not user:
+            return set()
+        return authz_service.visible_repository_ids(user["id"])
+
+    def _visible_task_ids(request: Request) -> set[int] | None:
+        if settings.auth_mode != "required":
+            return None
+        user = current_user(request)
+        if not user:
+            return set()
+        return authz_service.visible_task_ids(user["id"])
+
+    def _filter_polymorphic(request: Request, kind: str, rows: list) -> list:
+        """Per-row fallback for a list route whose entities don't carry a
+        direct repository_id/task_id column to filter on cheaply (e.g.
+        test_runs' own workspace_type/workspace_id) -- reuses AuthzService's
+        existing per-entity resolver instead of a second resolution path.
+        Deliberately only used for routes with a small/capped row count
+        (test-runs' own LIMIT 200) -- see docs/
+        B1_HOSTED_SERVICE_READ_ISOLATION.md's own scope note on this
+        trade-off; a route with real unbounded growth needs the batched
+        approach _visible_repo_ids/_visible_task_ids use instead."""
+        if settings.auth_mode != "required":
+            return rows
+        repo_ids = _visible_repo_ids(request)
+        if not repo_ids:
+            return []
+        return [r for r in rows if authz_service.resolve_repository_ids(kind, r["id"]) & repo_ids]
+
+    def _filter_rows(rows: list, id_ids: set[int] | None, key: str = "id") -> list:
+        """B1.1(b): filters an already-fetched row list down to the ones
+        whose `key` column is in id_ids -- id_ids is the None|set() result
+        of _visible_repo_ids/_visible_task_ids (or an ad-hoc {id, ...}
+        derived from one of those). None (AUTH_MODE=none) means
+        unrestricted -- returned unchanged, no new query cost at all in
+        the permanent self-hosted default. Does not touch pagination/
+        ordering; every caller filters BEFORE paginating, never after."""
+        if id_ids is None:
+            return rows
+        return [r for r in rows if r[key] in id_ids]
 
     async def _mutating_csrf(request: Request) -> None:
         """B0.4's CSRF check for the 12 body-based `create` routes (no
@@ -1528,8 +1624,14 @@ def create_app(settings=None):
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request):
-        agents=db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id WHERE w.status NOT IN ('CLOSED','DONE') ORDER BY w.updated_at DESC")
-        ints=db.all("SELECT i.*,r.repo_name FROM integration_workspaces i JOIN repositories r ON r.id=i.repository_id WHERE i.status!='CLOSED' ORDER BY i.updated_at DESC")
+        repo_ids=_visible_repo_ids(request)
+        agents=_filter_rows(db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id WHERE w.status NOT IN ('CLOSED','DONE') ORDER BY w.updated_at DESC"),repo_ids,"repository_id")
+        ints=_filter_rows(db.all("SELECT i.*,r.repo_name FROM integration_workspaces i JOIN repositories r ON r.id=i.repository_id WHERE i.status!='CLOSED' ORDER BY i.updated_at DESC"),repo_ids,"repository_id")
+        # B1.1(b) residual: running_sandboxes/cleanup_pending stay
+        # unfiltered aggregate COUNTs across every org (not per-row detail
+        # -- no title/content leaks, only a number) -- documented, not
+        # silently left, in docs/B1_HOSTED_SERVICE_READ_ISOLATION.md as a
+        # deliberately deferred low-severity item, not re-plumbed here.
         running_sandboxes=sandboxes.running_count()
         cleanup_pending=db.one("SELECT COUNT(*) n FROM sandboxes WHERE status='CLEANUP_ELIGIBLE'")["n"]
         # Dashboard is Task-centric (section 48): every count below comes
@@ -1537,7 +1639,7 @@ def create_app(settings=None):
         # same source Kanban/List/Detail use -- never a raw worktree
         # count standing in for Task state, never a second dashboard-only
         # tally that could drift from the real gate engine.
-        task_rows=db.all("SELECT * FROM tasks WHERE status!='CANCELLED'")
+        task_rows=_filter_rows(db.all("SELECT * FROM tasks WHERE status!='CANCELLED'"),_visible_task_ids(request))
         cards=[task_card_view(t) for t in task_rows]
         by_status={s:sum(1 for c in cards if c["status"]==s) for s in ("BACKLOG","ACTIVE","BLOCKED","READY_FOR_MAIN","DONE")}
         summary={"active":len(agents),"ready":sum(x["status"]=="READY" for x in agents),"testing":sum(x["status"]=="TESTING" for x in ints),"main":sum(bool(x["ready_for_main"]) for x in ints),
@@ -1555,7 +1657,7 @@ def create_app(settings=None):
     def help_page(request: Request): return render(request, "help.html")
 
     @app.get("/repositories", response_class=HTMLResponse)
-    def repositories(request: Request): return render(request,"repositories.html",repositories=db.all("SELECT * FROM repositories ORDER BY repo_name"),discovered=discover_repositories(settings.root))
+    def repositories(request: Request): return render(request,"repositories.html",repositories=_filter_rows(db.all("SELECT * FROM repositories ORDER BY repo_name"),_visible_repo_ids(request)),discovered=discover_repositories(settings.root))
     @app.post("/api/repositories")
     def register(request: Request, repo_path: str=Form(...), repo_name: str=Form(""), default_branch: str=Form("main"), _csrf: None = Depends(_mutating_csrf)):
         # B0.3: registering a brand-new repository carries no org
@@ -1567,7 +1669,7 @@ def create_app(settings=None):
         db.execute("INSERT INTO repositories(repo_name,repo_path,default_branch) VALUES(?,?,?) ON CONFLICT(repo_path) DO UPDATE SET enabled=1,repo_name=excluded.repo_name,default_branch=excluded.default_branch",(slugify(repo_name or path.name),str(path),default_branch))
         return RedirectResponse("/repositories",303)
     @app.get("/api/repositories")
-    def api_repos(): return db.all("SELECT * FROM repositories")
+    def api_repos(request: Request): return _filter_rows(db.all("SELECT * FROM repositories"),_visible_repo_ids(request))
 
     # ------------------------------------------- Repository Runtime & Sandbox
     def check_dependency_cycle(self_repo_name, dependency_names):
@@ -1591,7 +1693,7 @@ def create_app(settings=None):
             stack.extend(d["repo"] for d in settings_.get("runtime_dependencies", []))
         return False
     @app.get("/repositories/{rid}/runtime", response_class=HTMLResponse)
-    def repository_runtime(request: Request, rid: int):
+    def repository_runtime(request: Request, rid: int, _authz: None = Depends(require_read_role("repository", "rid"))):
         r = repo(rid)
         try:
             current = contract_editor.read_sandbox_settings(Path(r["repo_path"]))
@@ -1699,7 +1801,12 @@ def create_app(settings=None):
         return RedirectResponse(f"/sandboxes/{sid}", 303)
 
     @app.get("/workspaces", response_class=HTMLResponse)
-    def workspaces(request: Request): return render(request,"workspaces.html",workspaces=db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id ORDER BY w.updated_at DESC"),repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),tasks=db.all("SELECT id,title FROM tasks WHERE status NOT IN ('MERGED','CANCELLED') ORDER BY title"))
+    def workspaces(request: Request):
+        repo_ids=_visible_repo_ids(request)
+        return render(request,"workspaces.html",
+                       workspaces=_filter_rows(db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id ORDER BY w.updated_at DESC"),repo_ids,"repository_id"),
+                       repositories=_filter_rows(db.all("SELECT * FROM repositories WHERE enabled=1"),repo_ids),
+                       tasks=_filter_rows(db.all("SELECT id,title FROM tasks WHERE status NOT IN ('MERGED','CANCELLED') ORDER BY title"),_visible_task_ids(request)))
     @app.post("/api/workspaces")
     def create_workspace(request:Request,repository_id:int=Form(...),agent:str=Form(...),task_name:str=Form(...),base_branch:str=Form("main"), _csrf: None = Depends(_mutating_csrf)):
         _require_org_role_for_repo(request, repository_id, "MEMBER")
@@ -1712,9 +1819,9 @@ def create_app(settings=None):
             raise
         db.event("agent",wid,"WORKSPACE_CREATED",branch); return RedirectResponse(f"/workspaces/{wid}",303)
     @app.get("/api/workspaces")
-    def api_workspaces(): return db.all("SELECT * FROM agent_workspaces")
+    def api_workspaces(request: Request): return _filter_rows(db.all("SELECT * FROM agent_workspaces"),_visible_repo_ids(request),"repository_id")
     @app.get("/workspaces/{wid}",response_class=HTMLResponse)
-    def workspace_detail(request:Request,wid:int):
+    def workspace_detail(request:Request,wid:int, _authz: None = Depends(require_read_role("workspace", "wid"))):
         """Section 39: Task Status, Workspace Status, Sandbox Status and
         Test Status are shown as four clearly separate values -- Task
         Status/review gate state come only from decision.evaluate() (the
@@ -1762,7 +1869,7 @@ def create_app(settings=None):
                       session=session,live_session=live_session,agent_status=agent_status,detected_report=detected_report,
                       recovery_state=recovery_state,manual_ready_check=manual_ready_check)
     @app.get("/api/workspaces/{wid}")
-    def api_workspace(wid:int): return agent_row(wid)
+    def api_workspace(wid:int, _authz: None = Depends(require_read_role("workspace", "wid"))): return agent_row(wid)
     @app.post("/api/workspaces/{wid}/ready")
     def ready(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         w=agent_row(wid); head=git.head(w["worktree_path"]); db.execute("UPDATE agent_workspaces SET status='READY',ready_for_integration=1,last_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,wid)); db.event("agent",wid,"READY_MARKED",head)
@@ -2180,15 +2287,15 @@ def create_app(settings=None):
         return {"ok":True,"mode":mode}
     @app.get("/agents/live",response_class=HTMLResponse)
     def agents_live(request:Request):
-        rows=db.all("SELECT s.*,w.agent workspace_agent,w.role,r.repo_name,w.task_id tid,t.title task_title FROM agent_sessions s "
+        rows=_filter_rows(db.all("SELECT s.*,w.agent workspace_agent,w.role,w.repository_id,r.repo_name,w.task_id tid,t.title task_title FROM agent_sessions s "
                      "JOIN agent_workspaces w ON w.id=s.workspace_id JOIN repositories r ON r.id=w.repository_id LEFT JOIN tasks t ON t.id=w.task_id "
-                     "WHERE s.status IN ('STARTING','RUNNING','WAITING_FOR_INPUT') ORDER BY s.last_activity_at DESC")
+                     "WHERE s.status IN ('STARTING','RUNNING','WAITING_FOR_INPUT') ORDER BY s.last_activity_at DESC"),_visible_repo_ids(request),"repository_id")
         for row in rows:
             sb=sandbox_for_workspace(row["workspace_id"]); row["sandbox_status"]=sb["status"] if sb else None; row["sandbox_health"]=sb["health_status"] if sb else None
             row["activity_hint"]=activity_summary(row["id"], 160)
         return render(request,"agents_live.html",sessions=rows)
     @app.get("/workspaces/{wid}/sessions/{sid}",response_class=HTMLResponse)
-    def session_detail(request:Request,wid:int,sid:int):
+    def session_detail(request:Request,wid:int,sid:int, _authz: None = Depends(require_read_role("workspace", "wid"))):
         w=agent_row(wid); s=session_row(sid)
         if s["workspace_id"]!=wid: raise HTTPException(404)
         t=task_row(w["task_id"]) if w.get("task_id") else None
@@ -2263,7 +2370,12 @@ def create_app(settings=None):
             return JSONResponse({"ok":False,"code":exc.code,"message":str(exc),"fallback":f"cd {w['worktree_path']}"},status_code=409)
 
     @app.get("/integrations",response_class=HTMLResponse)
-    def integrations(request:Request): return render(request,"integrations.html",integrations=db.all("SELECT i.*,r.repo_name FROM integration_workspaces i JOIN repositories r ON r.id=i.repository_id ORDER BY i.updated_at DESC"),repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id WHERE w.status IN ('READY','CODING','CREATED')"))
+    def integrations(request:Request):
+        repo_ids=_visible_repo_ids(request)
+        return render(request,"integrations.html",
+                       integrations=_filter_rows(db.all("SELECT i.*,r.repo_name FROM integration_workspaces i JOIN repositories r ON r.id=i.repository_id ORDER BY i.updated_at DESC"),repo_ids,"repository_id"),
+                       repositories=_filter_rows(db.all("SELECT * FROM repositories WHERE enabled=1"),repo_ids),
+                       agents=_filter_rows(db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id WHERE w.status IN ('READY','CODING','CREATED')"),repo_ids,"repository_id"))
     @app.post("/api/integrations")
     async def create_integration(request:Request, _csrf: None = Depends(_mutating_csrf)):
         form=await request.form(); repository_id=int(form["repository_id"]); name=slugify(str(form["name"])); base=str(form.get("base_branch","main")); ids=[int(x) for x in form.getlist("workspace_ids")]
@@ -2282,9 +2394,9 @@ def create_app(settings=None):
         else: db.execute("UPDATE integration_workspaces SET status='TESTING' WHERE id=?",(iid,))
         return RedirectResponse(f"/integrations/{iid}",303)
     @app.get("/api/integrations")
-    def api_integrations(): return db.all("SELECT * FROM integration_workspaces")
+    def api_integrations(request: Request): return _filter_rows(db.all("SELECT * FROM integration_workspaces"),_visible_repo_ids(request),"repository_id")
     @app.get("/integrations/{iid}",response_class=HTMLResponse)
-    def integration_detail(request:Request,iid:int):
+    def integration_detail(request:Request,iid:int, _authz: None = Depends(require_read_role("integration", "iid"))):
         i=integration_row(iid); sources=db.all("SELECT s.*,w.agent,w.task_name,w.branch,w.worktree_path FROM integration_sources s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.integration_id=?",(iid,)); stale=[]
         for s in sources:
             current=git.head(i["repo_path"],s["branch"]); s["current_commit"]=current; s["stale"]=current!=s["merged_commit"]; stale.append(s["stale"])
@@ -2520,14 +2632,14 @@ def create_app(settings=None):
     def close_integration(iid:int, _authz: None = Depends(require_role("integration", "iid", "MEMBER"))): i=integration_row(iid); git.close(i["repo_path"],i["worktree_path"]); db.execute("UPDATE integration_workspaces SET status='CLOSED',ready_for_main=0,closed_at=CURRENT_TIMESTAMP WHERE id=?",(iid,)); db.event("integration",iid,"WORKSPACE_CLOSED"); return RedirectResponse("/integrations",303)
 
     @app.get("/test-runs",response_class=HTMLResponse)
-    def runs(request:Request): return render(request,"test_runs.html",runs=db.all("SELECT * FROM test_runs ORDER BY id DESC LIMIT 200"))
+    def runs(request:Request): return render(request,"test_runs.html",runs=_filter_polymorphic(request,"test_run",db.all("SELECT * FROM test_runs ORDER BY id DESC LIMIT 200")))
     @app.get("/api/test-runs/{rid}")
-    def api_run(rid:int):
+    def api_run(rid:int, _authz: None = Depends(require_read_role("test_run", "rid"))):
         row=db.one("SELECT * FROM test_runs WHERE id=?",(rid,));
         if not row: raise HTTPException(404)
         return row
     @app.get("/api/operations/{op_id}")
-    def api_operation(op_id:int):
+    def api_operation(op_id:int, _authz: None = Depends(require_read_role("operation", "op_id"))):
         """Polling endpoint for the generic action-button feedback model
         (Merge Latest Changes / Push Integration Branch / Create PR /
         Merge PR / Mark Ready for Main). The button-feedback JS polls
@@ -2538,7 +2650,7 @@ def create_app(settings=None):
         if not row: raise HTTPException(404)
         return row
     @app.get("/test-runs/{rid}/log",response_class=PlainTextResponse)
-    def run_log(rid:int):
+    def run_log(rid:int, _authz: None = Depends(require_read_role("test_run", "rid"))):
         row=db.one("SELECT * FROM test_runs WHERE id=?",(rid,));
         if not row: raise HTTPException(404)
         return f"STDOUT (tail)\n{row['stdout_tail']}\n\nSTDERR (tail)\n{row['stderr_tail']}"
@@ -2687,7 +2799,7 @@ def create_app(settings=None):
     @app.get("/tasks",response_class=HTMLResponse)
     def tasks_page(request:Request,status:str="",repository:str="",agent:str="",sandbox_status:str="",test_status:str="",integration_status:str="",q:str=""):
         filters,qs=parse_filters(status,repository,agent,sandbox_status,test_status,integration_status,q)
-        rows=db.all("SELECT * FROM tasks ORDER BY updated_at DESC")
+        rows=_filter_rows(db.all("SELECT * FROM tasks ORDER BY updated_at DESC"),_visible_task_ids(request))
         cards=[task_card_view(t) for t in rows]
         filtered=[c for c in cards if task_matches_filters(c,**filters)]
         return render(request,"tasks.html",cards=filtered,filters=filters,filters_qs=qs,columns=KANBAN_COLUMNS,
@@ -2695,7 +2807,7 @@ def create_app(settings=None):
     @app.get("/kanban",response_class=HTMLResponse)
     def kanban_page(request:Request,status:str="",repository:str="",agent:str="",sandbox_status:str="",test_status:str="",integration_status:str="",q:str=""):
         filters,qs=parse_filters(status,repository,agent,sandbox_status,test_status,integration_status,q)
-        rows=db.all("SELECT * FROM tasks WHERE status NOT IN ('CANCELLED') ORDER BY updated_at DESC")
+        rows=_filter_rows(db.all("SELECT * FROM tasks WHERE status NOT IN ('CANCELLED') ORDER BY updated_at DESC"),_visible_task_ids(request))
         cards=[task_card_view(t) for t in rows]
         filtered=[c for c in cards if task_matches_filters(c,**filters)]
         board={col:[c for c in filtered if c["column"]==col] for col in KANBAN_COLUMNS}
@@ -2886,9 +2998,9 @@ def create_app(settings=None):
         if prompt: regenerate_agent_prompt(tid,primary_repo_row)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.get("/api/tasks")
-    def api_tasks(): return db.all("SELECT * FROM tasks ORDER BY updated_at DESC")
+    def api_tasks(request: Request): return _filter_rows(db.all("SELECT * FROM tasks ORDER BY updated_at DESC"),_visible_task_ids(request))
     @app.get("/tasks/{tid}",response_class=HTMLResponse)
-    def task_detail(request:Request,tid:int):
+    def task_detail(request:Request,tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         """Every status/stage/gate/next-action value on this page comes
         from one call to decision.evaluate() (TaskDecisionService) --
         this route only attaches display-only detail (git worktree info,
@@ -3052,10 +3164,10 @@ def create_app(settings=None):
                       repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=settings.agents,
                       user_state=user_task_state(d),progress=progress_summary(d["current_step"],qa_required,integration_required))
     @app.get("/api/tasks/{tid}")
-    def api_task(tid:int):
+    def api_task(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         t=task_row(tid); return {**t,"workspaces":task_workspaces(tid),"sandboxes":task_sandboxes(tid),"task_integration":task_integration_row(tid)}
     @app.get("/api/tasks/{tid}/decision")
-    def api_task_decision(tid:int):
+    def api_task_decision(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         """The exact TaskDecisionService.evaluate() result -- the single
         source every page on this Task reads (section 32). Exposed
         directly so automation/tests never have to re-derive status/
@@ -3108,13 +3220,13 @@ def create_app(settings=None):
         db.event("task",tid,"SPEC_LINKAGE_UPDATED",f"classification={cls} feature_id={feature_id.strip() or None}")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.get("/api/tasks/{tid}/spec-gate")
-    def api_task_spec_gate(tid:int):
+    def api_task_spec_gate(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         t=task_row(tid); return spec_gate.evaluate(t)
     @app.get("/api/tasks/{tid}/spec-compliance")
-    def api_task_spec_compliance(tid:int):
+    def api_task_spec_compliance(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid); return spec_compliance.verify(tid)
     @app.get("/api/tasks/{tid}/evidence")
-    def api_task_evidence(tid:int):
+    def api_task_evidence(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid); return evidence_store.for_task(tid)
 
     # ---------------------------------------------- Engineering Domain (E1)
@@ -3160,8 +3272,9 @@ def create_app(settings=None):
         ~140 TaskDecisionService.evaluate() calls and 1400+ DB connections
         for just 100 Changes before this fix. Read-only route: safe to
         memoize end-to-end, never wrap a route that writes in this scope."""
+        repo_ids=_visible_repo_ids(request)
         summary=change_list_summary_service.build(
-            status=status,change_type=change_type,profile=profile,page=page,page_size=page_size)
+            status=status,change_type=change_type,profile=profile,page=page,page_size=page_size,visible_repo_ids=repo_ids)
         filter_qs=urlencode({k:v for k,v in {"status":status,"change_type":change_type,"profile":profile}.items() if v})
         return render(request,"changes.html",changes=summary["rows"],all_changes=summary["all_changes"],
                       human_attention=summary["human_attention"],recent=summary["recent"],
@@ -3169,9 +3282,9 @@ def create_app(settings=None):
                       change_types=CHANGE_TYPES,profiles=list(PROFILES),
                       page=summary["page"],page_size=summary["page_size"],
                       total=summary["total"],total_pages=summary["total_pages"],
-                      repos=db.all("SELECT id,repo_name FROM repositories WHERE enabled=1 ORDER BY repo_name"))
+                      repos=_filter_rows(db.all("SELECT id,repo_name FROM repositories WHERE enabled=1 ORDER BY repo_name"),repo_ids))
     @app.get("/changes/{cid}",response_class=HTMLResponse)
-    def change_detail(request:Request,cid:int):
+    def change_detail(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         # Track A1.11-A1.13: Simple Mode replaces this hub page's
         # rendering only -- every Advanced tab route below (spec/
@@ -3204,32 +3317,32 @@ def create_app(settings=None):
         }
         return render(request,"change_detail.html",cid=cid,active_tab="",header=header,overview=overview)
     @app.get("/changes/{cid}/spec",response_class=HTMLResponse)
-    def change_spec_tab(request:Request,cid:int):
+    def change_spec_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_spec.html",cid=cid,active_tab="spec",header=change_control_surface.header(cid),
                       data=change_control_surface.spec_tab(cid))
     @app.get("/changes/{cid}/architecture",response_class=HTMLResponse)
-    def change_architecture_tab(request:Request,cid:int):
+    def change_architecture_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_architecture.html",cid=cid,active_tab="architecture",header=change_control_surface.header(cid),
                       data=change_control_surface.architecture_tab(cid))
     @app.get("/changes/{cid}/design",response_class=HTMLResponse)
-    def change_design_tab(request:Request,cid:int):
+    def change_design_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_design.html",cid=cid,active_tab="design",header=change_control_surface.header(cid),
                       data=change_control_surface.design_tab(cid))
     @app.get("/changes/{cid}/tests",response_class=HTMLResponse)
-    def change_tests_tab(request:Request,cid:int):
+    def change_tests_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_tests.html",cid=cid,active_tab="tests",header=change_control_surface.header(cid),
                       data=change_control_surface.tests_tab(cid))
     @app.get("/changes/{cid}/plan",response_class=HTMLResponse)
-    def change_plan_tab(request:Request,cid:int):
+    def change_plan_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_plan.html",cid=cid,active_tab="plan",header=change_control_surface.header(cid),
                       data=change_control_surface.plan_tab(cid))
     @app.get("/changes/{cid}/tasks",response_class=HTMLResponse)
-    def change_tasks_tab(request:Request,cid:int):
+    def change_tasks_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         data=change_control_surface.tasks_tab(cid)
         # E8.23: per-row execution readiness (AUTO_READY/WAITING_.../
@@ -3250,32 +3363,32 @@ def create_app(settings=None):
         return render(request,"change_tasks.html",cid=cid,active_tab="tasks",header=change_control_surface.header(cid),
                       data=data)
     @app.get("/changes/{cid}/reviews",response_class=HTMLResponse)
-    def change_reviews_tab(request:Request,cid:int):
+    def change_reviews_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_reviews.html",cid=cid,active_tab="reviews",header=change_control_surface.header(cid),
                       data=change_control_surface.reviews_tab(cid))
     @app.get("/changes/{cid}/decisions",response_class=HTMLResponse)
-    def change_decisions_tab(request:Request,cid:int):
+    def change_decisions_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_decisions.html",cid=cid,active_tab="decisions",header=change_control_surface.header(cid),
                       data=change_control_surface.decisions_tab(cid))
     @app.get("/changes/{cid}/evidence",response_class=HTMLResponse)
-    def change_evidence_tab(request:Request,cid:int):
+    def change_evidence_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_evidence.html",cid=cid,active_tab="evidence",header=change_control_surface.header(cid),
                       data=change_control_surface.evidence_tab(cid))
     @app.get("/changes/{cid}/release",response_class=HTMLResponse)
-    def change_release_tab(request:Request,cid:int):
+    def change_release_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_release.html",cid=cid,active_tab="release",header=change_control_surface.header(cid),
                       data=change_control_surface.release_tab(cid))
     @app.get("/changes/{cid}/deploy",response_class=HTMLResponse)
-    def change_deploy_tab(request:Request,cid:int):
+    def change_deploy_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_deploy.html",cid=cid,active_tab="deploy",header=change_control_surface.header(cid),
                       data=change_control_surface.deploy_tab(cid))
     @app.get("/changes/{cid}/acceptance",response_class=HTMLResponse)
-    def change_acceptance_tab(request:Request,cid:int):
+    def change_acceptance_tab(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return render(request,"change_acceptance.html",cid=cid,active_tab="acceptance",header=change_control_surface.header(cid),
                       data=change_control_surface.acceptance_tab(cid))
@@ -3284,7 +3397,7 @@ def create_app(settings=None):
     @app.get("/incidents",response_class=HTMLResponse)
     def incidents_page(request:Request,status:str="",project_id:str=""):
         pid=int(project_id) if project_id.strip().isdigit() else None
-        rows=incident_service.list(project_id=pid,status=status.strip() or None)
+        rows=_filter_polymorphic(request,"incident",incident_service.list(project_id=pid,status=status.strip() or None))
         for r in rows:
             r["change"]=changes.get(r["change_id"]) if r["change_id"] else None
         open_rows=[r for r in rows if r["status"] not in ("CLOSED",)]
@@ -3292,7 +3405,7 @@ def create_app(settings=None):
                       filters={"status":status,"project_id":project_id},statuses=INCIDENT_STATUSES,
                       repos=db.all("SELECT * FROM repositories WHERE enabled=1"))
     @app.get("/incidents/{iid}",response_class=HTMLResponse)
-    def incident_detail(request:Request,iid:int):
+    def incident_detail(request:Request,iid:int, _authz: None = Depends(require_read_role("incident", "iid"))):
         row=incident_row(iid)
         change=changes.get(row["change_id"]) if row["change_id"] else None
         workflow_state=workflow_service.evaluate_workflow(row["change_id"]) if row["change_id"] else None
@@ -3306,7 +3419,7 @@ def create_app(settings=None):
                       test_case_specs=test_case_specs_store.list_for_change(row["change_id"]) if row["change_id"] else [])
 
     @app.get("/api/changes/{cid}/control-surface")
-    def api_change_control_surface(cid:int):
+    def api_change_control_surface(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         """E7.5.19: one composed, read-only view across every existing
         E1-E7 service for this Change -- composition only, never a new
         business-state calculation. The HTML tab routes above call the
@@ -3325,7 +3438,7 @@ def create_app(settings=None):
         }
 
     @app.get("/api/changes/{cid}/simple-view")
-    def api_change_simple_view(cid:int):
+    def api_change_simple_view(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         """A1.23: the one Simple Mode composition endpoint -- same
         no-duplicate-truth discipline as control-surface above, built on
         top of it (SimpleViewService only ever reads ChangeControlSurfaceService's
@@ -3344,8 +3457,8 @@ def create_app(settings=None):
         return RedirectResponse(f"/changes/{cid}/decisions#pending",303)
 
     @app.get("/api/changes")
-    def api_list_changes(project_id:int|None=None):
-        return changes.list(project_id=project_id)
+    def api_list_changes(request:Request,project_id:int|None=None):
+        return _filter_rows(changes.list(project_id=project_id),_visible_repo_ids(request),"project_id")
     @app.post("/api/changes")
     def api_create_change(request:Request,title:str=Form(...),description:str=Form(""),change_type:str=Form("FEATURE"),
                            risk_level:str=Form("NORMAL"),project_id:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
@@ -3375,7 +3488,7 @@ def create_app(settings=None):
         cid=changes.create(title=title,description=what,change_type=change_type,project_id=pid)
         return RedirectResponse(f"/changes/{cid}",303)
     @app.get("/api/changes/{cid}")
-    def api_get_change(cid:int):
+    def api_get_change(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         return change_row(cid)
     @app.post("/api/changes/{cid}/lifecycle")
     def api_change_lifecycle(cid:int,state:str=Form(...), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
@@ -3385,13 +3498,13 @@ def create_app(settings=None):
         changes.set_lifecycle_state(cid,state)
         return change_row(cid)
     @app.get("/api/changes/{cid}/tasks")
-    def api_change_tasks(cid:int):
+    def api_change_tasks(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid); return changes.list_tasks_for_change(cid)
     @app.post("/api/changes/{cid}/tasks/{tid}/attach")
     def api_attach_task_to_change(cid:int,tid:int, _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         changes.attach_task_to_change(cid,tid); return task_row(tid)
     @app.get("/api/changes/{cid}/work-products")
-    def api_change_work_products(cid:int):
+    def api_change_work_products(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid); return work_products.list_for_change(cid)
 
     @app.post("/api/work-products")
@@ -3423,11 +3536,11 @@ def create_app(settings=None):
             supersedes_id=int(supersedes_id) if supersedes_id.strip().isdigit() else None)
         return work_product_row(wpid)
     @app.get("/api/work-products/{wpid}")
-    def api_get_work_product(wpid:int):
+    def api_get_work_product(wpid:int, _authz: None = Depends(require_read_role("work_product", "wpid"))):
         return work_product_row(wpid)
 
     @app.get("/api/tasks/{tid}/work-products")
-    def api_task_work_products(tid:int):
+    def api_task_work_products(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         return {"inputs":work_products.inputs_for_task(tid),"outputs":work_products.outputs_for_task(tid)}
     @app.post("/api/tasks/{tid}/work-products/{wpid}/link")
@@ -3477,7 +3590,7 @@ def create_app(settings=None):
         return {"change_type":change_type.upper(),"risk_level":risk_level.upper(),
                 "recommended_roles":roles_catalog.recommended_roles_for_change(change_type,risk_level)}
     @app.get("/api/repositories/{rid}/engineering-policy")
-    def api_repository_engineering_policy(rid:int):
+    def api_repository_engineering_policy(rid:int, _authz: None = Depends(require_read_role("repository", "rid"))):
         r=repo(rid)
         try: policy=load_engineering_policy(Path(r["repo_path"]))
         except ContractError as exc: raise GitSafetyError(str(exc))
@@ -3512,7 +3625,7 @@ def create_app(settings=None):
         return tt
 
     @app.get("/api/changes/{cid}/workflow")
-    def api_get_change_workflow(cid:int):
+    def api_get_change_workflow(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         run=workflow_service.get_workflow(cid)
         if not run: raise HTTPException(404,"This Change has no workflow yet")
@@ -3523,15 +3636,15 @@ def create_app(settings=None):
         policy=_change_engineering_policy(change)
         return workflow_service.create_workflow_for_change(cid,profile_key.strip() or None,policy)
     @app.get("/api/changes/{cid}/workflow/state")
-    def api_change_workflow_state(cid:int):
+    def api_change_workflow_state(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         return workflow_service.evaluate_workflow(cid)
     @app.get("/api/changes/{cid}/ready-tasks")
-    def api_change_ready_tasks(cid:int):
+    def api_change_ready_tasks(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         return {"ready_tasks":workflow_service.list_ready_tasks(cid)}
     @app.get("/api/changes/{cid}/unmet-gates")
-    def api_change_unmet_gates(cid:int):
+    def api_change_unmet_gates(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         return {"unmet_gates":workflow_service.list_unmet_gates(cid)}
 
@@ -3551,7 +3664,7 @@ def create_app(settings=None):
 
     # ---- Task dependency graph (E3.6) ---------------------------------
     @app.get("/api/tasks/{tid}/dependencies")
-    def api_task_dependencies(tid:int):
+    def api_task_dependencies(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         return {"depends_on":task_dependencies.dependencies_for(tid),
                 "dependents":task_dependencies.dependents_of(tid),
@@ -3578,7 +3691,7 @@ def create_app(settings=None):
         _change_row(cid)
         return planner_service.plan_change(cid,provider=provider,materialize=materialize)
     @app.get("/api/changes/{cid}/plans")
-    def api_list_plans(cid:int):
+    def api_list_plans(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         return planner_service.list_plans(cid)
     @app.post("/api/changes/{cid}/replan")
@@ -3587,7 +3700,7 @@ def create_app(settings=None):
         return planner_service.replan_change(cid,provider=provider)
 
     @app.get("/api/plans/{pid}")
-    def api_get_plan(pid:int):
+    def api_get_plan(pid:int, _authz: None = Depends(require_read_role("plan", "pid"))):
         plan=_plan_row(pid)
         return {**plan,"items":planner_service.plan_items(pid),"human_decisions":planner_service.human_decisions(pid)}
     @app.post("/api/plans/{pid}/validate")
@@ -3599,11 +3712,11 @@ def create_app(settings=None):
         _plan_row(pid)
         return planner_service.materialize_plan(pid)
     @app.get("/api/plans/{pid}/validation")
-    def api_plan_validation(pid:int):
+    def api_plan_validation(pid:int, _authz: None = Depends(require_read_role("plan", "pid"))):
         plan=_plan_row(pid)
         return json.loads(plan["validation_result"] or "{}")
     @app.get("/api/plans/{pid}/task-graph")
-    def api_plan_task_graph(pid:int):
+    def api_plan_task_graph(pid:int, _authz: None = Depends(require_read_role("plan", "pid"))):
         _plan_row(pid)
         items=planner_service.plan_items(pid)
         return [{"key":it["item_key"],"title":it["title"],"task_type":it["task_type"],
@@ -3614,18 +3727,18 @@ def create_app(settings=None):
         _plan_row(pid)
         return planner_service.resolve_human_decision(did,resolution_note)
     @app.get("/api/plans/{pid}/staleness")
-    def api_plan_staleness(pid:int):
+    def api_plan_staleness(pid:int, _authz: None = Depends(require_read_role("plan", "pid"))):
         _plan_row(pid)
         return planner_service.check_staleness(pid)
     @app.get("/api/plans/{pid}/design-staleness")
-    def api_plan_design_staleness(pid:int):
+    def api_plan_design_staleness(pid:int, _authz: None = Depends(require_read_role("plan", "pid"))):
         """E6.17: PLAN_DESIGN_STALE -- surfaced separately from spec
         staleness above since they detect different drift (spec baseline
         vs. architecture/design WorkProduct state)."""
         _plan_row(pid)
         return planner_service.check_design_staleness(pid)
     @app.get("/api/plans/{pid}/test-design-staleness")
-    def api_plan_test_design_staleness(pid:int):
+    def api_plan_test_design_staleness(pid:int, _authz: None = Depends(require_read_role("plan", "pid"))):
         """E7.16: PLAN_TEST_DESIGN_STALE -- surfaced separately from spec/
         design staleness above since it detects test-design drift."""
         _plan_row(pid)
@@ -3655,7 +3768,7 @@ def create_app(settings=None):
         _change_row(cid)
         return requirement_analysis_service.analyze(cid,provider=provider)
     @app.get("/api/changes/{cid}/requirements")
-    def api_get_requirements(cid:int):
+    def api_get_requirements(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         wp=spec_lifecycle_service.get_requirement_analysis(cid)
         if not wp: raise HTTPException(404,"No Requirement Analysis yet for this Change")
@@ -3681,11 +3794,11 @@ def create_app(settings=None):
             result["proposal"]=_proposal_out(spec_lifecycle_service.get_proposal(result["proposal"]["id"]))
         return result
     @app.get("/api/changes/{cid}/spec-proposals")
-    def api_list_spec_proposals(cid:int):
+    def api_list_spec_proposals(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         return spec_lifecycle_service.list_proposals(cid)
     @app.get("/api/spec-proposals/{pid}")
-    def api_get_spec_proposal(pid:int):
+    def api_get_spec_proposal(pid:int, _authz: None = Depends(require_read_role("spec_proposal", "pid"))):
         p=_proposal_row(pid)
         return {**_proposal_out(p),"human_decisions":spec_lifecycle_service.human_decisions_for(pid)}
     @app.post("/api/spec-proposals/{pid}/review")
@@ -3709,11 +3822,11 @@ def create_app(settings=None):
         _proposal_row(pid)
         return spec_lifecycle_service.apply_proposal(pid)
     @app.get("/api/spec-proposals/{pid}/findings")
-    def api_spec_proposal_findings(pid:int):
+    def api_spec_proposal_findings(pid:int, _authz: None = Depends(require_read_role("spec_proposal", "pid"))):
         p=_proposal_row(pid)
         return json.loads(p["review_result"] or "{}").get("findings",[])
     @app.get("/api/spec-proposals/{pid}/validation")
-    def api_spec_proposal_validation(pid:int):
+    def api_spec_proposal_validation(pid:int, _authz: None = Depends(require_read_role("spec_proposal", "pid"))):
         p=_proposal_row(pid)
         return json.loads(p["validation_result"] or "{}")
 
@@ -3737,7 +3850,7 @@ def create_app(settings=None):
         if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
         return result
     @app.get("/api/changes/{cid}/architecture")
-    def api_get_architecture(cid:int):
+    def api_get_architecture(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         wp=architecture_analysis_service.current_for_change(cid)
         if not wp: raise HTTPException(404,"No Architecture Analysis yet for this Change")
@@ -3754,7 +3867,7 @@ def create_app(settings=None):
         if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
         return result
     @app.get("/api/changes/{cid}/adrs")
-    def api_list_adrs(cid:int):
+    def api_list_adrs(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         return [_wp_out(wp) for wp in work_products.list_for_change(cid) if wp["kind"]=="ADR"]
 
@@ -3775,7 +3888,7 @@ def create_app(settings=None):
         if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
         return result
     @app.get("/api/changes/{cid}/design")
-    def api_get_design(cid:int):
+    def api_get_design(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         return {"technical_design":_wp_out(technical_design_service.current_for_change(cid)),
                 "ui_ux_design":_wp_out(ui_ux_design_service.current_for_change(cid)),
@@ -3813,13 +3926,13 @@ def create_app(settings=None):
             if ui_result.get("work_product"): result["ui_ux_design"]=_wp_out(ui_result["work_product"])
         return result
     @app.get("/api/changes/{cid}/design/status")
-    def api_design_status(cid:int):
+    def api_design_status(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         s=architecture_design_service.status(cid,project_policy=_change_policy_or_none(cid))
         return {**s,"architecture_analysis":_wp_out(s["architecture_analysis"]),
                 "technical_design":_wp_out(s["technical_design"]),"ui_ux_design":_wp_out(s["ui_ux_design"])}
     @app.get("/api/changes/{cid}/design/findings")
-    def api_design_findings(cid:int):
+    def api_design_findings(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         return architecture_design_service.design_findings(cid)
 
@@ -3857,14 +3970,14 @@ def create_app(settings=None):
         result=test_design_service.design(cid,provider=provider,project_test_command=_change_test_command(cid))
         return _test_design_result_out(result)
     @app.get("/api/changes/{cid}/tests")
-    def api_get_tests(cid:int):
+    def api_get_tests(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         test_set=test_design_service.current_test_case_set(cid)
         return {"test_plan":_wp_out(test_design_service.current_test_plan(cid)),
                 "test_case_set":_wp_out(test_set),
                 "test_cases":[_tcs_out(tc) for tc in (test_case_specs_store.list_for_work_product(test_set["id"]) if test_set else [])]}
     @app.get("/api/changes/{cid}/tests/coverage")
-    def api_tests_coverage(cid:int):
+    def api_tests_coverage(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         return requirement_coverage_service.compute(cid)
     @app.post("/api/changes/{cid}/tests/review")
@@ -3892,17 +4005,17 @@ def create_app(settings=None):
         result=test_design_service.refine(sid,findings,provider=provider)
         return _test_design_result_out(result)
     @app.get("/api/changes/{cid}/tests/status")
-    def api_tests_status(cid:int):
+    def api_tests_status(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         s=test_design_lifecycle_service.status(cid)
         return {**s,"test_plan":_wp_out(s["test_plan"]),"test_case_set":_wp_out(s["test_case_set"])}
     @app.get("/api/changes/{cid}/tests/staleness")
-    def api_tests_staleness(cid:int):
+    def api_tests_staleness(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         _change_row(cid)
         return test_design_lifecycle_service.staleness(cid)
 
     @app.get("/api/test-cases/{tcid}")
-    def api_get_test_case(tcid:int):
+    def api_get_test_case(tcid:int, _authz: None = Depends(require_read_role("test_case_spec", "tcid"))):
         return _tcs_out(_tcs_row(tcid))
     @app.post("/api/test-cases/{tcid}/map-executable")
     def api_map_test_case_executable(tcid:int,repository_id:str=Form(""),repository_path:str=Form(...),
@@ -3911,7 +4024,7 @@ def create_app(settings=None):
         rid=int(repository_id) if repository_id.strip().isdigit() else None
         return executable_test_mapping_service.map(tcid,rid,repository_path,test_symbol,command=command,framework=framework)
     @app.get("/api/test-cases/{tcid}/mapping")
-    def api_get_test_case_mapping(tcid:int):
+    def api_get_test_case_mapping(tcid:int, _authz: None = Depends(require_read_role("test_case_spec", "tcid"))):
         _tcs_row(tcid)
         m=executable_test_mapping_service.get(tcid)
         return m if m else {"test_case_spec_id":tcid,"implementation_status":"UNIMPLEMENTED"}
@@ -4069,11 +4182,11 @@ def create_app(settings=None):
     app.state.execution_wave_service=execution_wave_service
 
     @app.get("/api/changes/{cid}/autonomous-execution")
-    def api_autonomous_execution_status(cid:int):
+    def api_autonomous_execution_status(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return autonomous_execution_service.status(cid)
     @app.get("/api/changes/{cid}/auto-ready-tasks")
-    def api_auto_ready_tasks(cid:int):
+    def api_auto_ready_tasks(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         return autonomous_execution_service.list_auto_ready_tasks(cid)
     @app.post("/api/changes/{cid}/autonomous-execution/tick")
@@ -4090,13 +4203,13 @@ def create_app(settings=None):
         task_row(tid)
         return autonomous_execution_service.launch_task_if_ready(tid)
     @app.get("/api/tasks/{tid}/execution-readiness")
-    def api_task_execution_readiness(tid:int):
+    def api_task_execution_readiness(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         return autonomous_execution_service.evaluate_task(tid)
 
     # ---- E8.5 Worktree Isolation Foundation --------------------------
     @app.get("/api/tasks/{tid}/worktree")
-    def api_task_worktree(tid:int):
+    def api_task_worktree(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         ws=worktree_manager.get_task_worktree(tid)
         if not ws: raise HTTPException(404,"This Task has no managed worktree")
@@ -4109,7 +4222,7 @@ def create_app(settings=None):
         task_row(tid)
         return worktree_manager.create_task_worktree(tid,repository_id,agent,role,base_branch or None,sandbox_profile)
     @app.get("/api/repositories/{rid}/worktrees")
-    def api_repository_worktrees(rid:int):
+    def api_repository_worktrees(rid:int, _authz: None = Depends(require_read_role("repository", "rid"))):
         repo(rid)
         return worktree_manager.list_repository_worktrees(rid)
     @app.post("/api/tasks/{tid}/worktree/inspect")
@@ -4125,7 +4238,7 @@ def create_app(settings=None):
         task_row(tid)
         return worktree_manager.remove_task_worktree(tid,force)
     @app.get("/api/tasks/{tid}/integration-check")
-    def api_task_integration_check(tid:int):
+    def api_task_integration_check(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         return worktree_manager.check_integration(tid)
 
@@ -4139,11 +4252,11 @@ def create_app(settings=None):
         task_row(tid)
         return security_review_service.review_task(tid,provider)
     @app.get("/api/tasks/{tid}/reviews")
-    def api_task_reviews(tid:int):
+    def api_task_reviews(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         return db.all("SELECT * FROM review_runs WHERE task_id=? ORDER BY id DESC",(tid,))
     @app.get("/api/tasks/{tid}/findings")
-    def api_task_findings(tid:int):
+    def api_task_findings(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         return findings_store.list_for_task(task_chain_ids(db,tid))
     @app.post("/api/tasks/{tid}/review-fix/tick")
@@ -4151,14 +4264,14 @@ def create_app(settings=None):
         task_row(tid)
         return review_fix_orchestrator.tick(tid,provider)
     @app.get("/api/tasks/{tid}/review-fix/status")
-    def api_task_review_fix_status(tid:int):
+    def api_task_review_fix_status(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         return review_fix_orchestrator.status(tid)
     @app.post("/api/findings/{fid}/resolve")
     def api_finding_resolve(fid:int,resolution_reference:str=Form(...),status:str=Form("RESOLVED"), _authz: None = Depends(require_role("finding", "fid", "MEMBER"))):
         return findings_store.resolve(fid,resolution_reference,status)
     @app.get("/api/tasks/{tid}/integration-readiness")
-    def api_task_integration_readiness(tid:int):
+    def api_task_integration_readiness(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         return review_fix_orchestrator.integration_readiness(tid)
 
@@ -4168,7 +4281,7 @@ def create_app(settings=None):
         task_row(tid)
         return integration_service.integrate_task(tid)
     @app.get("/api/tasks/{tid}/integration")
-    def api_task_integration_status(tid:int):
+    def api_task_integration_status(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         return integration_service.preflight_integration(tid)
 
@@ -4179,10 +4292,11 @@ def create_app(settings=None):
         r=release_service.create_release(repository_id,ids,version.strip() or None)
         return r
     @app.get("/api/releases")
-    def api_list_releases(repository_id:int):
+    def api_list_releases(request:Request,repository_id:int):
+        _require_org_role_for_repo(request,repository_id,"VIEWER")
         return release_service.list_for_repository(repository_id)
     @app.get("/api/releases/{rid}")
-    def api_get_release(rid:int):
+    def api_get_release(rid:int, _authz: None = Depends(require_read_role("release", "rid"))):
         r=release_service.get(rid)
         if not r: raise HTTPException(404,"Release not found")
         return {**r,"tasks":release_service.tasks_for(rid)}
@@ -4208,13 +4322,13 @@ def create_app(settings=None):
         return release_service.release_tick(rid,review_fix_orchestrator)
 
     @app.get("/api/releases/{rid}/deployments")
-    def api_release_deployments(rid:int):
+    def api_release_deployments(rid:int, _authz: None = Depends(require_read_role("release", "rid"))):
         r=release_service.get(rid)
         if not r: raise HTTPException(404,"Release not found")
         ids=[x for x in (r["test_deployment_id"],r["production_deployment_id"]) if x]
         return [db.one("SELECT * FROM deployments WHERE id=?",(i,)) for i in ids]
     @app.get("/api/releases/{rid}/runtime-verification")
-    def api_release_runtime_verification(rid:int):
+    def api_release_runtime_verification(rid:int, _authz: None = Depends(require_read_role("release", "rid"))):
         r=release_service.get(rid)
         if not r: raise HTTPException(404,"Release not found")
         return db.all(
@@ -4233,7 +4347,7 @@ def create_app(settings=None):
 
     # ---- E11.21: Human Product Acceptance API ----------------------
     @app.get("/api/changes/{cid}/acceptance")
-    def api_change_acceptance(cid:int):
+    def api_change_acceptance(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         pa=product_acceptance_service.get_current_for_change(cid)
         return {"eligibility":product_acceptance_service.eligibility(cid),
@@ -4256,7 +4370,7 @@ def create_app(settings=None):
     def api_acceptance_reject(paid:int,actor:str=Form("human"),reason:str=Form(...),classification:str=Form(""), _authz: None = Depends(require_role("product_acceptance", "paid", "MEMBER"))):
         return product_acceptance_service.reject(paid,actor,reason,classification.strip() or None)
     @app.get("/api/product-acceptances/{paid}/evidence")
-    def api_acceptance_evidence(paid:int):
+    def api_acceptance_evidence(paid:int, _authz: None = Depends(require_read_role("product_acceptance", "paid"))):
         return product_acceptance_service.evidence(paid)
 
     # ---- E12: Bug / Incident Closed Loop API ----------------------
@@ -4271,11 +4385,11 @@ def create_app(settings=None):
         _require_org_role_for_repo(request, pid, "MEMBER")
         return incident_service.report(title,description,source,severity,reported_by,pid)
     @app.get("/api/incidents")
-    def api_list_incidents(project_id:str="",status:str=""):
+    def api_list_incidents(request:Request,project_id:str="",status:str=""):
         pid=int(project_id) if project_id.strip().isdigit() else None
-        return incident_service.list(project_id=pid,status=status.strip() or None)
+        return _filter_polymorphic(request,"incident",incident_service.list(project_id=pid,status=status.strip() or None))
     @app.get("/api/incidents/{iid}")
-    def api_get_incident(iid:int):
+    def api_get_incident(iid:int, _authz: None = Depends(require_read_role("incident", "iid"))):
         row=incident_row(iid)
         return {**row,"regression_history":incident_service.regression_history(iid)}
     @app.post("/api/incidents/{iid}/classify")
@@ -4327,7 +4441,7 @@ def create_app(settings=None):
 
     # ---- E13.40: Parallel Execution Wave API ----------------------------
     @app.get("/api/changes/{cid}/execution-wave")
-    def api_get_execution_wave(cid:int):
+    def api_get_execution_wave(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
         current=execution_wave_service.current_wave_for_change(cid)
         return {"current_wave":current,"plan":execution_wave_service.plan_execution_wave(cid)}
@@ -4344,12 +4458,12 @@ def create_app(settings=None):
         if not execution_wave_service.get_wave(wid): raise HTTPException(404,"Execution wave not found")
         return execution_wave_service.integrate_wave(wid)
     @app.get("/api/execution-waves/{wid}")
-    def api_get_execution_wave_detail(wid:int):
+    def api_get_execution_wave_detail(wid:int, _authz: None = Depends(require_read_role("execution_wave", "wid"))):
         wave=execution_wave_service.get_wave(wid)
         if not wave: raise HTTPException(404,"Execution wave not found")
         return wave
     @app.get("/execution-waves/{wid}",response_class=HTMLResponse)
-    def execution_wave_detail_page(request:Request,wid:int):
+    def execution_wave_detail_page(request:Request,wid:int, _authz: None = Depends(require_read_role("execution_wave", "wid"))):
         wave=execution_wave_service.get_wave(wid)
         if not wave: raise HTTPException(404,"Execution wave not found")
         change=changes.get(wave["change_id"])
@@ -4364,11 +4478,11 @@ def create_app(settings=None):
                                   **parallel_safety_service.evaluate_pair(launched[i]["task_id"],launched[j]["task_id"])})
         return render(request,"execution_wave_detail.html",wave=wave,change=change,pairwise=pairwise)
     @app.get("/api/tasks/{tid}/parallel-safety")
-    def api_task_parallel_safety(tid:int):
+    def api_task_parallel_safety(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid)
         return parallel_safety_service.conflicts_for_task(tid)
     @app.get("/api/tasks/{tid}/parallel-conflicts")
-    def api_task_parallel_conflicts(tid:int):
+    def api_task_parallel_conflicts(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         t=task_row(tid)
         if not t.get("change_id"): return {"task_id":tid,"conflicts":[]}
         siblings=[s for s in changes.list_tasks_for_change(t["change_id"]) if s["id"]!=tid]
@@ -4847,12 +4961,12 @@ def create_app(settings=None):
         db.event("task",prev["task_id"],"ROLLBACK_REQUESTED",f"repo={prev['repository_id']} env={prev['environment']} rollback_of={did} deployment={new_id}")
         return RedirectResponse(f"/tasks/{prev['task_id']}",303)
     @app.get("/api/deployments/{did}")
-    def api_deployment(did:int):
+    def api_deployment(did:int, _authz: None = Depends(require_read_role("deployment", "did"))):
         row=db.one("SELECT * FROM deployments WHERE id=?",(did,))
         if not row: raise HTTPException(404)
         return row
     @app.get("/deployments/{did}",response_class=HTMLResponse)
-    def deployment_detail(request:Request,did:int):
+    def deployment_detail(request:Request,did:int, _authz: None = Depends(require_read_role("deployment", "did"))):
         row=db.one("SELECT d.*,r.repo_name FROM deployments d JOIN repositories r ON r.id=d.repository_id WHERE d.id=?",(did,))
         if not row: raise HTTPException(404)
         phases=db.all("SELECT * FROM deployment_phases WHERE deployment_id=? ORDER BY id",(did,))
@@ -4932,14 +5046,16 @@ def create_app(settings=None):
         if owner_type: clauses.append("s.owner_type=?"); params.append(owner_type)
         if profile: clauses.append("s.profile=?"); params.append(profile)
         where=(" WHERE "+" AND ".join(clauses)) if clauses else ""
-        rows=db.all(f"SELECT s.*,r.repo_name,t.title task_title FROM sandboxes s LEFT JOIN repositories r ON r.id=s.repository_id LEFT JOIN tasks t ON t.id=s.task_id{where} ORDER BY s.updated_at DESC",tuple(params))
+        rows=_filter_polymorphic(request,"sandbox",db.all(f"SELECT s.*,r.repo_name,t.title task_title FROM sandboxes s LEFT JOIN repositories r ON r.id=s.repository_id LEFT JOIN tasks t ON t.id=s.task_id{where} ORDER BY s.updated_at DESC",tuple(params)))
+        repo_ids=_visible_repo_ids(request)
         return render(request,"sandboxes.html",sandboxes=[sandbox_view(r) for r in rows],running=sandboxes.running_count(),max_running=settings.max_running_sandboxes,
                       filters={"status":status,"task_id":task_id,"repository_id":repository_id,"owner_type":owner_type,"profile":profile},
-                      tasks=db.all("SELECT id,title FROM tasks ORDER BY title"),repositories=db.all("SELECT * FROM repositories WHERE enabled=1"))
+                      tasks=_filter_rows(db.all("SELECT id,title FROM tasks ORDER BY title"),_visible_task_ids(request)),
+                      repositories=_filter_rows(db.all("SELECT * FROM repositories WHERE enabled=1"),repo_ids))
     @app.get("/api/sandboxes")
-    def api_sandboxes(): return db.all("SELECT * FROM sandboxes ORDER BY id DESC")
+    def api_sandboxes(request: Request): return _filter_polymorphic(request,"sandbox",db.all("SELECT * FROM sandboxes ORDER BY id DESC"))
     @app.get("/sandboxes/{sid}",response_class=HTMLResponse)
-    def sandbox_detail(request:Request,sid:int):
+    def sandbox_detail(request:Request,sid:int, _authz: None = Depends(require_read_role("sandbox", "sid"))):
         sb=sandbox_row(sid); sources=db.all("SELECT s.*,r.repo_name FROM sandbox_sources s JOIN repositories r ON r.id=s.repository_id WHERE s.sandbox_id=?",(sid,))
         ports_=ports.ports_for(sid); ops=db.all("SELECT * FROM sandbox_operations WHERE sandbox_id=? ORDER BY id DESC LIMIT 20",(sid,)); hw=db.all("SELECT * FROM hardware_test_results WHERE sandbox_id=? ORDER BY id DESC",(sid,))
         outputs_=sandboxes.outputs(sid); lan_ip=sandbox_runtime.local_ip() if sb["profile"]=="HARDWARE" else None
@@ -4951,9 +5067,9 @@ def create_app(settings=None):
         return render(request,"sandbox_detail.html",sb=sb,sources=sources,ports=ports_,ops=ops,hw=hw,outputs=outputs_,lan_ip=lan_ip,
                       task=task,stale=stale,view=sandbox_view(sb),manual=manual,manual_history=manual_history)
     @app.get("/api/sandboxes/{sid}")
-    def api_sandbox(sid:int): return sandbox_row(sid)
+    def api_sandbox(sid:int, _authz: None = Depends(require_read_role("sandbox", "sid"))): return sandbox_row(sid)
     @app.get("/api/sandboxes/{sid}/status")
-    def api_sandbox_status(sid:int):
+    def api_sandbox_status(sid:int, _authz: None = Depends(require_read_role("sandbox", "sid"))):
         """Small polling endpoint for the Provision/Reset Data/Cleanup
         button-feedback JS: sandbox.status + its own most recent
         sandbox_operations row (already the real source of truth --

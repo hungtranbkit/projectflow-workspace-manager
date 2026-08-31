@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.services.project_contract import deployment_config, load_command
+from app.services import ssrf_guard
 
 """Post-Merge DEV Deployment (section 2 of the spec this implements):
 deliberately NOT a second deployment framework. Every real action here
@@ -87,7 +88,7 @@ class DeploymentService:
     run one, so every existing assertion right after calling deploy()
     still sees the already-finished result."""
 
-    def __init__(self, db, git, runner=_default_runner):
+    def __init__(self, db, git, runner=_default_runner, enforce_ssrf_guard: bool = False):
         self.db = db
         self.git = git
         self.runner = runner
@@ -96,6 +97,14 @@ class DeploymentService:
         self.health_attempts = 20
         self.health_delay = 3.0
         self.image_exists = _default_image_exists
+        # B1.2 (docs/B1_HOSTED_SERVICE_READ_ISOLATION.md, app/services/
+        # ssrf_guard.py): only ever True when the caller (app/main.py)
+        # already knows AUTH_MODE=='required' -- under AUTH_MODE=none
+        # (the permanent self-hosted default) this stays False and
+        # _check_health's real target-audit precedent (DEV == 127.0.0.1)
+        # is byte-for-byte unchanged. Default False also preserves every
+        # existing direct construction (every test in this repo).
+        self.enforce_ssrf_guard = enforce_ssrf_guard
         # E10.19/E10.34: the env var a rollback pins to force the exact
         # prior artifact -- "MESFLOW_IMAGE" is this host's own real,
         # already-audited target's convention (see this module's own
@@ -361,6 +370,15 @@ class DeploymentService:
         if not url:
             self._phase_done(phase_id, "FAILED")
             return False
+        if self.enforce_ssrf_guard:
+            try:
+                ssrf_guard.check_url(url)
+            except ssrf_guard.SSRFGuardError:
+                # Checked once, up front -- not worth spending the full
+                # health_attempts*health_delay budget retrying a target
+                # this process will never be allowed to reach.
+                self._phase_done(phase_id, "FAILED")
+                return False
         for attempt in range(self.health_attempts):
             try:
                 with self.http_get(url, timeout=5) as resp:

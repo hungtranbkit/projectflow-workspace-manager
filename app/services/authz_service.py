@@ -196,6 +196,32 @@ class AuthzService:
         fn = dispatch.get(row["subject_type"])
         return fn(row["subject_id"]) if fn else set()
 
+    def _repo_ids_for_test_run(self, run_id: int) -> set[int]:
+        """B1.1(a): test_runs is polymorphic (workspace_type/workspace_id,
+        see app/services/test_runner.py's own INSERT) rather than a
+        straight FK -- 'agent' means agent_workspaces (this module's own
+        'workspace' kind), 'integration' means integration_workspaces."""
+        row = self.db.one("SELECT workspace_type, workspace_id FROM test_runs WHERE id=?", (run_id,))
+        if not row:
+            return set()
+        if row["workspace_type"] == "agent":
+            return self._repo_ids_for_workspace(row["workspace_id"])
+        if row["workspace_type"] == "integration":
+            return self._repo_ids_for_integration(row["workspace_id"])
+        return set()
+
+    def _repo_ids_for_operation(self, operation_id: int) -> set[int]:
+        """B1.1(a): operations is polymorphic too (entity_type/entity_id,
+        app/services/operations.py's own INSERT) -- entity_type values
+        used in practice are exactly this module's own kind names
+        ('task', 'change', 'integration', 'repository', ...), so this
+        just re-dispatches through RESOLVERS instead of a second map."""
+        row = self.db.one("SELECT entity_type, entity_id FROM operations WHERE id=?", (operation_id,))
+        if not row:
+            return set()
+        fn = self.RESOLVERS.get(row["entity_type"])
+        return fn(self, row["entity_id"]) if fn else set()
+
     RESOLVERS = {
         "repository": lambda self, rid: {rid} if self.db.one("SELECT id FROM repositories WHERE id=?", (rid,)) else set(),
         "change": _repo_ids_for_change,
@@ -215,6 +241,8 @@ class AuthzService:
         "work_product": _repo_ids_for_work_product,
         "execution_wave": _repo_ids_for_execution_wave,
         "human_decision": _repo_ids_for_human_decision,
+        "test_run": _repo_ids_for_test_run,
+        "operation": _repo_ids_for_operation,
     }
 
     def resolve_repository_ids(self, kind: str, entity_id: int) -> set[int]:
@@ -240,3 +268,46 @@ class AuthzService:
     def organization_ids_for_repository(self, repository_id: int) -> set[int]:
         row = self.db.one("SELECT organization_id FROM repositories WHERE id=?", (repository_id,))
         return {row["organization_id"]} if row and row["organization_id"] else set()
+
+    # ---- B1.1(b): list-route tenant filtering -----------------------------
+    # A per-id resolver above answers "which org(s) own THIS one row" --
+    # cheap for a single check, wasteful called once per row of a list
+    # (the exact N+1 shape Track A1 already fixed for evaluate_workflow()).
+    # These two answer "which rows can this user see" in ONE query each,
+    # for the two shapes list routes actually need: repo-scoped tables
+    # (their own repository_id, or a project_id that IS a repository_id --
+    # `changes.project_id`'s own established meaning), and Task specifically
+    # (no direct repository column -- unions the same three real sources
+    # _repo_ids_for_task already walks, batched instead of per-row).
+    def visible_repository_ids(self, user_id: int) -> set[int]:
+        """Every repository belonging to an organization this user is any
+        member of (VIEWER included -- read visibility, not a role gate;
+        callers needing a higher role for a specific action still check
+        that separately). Empty set is a real, valid, fail-closed answer
+        ("authenticated, member of zero relevant orgs") -- callers must
+        not confuse it with "unrestricted"; that decision (AUTH_MODE=none)
+        is made by the caller before this is ever invoked, same precedent
+        as require_role()'s own auth_mode gate."""
+        rows = self.db.all(
+            "SELECT DISTINCT r.id FROM repositories r "
+            "JOIN organization_members m ON m.org_id=r.organization_id "
+            "WHERE m.user_id=?", (user_id,))
+        return {r["id"] for r in rows}
+
+    def visible_task_ids(self, user_id: int) -> set[int]:
+        """Same idea as visible_repository_ids, for Task's own three-source
+        union (_repo_ids_for_task's exact same three columns, just
+        expressed as one batched JOIN instead of a per-task lookup)."""
+        repo_ids = self.visible_repository_ids(user_id)
+        if not repo_ids:
+            return set()
+        placeholders = ",".join("?" for _ in repo_ids)
+        rows = self.db.all(
+            f"SELECT DISTINCT t.id FROM tasks t "
+            f"LEFT JOIN changes c ON c.id=t.change_id "
+            f"LEFT JOIN agent_workspaces w ON w.task_id=t.id "
+            f"WHERE t.repo_scope_id IN ({placeholders}) "
+            f"OR c.project_id IN ({placeholders}) "
+            f"OR w.repository_id IN ({placeholders})",
+            tuple(repo_ids) * 3)
+        return {r["id"] for r in rows}

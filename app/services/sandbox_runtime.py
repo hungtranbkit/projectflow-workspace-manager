@@ -7,6 +7,8 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+from app.services import ssrf_guard
+
 
 class SandboxRuntimeError(RuntimeError):
     def __init__(self, code: str, message: str, stdout: str = "", stderr: str = ""):
@@ -22,9 +24,15 @@ class SandboxRuntimeService:
     touching anything (docs section 66) -- it never targets a bare compose
     project name string alone."""
 
-    def __init__(self, docker_bin: str | None = None, timeout: int = 300):
+    def __init__(self, docker_bin: str | None = None, timeout: int = 300, enforce_ssrf_guard: bool = False):
         self.docker_bin = docker_bin or shutil.which("docker") or "docker"
         self.timeout = timeout
+        # B1.2: only ever True when the caller (app/main.py) already
+        # knows AUTH_MODE=='required' -- see health_check() and this
+        # module's own docstring precedent in ssrf_guard.py. Default
+        # False preserves every existing direct construction (tests,
+        # AUTH_MODE=none) byte-for-byte.
+        self.enforce_ssrf_guard = enforce_ssrf_guard
 
     def _run(self, argv: list[str], cwd: Path, timeout: int | None = None) -> subprocess.CompletedProcess:
         try:
@@ -205,6 +213,11 @@ class SandboxRuntimeService:
             raise
 
     def health_check(self, url: str, timeout: float = 5.0) -> tuple[bool, str]:
+        if self.enforce_ssrf_guard:
+            try:
+                ssrf_guard.check_url(url)
+            except ssrf_guard.SSRFGuardError as exc:
+                return False, f"{exc.code}: {exc.message}"
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:
                 return 200 <= resp.status < 300, f"HTTP {resp.status}"

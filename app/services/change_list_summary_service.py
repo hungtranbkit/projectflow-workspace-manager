@@ -51,11 +51,21 @@ class ChangeListSummaryService:
         self.product_acceptance_service = product_acceptance_service
 
     def build(self, *, status: str = "", change_type: str = "", profile: str = "",
-              page: int = 1, page_size: int = 25, recent_limit: int = 8) -> dict:
+              page: int = 1, page_size: int = 25, recent_limit: int = 8,
+              visible_repo_ids: set[int] | None = None) -> dict:
+        """`visible_repo_ids` (B1.1(b), docs/B1_HOSTED_SERVICE_READ_
+        ISOLATION.md): None means unrestricted (AUTH_MODE=none, today's
+        exact behavior) -- filtered here, BEFORE any per-row expensive
+        computation below, both for tenant isolation and as a free perf
+        win (a filtered-out row never pays evaluate_workflow()'s cost
+        either). Applied before pagination, so page counts/`total`
+        reflect only what this caller can actually see."""
         page = max(1, page)
         page_size = max(1, min(page_size, 200))  # a deliberate, generous upper bound -- never "no limit"
         with self.db.memoize(), project_contract.memoize(), spec_registry.memoize():
             rows = self.changes.list()
+            if visible_repo_ids is not None:
+                rows = [c for c in rows if c["project_id"] in visible_repo_ids]
             for c in rows:
                 run = self.workflow_service.get_workflow(c["id"])
                 c["profile_key"] = run["profile_key"] if run else None

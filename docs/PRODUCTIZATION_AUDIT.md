@@ -302,6 +302,15 @@ as a **BLOCKER for hosted/public readiness** in `TECHNICAL_DEBT.md`
 with real, reproducible numbers, recommended as a dedicated, properly
 regression-tested follow-up rather than a rushed change here.
 
+> **Correction (B1, 2026-09):** option (a) above was implemented by
+> Track A1, after this P0 pass but before B1 started
+> (`app/services/request_memo.py`, wired into `TaskDecisionService`/
+> `WorkflowService.evaluate_workflow()`/`ChangeListSummaryService`).
+> Re-measured with the same `scripts/benchmark_changes_list.py 100`
+> at B1's start: **1,942.8ms**, not 15,972ms — the row above is
+> historical (what P0 actually measured, kept for the record), not
+> current. See `docs/TECHNICAL_DEBT.md`'s ALREADY_RESOLVED section.
+
 ## P0.20 — Regression summary
 
 Full non-real-provider suite (`pytest tests/ -k "not real_"`): **all

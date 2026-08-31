@@ -8,26 +8,10 @@ self-hosted single-operator use, unless stated otherwise.
 
 ## BLOCKER (public/hosted readiness)
 
-- **No AuthN/AuthZ.** No login/session/authorization layer exists
-  anywhere in the app. By design for today's localhost-only,
-  single-operator deployment; a hard blocker for tracks B/C.
-- **No multi-tenant data isolation.** One SQLite DB, no per-user/org
-  row scoping anywhere in the schema.
-- **`/changes` list page: ~16s at 100 Changes** (P0.18, measured).
-  Root cause: `evaluate_workflow()` per Change × redundant
-  `TaskDecisionService.evaluate()` calls per Task × fresh-SQLite-
-  connection-per-call overhead. Fix requires either per-call
-  memoization (mechanical refactor across `_gate_*` methods) or a
-  connection-reuse-per-request architecture change (touches the
-  fresh-connection semantics two of this audit's own race fixes rely
-  on) — real work, deliberately not rushed into this audit pass.
-- **`shell=True` execution of tenant-supplied PROJECT.yaml commands,
-  unsandboxed by default.** Fine for a self-hosted operator running
-  their own repo; a real RCE vector the moment a hosted service runs
-  arbitrary tenant content this way. `SandboxManager` (Docker) exists
-  but is opt-in, not mandatory.
-- **No CSRF protection** on any POST route.
-- **No rate limiting** on any API route.
+None open as of B1 (2026-09). Every item this section originally listed
+(written at P0, before B0/B1 existed) is now either fixed or moved to
+ALREADY_RESOLVED below with real evidence — see that section rather
+than assume this register is still accurate elsewhere without checking.
 
 ## IMPORTANT
 
@@ -36,9 +20,6 @@ self-hosted single-operator use, unless stated otherwise.
   create a new Task rather than reuse the old one — is proven and
   documented (ARCHITECTURE.md), but it is a real constraint a future
   UI/automation layer must design around, not assume away.
-- **SSRF surface via `PROJECT.yaml`'s `service.healthcheck.url`** —
-  real HTTP GETs to a tenant-controlled URL. Fine for track A; must be
-  constrained (allowlist / network policy) before B/C.
 - **`releases._next_version()` SELECT-then-INSERT race** (same class
   as the two fixed in P0.9), lower frequency (needs two concurrent
   `create_release()` calls with no explicit version for the same
@@ -67,6 +48,38 @@ self-hosted single-operator use, unless stated otherwise.
   (`resume_form`/`block_form`) not re-audited line-by-line for
   user-controlled substrings in this pass — worth a dedicated,
   narrowly-scoped follow-up read.
+
+## ALREADY_RESOLVED (B0/B1, 2026-08/09 — see docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md, docs/B1_HOSTED_SERVICE_READ_ISOLATION.md)
+
+- **No AuthN/AuthZ** — B0.1 (real login/session/API-token identity)
+  and B0.3 (`require_role()` swept across all 157 mutating routes) +
+  B1.1 (`require_read_role()`/list-filtering swept across every
+  GET route that can return another org's data).
+- **No multi-tenant data isolation** — B0.2 (`organizations`/
+  `organization_members`, `repositories.organization_id` as the one
+  tenant-scoping anchor), enforced on writes by B0.3 and on reads by
+  B1.1.
+- **`/changes` list page: ~16s at 100 Changes** — fixed by Track A1
+  (`app/services/request_memo.py`, wired into `TaskDecisionService`/
+  `WorkflowService.evaluate_workflow()`/`ChangeListSummaryService`)
+  after this line was originally written, before B1 started. Re-
+  measured at B1's start with the same disposable-fixture benchmark
+  (`scripts/benchmark_changes_list.py 100`): **1.9s**, not 16s — real,
+  current evidence, not an assumption. No B1 code was needed for this.
+- **`shell=True` execution of tenant-supplied PROJECT.yaml commands,
+  unsandboxed by default** — B0.6 (`SandboxedCommandRunner`/
+  `run_ephemeral()`, mandatory ephemeral-container isolation under
+  `AUTH_MODE=required`, unchanged direct-host under `AUTH_MODE=none`).
+- **No CSRF protection** — B0.4 (`require_csrf_unless_bearer`, folded
+  into the same B0.3 sweep, plus B1.1's own `require_read_role()`
+  deliberately NOT carrying it — GET is never CSRF-guarded).
+- **No rate limiting** — B0.5 (slowapi on every named abuse-sensitive
+  auth/org/token route).
+- **SSRF surface via `PROJECT.yaml`'s `service.healthcheck.url`** —
+  B1.2 (`app/services/ssrf_guard.py`), rejects loopback/private/
+  link-local/metadata-address targets under `AUTH_MODE=required`;
+  `AUTH_MODE=none`'s own real localhost DEV-target precedent stays
+  unchanged (the guard never runs there).
 
 ## ALREADY_RESOLVED (this audit, P0)
 

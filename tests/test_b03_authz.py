@@ -367,7 +367,15 @@ def test_create_task_blank_repo_scope_allowed_for_any_authenticated_user(two_org
     E1-E13 BACKLOG contract (nothing tenant-scoped is touched)."""
     f = two_org_fixture
     token = _bind_csrf(f["outsider"])
-    r = f["outsider"].post("/api/tasks", data={"title": "just an idea", "csrf_token": token})
+    # follow_redirects=False (B1.1's own established precedent, see this
+    # file's other follow_redirects=False call sites): TestClient's
+    # default auto-follow would otherwise chase the 303 into GET
+    # /tasks/{tid}, which B1.1's require_read_role() correctly 404s for
+    # an orgless task (same fail-closed "zero resolved orgs" precedent
+    # B0.3's require_role() already applies to mutations of this exact
+    # same task) -- masking the actual thing under test here, the
+    # CREATE response itself.
+    r = f["outsider"].post("/api/tasks", data={"title": "just an idea", "csrf_token": token}, follow_redirects=False)
     assert r.status_code not in (401, 403, 404), r.text
 
 
