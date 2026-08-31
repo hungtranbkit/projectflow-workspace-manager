@@ -33,6 +33,12 @@ class Settings:
     smtp_password: str | None = None
     smtp_from: str = "noreply@localhost"
     smtp_use_tls: bool = True
+    # B0.7: app-wide Fernet key(s) for org_secrets envelope encryption --
+    # comma-separated, newest first (MultiFernet); NEVER stored in the
+    # database. Same "REFUSED, never guessed" discipline as
+    # session_secret: required whenever AUTH_MODE=required, checked at
+    # startup in app/main.py, not silently skipped.
+    secret_encryption_keys: tuple[str, ...] = ()
 
     @property
     def worktree_root(self) -> Path:
@@ -72,4 +78,6 @@ def load_settings() -> Settings:
         smtp_password=os.getenv("WORKSPACE_MANAGER_SMTP_PASSWORD") or None,
         smtp_from=os.getenv("WORKSPACE_MANAGER_SMTP_FROM", "noreply@localhost"),
         smtp_use_tls=(os.getenv("WORKSPACE_MANAGER_SMTP_TLS", "true").strip().lower() not in ("0", "false", "no")),
+        secret_encryption_keys=tuple(
+            k.strip() for k in os.getenv("WORKSPACE_MANAGER_SECRET_ENCRYPTION_KEYS", "").split(",") if k.strip()),
     )

@@ -1,21 +1,26 @@
 # B0 — Hosted Platform Security Foundation (spec, 2026-08)
 
 **Status: ADR-001 through ADR-004 approved as current product/
-engineering decisions. B0.1 (AuthN foundation) and B0.2 (Organizations/
-Tenants) are IMPLEMENTED** — email magic-link login, self-hosted
-first-user console-token bootstrap, API tokens, in-house CSRF (ADR-003)
-applied to B0.1/B0.2's own new routes, slowapi rate limiting (ADR-003)
-on the launch-blocking login-request endpoint (ADR-002); real
-organizations/membership/coarse roles/invitations, `repositories.
-organization_id` as the one tenant-scoping lever (Design Principle #3),
-and an idempotent, evidence-tested B0.1→B0.2 bootstrap-to-org migration.
-See the B0.1 and B0.2 implementation reports (delivered alongside each
-update) for full acceptance-criteria coverage, test evidence (24 tests
-each, `tests/test_b01_authn.py` + `tests/test_b02_organizations.py`,
-plus the full 939-test regression suite passing unmodified), and
-residual risks. **B0.3 and later are NOT started — do not begin them
-automatically**; each still needs the same explicit go-ahead B0.1/B0.2
-received.
+engineering decisions. B0.1 through B0.7 are all IMPLEMENTED** — email
+magic-link login, self-hosted first-user console-token bootstrap, API
+tokens; real organizations/membership/coarse roles/invitations,
+`repositories.organization_id` as the one tenant-scoping lever (Design
+Principle #3); a general `require_role()` AuthZ guard swept across all
+157 mutating routes; in-house CSRF folded into that same sweep plus
+the standalone login-CSRF fix on `/auth/verify`; slowapi rate limiting
+on the named abuse-sensitive auth/org/token routes; mandatory
+ephemeral-container sandboxing for tenant-supplied PROJECT.yaml command
+execution; and a general encrypted org-scoped secret store with a
+simplified GitHub-token consumer and transcript/log redaction. See
+each sub-phase's own section below and its implementation report for
+full acceptance-criteria coverage, test evidence, and residual risks
+(most notably: B0.3's GET-route cross-org read gap, and B0.7's
+simplified-PAT-vs-full-GitHub-App gap — both explicitly flagged in
+their own sections, not silently left implicit). A FINAL B0
+QUALIFICATION pass runs after this document's own edits settle, per
+the same explicit user authorization to continue autonomously through
+B0.7 without per-phase approval as long as each phase genuinely
+PASSes.
 
 Track A1 (Performance Foundation & Simple Mode) is complete and verified
 in production — see `docs/TRACK_A1_PERFORMANCE_AND_SIMPLE_MODE.md` and
@@ -191,54 +196,209 @@ the full file/test map and the exact B0.2/B0.3 boundary this session
 drew (no retrofit of the 143 pre-existing engineering-lifecycle
 routes -- that general per-route AuthZ sweep stays B0.3's own scope).
 
-### B0.3 AuthZ
-Coarse per-organization roles (OWNER/ADMIN/MEMBER/VIEWER). One
-`require_role(min_role)` dependency wraps every mutating route (there
-are roughly 100+ POST/PUT/DELETE routes in `app/main.py` today — this
-needs a systematic sweep, not a handful of spot fixes, tracked as its
-own sub-phase).
+### B0.3 AuthZ -- IMPLEMENTED
+Coarse per-organization roles (OWNER/ADMIN/MEMBER/VIEWER), enforced by
+one general `require_role(kind, param, min_role)` FastAPI dependency
+factory in `app/main.py`, resolving against `app/services/
+authz_service.py`'s `AuthzService` -- one small resolver per distinct
+mutating-route entity kind (task, change, workspace, integration,
+sandbox, agent_session, deployment, release, incident, finding, plan,
+spec_proposal, product_acceptance, test_case_spec, work_product,
+execution_wave, human_decision, repository), each grounded directly in
+the real FK chain read out of `app/db.py`'s own CREATE TABLE
+statements, walking back to one or more `repositories.id` and then to
+`organization_id` -- the same single tenant-scoping lever B0.2
+established, never a second copy of tenant identity anywhere else.
 
-### B0.4 CSRF
-**Resolved — see ADR-003** below: in-house double-submit-cookie CSRF
-token, validated by a shared FastAPI dependency applied to every
-mutating, session-cookie-authenticated route (never Bearer-token or
-webhook routes, which are structurally CSRF-immune), alongside B0.3's
-own AuthZ route sweep — the same mechanical pass, since both are the
-first `Depends()`-based guards this codebase has ever carried.
+All 157 mutating routes in `app/main.py` are covered: 131 sub-resource
+routes (an id already in the URL path) via a mechanical `Depends(
+require_role(...))` sweep; 12 body-based `create` routes (no id exists
+yet to build a path dependency against -- `/api/repositories`,
+`/api/tasks`, `/api/tasks/create`, `/api/tasks/new-with-workspace`,
+`/api/workspaces`, `/api/incidents`, `/api/integrations`,
+`/api/releases`, `/api/work-products`, `/api/changes`, `/changes`,
+`/api/engineering/validate-assignment`) via equivalent inline
+`_require_org_role_for_repo`/`_require_org_role_for_repos`/
+`_require_org_role_for_entity`/`_require_login_only` calls at the top
+of each handler; the remaining 14 (`/auth/*`, `/account*`, `/orgs/*`)
+already carry their own B0.1/B0.2 guard and are unchanged.
+`tests/test_b03_authz.py::test_every_mutating_route_carries_authz_or_
+is_accounted_for` is the mechanical completeness proof -- it walks
+`app.routes` itself and fails if any future mutating route is added
+with no guard and no explicit allowlist entry, so this sweep cannot
+silently regress.
 
-### B0.5 Rate limiting
-**Resolved — see ADR-003** below: a maintained library from the
-`limits`-backed ecosystem family (e.g. `slowapi`), in-memory backend
-at launch, specifically *because* an in-house in-memory limiter breaks
-silently the moment hosted mode adds a second process/machine — the
-one B0 sub-area where this document departs from its own
-dependency-minimalism default, for a stated, narrow reason (distributed
-correctness), not a general preference reversal. A narrow instance of
-this same rate limiter must exist for the magic-link request endpoint
-by B0.1's own launch (ADR-002), ahead of this sub-area's general
-middleware rollout.
+A resource resolving to more than one organization (a cross-repository
+Task -- see AGENTS.md's own "a Task may span many repositories")
+requires `min_role` in **every** resolved organization, not just one.
+A resource resolving to zero organizations (an unlinked repository, an
+orgless BACKLOG Task) fails closed (404) rather than being treated as
+open to anyone -- the same existence-hiding precedent B0.2 established
+for `/orgs/{id}/*` (non-member/non-existent -> 404; member but
+below `min_role` -> 403). No identified user at all is 401 on these
+JSON/API routes (never a redirect, unlike `/orgs/*`'s own HTML-page
+`_org_context`). No-op under `AUTH_MODE=none`, the same precedent
+`current_user()`/`require_csrf` already established -- proven by both
+the existing 943-test suite (all `AUTH_MODE=none`, unmodified) and this
+file's own direct `AUTH_MODE=none` checks.
 
-### B0.6 Sandbox boundary
-Flip `SandboxManager`'s opt-in policy to mandatory when `AUTH_MODE=
-required`: every Builder workspace's command execution (today's
-`shell=True` call sites, see the audit table) must run inside a
-container once tenant-supplied code is involved. The sandboxing
-mechanism itself (`sandbox_manager.py`/`sandbox_runtime.py`/
-`sandbox_contract.py`) is reused unmodified.
+**Known, deliberately deferred residual risk**: this sweep covers
+*mutating* routes only, matching this section's own original "wraps
+every mutating route" scope and the B0.3 authorization's own repeated
+"mutating HTTP surface" framing. Read (`GET`) routes are NOT
+cross-org-scoped by this phase -- a member of one organization who
+guesses/enumerates another organization's numeric resource id via a
+`GET` route can still read that resource's data today. This is a real,
+known gap, not an oversight; closing it (read-path tenant scoping)
+is unscoped work for a future phase, called out explicitly here rather
+than silently left implicit.
 
-### B0.7 Secrets boundary
-The current GitHub-integration design (delegate to the host's own
-`gh` CLI, never store a token) **does not survive multi-org hosting** —
-a hosted service can't rely on one shared host's authenticated CLI
-session across tenants. This is the single largest unresolved
-architectural question this audit surfaced (see Open Decisions below);
-B0.7 is scoped to build the *general* encrypted, org-scoped secret-
-storage primitive, with the GitHub-specific redesign as its first real
-consumer once B0.2 exists. A redaction layer for agent transcripts/
-logs (flagged `CAN_WAIT` in P0, still open) is scoped here too, since
-transcripts become multi-tenant-visible surface once B0.2 ships.
-GitHub-integration architecture itself is **resolved** — see ADR-001
-below.
+### B0.4 CSRF -- IMPLEMENTED
+In-house double-submit-cookie CSRF (`app/services/csrf.py`, unchanged
+primitive from B0.1) now validated on all 143 pre-existing mutating
+routes, folded into the exact same B0.3 sweep rather than a second
+pass: the 131 path-param routes get it as the last step inside
+`require_role()`'s own dependency (checked only once identity+role are
+already confirmed, so an unauthenticated/wrong-org caller still gets
+the 401/404/403 that actually describes their situation); the 12
+body-based `create` routes get a small `_mutating_csrf` wrapper as
+their own `Depends()` (FastAPI always resolves a route's declared
+dependencies before its body runs, so for these 12 specifically CSRF
+is necessarily checked *before* the inline AuthZ call in the body --
+documented at both call sites, not a silent inconsistency). A new
+`require_csrf_unless_bearer` (`app/services/csrf.py`) skips the check
+entirely for a Bearer/API-token request (ADR-003's own structural-
+immunity reasoning: no ambient browser credential, nothing to forge).
+
+Client-side: rather than hand-editing the ~150 pre-existing
+`<form method=post>` tags and 5 `fetch()` call sites across ~20
+templates, one capture-phase `submit` listener plus a wrapped
+`window.fetch` in `base.html` (every page extends it) inject the
+current session's token into any current *or future* mutating
+form/fetch automatically -- a new template needs no CSRF-specific code
+at all. The token itself comes from a new Jinja global
+(`templates.env.globals["issue_csrf_token"]`, gated on
+`AUTH_MODE=="required"`, `""` otherwise) so no route handler needed
+editing either.
+
+**Login CSRF gap, closed**: `/auth/verify`'s POST (the step that
+actually creates a session) had no CSRF guard at all before this --
+letting an attacker force a victim's browser to submit the
+*attacker's own* real magic-link token, silently logging the victim in
+as the attacker (a session-fixation-via-forced-login class of bug).
+Fixed with the same double-submit primitive one step earlier than
+usual: the GET peek page now mints (or reuses) this anonymous
+session's own CSRF token via `issue_csrf_token()` -- SessionMiddleware
+is installed for every request under `AUTH_MODE=required` regardless
+of login state, so a real, unguessable-cross-origin session already
+exists the moment the page is first viewed -- and the POST now carries
+a plain `Depends(require_csrf)` (never Bearer-eligible, so no
+`_unless_bearer` needed). Real regression test:
+`tests/test_b04_csrf.py::test_login_csrf_forged_post_without_token_is_
+rejected`.
+
+No-op under `AUTH_MODE=none` -- both `require_role`'s own auth_mode
+gate and `_mutating_csrf`'s matching one keep the 12 pre-existing
+`create` routes (e.g. `/api/repositories`, `/api/tasks`) fully working
+exactly as before; a **real bug found and fixed in this same session**
+was that a first attempt used the bare `require_csrf_unless_bearer` as
+those 12 routes' own `Depends()`, which -- unlike `require_role`'s own
+internal gate -- only prevents crashing under `AUTH_MODE=none` (a
+clean 404, matching `/auth/logout`'s own precedent) rather than truly
+passing through, silently 404-ing every one of those 12 real,
+heavily-used production routes under the default self-hosted mode.
+Caught by this file's own `test_b03_authz.py::test_auth_mode_none_
+sample_routes_unaffected` before it ever reached the full regression
+suite; fixed by giving these 12 routes their own `_mutating_csrf`
+wrapper with the same auth_mode-first gate `require_role` already
+established.
+
+### B0.5 Rate limiting -- IMPLEMENTED
+`slowapi` (ADR-003's own resolved choice), in-memory backend, keyed by
+the real ASGI peer address (`get_remote_address` -- never a client-
+spoofable `X-Forwarded-For`, since this deployment has no reverse
+proxy in front of it yet, ADR-003's own flagged residual). Scope, per
+this phase's own explicit authorization: the named abuse-sensitive
+auth/magic-link/bootstrap/invite/org/token routes -- `/auth/login`
+(5/min) and `/auth/bootstrap` (5/min) shipped with B0.1;
+`/auth/verify` (10/min), `/orgs` create (10/min), `/orgs/{id}/invite`
+(20/min), `/orgs/invitations/{token}` accept (10/min), and
+`/account/api-tokens` create (20/min) land here. **Not** a blanket
+sweep across all 143 mutating routes -- that general middleware
+rollout this section's own text originally described remains
+unscoped, explicitly deferred future work, not silently done.
+
+### B0.6 Sandbox boundary -- IMPLEMENTED
+`SandboxManager`/`SandboxRuntimeService` (the long-running, docker-
+compose-based runtime sandbox feature) turned out to be the WRONG
+mechanism to reuse here -- it's an opt-in, health-checked persistent
+service, not a "run one PROJECT.yaml command and get its exit code"
+primitive. Built instead: `SandboxRuntimeService.run_ephemeral()` (a
+real, disposable `docker run --rm` per command -- `--memory`/`--cpus`/
+`--pids-limit` cgroup caps, `--network none` by default, `--cap-drop
+ALL --security-opt no-new-privileges`, one bind mount of the exact
+worktree/probe directory, real timeout-then-kill-then-remove cleanup)
+and `SandboxedCommandRunner` (`app/services/sandboxed_exec.py`), the
+one shared chokepoint `TestRunner`'s preflight/test stages,
+`GateWaiverService`'s baseline-probe re-run, and the hardware-firmware-
+build route all now go through, replacing each one's own
+`subprocess.run(..., shell=True)`. Direct-host under `AUTH_MODE=none`
+(unchanged); mandatory ephemeral-container isolation under
+`AUTH_MODE=required` (never a silent unsandboxed fallback). A repo
+declares its own execution image/network/resource caps via an
+additive `exec_sandbox:` PROJECT.yaml block (`project_contract.
+load_exec_sandbox`); one without it still gets a real, safe default
+profile (`python:3.12-slim`, `network: none`), never "sandboxing not
+required for this repo." **Real bug found and fixed in this same
+session**: the timeout-cleanup path's `docker rm -f` can transiently
+race a container mid-transition into Docker's own "Dead" state and
+fail silently (`SandboxRuntimeService._run` never inspected
+returncode) -- fixed with a short bounded retry; caught by this
+phase's own adversarial cleanup test before it ever reached production.
+
+### B0.7 Secrets boundary -- IMPLEMENTED
+The general primitive: `org_secrets`/`secret_access_log` (migration
+34), `SecretsService` (`app/services/secrets_service.py`) -- real
+envelope encryption via `cryptography`'s `Fernet`/`MultiFernet` (a new,
+justified dependency-minimalism exception, same precedent as ADR-003's
+own slowapi/itsdangerous — Python's stdlib has no AEAD primitive at
+all, and hand-rolling one is exactly the class of mistake this
+codebase's own GitHub-integration docstring already refuses to make
+elsewhere), app-wide master key(s) in `Settings.secret_encryption_keys`
+(`WORKSPACE_MANAGER_SECRET_ENCRYPTION_KEYS`, never in the database,
+same "REFUSED, never guessed" startup discipline as `session_secret`),
+real key rotation (`MultiFernet` + `re_encrypt_all()`). No plaintext
+ever touches a log/audit row -- `secret_access_log` is metadata-only
+(actor/action/timestamp). `/orgs/{id}/secrets` routes (list/create/
+rotate/revoke/reveal) are OWNER/ADMIN-only, CSRF-guarded, rate-limited,
+reveal-once (matching B0.1's own API-token precedent).
+
+A pattern-based redaction layer (`app/services/secret_redaction.py`)
+is wired into the agent-session transcript persist path
+(`AgentSessionManager.persist_tail`) and every `SandboxedCommandRunner`
+result (test output, gate-baseline re-runs, firmware builds) --
+unconditional, regardless of `AUTH_MODE` (a strict improvement over
+today's behavior, no new gate).
+
+**GitHub-integration architecture is resolved — see ADR-001** below,
+but this phase implements a deliberately **simplified, explicitly
+scoped interim consumer**, not the full design: a single stored
+Personal-Access-Token per organization (`SecretsService`, name
+`github_token`), injected just-in-time per subprocess call
+(`github_merge_service.py`'s `token_runner`/`make_hosted_runner` --
+`GH_TOKEN` env var for `gh` CLI calls, the `GIT_CONFIG_COUNT`/
+`_KEY_n`/`_VALUE_n` environment-variable mechanism for plain `git`
+calls, never argv-embedded, never written to disk), never the full
+GitHub-App-per-org architecture (App registration, JWT signing,
+short-lived installation-token minting, webhook lifecycle) ADR-001
+actually designs. That full design needs a real, externally-registered
+GitHub App's private key this implementation session has no way to
+obtain or safely fabricate as genuine evidence -- explicitly flagged
+as a residual gap for a real hosted deployment to close before
+onboarding real multi-org GitHub traffic, not silently substituted.
+Same public method surface, same `runner` DI seam ADR-001's own
+"Migration path" already describes, so swapping in a real App-based
+runner later needs no call-site change.
 
 ## ADR-001: GitHub authentication/authorization architecture for hosted multi-tenant mode
 

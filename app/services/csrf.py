@@ -70,3 +70,25 @@ async def require_csrf(request: Request) -> None:
         supplied = form.get("csrf_token")
     if not supplied or not secrets.compare_digest(str(supplied), expected):
         raise HTTPException(403, "CSRF_TOKEN_INVALID")
+
+
+async def require_csrf_unless_bearer(request: Request) -> None:
+    """B0.4's general-sweep counterpart to require_csrf -- the one this
+    track's own `require_role()` guard (app/main.py) invokes on every
+    one of the 143 pre-existing mutating routes, alongside B0.3's role
+    check. Structurally skips the CSRF check for a Bearer-token/API
+    request (this module's own docstring's standing reasoning: a
+    request carrying no ambient browser credential -- no cookie the
+    browser would auto-attach -- is structurally immune to CSRF; a
+    script that can set its own Authorization header can just as
+    easily not send a forged request in the first place). Every other
+    request (cookie-session-backed, or entirely unauthenticated) goes
+    through the real check -- an unauthenticated caller still needs a
+    valid double-submit token bound to whatever anonymous session it
+    already holds, closing the same "no ambient ability to read the
+    token" gap require_csrf's own docstring describes, one level
+    earlier than a logged-in user."""
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        return
+    await require_csrf(request)

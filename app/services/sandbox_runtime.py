@@ -1,4 +1,5 @@
 from __future__ import annotations
+import secrets
 import shutil
 import socket
 import subprocess
@@ -106,6 +107,102 @@ class SandboxRuntimeService:
         # nothing unowned to touch) or every match is already scoped to
         # exactly this project by the filter itself.
         return True
+
+    def run_ephemeral(self, command: str, worktree_root: Path, working_dir: str, timeout: int, image: str,
+                       network: str, memory: str, cpus: str, pids_limit: int,
+                       env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        """B0.6 -- mandatory sandboxing: run ONE PROJECT.yaml-declared
+        command (a repo's own preflight/test/build/gate-baseline-probe
+        command -- tenant-supplied code) inside a fresh, disposable
+        container instead of directly on the host. Real container
+        isolation, not a policy toggle around the same subprocess call:
+
+        - `--rm` -- the container never outlives this one call, success
+          or failure, so nothing needs a separate cleanup pass.
+        - `--name wm-exec-<random>` -- unique per call, giving a stable
+          handle to `docker kill` on timeout (see below) and to any
+          later ownership audit (matches the `wm-` compose-project
+          naming convention SandboxRuntimeService.verify_owned already
+          checks for the OTHER, long-running sandbox kind).
+        - `--memory`/`--cpus`/`--pids-limit` -- real cgroup resource
+          caps (adversarial "resource abuse" coverage: a fork-bomb or
+          memory-bomb command is capped by the KERNEL, not merely
+          slowed down).
+        - `--network` (default "none") -- no outbound network unless a
+          repo explicitly opts in via its own `exec_sandbox.network:`.
+        - `--cap-drop ALL --security-opt no-new-privileges` -- no Linux
+          capabilities beyond an unprivileged process's own default, no
+          privilege-escalation via setuid binaries.
+        - `-v {worktree_root}:/workspace:rw -w /workspace[/{working_dir}]`
+          -- the command sees ONLY the one worktree/probe directory it
+          was given (the FULL worktree, matching what the equivalent
+          direct-host `cwd=(path/working).resolve()` call could always
+          see, e.g. a monorepo command whose command references a
+          sibling directory outside its own `working_directory`), bind-
+          mounted at a fixed, predictable path -- never the host
+          filesystem beyond that, never a sibling Task's/Workspace's own
+          worktree (each call gets its own fresh container + exactly one
+          bind mount, so there is no shared mutable state between
+          concurrent sandboxed runs to leak through in the first place).
+
+        Timeout/cancel: subprocess.run's own `timeout=` (inside `_run`,
+        which converts a `subprocess.TimeoutExpired` into
+        `SandboxRuntimeError("RUNTIME_TIMEOUT", ...)`) kills the LOCAL
+        `docker run` client process on expiry, but -- unlike a plain
+        host subprocess -- the CONTAINER itself, owned by the Docker
+        daemon, keeps running unless explicitly told to stop. The
+        `--name` is reserved up front specifically so the
+        `RUNTIME_TIMEOUT` branch below can `docker kill` (then `docker
+        rm -f` -- `--rm` alone doesn't fire for a killed-out-from-under-
+        it client) that exact container before re-raising -- never
+        leaving an orphaned, still-running tenant-code container behind
+        a timed-out request.
+
+        `env`, if given, is injected via explicit `-e KEY=VALUE` flags
+        ONLY -- never the host's own `os.environ` (unlike the direct-
+        host execution path SandboxedCommandRunner falls back to under
+        AUTH_MODE=none, which legitimately does inherit the host
+        environment, matching today's exact pre-B0.6 behavior). A
+        tenant-supplied command must never see host secrets it wasn't
+        explicitly, deliberately given."""
+        container_name = f"wm-exec-{secrets.token_hex(8)}"
+        working_dir = (working_dir or ".").strip().strip("/")
+        container_workdir = "/workspace" if working_dir in ("", ".") else f"/workspace/{working_dir}"
+        env_flags = []
+        for key, value in (env or {}).items():
+            env_flags += ["-e", f"{key}={value}"]
+        argv = [
+            self.docker_bin, "run", "--rm", "--name", container_name,
+            "--memory", memory, "--cpus", cpus, "--pids-limit", str(pids_limit),
+            "--network", network,
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            *env_flags,
+            "-v", f"{worktree_root}:/workspace:rw", "-w", container_workdir,
+            image, "sh", "-c", command,
+        ]
+        try:
+            return self._run(argv, worktree_root, timeout=timeout)
+        except SandboxRuntimeError as exc:
+            if exc.code != "RUNTIME_TIMEOUT":
+                raise
+            self._run([self.docker_bin, "kill", container_name], worktree_root, timeout=30)
+            # `docker rm -f` immediately after `kill` can transiently race
+            # a container mid-transition into Docker's own "Dead" state
+            # ("removal of container ... is already in progress" or
+            # similar) -- found by this session's own testing: `_run`
+            # doesn't inspect returncode, so a first failed removal
+            # attempt would otherwise go unnoticed and leave a real
+            # orphaned (if inert) container behind. A short bounded
+            # retry, not a single best-effort attempt, is what actually
+            # guarantees "never leaving an orphaned container" rather
+            # than merely making it less likely.
+            for attempt in range(5):
+                result = self._run([self.docker_bin, "rm", "-f", container_name], worktree_root, timeout=30)
+                if result.returncode == 0:
+                    break
+                import time as _time
+                _time.sleep(0.5 * (attempt + 1))
+            raise
 
     def health_check(self, url: str, timeout: float = 5.0) -> tuple[bool, str]:
         try:

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}{% block title %}{{org.name}}{% endblock %}
-{% block header_action %}<a href="/orgs">← All organizations</a>{% endblock %}
+{% block header_action %}<a href="/orgs">← All organizations</a>{% if role in ('OWNER','ADMIN') %} · <a href="/orgs/{{org.id}}/secrets">Secrets</a>{% endif %}{% endblock %}
 {% block content %}
 <section class="panel"><h3>{{org.name}} <span class="badge">{{role}}</span></h3>
 <p><small>Created {{org.created_at}}</small></p>

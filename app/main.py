@@ -26,11 +26,12 @@ from app.services.sandbox_contract import (
 )
 from app.services.sandbox_manager import SandboxError, SandboxManager, SourceSpec
 from app.services.sandbox_runtime import SandboxRuntimeService
+from app.services.sandboxed_exec import SandboxedCommandRunner
 from app.services.agent_session_manager import AgentSessionManager, SessionError
 from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source, LIVE_SESSION_STATUSES, humanize_blocker
 from app.services.user_state_view import user_task_state, progress_summary, humanize_enum
 from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
-from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES
+from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES, make_hosted_runner
 from app.services.operations import OperationInProgress, OperationService
 from app.services.deployment_service import DeploymentService, DeploymentError
 from app.services.deployment_decision import deployment_view
@@ -46,8 +47,11 @@ from app.services.change_list_summary_service import ChangeListSummaryService
 from app.services.simple_view_service import SimpleViewService, t as simple_t
 from app.services.auth_service import AuthService, AuthError
 from app.services.organization_service import OrganizationService, OrganizationError, ROLES as ORG_ROLES
+from app.services.authz_service import AuthzService, ROLE_LEVEL
+from app.services.secrets_service import SecretsService, SecretsError
+from app.services.secret_redaction import redact as secret_redact
 from app.services.email_sender import EmailSenderService
-from app.services.csrf import issue_csrf_token, require_csrf
+from app.services.csrf import issue_csrf_token, require_csrf, require_csrf_unless_bearer
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -97,14 +101,47 @@ from app.services.execution_wave_service import ExecutionWaveService, ExecutionW
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
-    git = GitWorkspaceService(settings.root, worktree_root=settings.worktree_root); runner = TestRunner(db, git); launcher = TerminalLauncherService(settings, git)
+    # ---- B0.7: Secrets boundary -----------------------------------------
+    # docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md -- constructed early
+    # (github_merge below is B0.7's first real consumer -- ADR-001 --
+    # and needs it already built). Same "REFUSED, never guessed"
+    # discipline as session_secret: a hosted deployment with
+    # organizations/tenants but no configured encryption key would
+    # otherwise let B0.7's own routes exist while being silently
+    # unusable, or worse, tempt a future change to fall back to
+    # plaintext storage "just to make it work."
+    if settings.auth_mode == "required" and not settings.secret_encryption_keys:
+        raise RuntimeError(
+            "REFUSED: WORKSPACE_MANAGER_AUTH_MODE=required needs WORKSPACE_MANAGER_SECRET_ENCRYPTION_KEYS "
+            "set (one or more real Fernet keys, comma-separated -- generate with "
+            "`python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"`) "
+            "before this app will start.")
+    secrets_service = SecretsService(db, list(settings.secret_encryption_keys))
+    git = GitWorkspaceService(settings.root, worktree_root=settings.worktree_root); launcher = TerminalLauncherService(settings, git)
     sandbox_runtime = SandboxRuntimeService(); ports = PortAllocatorService(db)
+    # ---- B0.6: mandatory sandboxing for tenant-supplied command execution
+    # docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md -- the two real,
+    # audited shell=True call sites (TestRunner's preflight/test stages,
+    # GateWaiverService's baseline-probe re-run) both now go through the
+    # SAME SandboxedCommandRunner: direct-host under AUTH_MODE=none
+    # (today's exact behavior, zero new surface, ADR-004's permanent
+    # self-hosted mode), mandatory ephemeral-container isolation under
+    # AUTH_MODE=required (never a silent unsandboxed fallback).
+    sandboxed_exec = SandboxedCommandRunner(sandbox_runtime, mandatory=(settings.auth_mode == "required"))
+    runner = TestRunner(db, git, sandboxed_exec)
     sandboxes = SandboxManager(db, sandbox_runtime, ports, settings.state_dir, settings.max_running_sandboxes, settings.sandbox_retention_hours)
     cleanup_worker = CleanupWorker(db, sandboxes, settings.cleanup_poll_seconds)
     agent_sessions = AgentSessionManager(db)
     decision = TaskDecisionService(db, git)
-    gate_waivers = GateWaiverService(db, git)
-    github_merge = GitHubMergeService()
+    gate_waivers = GateWaiverService(db, git, sandboxed_exec)
+    # B0.7's first real consumer (ADR-001, simplified per-org-token
+    # variant -- see github_merge_service.py's own module docstring):
+    # AUTH_MODE=none keeps delegating entirely to the host's own
+    # already-authenticated `gh` CLI session, exactly as always (the
+    # class's own default `runner` -- never constructed with an
+    # explicit override here, so its behavior is untouched).
+    github_merge = (GitHubMergeService(runner=make_hosted_runner(db, secrets_service))
+                     if settings.auth_mode == "required" else GitHubMergeService())
     ops = OperationService(db)
     deployer = DeploymentService(db, git)
     contract_editor = RepositoryContractEditor(git)
@@ -265,6 +302,14 @@ def create_app(settings=None):
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
     templates.env.filters["humanize_blocker"] = humanize_blocker
+    # B0.4: one Jinja global every template (via base.html, see its own
+    # comment) uses to embed the current session's CSRF token client-side
+    # -- never called under AUTH_MODE=none (issue_csrf_token() itself
+    # would raise -- SessionMiddleware isn't installed there at all), so
+    # this wrapper checks auth_mode first and returns "" instead, the
+    # same no-op precedent every other B0.1-B0.4 guard already follows.
+    templates.env.globals["issue_csrf_token"] = (
+        lambda request: issue_csrf_token(request) if settings.auth_mode == "required" else "")
     # A1.20/A1.21: the one translation-key lookup every template can call
     # -- {{ pf_t('key') }} -- so a future language file swap is "point
     # this at a second dict", not a template rewrite. See
@@ -278,6 +323,8 @@ def create_app(settings=None):
     templates.env.globals["pf_t"] = simple_t
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
     app.state.settings, app.state.db, app.state.git, app.state.runner, app.state.launcher = settings, db, git, runner, launcher
+    app.state.sandboxed_exec = sandboxed_exec
+    app.state.secrets_service = secrets_service
     app.state.sandboxes, app.state.ports, app.state.sandbox_runtime, app.state.cleanup_worker = sandboxes, ports, sandbox_runtime, cleanup_worker
     app.state.agent_sessions = agent_sessions
     app.state.decision = decision
@@ -381,6 +428,18 @@ def create_app(settings=None):
     # AUTH_MODE=required, matching B0.1's own established pattern.
     org_service = OrganizationService(db, auth_service, email_sender)
     app.state.org_service = org_service
+    # ---- B0.3: AuthZ -----------------------------------------------------
+    # The general per-route sweep B0.2's own docstring deferred here --
+    # AuthzService (app/services/authz_service.py) resolves every one of
+    # the ~20 distinct mutating-route entity kinds back to the
+    # organization(s) that own it via repositories.organization_id, the
+    # same single tenant-scoping lever B0.2 established. Constructed
+    # regardless of AUTH_MODE (cheap, inert); require_role()/the inline
+    # _require_org_role_for_* helpers below are the only things that ever
+    # call into it, and they no-op under AUTH_MODE=none exactly like
+    # current_user() already does.
+    authz_service = AuthzService(db)
+    app.state.authz_service = authz_service
     if settings.auth_mode == "required":
         # Idempotent, safe, backward-compatible bootstrap-to-org backfill
         # -- see OrganizationService.migrate_existing_data()'s own
@@ -472,6 +531,176 @@ def create_app(settings=None):
             return RedirectResponse("/auth/login", 303)
         return user
 
+    # ---- B0.3/B0.4: general per-route AuthZ + CSRF guard ------------------
+    def require_role(kind: str, param: str, min_role: str = "MEMBER"):
+        """B0.3's general per-route AuthZ guard (docs/B0_HOSTED_PLATFORM_
+        SECURITY_FOUNDATION.md's own `require_role(min_role)` design) --
+        a dependency FACTORY, called once per route at decoration time
+        with that route's own resource kind/path-param name/minimum
+        role, returning the actual FastAPI dependency. Also carries
+        B0.4's CSRF check (see its own comment below) -- the exact same
+        143-route mutating-route sweep both sub-phases target, so B0.4
+        folds into this one dependency rather than re-touching every one
+        of those call sites a second time.
+
+        No-op under AUTH_MODE=none: current_user() itself already
+        returns None unconditionally there and never touches
+        request.session (SessionMiddleware isn't installed in that
+        mode) -- this preserves today's exact, already-verified
+        single-user behavior with zero new surface, same precedent as
+        require_csrf's own AUTH_MODE=none short-circuit.
+
+        Under AUTH_MODE=required: no identified user is 401 (never a
+        redirect -- every route this guards is a JSON/API surface, not
+        an HTML page, unlike /orgs/*'s _org_context). An identified user
+        who cannot reach `min_role` in EVERY organization the target
+        resource resolves to (AuthzService.resolve_organization_ids --
+        fail-closed on zero resolved orgs too, e.g. an unlinked
+        repository) is 404, matching B0.2's own established
+        existence-hiding precedent (a non-member never learns whether
+        the id is even valid); 403 only once membership is confirmed
+        but the role itself is too low -- the same distinction B0.2's
+        own org routes already draw."""
+        min_level = ROLE_LEVEL[min_role]
+
+        async def _dep(request: Request) -> None:
+            if settings.auth_mode != "required":
+                return
+            user = current_user(request)
+            if not user:
+                raise HTTPException(401, "AUTHENTICATION_REQUIRED")
+            raw = request.path_params.get(param)
+            if raw is None:
+                raise HTTPException(404)
+            try:
+                entity_id = int(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(404)
+            org_ids = authz_service.resolve_organization_ids(kind, entity_id)
+            if not org_ids:
+                raise HTTPException(404)
+            for org_id in org_ids:
+                role = org_service.member_role(org_id, user["id"])
+                if not role:
+                    raise HTTPException(404)
+                if ROLE_LEVEL[role] < min_level:
+                    raise HTTPException(403, "INSUFFICIENT_ROLE")
+            # B0.4: CSRF, checked last -- only once identity+role are
+            # already confirmed valid, so an unauthenticated/wrong-org
+            # caller keeps getting the 401/404/403 that actually
+            # describes their situation, never a CSRF error that leaks
+            # nothing extra either way (a genuine cross-site-forged
+            # request necessarily carries the real, valid victim
+            # session, so it always reaches this same point and is
+            # blocked here). No-ops for Bearer/API-token callers
+            # (require_csrf_unless_bearer's own docstring).
+            await require_csrf_unless_bearer(request)
+        return _dep
+
+    async def _mutating_csrf(request: Request) -> None:
+        """B0.4's CSRF check for the 12 body-based `create` routes (no
+        path-id to fold this into a require_role() call for -- see each
+        route's own Depends() list). Unlike require_role's internal
+        auth_mode gate, `require_csrf`/`require_csrf_unless_bearer`
+        themselves only guard against CRASHING under AUTH_MODE=none (a
+        clean 404 instead of an AssertionError on `request.session`) --
+        they do NOT make AUTH_MODE=none a true pass-through, because
+        their own established precedent (`/auth/logout`, `/account/
+        api-tokens`) is for BRAND-NEW B0.1 routes that never existed at
+        all under `AUTH_MODE=none` in the first place, so a 404 there is
+        correct either way. These 12 routes are the opposite case --
+        real, pre-existing, heavily-used production routes (register a
+        repository, create a Task, ...) that MUST keep working
+        completely unmodified under the default `AUTH_MODE=none` (the
+        same requirement every B0.1-B0.3 guard on pre-existing surface
+        has honored) -- so this wrapper checks auth_mode FIRST, the same
+        true no-op require_role()'s own _dep already establishes,
+        before ever calling into require_csrf machinery at all."""
+        if settings.auth_mode != "required":
+            return
+        await require_csrf_unless_bearer(request)
+
+    def _require_login_only(request: Request) -> dict | None:
+        """For the small number of `create` routes whose new resource
+        carries no repository/org reference at all (e.g. registering a
+        brand-new, not-yet-linked repository) -- only identity is
+        checked here, never a role, since there is no organization yet
+        to hold a role in. No-op under AUTH_MODE=none, same as every
+        other B0.1-B0.3 guard."""
+        if settings.auth_mode != "required":
+            return None
+        user = current_user(request)
+        if not user:
+            raise HTTPException(401, "AUTHENTICATION_REQUIRED")
+        return user
+
+    def _require_org_role_for_repos(request: Request, repository_ids: list[int], min_role: str = "MEMBER") -> None:
+        """Inline counterpart to require_role() for `create` routes whose
+        target resource doesn't exist yet, so there is no id in the path
+        to build a Depends() dependency against -- only body fields the
+        handler has already parsed by the time it can call this. An
+        empty `repository_ids` list is allowed through (the resulting
+        resource is legitimately orgless, e.g. a BACKLOG Task created
+        with no repo_scope_id yet, or an orgless Change/Incident/Work
+        Product -- every call site documents why blank is safe for
+        it). A non-blank id that fails to resolve to any organization
+        (unlinked repository, bad id) still fails closed, and a
+        multi-repository create (a cross-repo Task) requires the role in
+        EVERY listed repository's organization, the same conservative
+        rule require_role() itself applies."""
+        if settings.auth_mode != "required":
+            return
+        user = current_user(request)
+        if not user:
+            raise HTTPException(401, "AUTHENTICATION_REQUIRED")
+        for repository_id in repository_ids:
+            if repository_id is None:
+                continue
+            org_ids = authz_service.organization_ids_for_repository(repository_id)
+            if not org_ids:
+                raise HTTPException(404)
+            for org_id in org_ids:
+                role = org_service.member_role(org_id, user["id"])
+                if not role:
+                    raise HTTPException(404)
+                if ROLE_LEVEL[role] < ROLE_LEVEL[min_role]:
+                    raise HTTPException(403, "INSUFFICIENT_ROLE")
+
+    def _require_org_role_for_repo(request: Request, repository_id: int | None, min_role: str = "MEMBER") -> None:
+        _require_org_role_for_repos(request, [repository_id] if repository_id is not None else [], min_role)
+
+    def _require_org_role_for_entity(request: Request, kind: str, entity_id: int | None, min_role: str = "MEMBER") -> None:
+        """Generic counterpart to _require_org_role_for_repo for the
+        create routes whose body carries a reference to an EXISTING
+        entity of some other kind (a change_id, a task_id -- e.g.
+        Work Product's own project_id/change_id/task_id fallback chain)
+        rather than a repository_id directly -- delegates straight to
+        AuthzService.resolve_organization_ids, the exact same resolver
+        require_role() itself uses."""
+        if settings.auth_mode != "required":
+            return
+        user = current_user(request)
+        if not user:
+            raise HTTPException(401, "AUTHENTICATION_REQUIRED")
+        if entity_id is None:
+            return
+        org_ids = authz_service.resolve_organization_ids(kind, entity_id)
+        if not org_ids:
+            raise HTTPException(404)
+        for org_id in org_ids:
+            role = org_service.member_role(org_id, user["id"])
+            if not role:
+                raise HTTPException(404)
+            if ROLE_LEVEL[role] < ROLE_LEVEL[min_role]:
+                raise HTTPException(403, "INSUFFICIENT_ROLE")
+
+    def _require_org_role_for_change(request: Request, change_id: int | None, min_role: str = "MEMBER") -> None:
+        """Same shape as _require_org_role_for_repo, resolving through
+        Change.project_id (AuthzService's own "change" kind) since
+        several create routes (Task, Incident, Work Product) accept a
+        change_id rather than a repository_id directly."""
+        _require_org_role_for_entity(request, "change", change_id, min_role)
+
     @app.get("/auth/login", response_class=HTMLResponse)
     def auth_login_page(request: Request):
         if settings.auth_mode != "required": raise HTTPException(404)
@@ -491,13 +720,27 @@ def create_app(settings=None):
         """GET only ever PEEKS at the token (never consumes it) and shows
         an explicit confirm-click page -- ADR-002's own phishing
         mitigation against corporate email-security scanners silently
-        pre-fetching/"clicking" the raw link before the real user does."""
+        pre-fetching/"clicking" the raw link before the real user does.
+
+        B0.4: also issues (or reuses) this anonymous pre-login session's
+        own CSRF token here and embeds it in the confirm form -- closing
+        the "login CSRF" gap (an attacker's own valid magic-link token,
+        submitted via a cross-site forged POST so the VICTIM's browser
+        ends up silently logged into the ATTACKER's account, a classic
+        session-fixation-via-forced-login). SessionMiddleware is
+        installed for every request under AUTH_MODE=required regardless
+        of login state, so a real anonymous session -- and therefore a
+        real, unguessable-by-a-different-origin token -- already exists
+        the moment this page is first viewed, the same double-submit
+        property require_csrf relies on everywhere else."""
         if settings.auth_mode != "required": raise HTTPException(404)
         row = auth_service.peek_login_token(token)
-        return render(request, "auth_verify.html", token=token, email=row["email"] if row else None, valid=bool(row))
+        return render(request, "auth_verify.html", token=token, email=row["email"] if row else None,
+                      valid=bool(row), csrf_token=issue_csrf_token(request))
 
     @app.post("/auth/verify")
-    def auth_verify_confirm(request: Request, token: str = Form(...)):
+    @limiter.limit("10/minute")  # B0.5: token-consumption brute-force defense, same family as /auth/login's own
+    def auth_verify_confirm(request: Request, token: str = Form(...), csrf: None = Depends(require_csrf)):
         if settings.auth_mode != "required": raise HTTPException(404)
         try:
             user = auth_service.consume_login_token(token)
@@ -541,6 +784,7 @@ def create_app(settings=None):
                       csrf_token=issue_csrf_token(request), new_token=None)
 
     @app.post("/account/api-tokens", response_class=HTMLResponse)
+    @limiter.limit("20/minute")  # B0.5: token-creation abuse defense
     def account_create_api_token(request: Request, name: str = Form(...), csrf: None = Depends(require_csrf)):
         user = _require_login_redirect(request)
         if not isinstance(user, dict): return user
@@ -600,6 +844,7 @@ def create_app(settings=None):
         return render(request, "orgs_new.html", error=None, csrf_token=issue_csrf_token(request))
 
     @app.post("/orgs", response_class=HTMLResponse)
+    @limiter.limit("10/minute")  # B0.5: org-creation spam defense
     def orgs_create(request: Request, name: str = Form(...), csrf: None = Depends(require_csrf)):
         user = _require_login_redirect(request)
         if not isinstance(user, dict): return user
@@ -624,6 +869,7 @@ def create_app(settings=None):
                       new_invitation=None, error=None)
 
     @app.post("/orgs/{org_id}/invite", response_class=HTMLResponse)
+    @limiter.limit("20/minute")  # B0.5: invite-email spam defense
     def org_invite(request: Request, org_id: int, email: str = Form(...), role: str = Form("MEMBER"),
                     csrf: None = Depends(require_csrf)):
         ctx = _org_context(request, org_id)
@@ -705,6 +951,7 @@ def create_app(settings=None):
                       org_name=row["org_name"] if row else None, role=row["role"] if row else None, valid=bool(row))
 
     @app.post("/orgs/invitations/{token}")
+    @limiter.limit("10/minute")  # B0.5: invitation-token brute-force defense, same family as /auth/verify's own
     def org_invitation_accept_confirm(request: Request, token: str):
         if settings.auth_mode != "required": raise HTTPException(404)
         try:
@@ -713,6 +960,90 @@ def create_app(settings=None):
             return render(request, "org_invitation_accept.html", token=token, org_name=None, role=None, valid=False)
         request.session.clear(); request.session["user_id"] = org_user["id"]
         return RedirectResponse(f"/orgs/{org['id']}", 303)
+
+    # ---- B0.7: Secrets boundary routes ------------------------------
+    # Same _org_context foundation every /orgs/* route already uses
+    # (B0.2), NOT B0.3's require_role() sweep -- these are part of the
+    # /orgs/* family that sweep explicitly excludes (its own established
+    # non-member->404/insufficient-role->403 shape is exactly what a
+    # credential-management surface needs too). OWNER/ADMIN only for
+    # every one of these, including LIST -- unlike most other org
+    # resources, even a secret's NAME is scoped to least-privilege by
+    # default here (safe API/UI reveal semantics).
+    def _secrets_ctx(request: Request, org_id: int):
+        ctx = _org_context(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, role = ctx
+        if role not in ("OWNER", "ADMIN"):
+            raise HTTPException(403, "INSUFFICIENT_ROLE")
+        return user, role
+
+    @app.get("/orgs/{org_id}/secrets", response_class=HTMLResponse)
+    def org_secrets_list(request: Request, org_id: int):
+        ctx = _secrets_ctx(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, role = ctx
+        return render(request, "org_secrets.html", org=org_service.get_org(org_id), role=role,
+                      secrets=secrets_service.list_for_org(org_id), csrf_token=issue_csrf_token(request),
+                      error=None, revealed=None)
+
+    @app.post("/orgs/{org_id}/secrets", response_class=HTMLResponse)
+    @limiter.limit("20/minute")  # B0.7: secret-creation abuse defense, same family as B0.5's other org actions
+    def org_secrets_create(request: Request, org_id: int, name: str = Form(...), value: str = Form(...),
+                            kind: str = Form("GENERIC"), csrf: None = Depends(require_csrf)):
+        ctx = _secrets_ctx(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, role = ctx
+        try:
+            secrets_service.create(org_id, name, value, user["id"], kind)
+        except SecretsError as exc:
+            return render(request, "org_secrets.html", org=org_service.get_org(org_id), role=role,
+                          secrets=secrets_service.list_for_org(org_id), csrf_token=issue_csrf_token(request),
+                          error=str(exc), revealed=None)
+        return RedirectResponse(f"/orgs/{org_id}/secrets", 303)
+
+    @app.post("/orgs/{org_id}/secrets/{name}/rotate", response_class=HTMLResponse)
+    @limiter.limit("20/minute")
+    def org_secrets_rotate(request: Request, org_id: int, name: str, value: str = Form(...),
+                            csrf: None = Depends(require_csrf)):
+        ctx = _secrets_ctx(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, role = ctx
+        try:
+            secrets_service.rotate(org_id, name, value, user["id"])
+        except SecretsError as exc:
+            return render(request, "org_secrets.html", org=org_service.get_org(org_id), role=role,
+                          secrets=secrets_service.list_for_org(org_id), csrf_token=issue_csrf_token(request),
+                          error=str(exc), revealed=None)
+        return RedirectResponse(f"/orgs/{org_id}/secrets", 303)
+
+    @app.post("/orgs/{org_id}/secrets/{name}/revoke")
+    def org_secrets_revoke(request: Request, org_id: int, name: str, csrf: None = Depends(require_csrf)):
+        ctx = _secrets_ctx(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, _role = ctx
+        try: secrets_service.revoke(org_id, name, user["id"])
+        except SecretsError as exc: raise HTTPException(404, str(exc))
+        return RedirectResponse(f"/orgs/{org_id}/secrets", 303)
+
+    @app.post("/orgs/{org_id}/secrets/{name}/reveal", response_class=HTMLResponse)
+    @limiter.limit("10/minute")  # B0.7: plaintext-reveal is the most sensitive action here -- tightest limit
+    def org_secrets_reveal(request: Request, org_id: int, name: str, csrf: None = Depends(require_csrf)):
+        """Shown exactly once, in the response of THIS request only --
+        never persisted/cached/re-servable (matching B0.1's own API-
+        token 'raw token shown once' precedent)."""
+        ctx = _secrets_ctx(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, role = ctx
+        try:
+            plaintext = secrets_service.reveal(org_id, name, user["id"])
+        except SecretsError as exc:
+            return render(request, "org_secrets.html", org=org_service.get_org(org_id), role=role,
+                          secrets=secrets_service.list_for_org(org_id), csrf_token=issue_csrf_token(request),
+                          error=str(exc), revealed=None)
+        return render(request, "org_secrets.html", org=org_service.get_org(org_id), role=role,
+                      secrets=secrets_service.list_for_org(org_id), csrf_token=issue_csrf_token(request),
+                      error=None, revealed={"name": name, "value": plaintext})
 
     def repo(repo_id):
         row = db.one("SELECT * FROM repositories WHERE id=? AND enabled=1", (repo_id,))
@@ -1226,7 +1557,11 @@ def create_app(settings=None):
     @app.get("/repositories", response_class=HTMLResponse)
     def repositories(request: Request): return render(request,"repositories.html",repositories=db.all("SELECT * FROM repositories ORDER BY repo_name"),discovered=discover_repositories(settings.root))
     @app.post("/api/repositories")
-    def register(repo_path: str=Form(...), repo_name: str=Form(""), default_branch: str=Form("main")):
+    def register(request: Request, repo_path: str=Form(...), repo_name: str=Form(""), default_branch: str=Form("main"), _csrf: None = Depends(_mutating_csrf)):
+        # B0.3: registering a brand-new repository carries no org
+        # reference at all yet (it doesn't belong to one until a later
+        # /orgs/{id}/repositories/link) -- identity only, no role to check.
+        _require_login_only(request)
         path=git.validate_repo(repo_path); default_branch=git.validate_branch(default_branch)
         if not git.base_exists(path,default_branch): raise GitSafetyError("Default branch missing")
         db.execute("INSERT INTO repositories(repo_name,repo_path,default_branch) VALUES(?,?,?) ON CONFLICT(repo_path) DO UPDATE SET enabled=1,repo_name=excluded.repo_name,default_branch=excluded.default_branch",(slugify(repo_name or path.name),str(path),default_branch))
@@ -1318,7 +1653,7 @@ def create_app(settings=None):
             "ports": ports, "health": health, "outputs": outputs,
         }
     @app.post("/api/repositories/{rid}/runtime-sandbox")
-    async def save_runtime_sandbox(request: Request, rid: int):
+    async def save_runtime_sandbox(request: Request, rid: int, _authz: None = Depends(require_role("repository", "rid", "MEMBER"))):
         r = repo(rid)
         form = await request.form()
         proposed = _parse_runtime_form(form)
@@ -1339,7 +1674,7 @@ def create_app(settings=None):
                   f"repo={r['repo_name']} fields=sandbox before_sha={diff['before_sha256'][:12]} after_sha={diff['after_sha256'][:12]} operator=ui")
         return RedirectResponse(f"/repositories/{rid}/runtime?diff=1", 303)
     @app.post("/api/repositories/{rid}/runtime-sandbox/test")
-    def test_runtime_sandbox(rid: int):
+    def test_runtime_sandbox(rid: int, _authz: None = Depends(require_role("repository", "rid", "MEMBER"))):
         r = repo(rid)
         try:
             current = contract_editor.read_sandbox_settings(Path(r["repo_path"]))
@@ -1366,7 +1701,8 @@ def create_app(settings=None):
     @app.get("/workspaces", response_class=HTMLResponse)
     def workspaces(request: Request): return render(request,"workspaces.html",workspaces=db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id ORDER BY w.updated_at DESC"),repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),tasks=db.all("SELECT id,title FROM tasks WHERE status NOT IN ('MERGED','CANCELLED') ORDER BY title"))
     @app.post("/api/workspaces")
-    def create_workspace(repository_id:int=Form(...),agent:str=Form(...),task_name:str=Form(...),base_branch:str=Form("main")):
+    def create_workspace(request:Request,repository_id:int=Form(...),agent:str=Form(...),task_name:str=Form(...),base_branch:str=Form("main"), _csrf: None = Depends(_mutating_csrf)):
+        _require_org_role_for_repo(request, repository_id, "MEMBER")
         r=repo(repository_id); agent=slugify(agent); task=slugify(task_name)
         if agent not in settings.agents: raise GitSafetyError("Agent is not allowed")
         branch,path,commit=git.create_agent(r["repo_path"],agent,task,base_branch)
@@ -1428,14 +1764,14 @@ def create_app(settings=None):
     @app.get("/api/workspaces/{wid}")
     def api_workspace(wid:int): return agent_row(wid)
     @app.post("/api/workspaces/{wid}/ready")
-    def ready(wid:int):
+    def ready(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         w=agent_row(wid); head=git.head(w["worktree_path"]); db.execute("UPDATE agent_workspaces SET status='READY',ready_for_integration=1,last_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,wid)); db.event("agent",wid,"READY_MARKED",head)
         recompute_task_status(w.get("task_id"))
         return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/test")
-    def test_agent(wid:int): w=agent_row(wid); runner.start("agent",wid,Path(w["worktree_path"])); return RedirectResponse(f"/workspaces/{wid}",303)
+    def test_agent(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))): w=agent_row(wid); runner.start("agent",wid,Path(w["worktree_path"])); return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/create-sandbox")
-    def create_workspace_sandbox_standalone(wid:int,profile:str=Form("")):
+    def create_workspace_sandbox_standalone(wid:int,profile:str=Form(""), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         w=agent_row(wid)
         task_default=None
         if w["task_id"]:
@@ -1473,7 +1809,7 @@ def create_app(settings=None):
             # time, well after construction finishes).
             autonomous_execution_service.record_code_change_work_product(w,t,head,files_changed)
     @app.post("/api/workspaces/{wid}/verification-report")
-    def submit_workspace_report(wid:int,work_status:str=Form("READY"),what_changed:str=Form(""),files_changed:str=Form(""),tests_run:str=Form(""),automated_tests:str=Form(""),how_to_verify:str=Form(""),expected_result:str=Form(""),test_data:str=Form(""),runtime_requirements:str=Form("NONE"),risks:str=Form("")):
+    def submit_workspace_report(wid:int,work_status:str=Form("READY"),what_changed:str=Form(""),files_changed:str=Form(""),tests_run:str=Form(""),automated_tests:str=Form(""),how_to_verify:str=Form(""),expected_result:str=Form(""),test_data:str=Form(""),runtime_requirements:str=Form("NONE"),risks:str=Form(""), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         """Submit for Review (section 14/15): the Builder completion
         report (WHAT_CHANGED/FILES_CHANGED/TESTS_RUN/HOW_TO_VERIFY/
         EXPECTED_RESULT/RISKS) is what workspace becomes READY_FOR_REVIEW
@@ -1531,7 +1867,7 @@ def create_app(settings=None):
         return {"ok":True,"blocker":None,"detail":"","head":head}
 
     @app.post("/api/workspaces/{wid}/mark-ready-manual")
-    def mark_ready_manual(wid:int,what_changed:str=Form(...),how_to_verify:str=Form(...),tests_run:str=Form("Not run"),expected_result:str=Form(""),risks:str=Form("None known")):
+    def mark_ready_manual(wid:int,what_changed:str=Form(...),how_to_verify:str=Form(...),tests_run:str=Form("Not run"),expected_result:str=Form(""),risks:str=Form("None known"), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         """[Mark Ready for Review] manual fallback (section 1/2/12): shown
         only when AgentSession EXITED (or FAILED) without a persisted or
         detected completion report and the Builder isn't already READY --
@@ -1561,9 +1897,9 @@ def create_app(settings=None):
         db.event("agent",wid,"BUILDER_MANUAL_READY_SUCCEEDED",f"task={w.get('task_id')} session={session['id'] if session else None} commit={head} operator=ui")
         return RedirectResponse(f"/tasks/{w['task_id']}" if w.get("task_id") else f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/close")
-    def close_agent(wid:int): w=agent_row(wid); git.close(w["repo_path"],w["worktree_path"]); db.execute("UPDATE agent_workspaces SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(wid,)); db.event("agent",wid,"WORKSPACE_CLOSED"); return RedirectResponse("/workspaces",303)
+    def close_agent(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))): w=agent_row(wid); git.close(w["repo_path"],w["worktree_path"]); db.execute("UPDATE agent_workspaces SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(wid,)); db.event("agent",wid,"WORKSPACE_CLOSED"); return RedirectResponse("/workspaces",303)
     @app.post("/api/workspaces/{wid}/create-task")
-    def create_task_from_workspace(wid:int):
+    def create_task_from_workspace(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         """Legacy-workspace migration (section 21): wraps an UNASSIGNED
         workspace (task_id IS NULL) in a brand-new Task, title prefilled
         from its own task_name. No branch/worktree/sandbox is touched or
@@ -1579,7 +1915,7 @@ def create_app(settings=None):
         db.event("task",tid,"TASK_CREATED_FROM_WORKSPACE",str(wid)); db.event("agent",wid,"ATTACHED_TO_TASK",str(tid))
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/workspaces/{wid}/attach-task")
-    def attach_workspace_to_task(wid:int,task_id:int=Form(...)):
+    def attach_workspace_to_task(wid:int,task_id:int=Form(...), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         w=agent_row(wid)
         if w["task_id"]: raise GitSafetyError("Workspace already belongs to a Task")
         t=task_row(task_id)
@@ -1589,7 +1925,7 @@ def create_app(settings=None):
 
     # ------------------------------------------------------ Review / QA
     @app.post("/api/workspaces/{wid}/start-review")
-    def start_review(wid:int,reviewer_agent:str=Form(...)):
+    def start_review(wid:int,reviewer_agent:str=Form(...), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         """[Start Review] (section 6/11): only after Builder submitted
         (status=READY). Inserts a NEW review_runs row -- a fresh review
         cycle after a fix is a new row, never an overwrite of the old
@@ -1622,7 +1958,7 @@ def create_app(settings=None):
         db.event("agent",wid,"REVIEW_STARTED",f"run={rid} reviewer={reviewer_agent}")
         return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/submit-review")
-    def submit_review(wid:int,result:str=Form(...),notes:str=Form("")):
+    def submit_review(wid:int,result:str=Form(...),notes:str=Form(""), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         """Reviewer result (section 6/7/17): REVIEW_PASS/FIX_REQUIRED/
         BLOCKED, completing the most recent RUNNING review_runs row for
         this workspace (never overwriting an earlier, already-completed
@@ -1638,7 +1974,7 @@ def create_app(settings=None):
         db.event("agent",wid,"REVIEW_SUBMITTED",f"run={run['id']} result={result}")
         return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/tasks/{tid}/start-qa")
-    def start_qa(tid:int,tester_agent:str=Form("")):
+    def start_qa(tid:int,tester_agent:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """[Start Tester] (section 8/12/19): QA is Task-level (it may
         cover cross-repo behavior), gated on every required Builder's
         review being PASS-and-current. Primarily reads the sandbox +
@@ -1665,7 +2001,7 @@ def create_app(settings=None):
         db.event("task",tid,"QA_STARTED",f"run={qid} tester={tester_agent}")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/submit-qa")
-    def submit_qa(tid:int,result:str=Form(...),notes:str=Form(""),manual_result:str=Form(""),hardware_result:str=Form("")):
+    def submit_qa(tid:int,result:str=Form(...),notes:str=Form(""),manual_result:str=Form(""),hardware_result:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         if result not in ("PASS","FAIL","BLOCKED"): raise GitSafetyError("Invalid QA result")
         run=db.one("SELECT * FROM qa_runs WHERE task_id=? ORDER BY id DESC LIMIT 1",(tid,))
@@ -1790,7 +2126,7 @@ def create_app(settings=None):
         note_exited=bool(session and session["status"] in ("EXITED","FAILED") and w["status"]!="READY")
         return _start_builder_session(w,note_exited_without_report=note_exited)
     @app.post("/api/workspaces/{wid}/sessions")
-    def create_session(wid:int,mode:str=Form("INTERACTIVE")):
+    def create_session(wid:int,mode:str=Form("INTERACTIVE"), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         """Command safety (section 14): the browser supplies only
         workspace_id + (fixed) mode -- agent name and cwd are both
         resolved server-side from the trusted workspace/launcher
@@ -1805,7 +2141,7 @@ def create_app(settings=None):
         except SessionError as exc: raise GitSafetyError(str(exc)) from exc
         return RedirectResponse(f"/workspaces/{wid}/sessions/{sid}",303)
     @app.post("/api/sessions/{sid}/deliver-prompt")
-    def retry_prompt_delivery(sid:int):
+    def retry_prompt_delivery(sid:int, _authz: None = Depends(require_role("agent_session", "sid", "MEMBER"))):
         """[Retry Prompt Delivery] (section 3): the explicit, exceptional
         recovery action for a session whose automatic delivery failed --
         never triggered automatically on a timer/poll."""
@@ -1814,7 +2150,7 @@ def create_app(settings=None):
         db.event("agent",w["id"],"PROMPT_DELIVERED" if delivered else "PROMPT_DELIVERY_FAILED",f"session={sid} (manual retry)")
         return RedirectResponse(f"/workspaces/{w['id']}/sessions/{sid}",303)
     @app.post("/api/tasks/{tid}/start-all-builders")
-    def start_all_builders(tid:int):
+    def start_all_builders(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """[Start All Builders]: for every valid Builder Workspace that
         isn't already RUNNING (agent_status not in the live-session set),
         start its AgentSession -- a missing Implementation Prompt never
@@ -1831,10 +2167,10 @@ def create_app(settings=None):
             except SessionError as exc: db.event("agent",b["id"],"SESSION_START_FAILED",str(exc))
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/sessions/{sid}/stop")
-    def stop_session(sid:int):
+    def stop_session(sid:int, _authz: None = Depends(require_role("agent_session", "sid", "MEMBER"))):
         session_row(sid); agent_sessions.stop(sid); return RedirectResponse(f"/workspaces/{session_row(sid)['workspace_id']}",303)
     @app.post("/api/sessions/{sid}/mode")
-    def set_session_mode(sid:int,mode:str=Form(...)):
+    def set_session_mode(sid:int,mode:str=Form(...), _authz: None = Depends(require_role("agent_session", "sid", "MEMBER"))):
         """The actual VIEW_ONLY/INTERACTIVE security boundary: persisted
         here and re-read by the WebSocket handler on every stdin message,
         never trusted from anything the client itself claims."""
@@ -1894,7 +2230,7 @@ def create_app(settings=None):
             except Exception: pass
 
     @app.post("/api/workspaces/{wid}/open-terminal")
-    def open_terminal(wid:int):
+    def open_terminal(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         w=agent_row(wid)
         try:
             result=launcher.open_terminal(w["worktree_path"]); db.event("agent",wid,"TERMINAL_OPENED",f"agent={w['agent']} path={result['worktree']} terminal={result['terminal']} result=requested")
@@ -1903,7 +2239,7 @@ def create_app(settings=None):
             db.event("agent",wid,"AGENT_LAUNCH_FAILED",f"agent={w['agent']} path={w['worktree_path']} result={exc.code}")
             return JSONResponse({"ok":False,"code":exc.code,"message":str(exc),"fallback":f"cd {w['worktree_path']}"},status_code=409)
     @app.post("/api/workspaces/{wid}/launch-agent")
-    def launch_agent(wid:int):
+    def launch_agent(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         """This spawns a REAL, independent codex/claude process in a
         desktop terminal window on THIS HOST's own graphical session
         (TerminalLauncherService, entirely separate from AgentSession's
@@ -1929,8 +2265,9 @@ def create_app(settings=None):
     @app.get("/integrations",response_class=HTMLResponse)
     def integrations(request:Request): return render(request,"integrations.html",integrations=db.all("SELECT i.*,r.repo_name FROM integration_workspaces i JOIN repositories r ON r.id=i.repository_id ORDER BY i.updated_at DESC"),repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id WHERE w.status IN ('READY','CODING','CREATED')"))
     @app.post("/api/integrations")
-    async def create_integration(request:Request):
+    async def create_integration(request:Request, _csrf: None = Depends(_mutating_csrf)):
         form=await request.form(); repository_id=int(form["repository_id"]); name=slugify(str(form["name"])); base=str(form.get("base_branch","main")); ids=[int(x) for x in form.getlist("workspace_ids")]
+        _require_org_role_for_repo(request, repository_id, "MEMBER")
         if not ids: raise GitSafetyError("Select at least one agent workspace")
         r=repo(repository_id); sources=[agent_row(x) for x in ids]
         if any(x["repository_id"]!=repository_id for x in sources): raise GitSafetyError("All sources must belong to integration repository")
@@ -2003,7 +2340,7 @@ def create_app(settings=None):
                       push_op=ops.latest("integration",iid,"PUSH_INTEGRATION"),
                       ready_op=ops.latest("integration",iid,"MARK_READY_FOR_MAIN"))
     @app.post("/api/integrations/{iid}/merge-latest")
-    def merge_latest(iid:int):
+    def merge_latest(iid:int, _authz: None = Depends(require_role("integration", "iid", "MEMBER"))):
         """[Merge Latest Changes]: tracked as one MERGE_LATEST Operation
         (button-feedback section 8) -- a second click while one is still
         RUNNING is reflected back, never launches a second real git merge
@@ -2030,7 +2367,7 @@ def create_app(settings=None):
             ops.fail(op_id,exc); raise
         return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/test")
-    def test_integration(iid:int):
+    def test_integration(iid:int, _authz: None = Depends(require_role("integration", "iid", "MEMBER"))):
         """[Run Tests]: test_runs already tracks QUEUED/RUNNING/PASS/FAIL
         (TestRunner runs it in a background thread) -- reused as-is
         rather than a second `operations` row (db.py V12 comment). The
@@ -2051,7 +2388,7 @@ def create_app(settings=None):
         except ContractError: pass
         return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/ready-for-main")
-    def ready_main(iid:int):
+    def ready_main(iid:int, _authz: None = Depends(require_role("integration", "iid", "MEMBER"))):
         """[Mark Ready for Main] (section 15): tracked as one
         MARK_READY_FOR_MAIN Operation so the button never looks unchanged
         after a click -- 'Validating readiness...' while RUNNING (this
@@ -2073,7 +2410,7 @@ def create_app(settings=None):
         return RedirectResponse(f"/integrations/{iid}",303)
     INTEGRATION_PUSH_BRANCH_DENYLIST={"main","master","production"}
     @app.post("/api/integrations/{iid}/push")
-    def push_integration(iid:int):
+    def push_integration(iid:int, _authz: None = Depends(require_role("integration", "iid", "MEMBER"))):
         """[Push Integration Branch] (section 1-3): the ONLY way an
         Integration branch's local HEAD reaches GitHub -- a real,
         non-force `git push origin <branch>:<branch>`, derived entirely
@@ -2139,7 +2476,7 @@ def create_app(settings=None):
         ops.succeed(op_id,f"Pushed {head[:8]}{pr_note}")
         return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/reproduce-baseline")
-    def reproduce_baseline_failure(iid:int,gate:str=Form(...),test_identifier:str=Form(...)):
+    def reproduce_baseline_failure(iid:int,gate:str=Form(...),test_identifier:str=Form(...), _authz: None = Depends(require_role("integration", "iid", "MEMBER"))):
         """[View Baseline Evidence] step 1 (section 12/22): actually
         reproduces the failure against this Integration's own recorded
         base_commit in a disposable, detached worktree -- the only way a
@@ -2153,7 +2490,7 @@ def create_app(settings=None):
         db.event("integration",iid,"BASELINE_REPRODUCTION_STARTED",f"gate={gate} test={test_identifier} run={run_id}")
         return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/waive-baseline-failure")
-    def waive_baseline_failure(iid:int,gate:str=Form(...),test_identifier:str=Form(...),reason:str=Form("")):
+    def waive_baseline_failure(iid:int,gate:str=Form(...),test_identifier:str=Form(...),reason:str=Form(""), _authz: None = Depends(require_role("integration", "iid", "MEMBER"))):
         """[Waive Baseline Failure] (section 14-17): the ONLY way past a
         currently-failing required gate other than actually fixing it --
         and only for a failure this route independently re-classifies
@@ -2180,7 +2517,7 @@ def create_app(settings=None):
         db.event("integration",iid,"BASELINE_WAIVER_APPROVED",f"gate={gate} test={test_identifier}")
         return RedirectResponse(f"/tasks/{ti['task_id']}",303)
     @app.post("/api/integrations/{iid}/close")
-    def close_integration(iid:int): i=integration_row(iid); git.close(i["repo_path"],i["worktree_path"]); db.execute("UPDATE integration_workspaces SET status='CLOSED',ready_for_main=0,closed_at=CURRENT_TIMESTAMP WHERE id=?",(iid,)); db.event("integration",iid,"WORKSPACE_CLOSED"); return RedirectResponse("/integrations",303)
+    def close_integration(iid:int, _authz: None = Depends(require_role("integration", "iid", "MEMBER"))): i=integration_row(iid); git.close(i["repo_path"],i["worktree_path"]); db.execute("UPDATE integration_workspaces SET status='CLOSED',ready_for_main=0,closed_at=CURRENT_TIMESTAMP WHERE id=?",(iid,)); db.event("integration",iid,"WORKSPACE_CLOSED"); return RedirectResponse("/integrations",303)
 
     @app.get("/test-runs",response_class=HTMLResponse)
     def runs(request:Request): return render(request,"test_runs.html",runs=db.all("SELECT * FROM test_runs ORDER BY id DESC LIMIT 200"))
@@ -2365,7 +2702,7 @@ def create_app(settings=None):
         return render(request,"kanban.html",board=board,columns=KANBAN_COLUMNS,filters=filters,filters_qs=qs,
                       repositories=db.all("SELECT * FROM repositories WHERE enabled=1"),agents=settings.agents)
     @app.post("/api/tasks")
-    def create_task(title:str=Form(...),description:str=Form(""),priority:str=Form("NORMAL"),tags:str=Form(""),repo_scope_id:str=Form(""),notes:str=Form(""),risk_profile:str=Form("NORMAL")):
+    def create_task(request:Request,title:str=Form(...),description:str=Form(""),priority:str=Form("NORMAL"),tags:str=Form(""),repo_scope_id:str=Form(""),notes:str=Form(""),risk_profile:str=Form("NORMAL"), _csrf: None = Depends(_mutating_csrf)):
         """The primary Task creation flow (section 1): a Task lands in
         BACKLOG with no branch/worktree/sandbox allocated at all -- those
         only appear once the Task is explicitly Selected (see /select) and
@@ -2374,11 +2711,15 @@ def create_app(settings=None):
         slug=slugify(title); priority=priority.strip().upper() or "NORMAL"; risk_profile=risk_profile.strip().upper()
         if risk_profile not in RISK_PROFILES: risk_profile="NORMAL"
         scope=int(repo_scope_id) if repo_scope_id.strip().isdigit() else None
+        # B0.3: a blank repo_scope_id is a legitimate orgless BACKLOG task
+        # (allowed through); a given one must resolve to an org this user
+        # can act in.
+        _require_org_role_for_repo(request, scope, "MEMBER")
         tid=db.execute("INSERT INTO tasks(slug,title,description,status,priority,tags,repo_scope_id,notes,risk_profile) VALUES(?,?,?,?,?,?,?,?,?)",
                         (slug,title,description,"BACKLOG",priority,tags.strip(),scope,notes.strip(),risk_profile))
         db.event("task",tid,"TASK_CREATED_BACKLOG",slug); return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/select")
-    def select_task(tid:int):
+    def select_task(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """[Select for Development] (section 7): BACKLOG -> ACTIVE. Still
         allocates nothing -- Task Stage stays PLANNING (computed) until an
         Agent Workspace actually exists."""
@@ -2388,7 +2729,7 @@ def create_app(settings=None):
         return RedirectResponse(f"/tasks/{tid}",303)
     BRIEF_FIELDS=("brief_goal","brief_context","brief_requirements","brief_acceptance_criteria","brief_out_of_scope","brief_test_plan","brief_risks")
     @app.post("/api/tasks/{tid}/brief")
-    def save_brief(tid:int,goal:str=Form(""),context:str=Form(""),requirements:str=Form(""),acceptance_criteria:str=Form(""),out_of_scope:str=Form(""),test_plan:str=Form(""),risks:str=Form(""),risk_profile:str=Form("")):
+    def save_brief(tid:int,goal:str=Form(""),context:str=Form(""),requirements:str=Form(""),acceptance_criteria:str=Form(""),out_of_scope:str=Form(""),test_plan:str=Form(""),risks:str=Form(""),risk_profile:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Implementation Brief (section 8): structured fields, saved in
         place (one current brief per Task, not a history log) -- but
         brief_version bumps whenever the content that actually drives a
@@ -2409,7 +2750,7 @@ def create_app(settings=None):
         db.event("task",tid,"BRIEF_SAVED",f"brief_version+1={changed}")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/generate-prompt")
-    def generate_prompt(tid:int):
+    def generate_prompt(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Fill AGENT PROMPT from the Task's current prompt/brief
         (deterministic template, never a model call) -- the user still
         reviews/edits it before any agent is launched (section 3). Kept
@@ -2421,7 +2762,7 @@ def create_app(settings=None):
         regenerate_agent_prompt(tid,repo_row)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/prompt")
-    def save_prompt(tid:int,implementation_prompt:str=Form("")):
+    def save_prompt(tid:int,implementation_prompt:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Edit the Implementation Prompt (section: 'do not rewrite the
         user's prompt silently' -- only the user changes this text, ever).
         Bumps brief_version on an actual content change, the exact same
@@ -2444,7 +2785,7 @@ def create_app(settings=None):
             regenerate_agent_prompt(tid,repo_row)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/agent-prompt")
-    def save_agent_prompt(tid:int,agent_prompt:str=Form("")):
+    def save_agent_prompt(tid:int,agent_prompt:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         t=task_row(tid); db.execute("UPDATE tasks SET agent_prompt=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(agent_prompt,tid))
         latest=db.one("SELECT id FROM prompts WHERE task_id=? AND prompt_type='BUILDER' ORDER BY id DESC LIMIT 1",(tid,))
         if latest: db.execute("UPDATE prompts SET content=? WHERE id=?",(agent_prompt,latest["id"]))
@@ -2453,7 +2794,7 @@ def create_app(settings=None):
     def latest_prompt(tid,prompt_type="BUILDER"):
         return db.one("SELECT * FROM prompts WHERE task_id=? AND prompt_type=? ORDER BY id DESC LIMIT 1",(tid,prompt_type))
     @app.post("/api/tasks/new-with-workspace")
-    async def create_task_with_workspace(request:Request):
+    async def create_task_with_workspace(request:Request, _csrf: None = Depends(_mutating_csrf)):
         """Advanced/quick-start shortcut: Task + at least one Agent
         Workspace in one submit (optionally many, for a cross-repo Task
         defined immediately), skipping BACKLOG for when planning is
@@ -2467,6 +2808,12 @@ def create_app(settings=None):
         description=str(form.get("description",""))
         repo_ids=form.getlist("ws_repository_id"); agents=form.getlist("ws_agent"); roles=form.getlist("ws_role")
         bases=form.getlist("ws_base_branch"); profiles=form.getlist("ws_sandbox_profile")
+        # B0.3: role required in every listed repository's org before any
+        # Task/Workspace is actually created (fail before the INSERT, not
+        # after -- a partially-created cross-repo Task is a worse failure
+        # mode than refusing up front).
+        _require_org_role_for_repos(
+            request, [int(r) for r in repo_ids if str(r).strip().isdigit()], "MEMBER")
         slug=slugify(title); tid=db.execute("INSERT INTO tasks(slug,title,description,status) VALUES(?,?,?,?)",(slug,title,description,"ACTIVE"))
         db.event("task",tid,"TASK_CREATED",slug)
         for i,rid_raw in enumerate(repo_ids):
@@ -2479,7 +2826,7 @@ def create_app(settings=None):
             if not result["ok"]: db.event("task",tid,"WORKSPACE_CREATE_FAILED",f"{agent} · repo #{rid_raw}: {result['error']}")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/create")
-    async def create_task_unified(request:Request):
+    async def create_task_unified(request:Request, _csrf: None = Depends(_mutating_csrf)):
         """The primary, simplified Task Create flow: ONE Implementation
         Prompt instead of a structured Brief form (Task title / Prompt /
         Repository / Agent / Sandbox, everything else tucked under
@@ -2517,6 +2864,10 @@ def create_app(settings=None):
                          (extra_base[i] if i<len(extra_base) else "main") or "main",
                          extra_profile[i] if i<len(extra_profile) else ""))
 
+        # B0.3: same rule as /api/tasks/new-with-workspace -- role required
+        # in every listed repository's org before creating anything.
+        _require_org_role_for_repos(
+            request, [int(r[0]) for r in rows if str(r[0]).strip().isdigit()], "MEMBER")
         slug=slugify(title); status="ACTIVE" if rows else "BACKLOG"
         tid=db.execute("INSERT INTO tasks(slug,title,status,risk_profile,implementation_prompt) VALUES(?,?,?,?,?)",
                         (slug,title,status,risk_profile,prompt))
@@ -2737,7 +3088,7 @@ def create_app(settings=None):
         return {k:v for k,v in feature.items() if k!="_path"}
     @app.post("/api/tasks/{tid}/spec")
     def save_task_spec(tid:int,classification:str=Form(""),feature_id:str=Form(""),spec_version:str=Form(""),
-                        requirement_ids:str=Form(""),acceptance_ids:str=Form(""),invariant_ids:str=Form("")):
+                        requirement_ids:str=Form(""),acceptance_ids:str=Form(""),invariant_ids:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Task/spec TraceLink (S4): sets a Task's spec_* linkage.
         Deliberately permissive at write time (this route never itself
         validates against the registry -- SpecGate does that, every
@@ -2983,7 +3334,7 @@ def create_app(settings=None):
         return simple_view_service.build(cid)
 
     @app.post("/changes/{cid}/human-decisions/{did}/resolve")
-    def change_resolve_human_decision(cid:int,did:int,resolution_note:str=Form(...)):
+    def change_resolve_human_decision(cid:int,did:int,resolution_note:str=Form(...), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         """Form-friendly counterpart to the JSON /api/human-decisions/{did}/
         resolve route (E5.11) -- same HumanDecisionService.resolve() call,
         just a redirect back to this Change's Decisions tab (E7.5.13)
@@ -2996,13 +3347,14 @@ def create_app(settings=None):
     def api_list_changes(project_id:int|None=None):
         return changes.list(project_id=project_id)
     @app.post("/api/changes")
-    def api_create_change(title:str=Form(...),description:str=Form(""),change_type:str=Form("FEATURE"),
-                           risk_level:str=Form("NORMAL"),project_id:str=Form("")):
+    def api_create_change(request:Request,title:str=Form(...),description:str=Form(""),change_type:str=Form("FEATURE"),
+                           risk_level:str=Form("NORMAL"),project_id:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
         pid=int(project_id) if project_id.strip().isdigit() else None
+        _require_org_role_for_repo(request, pid, "MEMBER")
         cid=changes.create(title=title,description=description,change_type=change_type,risk_level=risk_level,project_id=pid)
         return change_row(cid)
     @app.post("/changes")
-    def create_change_simple(request:Request,what:str=Form(...),change_type:str=Form("FEATURE"),project_id:str=Form("")):
+    def create_change_simple(request:Request,what:str=Form(...),change_type:str=Form("FEATURE"),project_id:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
         """A1.19: the Simple Create Change entry -- one big "what do you
         want to change or build?" box, no Spec/Plan/Task vocabulary
         required. Reuses ChangeService.create() exactly (never a second
@@ -3019,13 +3371,14 @@ def create_app(settings=None):
             raise HTTPException(422,"Tell us what you want to change or build.")
         title=what.splitlines()[0].strip()[:120] or what[:120]
         pid=int(project_id) if project_id.strip().isdigit() else None
+        _require_org_role_for_repo(request, pid, "MEMBER")
         cid=changes.create(title=title,description=what,change_type=change_type,project_id=pid)
         return RedirectResponse(f"/changes/{cid}",303)
     @app.get("/api/changes/{cid}")
     def api_get_change(cid:int):
         return change_row(cid)
     @app.post("/api/changes/{cid}/lifecycle")
-    def api_change_lifecycle(cid:int,state:str=Form(...)):
+    def api_change_lifecycle(cid:int,state:str=Form(...), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         """Human-driven only (E1.1): no Supervisor/Agent code path in this
         phase ever calls ChangeService.set_lifecycle_state -- an Agent
         cannot arbitrarily mark a Change DONE."""
@@ -3035,19 +3388,31 @@ def create_app(settings=None):
     def api_change_tasks(cid:int):
         change_row(cid); return changes.list_tasks_for_change(cid)
     @app.post("/api/changes/{cid}/tasks/{tid}/attach")
-    def api_attach_task_to_change(cid:int,tid:int):
+    def api_attach_task_to_change(cid:int,tid:int, _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         changes.attach_task_to_change(cid,tid); return task_row(tid)
     @app.get("/api/changes/{cid}/work-products")
     def api_change_work_products(cid:int):
         change_row(cid); return work_products.list_for_change(cid)
 
     @app.post("/api/work-products")
-    def api_create_work_product(kind:str=Form(...),title:str=Form(...),project_id:str=Form(""),
+    def api_create_work_product(request:Request,kind:str=Form(...),title:str=Form(...),project_id:str=Form(""),
                                  change_id:str=Form(""),task_id:str=Form(""),status:str=Form("DRAFT"),
                                  content_ref:str=Form(""),content_metadata:str=Form(""),
-                                 content_digest:str=Form(""),supersedes_id:str=Form("")):
+                                 content_digest:str=Form(""),supersedes_id:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
         try: metadata=json.loads(content_metadata) if content_metadata.strip() else {}
         except (TypeError, ValueError): raise WorkProductError("content_metadata must be valid JSON")
+        # B0.3: same project_id -> change_id -> task_id fallback chain
+        # AuthzService's own work_product resolver uses for an EXISTING
+        # work product -- checked here against whichever reference is
+        # actually given before create (all three blank is a legitimate
+        # orgless work product, same as the underlying schema allows).
+        _wp_pid=int(project_id) if project_id.strip().isdigit() else None
+        _wp_cid=int(change_id) if change_id.strip().isdigit() else None
+        _wp_tid=int(task_id) if task_id.strip().isdigit() else None
+        if _wp_pid is not None: _require_org_role_for_repo(request, _wp_pid, "MEMBER")
+        elif _wp_cid is not None: _require_org_role_for_change(request, _wp_cid, "MEMBER")
+        elif _wp_tid is not None: _require_org_role_for_entity(request, "task", _wp_tid, "MEMBER")
+        else: _require_login_only(request)
         wpid=work_products.create(
             kind=kind,title=title,
             project_id=int(project_id) if project_id.strip().isdigit() else None,
@@ -3066,7 +3431,7 @@ def create_app(settings=None):
         task_row(tid)
         return {"inputs":work_products.inputs_for_task(tid),"outputs":work_products.outputs_for_task(tid)}
     @app.post("/api/tasks/{tid}/work-products/{wpid}/link")
-    def api_link_task_work_product(tid:int,wpid:int,direction:str=Form(...)):
+    def api_link_task_work_product(tid:int,wpid:int,direction:str=Form(...), _authz: None = Depends(require_role("work_product", "wpid", "MEMBER"))):
         work_products.link_task(tid,wpid,direction)
         return {"inputs":work_products.inputs_for_task(tid),"outputs":work_products.outputs_for_task(tid)}
 
@@ -3091,7 +3456,11 @@ def create_app(settings=None):
     def api_list_providers():
         return {p:roles_catalog.capabilities_for_provider(p) for p in roles_catalog.providers}
     @app.post("/api/engineering/validate-assignment")
-    def api_validate_assignment(provider:str=Form(...),role_key:str=Form(...),repository_id:str=Form("")):
+    def api_validate_assignment(request:Request,provider:str=Form(...),role_key:str=Form(...),repository_id:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
+        # Diagnostic/advisory (see docstring below) -- VIEWER is enough
+        # when a repository is named; identity only otherwise.
+        _require_org_role_for_repo(
+            request, int(repository_id) if repository_id.strip().isdigit() else None, "VIEWER")
         policy=None
         if repository_id.strip().isdigit():
             r=repo(int(repository_id))
@@ -3149,7 +3518,7 @@ def create_app(settings=None):
         if not run: raise HTTPException(404,"This Change has no workflow yet")
         return run
     @app.post("/api/changes/{cid}/workflow")
-    def api_create_change_workflow(cid:int,profile_key:str=Form("")):
+    def api_create_change_workflow(cid:int,profile_key:str=Form(""), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         change=_change_row(cid)
         policy=_change_engineering_policy(change)
         return workflow_service.create_workflow_for_change(cid,profile_key.strip() or None,policy)
@@ -3167,7 +3536,7 @@ def create_app(settings=None):
         return {"unmet_gates":workflow_service.list_unmet_gates(cid)}
 
     @app.post("/api/tasks/{tid}/task-type")
-    def api_set_task_type(tid:int,task_type:str=Form("")):
+    def api_set_task_type(tid:int,task_type:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Optional (E3.1) -- a Task never requires one; NULL/'' clears
         it back to unset, exactly like spec_change_classification's own
         write route. Validated against the seeded catalog, never a
@@ -3188,7 +3557,7 @@ def create_app(settings=None):
                 "dependents":task_dependencies.dependents_of(tid),
                 "readiness":task_dependencies.readiness(tid,decision)}
     @app.post("/api/tasks/{tid}/dependencies")
-    def api_add_task_dependency(tid:int,depends_on_task_id:int=Form(...)):
+    def api_add_task_dependency(tid:int,depends_on_task_id:int=Form(...), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_dependencies.add_dependency(tid,depends_on_task_id)
         return {"depends_on":task_dependencies.dependencies_for(tid),
                 "dependents":task_dependencies.dependents_of(tid),
@@ -3205,7 +3574,7 @@ def create_app(settings=None):
         return row
 
     @app.post("/api/changes/{cid}/plan")
-    def api_plan_change(cid:int,provider:str=Form("claude"),materialize:bool=Form(False)):
+    def api_plan_change(cid:int,provider:str=Form("claude"),materialize:bool=Form(False), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         return planner_service.plan_change(cid,provider=provider,materialize=materialize)
     @app.get("/api/changes/{cid}/plans")
@@ -3213,7 +3582,7 @@ def create_app(settings=None):
         _change_row(cid)
         return planner_service.list_plans(cid)
     @app.post("/api/changes/{cid}/replan")
-    def api_replan_change(cid:int,provider:str=Form("claude")):
+    def api_replan_change(cid:int,provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         return planner_service.replan_change(cid,provider=provider)
 
@@ -3222,11 +3591,11 @@ def create_app(settings=None):
         plan=_plan_row(pid)
         return {**plan,"items":planner_service.plan_items(pid),"human_decisions":planner_service.human_decisions(pid)}
     @app.post("/api/plans/{pid}/validate")
-    def api_validate_plan(pid:int):
+    def api_validate_plan(pid:int, _authz: None = Depends(require_role("plan", "pid", "MEMBER"))):
         _plan_row(pid)
         return planner_service.validate_plan(pid)
     @app.post("/api/plans/{pid}/materialize")
-    def api_materialize_plan(pid:int):
+    def api_materialize_plan(pid:int, _authz: None = Depends(require_role("plan", "pid", "MEMBER"))):
         _plan_row(pid)
         return planner_service.materialize_plan(pid)
     @app.get("/api/plans/{pid}/validation")
@@ -3241,7 +3610,7 @@ def create_app(settings=None):
                  "preferred_role":it["preferred_role"],"depends_on":json.loads(it["depends_on_keys"] or "[]"),
                  "materialized_task_id":it["materialized_task_id"]} for it in items]
     @app.post("/api/plans/{pid}/human-decisions/{did}/resolve")
-    def api_resolve_human_decision(pid:int,did:int,resolution_note:str=Form(...)):
+    def api_resolve_human_decision(pid:int,did:int,resolution_note:str=Form(...), _authz: None = Depends(require_role("plan", "pid", "MEMBER"))):
         _plan_row(pid)
         return planner_service.resolve_human_decision(did,resolution_note)
     @app.get("/api/plans/{pid}/staleness")
@@ -3262,7 +3631,7 @@ def create_app(settings=None):
         _plan_row(pid)
         return planner_service.check_test_design_staleness(pid)
     @app.post("/api/human-decisions/{did}/resolve")
-    def api_resolve_human_decision_generic(did:int,resolution_note:str=Form(...)):
+    def api_resolve_human_decision_generic(did:int,resolution_note:str=Form(...), _authz: None = Depends(require_role("human_decision", "did", "MEMBER"))):
         """E5.11: the generalized resolve path -- works for a decision
         raised against a Change, a Plan, OR a SpecProposal alike, since
         human_decisions is now one shared table/service (app/services/
@@ -3282,7 +3651,7 @@ def create_app(settings=None):
         return row
 
     @app.post("/api/changes/{cid}/requirements/analyze")
-    def api_analyze_requirements(cid:int,provider:str=Form("claude")):
+    def api_analyze_requirements(cid:int,provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         return requirement_analysis_service.analyze(cid,provider=provider)
     @app.get("/api/changes/{cid}/requirements")
@@ -3299,7 +3668,7 @@ def create_app(settings=None):
         return {**p,"proposed_content":json.loads(p["proposed_content"])}
 
     @app.post("/api/changes/{cid}/spec-proposals")
-    def api_create_spec_proposal(cid:int,requirement_analysis_id:str=Form(""),provider:str=Form("claude")):
+    def api_create_spec_proposal(cid:int,requirement_analysis_id:str=Form(""),provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         ra_id=int(requirement_analysis_id) if requirement_analysis_id.strip().isdigit() else None
         if ra_id is None:
@@ -3320,14 +3689,14 @@ def create_app(settings=None):
         p=_proposal_row(pid)
         return {**_proposal_out(p),"human_decisions":spec_lifecycle_service.human_decisions_for(pid)}
     @app.post("/api/spec-proposals/{pid}/review")
-    def api_review_spec_proposal(pid:int,provider:str=Form("claude")):
+    def api_review_spec_proposal(pid:int,provider:str=Form("claude"), _authz: None = Depends(require_role("spec_proposal", "pid", "MEMBER"))):
         _proposal_row(pid)
         review=spec_review_service.review(pid,provider=provider)
         if review["outcome"]=="REVIEWED":
             spec_lifecycle_service.finalize_after_review(pid,review["verdict"])
         return review
     @app.post("/api/spec-proposals/{pid}/refine")
-    def api_refine_spec_proposal(pid:int,provider:str=Form("claude")):
+    def api_refine_spec_proposal(pid:int,provider:str=Form("claude"), _authz: None = Depends(require_role("spec_proposal", "pid", "MEMBER"))):
         proposal=_proposal_row(pid)
         findings=json.loads(proposal["review_result"] or "{}")
         result=spec_author_service.refine(pid,findings,provider=provider)
@@ -3336,7 +3705,7 @@ def create_app(settings=None):
             result["proposal"]=_proposal_out(spec_lifecycle_service.get_proposal(result["proposal"]["id"]))
         return result
     @app.post("/api/spec-proposals/{pid}/apply")
-    def api_apply_spec_proposal(pid:int):
+    def api_apply_spec_proposal(pid:int, _authz: None = Depends(require_role("spec_proposal", "pid", "MEMBER"))):
         _proposal_row(pid)
         return spec_lifecycle_service.apply_proposal(pid)
     @app.get("/api/spec-proposals/{pid}/findings")
@@ -3362,7 +3731,7 @@ def create_app(settings=None):
         return _change_engineering_policy(_change_row(cid))
 
     @app.post("/api/changes/{cid}/architecture/analyze")
-    def api_architecture_analyze(cid:int,provider:str=Form("claude")):
+    def api_architecture_analyze(cid:int,provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         result=architecture_analysis_service.analyze(cid,provider=provider)
         if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
@@ -3374,7 +3743,7 @@ def create_app(settings=None):
         if not wp: raise HTTPException(404,"No Architecture Analysis yet for this Change")
         return _wp_out(wp)
     @app.post("/api/changes/{cid}/architecture/review")
-    def api_architecture_review(cid:int,analysis_id:str=Form(""),provider:str=Form("claude")):
+    def api_architecture_review(cid:int,analysis_id:str=Form(""),provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         aid=int(analysis_id) if analysis_id.strip().isdigit() else None
         if aid is None:
@@ -3390,7 +3759,7 @@ def create_app(settings=None):
         return [_wp_out(wp) for wp in work_products.list_for_change(cid) if wp["kind"]=="ADR"]
 
     @app.post("/api/changes/{cid}/design/technical")
-    def api_design_technical(cid:int,architecture_analysis_id:str=Form(""),provider:str=Form("claude")):
+    def api_design_technical(cid:int,architecture_analysis_id:str=Form(""),provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         aid=int(architecture_analysis_id) if architecture_analysis_id.strip().isdigit() else None
         if aid is None:
@@ -3400,7 +3769,7 @@ def create_app(settings=None):
         if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
         return result
     @app.post("/api/changes/{cid}/design/ui-ux")
-    def api_design_ui_ux(cid:int,provider:str=Form("claude")):
+    def api_design_ui_ux(cid:int,provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         result=ui_ux_design_service.design(cid,provider=provider)
         if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
@@ -3412,7 +3781,7 @@ def create_app(settings=None):
                 "ui_ux_design":_wp_out(ui_ux_design_service.current_for_change(cid)),
                 "ui_ux_applicability":architecture_design_service.detect_ui_ux(cid,project_policy=_change_policy_or_none(cid))}
     @app.post("/api/changes/{cid}/design/review")
-    def api_design_review(cid:int,technical_design_id:str=Form(""),ui_ux_design_id:str=Form(""),provider:str=Form("claude")):
+    def api_design_review(cid:int,technical_design_id:str=Form(""),ui_ux_design_id:str=Form(""),provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         tid=int(technical_design_id) if technical_design_id.strip().isdigit() else None
         if tid is None:
@@ -3427,7 +3796,7 @@ def create_app(settings=None):
         if result.get("work_product"): result["work_product"]=_wp_out(result["work_product"])
         return result
     @app.post("/api/changes/{cid}/design/refine")
-    def api_design_refine(cid:int,technical_design_id:str=Form(""),provider:str=Form("claude")):
+    def api_design_refine(cid:int,technical_design_id:str=Form(""),provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         tid=int(technical_design_id) if technical_design_id.strip().isdigit() else None
         if tid is None:
@@ -3483,7 +3852,7 @@ def create_app(settings=None):
         return result
 
     @app.post("/api/changes/{cid}/tests/design")
-    def api_tests_design(cid:int,provider:str=Form("claude")):
+    def api_tests_design(cid:int,provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         result=test_design_service.design(cid,provider=provider,project_test_command=_change_test_command(cid))
         return _test_design_result_out(result)
@@ -3499,7 +3868,7 @@ def create_app(settings=None):
         _change_row(cid)
         return requirement_coverage_service.compute(cid)
     @app.post("/api/changes/{cid}/tests/review")
-    def api_tests_review(cid:int,test_case_set_id:str=Form(""),provider:str=Form("claude")):
+    def api_tests_review(cid:int,test_case_set_id:str=Form(""),provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         sid=int(test_case_set_id) if test_case_set_id.strip().isdigit() else None
         if sid is None:
@@ -3511,7 +3880,7 @@ def create_app(settings=None):
         if result.get("coverage_work_product") is not None: result["coverage_work_product"]=_wp_out(result["coverage_work_product"])
         return result
     @app.post("/api/changes/{cid}/tests/refine")
-    def api_tests_refine(cid:int,test_case_set_id:str=Form(""),provider:str=Form("claude")):
+    def api_tests_refine(cid:int,test_case_set_id:str=Form(""),provider:str=Form("claude"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         _change_row(cid)
         sid=int(test_case_set_id) if test_case_set_id.strip().isdigit() else None
         if sid is None:
@@ -3537,7 +3906,7 @@ def create_app(settings=None):
         return _tcs_out(_tcs_row(tcid))
     @app.post("/api/test-cases/{tcid}/map-executable")
     def api_map_test_case_executable(tcid:int,repository_id:str=Form(""),repository_path:str=Form(...),
-                                      test_symbol:str=Form(""),command:str=Form(""),framework:str=Form("")):
+                                      test_symbol:str=Form(""),command:str=Form(""),framework:str=Form(""), _authz: None = Depends(require_role("test_case_spec", "tcid", "MEMBER"))):
         _tcs_row(tcid)
         rid=int(repository_id) if repository_id.strip().isdigit() else None
         return executable_test_mapping_service.map(tcid,rid,repository_path,test_symbol,command=command,framework=framework)
@@ -3548,7 +3917,7 @@ def create_app(settings=None):
         return m if m else {"test_case_spec_id":tcid,"implementation_status":"UNIMPLEMENTED"}
 
     @app.post("/api/workspaces/{wid}/builder-instructions")
-    def save_builder_instructions(wid:int,builder_instructions:str=Form("")):
+    def save_builder_instructions(wid:int,builder_instructions:str=Form(""), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         """Optional, per-Builder-Workspace extra instructions layered on
         top of the Task's own effective prompt -- e.g. distinguishing what
         a Backend Builder should do from what a Firmware Builder on the
@@ -3708,11 +4077,11 @@ def create_app(settings=None):
         change_row(cid)
         return autonomous_execution_service.list_auto_ready_tasks(cid)
     @app.post("/api/changes/{cid}/autonomous-execution/tick")
-    def api_autonomous_execution_tick(cid:int):
+    def api_autonomous_execution_tick(cid:int, _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         change_row(cid)
         return autonomous_execution_service.tick(cid)
     @app.post("/api/tasks/{tid}/autonomous-start")
-    def api_task_autonomous_start(tid:int):
+    def api_task_autonomous_start(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Operator-triggered single-task run (E8.23's 'Run next ready
         task' UI action) -- evaluates THIS Task specifically rather than
         letting tick() pick whichever is first in DAG order, so an
@@ -3733,7 +4102,7 @@ def create_app(settings=None):
         if not ws: raise HTTPException(404,"This Task has no managed worktree")
         return ws
     @app.post("/api/tasks/{tid}/worktree/create")
-    def api_task_worktree_create(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form(""),sandbox_profile:str=Form("")):
+    def api_task_worktree_create(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form(""),sandbox_profile:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Diagnostic/manual-testing entry point (E8.5.26) -- autonomous
         execution normally creates a worktree internally via the exact
         same add_task_workspace() call this delegates to."""
@@ -3744,15 +4113,15 @@ def create_app(settings=None):
         repo(rid)
         return worktree_manager.list_repository_worktrees(rid)
     @app.post("/api/tasks/{tid}/worktree/inspect")
-    def api_task_worktree_inspect(tid:int):
+    def api_task_worktree_inspect(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         return worktree_manager.inspect_task_worktree(tid)
     @app.post("/api/tasks/{tid}/worktree/abandon")
-    def api_task_worktree_abandon(tid:int,note:str=Form("")):
+    def api_task_worktree_abandon(tid:int,note:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         return worktree_manager.abandon_task_worktree(tid,note)
     @app.post("/api/tasks/{tid}/worktree/cleanup")
-    def api_task_worktree_cleanup(tid:int,force:bool=Form(False)):
+    def api_task_worktree_cleanup(tid:int,force:bool=Form(False), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         return worktree_manager.remove_task_worktree(tid,force)
     @app.get("/api/tasks/{tid}/integration-check")
@@ -3762,11 +4131,11 @@ def create_app(settings=None):
 
     # ---- E9 Independent Review / Security Review / Fix Loop ---------
     @app.post("/api/tasks/{tid}/review/code")
-    def api_task_review_code(tid:int,provider:str=Form("claude")):
+    def api_task_review_code(tid:int,provider:str=Form("claude"), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         return code_review_service.review_task(tid,provider)
     @app.post("/api/tasks/{tid}/review/security")
-    def api_task_review_security(tid:int,provider:str=Form("claude")):
+    def api_task_review_security(tid:int,provider:str=Form("claude"), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         return security_review_service.review_task(tid,provider)
     @app.get("/api/tasks/{tid}/reviews")
@@ -3778,7 +4147,7 @@ def create_app(settings=None):
         task_row(tid)
         return findings_store.list_for_task(task_chain_ids(db,tid))
     @app.post("/api/tasks/{tid}/review-fix/tick")
-    def api_task_review_fix_tick(tid:int,provider:str=Form("claude")):
+    def api_task_review_fix_tick(tid:int,provider:str=Form("claude"), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         return review_fix_orchestrator.tick(tid,provider)
     @app.get("/api/tasks/{tid}/review-fix/status")
@@ -3786,7 +4155,7 @@ def create_app(settings=None):
         task_row(tid)
         return review_fix_orchestrator.status(tid)
     @app.post("/api/findings/{fid}/resolve")
-    def api_finding_resolve(fid:int,resolution_reference:str=Form(...),status:str=Form("RESOLVED")):
+    def api_finding_resolve(fid:int,resolution_reference:str=Form(...),status:str=Form("RESOLVED"), _authz: None = Depends(require_role("finding", "fid", "MEMBER"))):
         return findings_store.resolve(fid,resolution_reference,status)
     @app.get("/api/tasks/{tid}/integration-readiness")
     def api_task_integration_readiness(tid:int):
@@ -3795,7 +4164,7 @@ def create_app(settings=None):
 
     # ---- E10 Integration / Release / Deploy / Rollback ----------------
     @app.post("/api/tasks/{tid}/integrate")
-    def api_task_integrate(tid:int):
+    def api_task_integrate(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         return integration_service.integrate_task(tid)
     @app.get("/api/tasks/{tid}/integration")
@@ -3804,7 +4173,8 @@ def create_app(settings=None):
         return integration_service.preflight_integration(tid)
 
     @app.post("/api/releases")
-    def api_create_release(repository_id:int=Form(...),task_ids:str=Form(...),version:str=Form("")):
+    def api_create_release(request:Request,repository_id:int=Form(...),task_ids:str=Form(...),version:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
+        _require_org_role_for_repo(request, repository_id, "MEMBER")
         ids=[int(x) for x in task_ids.split(",") if x.strip()]
         r=release_service.create_release(repository_id,ids,version.strip() or None)
         return r
@@ -3818,23 +4188,23 @@ def create_app(settings=None):
         return {**r,"tasks":release_service.tasks_for(rid)}
 
     @app.post("/api/releases/{rid}/build")
-    def api_release_build(rid:int):
+    def api_release_build(rid:int, _authz: None = Depends(require_role("release", "rid", "MEMBER"))):
         return release_service.build(rid)
     @app.post("/api/releases/{rid}/qualify")
-    def api_release_qualify(rid:int):
+    def api_release_qualify(rid:int, _authz: None = Depends(require_role("release", "rid", "MEMBER"))):
         return release_service.qualify(rid,review_fix_orchestrator)
 
     @app.post("/api/releases/{rid}/deploy/test")
-    def api_release_deploy_test(rid:int):
+    def api_release_deploy_test(rid:int, _authz: None = Depends(require_role("release", "rid", "MEMBER"))):
         return release_service.deploy_test(rid)
     @app.post("/api/releases/{rid}/deploy/production")
-    def api_release_deploy_production(rid:int):
+    def api_release_deploy_production(rid:int, _authz: None = Depends(require_role("release", "rid", "ADMIN"))):
         return release_service.deploy_production(rid)
     @app.post("/api/releases/{rid}/approve-production")
-    def api_release_approve_production(rid:int,approved_by:str=Form(...)):
+    def api_release_approve_production(rid:int,approved_by:str=Form(...), _authz: None = Depends(require_role("release", "rid", "ADMIN"))):
         return release_service.approve_production(rid,approved_by)
     @app.post("/api/releases/{rid}/tick")
-    def api_release_tick(rid:int):
+    def api_release_tick(rid:int, _authz: None = Depends(require_role("release", "rid", "MEMBER"))):
         return release_service.release_tick(rid,review_fix_orchestrator)
 
     @app.get("/api/releases/{rid}/deployments")
@@ -3856,7 +4226,7 @@ def create_app(settings=None):
     # rollback is a distinct JSON API action, never overloaded onto the
     # same path with a different response shape.
     @app.post("/api/releases/{rid}/rollback")
-    def api_release_rollback(rid:int):
+    def api_release_rollback(rid:int, _authz: None = Depends(require_role("release", "rid", "ADMIN"))):
         r=release_service.get(rid)
         if not r: raise HTTPException(404,"Release not found")
         return release_service.rollback_production(rid)
@@ -3870,20 +4240,20 @@ def create_app(settings=None):
                 "acceptance":pa,"checklist":product_acceptance_service.checklist(pa["id"]) if pa else [],
                 "context":product_acceptance_service.context(cid)}
     @app.post("/api/changes/{cid}/acceptance/request")
-    def api_change_acceptance_request(cid:int,requested_by:str=Form("human")):
+    def api_change_acceptance_request(cid:int,requested_by:str=Form("human"), _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         change_row(cid)
         return product_acceptance_service.request(cid,requested_by=requested_by)
     @app.post("/api/product-acceptances/{paid}/checklist/{item_id}")
-    def api_acceptance_checklist_item(paid:int,item_id:int,status:str=Form(...),note:str=Form(""),checked_by:str=Form("human")):
+    def api_acceptance_checklist_item(paid:int,item_id:int,status:str=Form(...),note:str=Form(""),checked_by:str=Form("human"), _authz: None = Depends(require_role("product_acceptance", "paid", "MEMBER"))):
         return product_acceptance_service.check_item(paid,item_id,status,note,checked_by)
     @app.post("/api/product-acceptances/{paid}/accept")
-    def api_acceptance_accept(paid:int,actor:str=Form("human"),note:str=Form("")):
+    def api_acceptance_accept(paid:int,actor:str=Form("human"),note:str=Form(""), _authz: None = Depends(require_role("product_acceptance", "paid", "MEMBER"))):
         return product_acceptance_service.accept(paid,actor,note)
     @app.post("/api/product-acceptances/{paid}/request-change")
-    def api_acceptance_request_change(paid:int,actor:str=Form("human"),feedback:str=Form(...),classification:str=Form("PRODUCT_ADJUSTMENT")):
+    def api_acceptance_request_change(paid:int,actor:str=Form("human"),feedback:str=Form(...),classification:str=Form("PRODUCT_ADJUSTMENT"), _authz: None = Depends(require_role("product_acceptance", "paid", "MEMBER"))):
         return product_acceptance_service.request_change(paid,actor,feedback,classification)
     @app.post("/api/product-acceptances/{paid}/reject")
-    def api_acceptance_reject(paid:int,actor:str=Form("human"),reason:str=Form(...),classification:str=Form("")):
+    def api_acceptance_reject(paid:int,actor:str=Form("human"),reason:str=Form(...),classification:str=Form(""), _authz: None = Depends(require_role("product_acceptance", "paid", "MEMBER"))):
         return product_acceptance_service.reject(paid,actor,reason,classification.strip() or None)
     @app.get("/api/product-acceptances/{paid}/evidence")
     def api_acceptance_evidence(paid:int):
@@ -3895,9 +4265,10 @@ def create_app(settings=None):
         if not row: raise HTTPException(404,"Incident not found")
         return row
     @app.post("/api/incidents")
-    def api_report_incident(title:str=Form(...),description:str=Form(""),source:str=Form("MANUAL"),
-                             severity:str=Form("MEDIUM"),reported_by:str=Form("system"),project_id:str=Form("")):
+    def api_report_incident(request:Request,title:str=Form(...),description:str=Form(""),source:str=Form("MANUAL"),
+                             severity:str=Form("MEDIUM"),reported_by:str=Form("system"),project_id:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
         pid=int(project_id) if project_id.strip().isdigit() else None
+        _require_org_role_for_repo(request, pid, "MEMBER")
         return incident_service.report(title,description,source,severity,reported_by,pid)
     @app.get("/api/incidents")
     def api_list_incidents(project_id:str="",status:str=""):
@@ -3908,49 +4279,49 @@ def create_app(settings=None):
         row=incident_row(iid)
         return {**row,"regression_history":incident_service.regression_history(iid)}
     @app.post("/api/incidents/{iid}/classify")
-    def api_classify_incident(iid:int,classification:str=Form(...),severity:str=Form("")):
+    def api_classify_incident(iid:int,classification:str=Form(...),severity:str=Form(""), _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         return incident_service.classify(iid,classification,severity.strip() or None)
     @app.post("/api/incidents/{iid}/link-spec")
-    def api_link_incident_spec(iid:int,feature_id:str=Form(...),requirement_ids:str=Form(""),acceptance_ids:str=Form("")):
+    def api_link_incident_spec(iid:int,feature_id:str=Form(...),requirement_ids:str=Form(""),acceptance_ids:str=Form(""), _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         def _ids(raw): return [x.strip() for x in raw.replace(",","\n").splitlines() if x.strip()]
         return incident_service.link_spec(iid,feature_id,_ids(requirement_ids),_ids(acceptance_ids))
     @app.post("/api/incidents/{iid}/spec-gap")
-    def api_incident_spec_gap(iid:int,note:str=Form("")):
+    def api_incident_spec_gap(iid:int,note:str=Form(""), _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         return incident_service.mark_spec_gap(iid,note)
     @app.post("/api/incidents/{iid}/sync")
-    def api_sync_incident(iid:int):
+    def api_sync_incident(iid:int, _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         incident_service.sync_spec_gap(iid)
         return incident_service.sync_status(iid)
     @app.post("/api/incidents/{iid}/reproduction/start")
-    def api_incident_reproduction_start(iid:int):
+    def api_incident_reproduction_start(iid:int, _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         return incident_service.start_reproduction(iid)
     @app.post("/api/incidents/{iid}/reproduction/record")
-    def api_incident_reproduction_record(iid:int,reproduced:bool=Form(...),note:str=Form(""),commit:str=Form("")):
+    def api_incident_reproduction_record(iid:int,reproduced:bool=Form(...),note:str=Form(""),commit:str=Form(""), _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         return incident_service.record_reproduction(iid,reproduced,note,commit.strip() or None)
     @app.post("/api/incidents/{iid}/regression-test")
-    def api_incident_regression_test(iid:int,test_case_spec_id:int=Form(...)):
+    def api_incident_regression_test(iid:int,test_case_spec_id:int=Form(...), _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         return incident_service.add_regression_test(iid,test_case_spec_id)
     @app.post("/api/incidents/{iid}/regression-result")
-    def api_incident_regression_result(iid:int,status:str=Form(...),tested_commit:str=Form(...),command:str=Form("")):
+    def api_incident_regression_result(iid:int,status:str=Form(...),tested_commit:str=Form(...),command:str=Form(""), _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         return incident_service.record_regression_result(iid,status,tested_commit,command)
     @app.post("/api/incidents/{iid}/verify-resolved")
-    def api_incident_verify_resolved(iid:int):
+    def api_incident_verify_resolved(iid:int, _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         return incident_service.verify_resolved(iid)
     @app.post("/api/incidents/{iid}/close")
-    def api_incident_close(iid:int,closed_by:str=Form("human"),note:str=Form("")):
+    def api_incident_close(iid:int,closed_by:str=Form("human"),note:str=Form(""), _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         return incident_service.close(iid,closed_by,note)
     @app.post("/api/incidents/{iid}/reopen")
-    def api_incident_reopen(iid:int,reason:str=Form(...)):
+    def api_incident_reopen(iid:int,reason:str=Form(...), _authz: None = Depends(require_role("incident", "iid", "MEMBER"))):
         incident_row(iid)
         return incident_service.reopen(iid,reason)
 
@@ -3961,15 +4332,15 @@ def create_app(settings=None):
         current=execution_wave_service.current_wave_for_change(cid)
         return {"current_wave":current,"plan":execution_wave_service.plan_execution_wave(cid)}
     @app.post("/api/changes/{cid}/execution-wave/plan")
-    def api_plan_execution_wave(cid:int):
+    def api_plan_execution_wave(cid:int, _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         change_row(cid)
         return execution_wave_service.plan_execution_wave(cid)
     @app.post("/api/changes/{cid}/execution-wave/run")
-    def api_run_execution_wave(cid:int):
+    def api_run_execution_wave(cid:int, _authz: None = Depends(require_role("change", "cid", "MEMBER"))):
         change_row(cid)
         return execution_wave_service.run_execution_wave(cid)
     @app.post("/api/execution-waves/{wid}/integrate")
-    def api_integrate_execution_wave(wid:int):
+    def api_integrate_execution_wave(wid:int, _authz: None = Depends(require_role("execution_wave", "wid", "MEMBER"))):
         if not execution_wave_service.get_wave(wid): raise HTTPException(404,"Execution wave not found")
         return execution_wave_service.integrate_wave(wid)
     @app.get("/api/execution-waves/{wid}")
@@ -4009,12 +4380,12 @@ def create_app(settings=None):
         return {"task_id":tid,"conflicts":conflicts}
 
     @app.post("/api/tasks/{tid}/workspaces")
-    def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):
+    def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         result=add_task_workspace(tid,repository_id,agent,role,base_branch,sandbox_profile)
         if not result["ok"]: raise GitSafetyError(result["error"])
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/setup-and-start")
-    def setup_and_start(tid:int,repository_id:str=Form(""),agent:str=Form(""),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):
+    def setup_and_start(tid:int,repository_id:str=Form(""),agent:str=Form(""),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """The Wizard's SETUP step single primary action ('Start Claude' /
         'Start Codex', section 4): Select for Development if still in
         BACKLOG, create the Builder Workspace if one doesn't already
@@ -4047,7 +4418,7 @@ def create_app(settings=None):
                     except SessionError as exc: db.event("agent",b["id"],"SESSION_START_FAILED",str(exc))
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/integrations")
-    def create_task_integration(tid:int):
+    def create_task_integration(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Integration eligibility (section 22): only once every Builder
         Workspace is READY with a current, PASS review and nothing
         unresolved -- decision.evaluate() is the one gate, never a looser
@@ -4136,7 +4507,7 @@ def create_app(settings=None):
             db.event("task",tid,"SANDBOX_CONTRACT_REQUIRED","no participating repo declares sandbox: contract")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/verification-sandbox")
-    def create_verification_sandbox(tid:int):
+    def create_verification_sandbox(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """[Create Verification Sandbox] (section 11-13): post-completion
         'view the running app' fallback for when Integration creation
         never provisioned one (contract added later, earlier provision
@@ -4176,7 +4547,7 @@ def create_app(settings=None):
         if sid: sandboxes.provision(sid)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/mark-merged")
-    def mark_merge_record(tid:int,repository_id:int,pr_ref:str=Form(""),merged_commit:str=Form("")):
+    def mark_merge_record(tid:int,repository_id:int,pr_ref:str=Form(""),merged_commit:str=Form(""), _authz: None = Depends(require_role("repository", "repository_id", "MEMBER"))):
         """Per-repository merge tracking (section 25): a cross-repo Task
         does NOT become DONE just because one repo's PR landed --
         MergeRecord is the fact TaskDecisionService actually checks. If no
@@ -4197,7 +4568,7 @@ def create_app(settings=None):
         db.event("task",tid,"MERGE_RECORDED",f"repo={repository_id} commit={commit}")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/mark-pr-open")
-    def mark_merge_pr_open(tid:int,repository_id:int,pr_ref:str=Form("")):
+    def mark_merge_pr_open(tid:int,repository_id:int,pr_ref:str=Form(""), _authz: None = Depends(require_role("repository", "repository_id", "MEMBER"))):
         task_row(tid); decision.merge_records(tid)
         row=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
         if not row: raise GitSafetyError("No MergeRecord for this repository on this Task")
@@ -4256,7 +4627,7 @@ def create_app(settings=None):
             db.event("task",tid,"PR_MERGED_DETECTED",f"repo={row['repository_id']} pr={row['pr_number']} merge_sha={status.get('merged_commit')} source={source}")
         _schedule_cleanup_if_done(tid)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/create-pr")
-    def create_merge_pr(tid:int,repository_id:int):
+    def create_merge_pr(tid:int,repository_id:int, _authz: None = Depends(require_role("repository", "repository_id", "MEMBER"))):
         """[Create PR] (section 3): only from the exact verified source
         (the repo's Task Integration branch when Integration is required,
         else the Builder's own branch) -- never a branch name accepted
@@ -4307,7 +4678,7 @@ def create_app(settings=None):
         ops.succeed(op_id,f"PR #{status['pr_number']} already open" if reused else f"PR #{status['pr_number']} created")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/refresh")
-    def refresh_merge_pr(tid:int,repository_id:int):
+    def refresh_merge_pr(tid:int,repository_id:int, _authz: None = Depends(require_role("repository", "repository_id", "MEMBER"))):
         """[Refresh] (section 2/5/7): re-reads live PR/CI/mergeability
         from GitHub -- never trusts whatever was last rendered. If
         GitHub reports the PR as MERGED (whether Workspace Manager
@@ -4323,7 +4694,7 @@ def create_app(settings=None):
         _reconcile_merge_record(tid,row,status,source="GITHUB_REFRESH")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/merge")
-    def real_merge_pr(tid:int,repository_id:int):
+    def real_merge_pr(tid:int,repository_id:int, _authz: None = Depends(require_role("repository", "repository_id", "MEMBER"))):
         """[Merge] (section 5): re-fetches PR status, revalidates head
         SHA/CI/mergeability against the Task's live decision one more
         time right here (never trusts whatever the page last rendered),
@@ -4366,7 +4737,7 @@ def create_app(settings=None):
         ops.succeed(op_id,f"Merged {(merged['merged_commit'] or '')[:8]}")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/merges/{repository_id}/confirm-external-merge")
-    def confirm_external_merge(tid:int,repository_id:int,merged_commit:str=Form(""),reason:str=Form(...)):
+    def confirm_external_merge(tid:int,repository_id:int,merged_commit:str=Form(""),reason:str=Form(...), _authz: None = Depends(require_role("repository", "repository_id", "MEMBER"))):
         """Manual fallback (section 12), Advanced-only: real ancestry
         verification -- refuses unless the verified source commit is
         actually an ancestor of the target branch's real, freshly-fetched
@@ -4409,7 +4780,7 @@ def create_app(settings=None):
             raise GitSafetyError("This repository is not MERGED yet -- nothing to deploy")
         return mr["merged_commit"], mr.get("base_branch") or "main"
     @app.post("/api/tasks/{tid}/deployments")
-    def create_deployment(tid:int,repository_id:int=Form(...),environment:str=Form("DEV")):
+    def create_deployment(tid:int,repository_id:int=Form(...),environment:str=Form("DEV"), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """[Deploy to DEV]: only reachable once the repo is actually
         MERGED (section 1/25) -- never the old workflow's Merge/Create
         PR/Push/Mark Ready actions, and never re-merges or re-touches
@@ -4442,7 +4813,7 @@ def create_app(settings=None):
         deployer.deploy(did)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/deployments/{did}/redeploy")
-    def redeploy(did:int):
+    def redeploy(did:int, _authz: None = Depends(require_role("deployment", "did", "ADMIN"))):
         """[Redeploy] (section 19): always the SAME exact source_commit
         as the deployment being redeployed -- never silently deploys
         whatever main/HEAD currently is. A genuinely newer merged
@@ -4460,7 +4831,7 @@ def create_app(settings=None):
         deployer.deploy(did2)
         return RedirectResponse(f"/tasks/{prev['task_id']}",303)
     @app.post("/api/deployments/{did}/rollback")
-    def rollback_deployment(did:int):
+    def rollback_deployment(did:int, _authz: None = Depends(require_role("deployment", "did", "ADMIN"))):
         """[Rollback] (section 5/6/7): only ever reachable from a FAILED
         or ROLLBACK_FAILED deployment with a still-eligible prior
         VERIFIED deployment -- DeploymentService.rollback() re-checks
@@ -4490,7 +4861,7 @@ def create_app(settings=None):
         return render(request,"deployment_detail.html",d=row,phases=phases,history=history,view=view)
 
     @app.post("/api/tasks/{tid}/mark-merged")
-    def mark_task_merged(tid:int):
+    def mark_task_merged(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Bulk convenience for the common single-repo Task (or "I already
         confirmed everything is merged manually") -- marks every required
         MergeRecord MERGED at once. Task DONE still only ever falls out of
@@ -4505,7 +4876,7 @@ def create_app(settings=None):
             if sb["status"] not in ("CLOSED","CLEANING"): sandboxes.mark_cleanup_eligible(sb["id"])
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/close")
-    def close_task(tid:int):
+    def close_task(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Close (section 41/42): available once computed status is DONE.
         closed_at is only ever a timestamp annotation on an already-DONE
         Task, never its own status -- and forcing sandbox cleanup here is
@@ -4518,30 +4889,30 @@ def create_app(settings=None):
             if sb["status"] not in ("CLOSED","CLEANING"): sandboxes.cleanup(sb["id"],force=True)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/cancel")
-    def cancel_task(tid:int):
+    def cancel_task(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid); db.execute("UPDATE tasks SET status='CANCELLED',closed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,)); db.event("task",tid,"TASK_CANCELLED")
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/workspaces/{wid}/create-sandbox")
-    def create_workspace_sandbox(tid:int,wid:int,profile:str=Form("")):
+    def create_workspace_sandbox(tid:int,wid:int,profile:str=Form(""), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         t=task_row(tid); w=agent_row(wid)
         if w["task_id"]!=tid: raise HTTPException(404,"Workspace does not belong to this task")
         sid=auto_create_sandbox(tid,w["repository_id"],w["repo_path"],"AGENT_WORKSPACE",wid,w["role"] or w["agent"],w["branch"],w["last_commit"],w["worktree_path"],profile.strip().upper() or None,t.get("default_sandbox_profile"))
         if sid: db.execute("UPDATE agent_workspaces SET sandbox_profile=(SELECT profile FROM sandboxes WHERE id=?) WHERE id=?",(sid,wid))
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/extend-retention")
-    def extend_task_retention(tid:int,hours:int=Form(24)):
+    def extend_task_retention(tid:int,hours:int=Form(24), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         for sb in task_sandboxes(tid):
             if sb["status"]!="CLOSED": sandboxes.mark_cleanup_eligible(sb["id"],hours)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/cleanup-now")
-    def cleanup_task_now(tid:int):
+    def cleanup_task_now(tid:int, _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         for sb in task_sandboxes(tid):
             if sb["status"]!="CLOSED": sandboxes.cleanup(sb["id"],force=True)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/verification-report")
-    def submit_task_report(tid:int,work_status:str=Form("READY"),what_changed:str=Form(""),automated_tests:str=Form(""),how_to_verify:str=Form(""),expected_result:str=Form(""),test_data:str=Form(""),runtime_requirements:str=Form("NONE"),risks:str=Form("")):
+    def submit_task_report(tid:int,work_status:str=Form("READY"),what_changed:str=Form(""),automated_tests:str=Form(""),how_to_verify:str=Form(""),expected_result:str=Form(""),test_data:str=Form(""),runtime_requirements:str=Form("NONE"),risks:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         task_row(tid)
         db.execute("INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks) VALUES(?,NULL,?,?,?,?,?,?,?,?)",
                    (tid,work_status.strip().upper() or "READY",what_changed.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip()))
@@ -4592,19 +4963,19 @@ def create_app(settings=None):
         return {"status":sb["status"],"health_status":sb["health_status"],"error_code":sb["error_code"],"error_message":sb["error_message"],"latest_operation":op}
     SANDBOX_BUSY_STATUSES=("PROVISIONING","STARTING","RESETTING","CLEANING")
     @app.post("/api/sandboxes/{sid}/start")
-    def start_sandbox(sid:int):
+    def start_sandbox(sid:int, _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))):
         sb=sandbox_row(sid)
         if sb["status"] in SANDBOX_BUSY_STATUSES: return RedirectResponse(f"/sandboxes/{sid}",303)
         sandboxes.provision(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/stop")
-    def stop_sandbox(sid:int): sandbox_row(sid); sandboxes.stop(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
+    def stop_sandbox(sid:int, _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))): sandbox_row(sid); sandboxes.stop(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/restart")
-    def restart_sandbox(sid:int):
+    def restart_sandbox(sid:int, _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))):
         sb=sandbox_row(sid)
         if sb["status"] in SANDBOX_BUSY_STATUSES: return RedirectResponse(f"/sandboxes/{sid}",303)
         sandboxes.stop(sid); sandboxes.provision(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/rebuild")
-    def rebuild_sandbox(sid:int):
+    def rebuild_sandbox(sid:int, _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))):
         sb=sandbox_row(sid)
         if sb["status"] in SANDBOX_BUSY_STATUSES: return RedirectResponse(f"/sandboxes/{sid}",303)
         for src in db.all("SELECT * FROM sandbox_sources WHERE sandbox_id=?",(sid,)):
@@ -4612,7 +4983,7 @@ def create_app(settings=None):
         sandboxes._write_manifest(sid); db.execute("UPDATE sandboxes SET status='CREATED',health_status='UNKNOWN' WHERE id=?",(sid,)); db.event("sandbox",sid,"SANDBOX_REBUILD_REQUESTED")
         sandboxes.provision(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/reset-data")
-    def reset_sandbox_data(sid:int):
+    def reset_sandbox_data(sid:int, _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))):
         """[Reset Sandbox Data] (sections 6-9): the first-class, audited
         way to test default-credential/first-run/seed/migration behavior
         from a genuinely clean state -- never a raw docker compose down
@@ -4627,22 +4998,22 @@ def create_app(settings=None):
         if sb["status"] in SANDBOX_BUSY_STATUSES: return RedirectResponse(f"/sandboxes/{sid}",303)
         sandboxes.reset_data(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/health")
-    def health_sandbox(sid:int): sandbox_row(sid); sandboxes.health_check(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
+    def health_sandbox(sid:int, _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))): sandbox_row(sid); sandboxes.health_check(sid); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/cleanup")
-    def cleanup_sandbox_now(sid:int):
+    def cleanup_sandbox_now(sid:int, _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))):
         sb=sandbox_row(sid)
         if sb["status"] in SANDBOX_BUSY_STATUSES: return RedirectResponse(f"/sandboxes/{sid}",303)
         sandboxes.cleanup(sid,force=True); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/extend-retention")
-    def extend_retention(sid:int,hours:int=Form(24)): sandbox_row(sid); sandboxes.mark_cleanup_eligible(sid,hours); return RedirectResponse(f"/sandboxes/{sid}",303)
+    def extend_retention(sid:int,hours:int=Form(24), _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))): sandbox_row(sid); sandboxes.mark_cleanup_eligible(sid,hours); return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/hardware-test")
-    def record_hardware_test(sid:int,result:str=Form(...),notes:str=Form("")):
+    def record_hardware_test(sid:int,result:str=Form(...),notes:str=Form(""), _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))):
         sandbox_row(sid)
         if result not in ("PASS","FAIL","NOT_RUN"): raise GitSafetyError("Invalid hardware test result")
         db.execute("INSERT INTO hardware_test_results(sandbox_id,result,notes) VALUES(?,?,?)",(sid,result,notes)); db.event("sandbox",sid,"HARDWARE_TEST_RECORDED",result)
         return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/manual-verification")
-    def record_manual_verification(sid:int,result:str=Form(...),note:str=Form("")):
+    def record_manual_verification(sid:int,result:str=Form(...),note:str=Form(""), _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))):
         """Verification guard (QA Center sandbox spec section 15): a
         sandbox that was never HEALTHY is a setup/runtime problem, not a
         QA finding -- neither PASS nor FAIL means anything recorded
@@ -4674,14 +5045,19 @@ def create_app(settings=None):
         db.event("sandbox",sid,"MANUAL_VERIFICATION_RECORDED",result)
         return RedirectResponse(f"/sandboxes/{sid}",303)
     @app.post("/api/sandboxes/{sid}/build-firmware")
-    def build_firmware(sid:int):
-        import os as _os, subprocess as _sp
+    def build_firmware(sid:int, _authz: None = Depends(require_role("sandbox", "sid", "MEMBER"))):
         sandbox_row(sid); provider=db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1",(sid,))
         contract=load_sandbox_contract(Path(provider["worktree_path"])); cmd=hardware_build_command(contract or {})
         if not cmd: raise SandboxError("HARDWARE_BUILD_NOT_DECLARED","sandbox.hardware.build_command not declared")
         backend_url=next(iter(sandboxes.outputs(sid).values()),"")
-        env={**_os.environ,"SANDBOX_BACKEND_URL":backend_url,"SANDBOX_ID":str(sid)}
-        result=_sp.run(cmd,shell=True,cwd=provider["worktree_path"],env=env,text=True,capture_output=True,timeout=900)
+        # B0.6: the third real shell=True call site the audit flagged --
+        # same sandboxed_exec chokepoint as TestRunner/GateWaiverService.
+        # Direct-host path (AUTH_MODE=none) still inherits the full host
+        # environment (today's exact behavior); the sandboxed path
+        # (AUTH_MODE=required) gets ONLY these two explicit vars, never
+        # the host's own os.environ (sandboxed_exec's own docstring).
+        result=sandboxed_exec.run(cmd, Path(provider["worktree_path"]), ".", 900,
+                                   env={"SANDBOX_BACKEND_URL":backend_url,"SANDBOX_ID":str(sid)})
         op_id=sandboxes._op_start(sid,"FIRMWARE_BUILD"); sandboxes._op_finish(op_id,"SUCCESS" if result.returncode==0 else "FAILED",result.returncode,result.stdout,result.stderr)
         return RedirectResponse(f"/sandboxes/{sid}",303)
 

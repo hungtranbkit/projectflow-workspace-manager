@@ -39,6 +39,42 @@ def _read(repo: Path) -> dict:
     if data is None: raise ContractError("Managed repository has no PROJECT.yaml")
     return data
 
+# B0.6 -- mandatory sandboxing (docs/B0_HOSTED_PLATFORM_SECURITY_
+# FOUNDATION.md): a repository's `commands.*` (preflight/test/build/...)
+# are tenant-supplied code by construction -- PROJECT.yaml lives IN the
+# managed repository, not this app. Under AUTH_MODE=required every one
+# of those commands runs inside an ephemeral, resource-limited,
+# network-isolated container (SandboxedCommandRunner) instead of
+# directly on the host; these are that container's own defaults, used
+# whenever a repo doesn't declare its own `exec_sandbox:` block. A repo
+# needing a specific toolchain (node, go, ...) or outbound network
+# during test execution declares its own image/network here -- there is
+# no silent unsandboxed fallback once AUTH_MODE=required (fail closed).
+DEFAULT_EXEC_IMAGE = "python:3.12-slim"
+DEFAULT_EXEC_NETWORK = "none"
+DEFAULT_EXEC_MEMORY = "512m"
+DEFAULT_EXEC_CPUS = "1.0"
+DEFAULT_EXEC_PIDS_LIMIT = 256
+
+
+def load_exec_sandbox(repo: Path) -> dict:
+    """PROJECT.yaml's optional `exec_sandbox:` block -- always returns a
+    complete dict (every field defaulted), never None/raises, since
+    every repo -- even one declaring nothing -- must still get a real,
+    safe sandbox profile once AUTH_MODE=required makes this mandatory."""
+    data = _load_yaml(repo) or {}
+    block = data.get("exec_sandbox") or {}
+    if not isinstance(block, dict):
+        raise ContractError("exec_sandbox: must be a mapping")
+    return {
+        "image": str(block.get("image", DEFAULT_EXEC_IMAGE)),
+        "network": str(block.get("network", DEFAULT_EXEC_NETWORK)),
+        "memory": str(block.get("memory", DEFAULT_EXEC_MEMORY)),
+        "cpus": str(block.get("cpus", DEFAULT_EXEC_CPUS)),
+        "pids_limit": int(block.get("pids_limit", DEFAULT_EXEC_PIDS_LIMIT)),
+    }
+
+
 def load_contract(repo: Path):
     data = _read(repo)
     commands = data.get("commands") or {}; required = (data.get("ci") or {}).get("required") or [x for x in ("preflight", "test") if x in commands]

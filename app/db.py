@@ -1511,6 +1511,44 @@ CREATE INDEX IF NOT EXISTS idx_org_invitations_email ON organization_invitations
 ALTER TABLE repositories ADD COLUMN organization_id INTEGER REFERENCES organizations(id);
 CREATE INDEX IF NOT EXISTS idx_repositories_org ON repositories(organization_id);
 """),
+    # B0.7 -- Secrets boundary (docs/B0_HOSTED_PLATFORM_SECURITY_
+    # FOUNDATION.md): the general encrypted, org-scoped secret-storage
+    # primitive. `ciphertext` is a Fernet token (AES-128-CBC + HMAC,
+    # authenticated -- app/services/secrets_service.py) keyed by an
+    # app-wide master key never stored in this database; NO plaintext
+    # column exists anywhere in this table by construction. `name` is
+    # unique per org (never globally) so two orgs may each declare their
+    # own e.g. "github_token" independently. secret_access_log is
+    # metadata-only (actor, action, timestamp) -- it never carries the
+    # plaintext or ciphertext value itself, so the audit trail itself
+    # can never become a second place a secret leaks from.
+    (34, """
+CREATE TABLE IF NOT EXISTS org_secrets(
+  id INTEGER PRIMARY KEY,
+  org_id INTEGER NOT NULL REFERENCES organizations(id),
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'GENERIC',
+  ciphertext TEXT NOT NULL,
+  created_by_user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  rotated_at TEXT,
+  revoked_at TEXT,
+  last_accessed_at TEXT,
+  UNIQUE(org_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_org_secrets_org ON org_secrets(org_id);
+CREATE TABLE IF NOT EXISTS secret_access_log(
+  id INTEGER PRIMARY KEY,
+  secret_id INTEGER NOT NULL REFERENCES org_secrets(id),
+  org_id INTEGER NOT NULL REFERENCES organizations(id),
+  actor_user_id INTEGER REFERENCES users(id),
+  action TEXT NOT NULL CHECK(action IN ('CREATE','REVEAL','ROTATE','REVOKE','USE','USE_FAILED')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_secret_access_log_secret ON secret_access_log(secret_id);
+CREATE INDEX IF NOT EXISTS idx_secret_access_log_org ON secret_access_log(org_id);
+"""),
 ]
 
 

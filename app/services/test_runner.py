@@ -7,7 +7,18 @@ from app.services.project_contract import load_contract
 def now(): return datetime.now(timezone.utc).isoformat()
 
 class TestRunner:
-    def __init__(self, db, git): self.db, self.git = db, git
+    def __init__(self, db, git, runner=None):
+        """`runner` is a SandboxedCommandRunner (B0.6) -- optional so
+        every pre-existing direct construction of TestRunner(db, git)
+        (tests, scripts) keeps working unmodified, falling back to a
+        real, always-direct-host runner (mandatory=False) that
+        reproduces today's exact subprocess.run(shell=True) behavior."""
+        self.db, self.git = db, git
+        if runner is None:
+            from app.services.sandboxed_exec import SandboxedCommandRunner
+            from app.services.sandbox_runtime import SandboxRuntimeService
+            runner = SandboxedCommandRunner(SandboxRuntimeService(), mandatory=False)
+        self.runner = runner
     def start(self, kind: str, entity_id: int, path: Path):
         stages = load_contract(path)
         ids = [self.db.execute("INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit) VALUES(?,?,?,?,?,?)", (kind, entity_id, cmd, stage, "QUEUED", self.git.head(path))) for stage, cmd, _, _ in stages]
@@ -21,7 +32,7 @@ class TestRunner:
                 self.db.execute("UPDATE test_runs SET status='SKIPPED',finished_at=? WHERE id=?", (now(), run_id)); continue
             self.db.execute("UPDATE test_runs SET status='RUNNING',started_at=? WHERE id=?", (now(), run_id))
             try:
-                proc = subprocess.run(command, cwd=(path / working).resolve(), shell=True, text=True, capture_output=True, timeout=timeout)
+                proc = self.runner.run(command, path, working, timeout)
                 status = "PASS" if proc.returncode == 0 else "FAIL"; overall = overall and proc.returncode == 0
                 self.db.execute("UPDATE test_runs SET status=?,finished_at=?,exit_code=?,stdout_tail=?,stderr_tail=? WHERE id=?", (status, now(), proc.returncode, proc.stdout[-50000:], proc.stderr[-50000:], run_id))
             except subprocess.TimeoutExpired as exc:

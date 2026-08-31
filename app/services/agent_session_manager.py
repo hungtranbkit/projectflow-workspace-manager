@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.launchers import AGENT_LAUNCHERS
+from app.services.secret_redaction import redact
 
 
 def now() -> str:
@@ -276,7 +277,17 @@ class AgentSessionManager:
             return
         with session._lock:
             tail = bytes(session._buffer)[-session.BUFFER_CAP:]
-        self.db.execute("UPDATE agent_sessions SET transcript_tail=? WHERE id=?", (tail.decode("utf-8", "replace"), sid))
+        # B0.7: pattern-based redaction (app/services/secret_redaction.py)
+        # on every persisted transcript -- a real Builder session's own
+        # PTY output can print a credential an agent's tool/environment
+        # emitted (never routed through SecretsService at all), and a
+        # transcript becomes real multi-tenant-visible surface once
+        # B0.2's organizations exist. Applied unconditionally (cheap,
+        # pure-text, no DB/org lookup needed) regardless of AUTH_MODE --
+        # this is a strict improvement over today's exact behavior, not
+        # a new gate, so it carries no AUTH_MODE=none precedent concern.
+        text = redact(tail.decode("utf-8", "replace"))
+        self.db.execute("UPDATE agent_sessions SET transcript_tail=? WHERE id=?", (text, sid))
 
     def live_tail(self, sid: int, n: int = LivePtySession.BUFFER_CAP) -> str | None:
         """The session's current transcript, read straight from the live

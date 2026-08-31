@@ -22,9 +22,13 @@ from app.main import create_app
 from tests.conftest import build_client
 
 
+TEST_SECRET_ENCRYPTION_KEY = "M2RXNV3dhIR-lc1WoE8DGxt-kowfK-34xGTIcF1t8m4="  # test-only, never a real deployment key
+
+
 def auth_client(root, tmp_path, **overrides):
     settings = Settings(root, "127.0.0.1", 8765, tmp_path / "test.db", 30, configured_state_dir=tmp_path / "state",
-                         auth_mode="required", session_secret="test-only-secret-never-a-default", **overrides)
+                         auth_mode="required", session_secret="test-only-secret-never-a-default",
+                         secret_encryption_keys=(TEST_SECRET_ENCRYPTION_KEY,), **overrides)
     return build_client(settings)
 
 
@@ -164,8 +168,9 @@ def test_login_link_request_verify_flow(git_repo, tmp_path, captured_logs):
     peek = fresh.get(f"/auth/verify?token={token}")
     assert peek.status_code == 200 and "owner@example.com" in peek.text
     assert fresh.get("/api/whoami").json()["authenticated"] is False  # GET alone never establishes a session
+    csrf = re.search(r'name="csrf_token" value="([^"]+)"', peek.text).group(1)
 
-    confirm = fresh.post("/auth/verify", data={"token": token}, follow_redirects=False)
+    confirm = fresh.post("/auth/verify", data={"token": token, "csrf_token": csrf}, follow_redirects=False)
     assert confirm.status_code == 303 and confirm.headers["location"] == "/account"
     assert fresh.get("/api/whoami").json() == {"auth_mode": "required", "authenticated": True, "email": "owner@example.com"}
 
@@ -179,9 +184,16 @@ def test_login_token_is_single_use(git_repo, tmp_path, captured_logs):
     fresh.post("/auth/login", data={"email": "owner@example.com"})
     token = re.search(r"token=(\S+)", next(m for m in captured_logs if "would send to" in m)).group(1)
     first = TestClient(c.app); second = TestClient(c.app)
-    r1 = first.post("/auth/verify", data={"token": token}, follow_redirects=False)
+    first_csrf = re.search(r'name="csrf_token" value="([^"]+)"', first.get(f"/auth/verify?token={token}").text).group(1)
+    r1 = first.post("/auth/verify", data={"token": token, "csrf_token": first_csrf}, follow_redirects=False)
     assert r1.status_code == 303
-    r2 = second.post("/auth/verify", data={"token": token})
+    # The token is already consumed at this point, so peek_login_token()
+    # correctly returns invalid=True and no longer renders a csrf_token
+    # field at all -- mint second's own session token from any other
+    # page instead (CSRF is session-bound, not token-bound, so this is
+    # still a real, valid token for second's own session).
+    second_csrf = re.search(r'_TOKEN = "([^"]+)"', second.get("/auth/login").text).group(1)
+    r2 = second.post("/auth/verify", data={"token": token, "csrf_token": second_csrf})
     assert "invalid or expired" in r2.text.lower() and r2.status_code == 200
     assert second.get("/api/whoami").json()["authenticated"] is False
 
@@ -213,7 +225,15 @@ def test_login_request_enumeration_mitigation_identical_response(git_repo, tmp_p
     captured_logs.clear()
     r_unknown = fresh2.post("/auth/login", data={"email": "nobody@example.com"})
     assert r_known.status_code == r_unknown.status_code == 200
-    assert r_known.text == r_unknown.text
+    # B0.4: base.html now embeds a real, random, per-SESSION CSRF token
+    # on every page (via its own Jinja global) -- two separate sessions
+    # legitimately get two different random values regardless of which
+    # email was submitted, so byte-for-byte equality must normalize that
+    # one dynamic value out first; it carries no signal correlated with
+    # email validity (unlike the requirement this test actually
+    # verifies), so normalizing it doesn't weaken the assertion.
+    normalize = lambda text: re.sub(r'_TOKEN = "[^"]+"', '_TOKEN = "X"', text)
+    assert normalize(r_known.text) == normalize(r_unknown.text)
     assert not any("nobody@example.com" in m for m in captured_logs)
 
 

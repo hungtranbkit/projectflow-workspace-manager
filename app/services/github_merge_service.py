@@ -1,5 +1,7 @@
 from __future__ import annotations
+import base64
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -10,7 +12,25 @@ raw access token handled by this app. Every call is scoped to a
 specific, already-registered repository's real filesystem path; there
 is no code path that accepts a repo owner/name or PR number from the
 browser (section 18) -- callers always derive those from the
-Repository row + the persisted MergeRecord."""
+Repository row + the persisted MergeRecord.
+
+B0.7's own consumer of the general secret store (docs/
+B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md, ADR-001): under
+`AUTH_MODE=none` (default, unchanged), `GitHubMergeService()` with no
+args keeps delegating entirely to the host's own already-authenticated
+`gh` CLI session, exactly as always -- `token_runner()` below is never
+constructed, never reached. Under `AUTH_MODE=required`,
+`token_runner(token)` is a SIMPLIFIED, real, per-org-token consumer
+(a single stored Personal Access Token per org, resolved via
+SecretsService) -- deliberately NOT the full GitHub-App-per-org
+architecture ADR-001 designs (App registration + JWT signing +
+short-lived installation-token minting + webhook lifecycle), which
+needs a real, externally-registered GitHub App's private key this
+session cannot fabricate or safely simulate as genuine evidence. This
+is an explicitly scoped, documented interim step: the same public
+method surface, the same `runner` DI seam ADR-001's own "Migration
+path" section describes, ready to swap for a real App-based runner
+later without any call-site change."""
 
 PR_FIELDS = "number,url,state,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup,mergedAt,mergeCommit,title"
 
@@ -35,6 +55,63 @@ class GitHubIntegrationError(RuntimeError):
 
 def _default_runner(argv: list[str], cwd, timeout: int = 30) -> subprocess.CompletedProcess:
     return subprocess.run(argv, cwd=str(cwd), text=True, capture_output=True, timeout=timeout)
+
+
+def token_runner(token: str):
+    """B0.7 hosted-mode runner: injects one org-scoped token, resolved
+    just-in-time from SecretsService, for exactly this one subprocess
+    call -- never written to disk, never embedded in argv (which a
+    concurrent `ps`/process-list on a SHARED host could otherwise
+    observe -- a real concern once multiple tenants' operations run on
+    the same machine), never logged.
+
+    - `gh` CLI calls: `GH_TOKEN` env var, gh's own first-class,
+      documented non-interactive auth override -- no `gh auth login`,
+      no credential helper setup needed on this host at all.
+    - Plain `git` calls (push/fetch/rev-parse/merge-base): the
+      `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`
+      environment-variable mechanism (git >=2.31) sets a one-shot
+      `http.extraheader` carrying a Basic auth header for this process
+      only -- the same technique GitHub Actions' own checkout action
+      uses internally, chosen specifically because it's environment-
+      variable-based (not argv-based, not a written credential file)."""
+    basic = base64.b64encode(f"x-access-token:{token}".encode("utf-8")).decode("ascii")
+
+    def runner(argv: list[str], cwd, timeout: int = 30) -> subprocess.CompletedProcess:
+        env = {**os.environ, "GH_TOKEN": token, "GIT_TERMINAL_PROMPT": "0"}
+        if argv and argv[0] == "git":
+            env["GIT_CONFIG_COUNT"] = "1"
+            env["GIT_CONFIG_KEY_0"] = "http.extraheader"
+            env["GIT_CONFIG_VALUE_0"] = f"AUTHORIZATION: basic {basic}"
+        return subprocess.run(argv, cwd=str(cwd), text=True, capture_output=True, timeout=timeout, env=env)
+    return runner
+
+
+def make_hosted_runner(db, secrets_service):
+    """The actual `AUTH_MODE=required` runner constructed once at app
+    startup (`GitHubMergeService(runner=make_hosted_runner(db,
+    secrets_service))`) -- every one of `GitHubMergeService`'s ~15
+    existing call sites (main.py, integration_service.py) is already
+    keyed only by a Repository row's own `repo_path` (see this module's
+    own docstring's standing invariant), so this runner resolves
+    `repo_path -> repositories.organization_id -> the org's stored
+    "github_token" secret` freshly on EVERY call -- "just-in-time", per
+    ADR-001's own migration-path language -- rather than binding one
+    token at construction time (which would be wrong the moment two
+    different organizations' repositories are both in play, and stale
+    the moment a token is rotated mid-process). Stateless and
+    thread-safe: no shared mutable credential is ever held on `self`."""
+    def runner(argv: list[str], cwd, timeout: int = 30) -> subprocess.CompletedProcess:
+        repo = db.one("SELECT organization_id FROM repositories WHERE repo_path=?", (str(cwd),))
+        org_id = repo["organization_id"] if repo else None
+        token = secrets_service.get_for_use(org_id, "github_token") if org_id else None
+        if not token:
+            raise GitHubIntegrationError(
+                "INSTALLATION_UNAVAILABLE",
+                "No GitHub credential configured for this organization (store one at "
+                "/orgs/{id}/secrets as 'github_token').")
+        return token_runner(token)(argv, cwd, timeout)
+    return runner
 
 
 class GitHubMergeService:

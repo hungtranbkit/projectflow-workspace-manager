@@ -26,9 +26,20 @@ class GateWaiverService:
     gate command can take minutes) and always cleans up the probe
     worktree afterward, success or failure."""
 
-    def __init__(self, db, git):
+    def __init__(self, db, git, runner=None):
+        """`runner` is a SandboxedCommandRunner (B0.6) -- optional so
+        every pre-existing direct construction of
+        GateWaiverService(db, git) (tests, scripts) keeps working
+        unmodified, falling back to a real, always-direct-host runner
+        (mandatory=False) that reproduces today's exact
+        subprocess.run(shell=True) behavior."""
         self.db = db
         self.git = git
+        if runner is None:
+            from app.services.sandboxed_exec import SandboxedCommandRunner
+            from app.services.sandbox_runtime import SandboxRuntimeService
+            runner = SandboxedCommandRunner(SandboxRuntimeService(), mandatory=False)
+        self.runner = runner
 
     def start_reproduction(self, *, repository_id: int, repo_path: str, base_commit: str, gate: str, test_identifier: str) -> int:
         """Queues a REPRODUCE_BASELINE run (a test_runs row, workspace_type
@@ -57,7 +68,7 @@ class GateWaiverService:
         probe_path = None
         try:
             probe_path = self.git.create_baseline_probe(repo_path, base_commit)
-            proc = subprocess.run(command, cwd=(probe_path / working).resolve(), shell=True, text=True, capture_output=True, timeout=timeout)
+            proc = self.runner.run(command, probe_path, working, timeout)
             status = "PASS" if proc.returncode == 0 else "FAIL"
             self.db.execute(
                 "UPDATE test_runs SET status=?,finished_at=?,exit_code=?,stdout_tail=?,stderr_tail=? WHERE id=?",

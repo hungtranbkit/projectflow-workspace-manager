@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "ProjectFlow Runtime Architecture",
-    "subtitle": "workspace-manager \u00b7 single-process FastAPI \u00b7 SQLite \u00b7 B0.1/B0.2 AuthN+Tenants implemented",
+    "subtitle": "workspace-manager \u00b7 single-process FastAPI \u00b7 SQLite \u00b7 B0.1-B0.7 all implemented",
     "output": "projectflow-runtime.architecture.html",
     "animation": "trace",
     "visual_preset": "signal-flow",
@@ -31,7 +31,7 @@
       },
       {
         "id": "tenant-boundary",
-        "label": "AuthN + tenant boundary (B0.1/B0.2, implemented)",
+        "label": "AuthN + tenant boundary (B0.1-B0.4, implemented)",
         "focus": [
           "api_entry",
           "auth_session",
@@ -39,7 +39,7 @@
           "authz_csrf",
           "database"
         ],
-        "note": "Shipped: session/API-token identity (B0.1) and org membership (B0.2), server-enforced. General per-route AuthZ is B0.3, not built."
+        "note": "Shipped: identity (B0.1), org membership (B0.2), a require_role() sweep across 157 routes (B0.3), CSRF folded into it (B0.4)."
       },
       {
         "id": "agent-execution",
@@ -51,7 +51,7 @@
           "github_integration",
           "background"
         ],
-        "note": "How a Builder session runs: launched by the Supervisor, optionally verified in Docker, merged via the host's own gh CLI (pre-B0.7)."
+        "note": "A Builder runs via the Supervisor; commands run host-side (none) or sandboxed (required, B0.6); GitHub via gh CLI or a stored PAT (B0.7)."
       }
     ]
   },
@@ -116,9 +116,9 @@
     {
       "id": "authz_csrf",
       "type": "security",
-      "label": "CSRF Guard",
-      "sublabel": "route AuthZ sweep: PLANNED B0.3",
-      "tag": "PARTIAL",
+      "label": "AuthZ + CSRF Guard",
+      "sublabel": "B0.3 role sweep + B0.4 CSRF",
+      "tag": "IMPLEMENTED",
       "pos": [
         560,
         300
@@ -128,6 +128,16 @@
         64
       ],
       "sources": [
+        {
+          "path": "app/services/authz_service.py",
+          "line": 42,
+          "label": "AuthzService"
+        },
+        {
+          "path": "app/main.py",
+          "line": 535,
+          "label": "require_role()"
+        },
         {
           "path": "app/services/csrf.py",
           "line": 43,
@@ -186,7 +196,7 @@
       "id": "org_tenant",
       "type": "backend",
       "label": "Organizations & Tenants",
-      "sublabel": "B0.2 \u00b7 membership, invitations",
+      "sublabel": "B0.2 members \u00b7 B0.7 secrets",
       "tag": "IMPLEMENTED",
       "pos": [
         830,
@@ -201,6 +211,11 @@
           "path": "app/services/organization_service.py",
           "line": 59,
           "label": "OrganizationService"
+        },
+        {
+          "path": "app/services/secrets_service.py",
+          "line": 41,
+          "label": "SecretsService"
         }
       ]
     },
@@ -255,8 +270,8 @@
       "id": "sandbox_runtime",
       "type": "cloud",
       "label": "Docker Sandbox Runtime",
-      "sublabel": "opt-in today, mandatory: B0.6",
-      "tag": "PARTIAL",
+      "sublabel": "B0.6 · mandatory when required",
+      "tag": "IMPLEMENTED",
       "pos": [
         830,
         820
@@ -267,9 +282,14 @@
       ],
       "sources": [
         {
-          "path": "app/services/sandbox_manager.py",
-          "line": 46,
-          "label": "SandboxManager"
+          "path": "app/services/sandboxed_exec.py",
+          "line": 32,
+          "label": "SandboxedCommandRunner"
+        },
+        {
+          "path": "app/services/sandbox_runtime.py",
+          "line": 111,
+          "label": "run_ephemeral()"
         }
       ]
     },
@@ -277,7 +297,7 @@
       "id": "github_integration",
       "type": "external",
       "label": "GitHub",
-      "sublabel": "host gh CLI now, App: B0.7",
+      "sublabel": "host gh CLI, or a stored PAT (B0.7)",
       "tag": "PARTIAL",
       "pos": [
         830,
@@ -394,23 +414,24 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "Implemented (current HEAD)",
+      "title": "Implemented (current HEAD) -- B0.1 through B0.7",
       "items": [
         "AuthN: email magic-link, API tokens, self-hosted bootstrap (B0.1)",
         "Organizations/tenants: membership, roles, invitations (B0.2)",
-        "CSRF on every new B0.1/B0.2 mutating route",
-        "AUTH_MODE=none: zero new surface, the permanent self-hosted default (ADR-004)",
-        "Every service (auth, orgs, repos, background workers) reads/writes the one SQLite file directly"
+        "AuthZ: require_role() swept across all 157 mutating routes (B0.3)",
+        "CSRF folded into that same sweep + the /auth/verify login-CSRF fix (B0.4)",
+        "Rate limiting on named abuse-sensitive auth/org/token routes (B0.5)",
+        "Mandatory ephemeral-container sandboxing for tenant PROJECT.yaml commands (B0.6)",
+        "Encrypted org-scoped secret store + transcript/log redaction (B0.7)",
+        "AUTH_MODE=none: zero new surface, the permanent self-hosted default (ADR-004)"
       ]
     },
     {
       "dot": "amber",
-      "title": "Planned, not yet built (B0.3-B0.7)",
+      "title": "Known, explicitly deferred residual gaps",
       "items": [
-        "General per-route AuthZ (require_role() across the 143 pre-existing routes) -- B0.3",
-        "Rate-limiting middleware beyond the B0.1 login endpoint -- B0.5",
-        "Mandatory (not opt-in) sandboxing for tenant-supplied code -- B0.6",
-        "Encrypted secret storage + GitHub App architecture (ADR-001) -- B0.7"
+        "B0.3's AuthZ sweep covers mutating routes only -- GET-route cross-org read isolation is unscoped future work",
+        "B0.7's GitHub consumer is a simplified per-org PAT, not ADR-001's full GitHub-App/JWT/installation-token design"
       ]
     }
   ]

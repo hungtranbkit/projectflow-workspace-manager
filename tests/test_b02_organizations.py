@@ -20,9 +20,13 @@ from app.main import create_app
 from tests.conftest import build_client
 
 
+TEST_SECRET_ENCRYPTION_KEY = "M2RXNV3dhIR-lc1WoE8DGxt-kowfK-34xGTIcF1t8m4="  # test-only, never a real deployment key
+
+
 def auth_client(root, tmp_path, **overrides):
     settings = Settings(root, "127.0.0.1", 8765, tmp_path / "test.db", 30, configured_state_dir=tmp_path / "state",
-                         auth_mode="required", session_secret="test-only-secret-never-a-default", **overrides)
+                         auth_mode="required", session_secret="test-only-secret-never-a-default",
+                         secret_encryption_keys=(TEST_SECRET_ENCRYPTION_KEY,), **overrides)
     return build_client(settings)
 
 
@@ -401,7 +405,8 @@ def test_migration_backfills_single_user_and_their_repositories(git_repo, tmp_pa
     # A second create_app() against the SAME db_path is what actually
     # triggers the startup migration -- simulating a real process restart.
     settings2 = Settings(root, "127.0.0.1", 8765, tmp_path / "test.db", 30, configured_state_dir=tmp_path / "state",
-                          auth_mode="required", session_secret="test-only-secret-never-a-default")
+                          auth_mode="required", session_secret="test-only-secret-never-a-default",
+                          secret_encryption_keys=(TEST_SECRET_ENCRYPTION_KEY,))
     app2 = create_app(settings2)
     result = app2.state.b02_migration_result
     assert result["action"] == "MIGRATED"
@@ -420,7 +425,8 @@ def test_migration_is_idempotent_across_repeated_restarts(git_repo, tmp_path, ca
     c1.app.state.db.execute("INSERT INTO repositories(repo_name,repo_path) VALUES(?,?)", ("repo-a", str(root / "a")))
 
     settings = Settings(root, "127.0.0.1", 8765, tmp_path / "test.db", 30, configured_state_dir=tmp_path / "state",
-                         auth_mode="required", session_secret="test-only-secret-never-a-default")
+                         auth_mode="required", session_secret="test-only-secret-never-a-default",
+                         secret_encryption_keys=(TEST_SECRET_ENCRYPTION_KEY,))
     app2 = create_app(settings)
     assert app2.state.b02_migration_result["action"] == "MIGRATED"
     org_count_after_first = app2.state.db.one("SELECT COUNT(*) c FROM organizations")["c"]

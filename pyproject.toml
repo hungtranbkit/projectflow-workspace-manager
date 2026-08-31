@@ -17,7 +17,18 @@ dependencies = ["fastapi>=0.110,<1", "uvicorn>=0.27,<1", "jinja2>=3.1,<4", "pyth
     # rather than relied upon implicitly. slowapi is ADR-003's own
     # resolved choice for rate limiting (a maintained, pluggable-backend
     # library, in-memory backend at B0.1 launch).
-    "itsdangerous>=2.1,<3", "slowapi>=0.1.9,<1"]
+    "itsdangerous>=2.1,<3", "slowapi>=0.1.9,<1",
+    # B0.7 (docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md): the general
+    # encrypted org-scoped secret store needs real, authenticated
+    # encryption-at-rest -- Python's stdlib has no AES/AEAD primitive at
+    # all, and hand-rolling one is exactly the "never a hand-rolled ...
+    # raw access token handled by this app" class of mistake this
+    # codebase's own GitHub-integration docstring already refuses to
+    # make elsewhere. `cryptography` (pyca) is the de facto standard,
+    # audited Python crypto library -- the same justified, narrow
+    # dependency-minimalism exception ADR-003 already set precedent for
+    # (slowapi/itsdangerous), not a general policy reversal.
+    "cryptography>=42,<47"]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9", "httpx>=0.27,<1"]

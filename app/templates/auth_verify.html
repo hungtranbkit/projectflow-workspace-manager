@@ -6,6 +6,7 @@
 <p><small>If this isn't you, close this page -- nothing happens until you press the button below.</small></p>
 <form method="post" action="/auth/verify">
 <input type="hidden" name="token" value="{{token}}">
+<input type="hidden" name="csrf_token" value="{{csrf_token}}">
 <button type="submit">Confirm sign-in</button>
 </form>
 {% else %}
