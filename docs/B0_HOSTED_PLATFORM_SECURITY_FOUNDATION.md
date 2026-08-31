@@ -170,6 +170,255 @@ storage primitive, with the GitHub-specific redesign as its first real
 consumer once B0.3 exists. A redaction layer for agent transcripts/
 logs (flagged `CAN_WAIT` in P0, still open) is scoped here too, since
 transcripts become multi-tenant-visible surface once B0.3 ships.
+GitHub-integration architecture itself is **resolved** — see ADR-001
+below.
+
+## ADR-001: GitHub authentication/authorization architecture for hosted multi-tenant mode
+
+**Status: DECIDED (design only — not implemented).** Resolves Open
+Decision #3 below. Scope: how `GitHubMergeService` authenticates once
+`AUTH_MODE=required` and B0.3's organizations exist; `AUTH_MODE=none`
+is unaffected (see its own section below) and needs no ADR.
+
+### Grounding: what GitHubMergeService actually does today
+
+Read in full (`app/services/github_merge_service.py`, 160 lines) to
+ground this decision in the real, current operation set rather than a
+generic "GitHub integration" assumption:
+
+- `git push` (push a branch to origin), `gh pr list`/`gh pr create`/
+  `gh pr view`/`gh pr merge`, `git fetch`/`git rev-parse`/`git
+  merge-base` — every operation needs: **push access to repo contents,
+  read/write on pull requests, and read on commit statuses/check
+  runs**. Nothing broader (no admin, no secrets, no Actions triggers).
+- `_parse()` reads `statusCheckRollup` via **polling** (`gh pr view
+  --json ...`) — there is no webhook integration today at all.
+- **Every single call site is keyed by an already-registered
+  `repositories.repo_path` row** (`app/main.py:1591,1728,1734,1757,
+  1761,2256,3900,3912-3920,3950,3967,3982,4010-4011`,
+  `app/services/integration_service.py`) — never by a client-supplied
+  owner/repo string. The module's own docstring states this as a
+  deliberate invariant: "there is no code path that accepts a repo
+  owner/name or PR number from the browser." **This invariant must
+  survive B0 unchanged** — the design below extends it to "and never
+  accepts an installation id from the browser either."
+- `available()` only checks the git remote looks like a GitHub URL
+  locally — it never confirms `gh` is actually authenticated; that's
+  discovered lazily by the real API calls failing. This changes under
+  the hosted design (see Failure behavior below).
+
+### Options compared
+
+| | GitHub App per org | Per-user OAuth token | Tenant-provided/BYOC | 
+|---|---|---|---|
+| Tenant isolation | Native — installation scoped to granted repos | Weak — token scoped to whatever the user can access, spans orgs outside ProjectFlow's own boundary unless policed in-app | Perfect by construction (tenant's own credential never leaves their control, in the self-hosted variant) |
+| Least privilege | Fine-grained permissions declared once (`contents`, `pull_requests`, `checks`) | Coarse (`repo` scope = all repos, public+private); fine-grained PATs help but are user-managed, not app-provisioned | Entirely the tenant's own discipline; ProjectFlow can't enforce it |
+| Repo/org scoping | Native (installation = "all repos" or "selected repos") | None native — must be enforced in ProjectFlow's own policy layer | Whatever the tenant's own credential is scoped to |
+| Token lifetime/rotation | Installation tokens auto-expire ≤1hr, minted on demand; only the App's own long-lived private key is stored, app-wide | Classic tokens don't expire by default; a real long-lived bearer token must be stored per user | Tenant's own responsibility; ProjectFlow can't rotate it |
+| Webhook model | One App-wide endpoint, `installation.id` cleanly dispatches per-tenant | No native installation scoping; per-repo-per-user registration, needs the connecting user to have repo admin rights | N/A for self-hosted; same as OAuth if a pasted PAT is used instead |
+| Installation lifecycle | Real install/uninstall webhook events — clean onboarding/offboarding | No install/uninstall concept; needs custom connect/disconnect UI | N/A (self-hosted) / manual paste-replace (pasted-PAT variant) |
+| Auditability | GitHub log shows "App on behalf of installation X" — org-level, not per-ProjectFlow-user unless logged separately | GitHub log shows "user via OAuth App" — better individual attribution | Whatever the underlying credential shows |
+| Secret storage burden | LOW — one app-wide private key + webhook secret; **zero per-tenant secrets** (tokens minted, never persisted) | HIGH — one real bearer token stored per user, forever until revoked | ZERO for true self-hosted BYOC (nothing to store); HIGH for hosted-pasted-PAT (same as OAuth, arguably worse — PATs are commonly over-scoped) |
+| UX/onboarding | One-click "Install ProjectFlow" GitHub flow, org-admin-approved once | "Connect your GitHub account" per user, or a shared bot account (bus-factor risk) | Zero onboarding for self-hosted (today's exact experience); manual token generation/paste for hosted-pasted-PAT (known support/security-mistake source elsewhere) |
+| Service-account/automation compatibility | Excellent — Apps ARE the service-account model | Requires manually provisioning + OAuth-connecting a dedicated bot account | Good for self-hosted (a bot PAT works, unchanged from today) |
+| Self-hosted compatibility | Orthogonal — self-hosted keeps using `gh` CLI, untouched | Orthogonal | **Is** self-hosted compatibility — the natural formalization of `AUTH_MODE=none`'s existing design |
+| Blast radius | "Every installed org," bounded by minimal declared permissions + 1hr token TTL | Every connected user's live, long-lived, broad-scoped token leaked on backend/DB compromise | Contained inside tenant's own infra for self-hosted BYOC; same as OAuth's per-org concentration for hosted-pasted-PAT |
+| Revocation | Instant, org-admin self-service (uninstall) or ProjectFlow-initiated | Per-user, not per-org — an offboarded org leaves N individual tokens to clean up | Tenant's own action (self-hosted) / ProjectFlow secret-store deletion (pasted-PAT) |
+| GitHub API limits | Own 5,000-15,000/hr budget **per installation** — scales with tenant count | Shared 5,000/hr **per user**, contends with that user's own personal GitHub usage | Whatever the tenant's own credential's budget is |
+| Operational complexity | Moderate upfront (App registration, JWT signing, installation-token minting, webhook lifecycle); well-trodden pattern elsewhere | Lower upfront, higher ongoing (token storage/rotation, no clean lifecycle, per-user reconnect flows) | Lowest for self-hosted (already built); moderate for hosted-pasted-PAT (needs B0.7's secret store, no App machinery) |
+| Migration from today's `gh` CLI delegation | Clean — `GitHubMergeService`'s method surface unchanged, only its credential-resolution layer gains an `AUTH_MODE`-gated branch | Clean in principle, but requires B0.7's secret store built first, and reintroduces the "raw access token handled by this app" the current design explicitly avoids | Self-hosted: zero migration (already the current design). Hosted-pasted-PAT: same secret-store dependency as OAuth |
+
+A fourth combined "hybrid" was also considered and **is** the actual
+recommendation below — not a fourth independent design.
+
+### Recommendation
+
+**GitHub App per organization as the primary hosted-mode mechanism.
+Self-hosted BYOC (today's `gh` CLI delegation under `AUTH_MODE=none`)
+remains a fully first-class, permanently supported mode — not a
+fallback.** Per-user OAuth is rejected outright as the primary
+mechanism. A narrow "paste your own token" escape hatch for hosted
+tenants whose org policy forbids installing third-party GitHub Apps
+*may* be offered later as an explicitly documented exception, never
+the default — its own threat model is not designed here (see Residual
+risks).
+
+**Rationale**: the App model is the only option that satisfies this
+codebase's own already-stated principle — "never a hand-rolled OAuth
+flow or a raw access token handled by this app"
+(`app/services/github_merge_service.py:6-13`) — while also working for
+genuinely hosted, multi-org, multi-user scenarios that self-hosted BYOC
+structurally cannot serve (a hosted tenant expects to click "install,"
+not run `gh auth login` on infrastructure they don't control). It
+natively matches B0.3's organization boundary, mints tokens on demand
+rather than storing per-tenant secrets (minimizing B0.7's burden to
+exactly one app-wide key), has a real install/uninstall lifecycle for
+clean offboarding, and scales API budget per-installation instead of
+sharing one global limit across every tenant.
+
+### Trust boundaries + threat model
+
+1. **ProjectFlow backend <-> GitHub.** The backend holds ONE app-wide
+   RSA private key (never a per-tenant secret), used to sign short-
+   lived JWTs (≤10 minutes, GitHub's own limit) exchanged for
+   installation access tokens. Compromise of this one key is the
+   single highest-severity risk in this design (an attacker could mint
+   tokens for any installed org) — it warrants its own protection tier
+   (dedicated secret-manager entry, scheduled rotation, access
+   logging), distinct from B0.7's general per-tenant secret store.
+2. **Organization <-> ProjectFlow.** An org admin explicitly grants
+   installation scope (all repos or selected repos) — GitHub's own
+   enforced boundary, not ProjectFlow's to get wrong.
+3. **Request handling <-> repository resolution.** Every token mint is
+   keyed `repositories.id -> repositories.organization_id ->
+   organizations.github_installation_id`, resolved server-side —
+   **never from a client-supplied owner/repo or installation id**,
+   extending today's existing invariant (see Grounding above) rather
+   than replacing it.
+4. **Webhook ingress <-> ProjectFlow.** Every inbound payload is
+   HMAC-verified (`X-Hub-Signature-256`, the App's webhook secret)
+   before any parsing — untrusted network input, never trusted by
+   default.
+
+### Credential/token types actually stored (or not)
+
+- **Stored, app-wide, long-lived:** one App private key (RSA) + one
+  webhook secret. Not per-tenant.
+- **Stored, per-org, non-secret:** `organizations.github_installation_id`
+  — an opaque integer, safe in a plain column (not a credential).
+- **Never stored, anywhere:** any per-org or per-user bearer/access
+  token. Installation access tokens are minted on demand (`POST
+  /app/installations/{id}/access_tokens`), used for exactly one
+  `git`/`gh` subprocess call, and left to expire naturally — the
+  direct continuation of today's "never a raw access token handled by
+  this app" principle, just replacing "delegate entirely to the host's
+  CLI" with "mint one, use it once, discard it."
+- **Encryption requirement:** the App private key and webhook secret
+  need B0.7's general encrypted-secret-store primitive (envelope
+  encryption via a KMS, or at minimum a locally-held encryption key
+  never committed to the DB in plaintext) as a **prerequisite** — this
+  ADR does not bypass B0.7, it is B0.7's first real consumer, exactly
+  as the Proposed Architecture section above already scoped.
+
+### Organization/repository mapping model
+
+`organizations.github_installation_id` (nullable — an org may exist
+without GitHub connected, or use self-hosted BYOC instead).
+`repositories.organization_id` (already B0.3's own column) resolves a
+repo to its org, and the org to its installation — one more hop on the
+existing `project_id -> repositories.id` chain (E1.6's own
+convention). A separate `github_installations` join table (for one
+ProjectFlow org spanning multiple GitHub installations) is explicitly
+deferred — start with the simpler one-column model, add the join table
+only if real usage demands it.
+
+### Webhook identity/verification
+
+One shared endpoint, `POST /webhooks/github`, registered once at App
+creation. Every payload is (1) HMAC-verified against the App's webhook
+secret before parsing, (2) dispatched by its `installation.id` field
+to the matching `organizations` row, (3) further scoped by
+`repository.full_name`/`repository.id` to the already-registered
+`repositories` row. An `installation` event with action `deleted`
+triggers the offboarding cleanup below automatically. Using
+`pull_request`/`check_run`/`status` webhooks to **replace** today's
+polling (`gh pr view`) is a real, worthwhile enhancement — explicitly
+deferred to a phase-2 pass (see Non-goals), not part of this decision's
+initial cut.
+
+### Permissions/scopes principle
+
+Least-privilege, declared once at App-registration time (every org
+sees exactly what they're granting): `contents: write`, `pull_requests:
+write`, `checks: read`, `statuses: read`. No `administration`, no
+`secrets`, no `actions: write`, no org-admin permissions — a direct,
+minimal mapping of the operations `GitHubMergeService` already performs
+today (see Grounding), nothing broader requested "just in case."
+
+### Install/revoke/rotate flows
+
+- **Install:** org admin uses GitHub's own App-install URL, selects
+  org + repos, GitHub redirects back with the new `installation_id`;
+  a B0.2-guarded (admin-only) callback route stores it on the matching
+  `organizations` row.
+- **Revoke, org-initiated:** admin uninstalls from GitHub's side ->
+  `installation.deleted` webhook -> ProjectFlow clears
+  `organizations.github_installation_id` and marks every `repositories`
+  row under that org unavailable (same spirit as today's `available()`
+  check, now driven by real installation state).
+- **Revoke, ProjectFlow-initiated** (tenant offboarding/non-payment):
+  call GitHub's installation-deletion API directly; same cleanup.
+- **Rotate:** the App private key rotates on a defined schedule (or on
+  suspected compromise) via GitHub's own App-settings UI, which
+  supports multiple concurrent keys during rotation — no per-tenant
+  action needed, since no per-tenant secret exists to rotate.
+
+### Failure and tenant-offboarding behavior
+
+A failed token mint (installation suspended, or deleted but its
+webhook not yet processed) surfaces as the existing
+`GitHubIntegrationError` shape (a new code, e.g.
+`INSTALLATION_UNAVAILABLE`, alongside today's `GH_CLI_ERROR`/
+`PR_CREATE_FAILED`/etc.) — every existing caller in
+`integration_service.py`/`main.py` needs no structural change, only a
+new distinguishable error code to handle. Tenant offboarding is a
+single, complete, GitHub-side action (uninstall) — no per-user token
+cleanup, unlike the OAuth option.
+
+### How `AUTH_MODE=none` stays isolated from hosted GitHub auth
+
+`GitHubMergeService`'s credential-resolution layer becomes mode-aware
+at construction, not scattered through call sites. Under `AUTH_MODE=
+none` (today's default, unchanged): delegates entirely to the host's
+already-authenticated `gh` CLI, exactly as today — the App/installation
+code path is never reached at all. Under `AUTH_MODE=required`: resolves
+an installation token per repo as described above. This mirrors B0.1's
+own `AUTH_MODE` toggle discipline exactly — self-hosted operators never
+need a GitHub App, a private key, or any B0.7 dependency.
+
+### Migration path — no flag-day breakage
+
+`GitHubMergeService`'s public method surface (`available`,
+`push_branch`, `find_existing_pr`, `create_pr`, `pr_status`,
+`merge_pr`, `target_head`, `is_ancestor`) is **unchanged**. Only its
+internal `runner` construction changes, gated by `AUTH_MODE`:
+`AUTH_MODE=none` keeps `runner=_default_runner` exactly as today;
+`AUTH_MODE=required` uses a new runner wrapper that resolves an
+installation token just-in-time and injects it for that one subprocess
+call. Every existing caller (already keyed by `repositories.id`, per
+Grounding above) needs no change at all — the existing `runner`
+dependency-injection seam (already used for tests) is precisely the
+seam this migration needs.
+
+### Non-goals (of this decision)
+
+- Webhook-driven status updates replacing today's polling — deferred
+  enhancement, not part of the initial cut.
+- Per-ProjectFlow-user attribution inside GitHub's own audit log (App
+  actions are attributable to "the App on installation X," not to
+  which ProjectFlow user triggered it, unless ProjectFlow logs that
+  correlation itself — a separate audit-logging feature).
+- Multiple GitHub installations per ProjectFlow organization — deferred
+  until real usage demands it.
+- Designing the hosted-with-pasted-PAT escape hatch's UI/flow.
+- Any change to `AUTH_MODE=none` behavior.
+
+### Residual risks / open questions
+
+- App private key custody (dedicated secrets manager vs. B0.7's general
+  encrypted store) is not decided here — B0.7's implementation must
+  choose, this ADR only requires the capability exist.
+- GitHub Enterprise Server (self-hosted GitHub) support is unresolved —
+  the App model works there too but registration/URLs differ; not
+  investigated in this pass.
+- JWT-exchange rate-limit behavior under very high tenant counts
+  sharing ProjectFlow's own outbound IP is not load-tested (distinct
+  from the per-installation 5,000/hr budget, which scales fine) —
+  flagged for empirical verification during B0.7 implementation,
+  matching this codebase's own profile-before-optimizing discipline.
+- The hosted-with-pasted-PAT escape hatch, if ever built, reintroduces
+  per-tenant secret-storage burden for that subset of tenants and needs
+  its own dedicated threat-model pass.
 
 ## Phasing
 
@@ -201,14 +450,14 @@ decided by this document:
    document recommends in-house for both, given zero existing
    middleware and the project's dependency-minimalism, but that's a
    recommendation, not a decision made on the user's behalf).
-3. **GitHub auth architecture** once multi-org hosting means "delegate
-   to the host's own `gh` CLI" no longer holds — the single biggest
-   open question this audit found. Options include a GitHub App
-   installed per-organization, per-user OAuth tokens stored via B0.7's
-   own secret store, or continuing to require each tenant to bring
-   their own already-authenticated environment (limiting hosted
-   viability). Needs a dedicated design pass before B0.7 implementation
-   starts.
+3. ~~**GitHub auth architecture** once multi-org hosting means
+   "delegate to the host's own `gh` CLI" no longer holds.~~
+   **RESOLVED — see ADR-001** (above, in the B0.7 section): GitHub App
+   per organization, self-hosted `gh` CLI delegation preserved unchanged
+   under `AUTH_MODE=none`. Still requires a human sign-off on ADR-001's
+   own recommendation before B0.7 implementation starts — "resolved"
+   here means "a concrete, evidence-based recommendation now exists,"
+   not "silently approved."
 4. **Whether self-hosted single-user mode (`AUTH_MODE=none`) is a
    permanent, supported deployment target**, or an eventually-
    deprecated transitional one. Affects how much long-term test/
