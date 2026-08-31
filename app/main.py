@@ -79,6 +79,8 @@ from app.services.incident_service import (
     IncidentService, IncidentError, STATUSES as INCIDENT_STATUSES, CLASSIFICATIONS as INCIDENT_CLASSIFICATIONS,
     SOURCES as INCIDENT_SOURCES, SEVERITIES as INCIDENT_SEVERITIES,
 )
+from app.services.parallel_safety_service import ParallelSafetyService
+from app.services.execution_wave_service import ExecutionWaveService, ExecutionWaveError
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -766,12 +768,13 @@ def create_app(settings=None):
     @app.exception_handler(ReleaseError)
     @app.exception_handler(ProductAcceptanceError)
     @app.exception_handler(IncidentError)
+    @app.exception_handler(ExecutionWaveError)
     async def engineering_domain_error(request, exc):
-        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5/E9/E10/E11/E12's Change/
+        """Phase E1/E3/E4/E5/E6/E7/E8/E8.5/E9/E10/E11/E12/E13's Change/
         WorkProduct/Workflow/Plan/Spec-Proposal/Architecture/Design/
         Test-Design/Autonomous-Execution/Worktree/Review-Fix/
-        Integration/Release/Product-Acceptance/Incident API is a pure
-        JSON surface (E1.7: 'API/service
+        Integration/Release/Product-Acceptance/Incident/ExecutionWave
+        API is a pure JSON surface (E1.7: 'API/service
         correctness first, no large UI yet') -- a clean 400 + message,
         never the HTML 'Action blocked' page the older form-posting
         routes use."""
@@ -2413,6 +2416,18 @@ def create_app(settings=None):
         # _start_builder_session) -- both names resolve fine at request
         # time regardless of definition order within this same closure.
         overview["autonomous_execution"]=autonomous_execution_service.status(cid)
+        # E13.38: PARALLEL section on the same card -- composed here for
+        # the same construction-order reason as above (execution_wave_service
+        # needs release_service/integration_service, built later).
+        change_row_data=change_row(cid)
+        parallel_policy=execution_wave_service.get_parallel_policy(change_row_data)
+        current_wave=execution_wave_service.current_wave_for_change(cid)
+        overview["parallel_execution"]={
+            "enabled":parallel_policy["enabled"],
+            "active_builders":autonomous_execution_service._live_builder_count(cid),
+            "max_concurrent_builders":autonomous_execution_service.get_policy(change_row_data)["max_concurrent_builders"],
+            "current_wave":current_wave,
+        }
         return render(request,"change_detail.html",cid=cid,active_tab="",header=header,overview=overview)
     @app.get("/changes/{cid}/spec",response_class=HTMLResponse)
     def change_spec_tab(request:Request,cid:int):
@@ -2448,6 +2463,16 @@ def create_app(settings=None):
         # the API/scheduler itself uses, never a second readiness engine.
         for row in data["rows"]:
             row["execution_readiness"]=autonomous_execution_service.evaluate_task(row["task"]["id"])
+            # E13.38: per-row Parallel Safety/Wave/Active Session --
+            # read-only annotation over the same execution_wave_tasks
+            # audit rows/ParallelSafetyService the API itself uses,
+            # never a second scheduler truth.
+            tid=row["task"]["id"]
+            ewt=db.one("SELECT ewt.*,ew.wave_number FROM execution_wave_tasks ewt JOIN execution_waves ew ON ew.id=ewt.wave_id "
+                       "WHERE ewt.task_id=? ORDER BY ewt.id DESC LIMIT 1",(tid,))
+            row["wave"]=ewt
+            live=db.one("SELECT * FROM agent_sessions WHERE task_id=? ORDER BY id DESC LIMIT 1",(tid,))
+            row["active_session"]=live if live and live["status"] in ("STARTING","RUNNING","WAITING_FOR_INPUT") else None
         return render(request,"change_tasks.html",cid=cid,active_tab="tasks",header=change_control_surface.header(cid),
                       data=data)
     @app.get("/changes/{cid}/reviews",response_class=HTMLResponse)
@@ -3199,6 +3224,14 @@ def create_app(settings=None):
         workflow_service,release_service,specs_root)
     app.state.incident_service=incident_service
 
+    # ---- E13: Parallel Multi-Agent Execution & Integration Waves ------
+    parallel_safety_service=ParallelSafetyService(db,task_dependencies,_resolve_project_policy_for_change)
+    app.state.parallel_safety_service=parallel_safety_service
+    execution_wave_service=ExecutionWaveService(
+        db,changes,autonomous_execution_service,parallel_safety_service,integration_service,git,
+        _resolve_project_policy_for_change)
+    app.state.execution_wave_service=execution_wave_service
+
     @app.get("/api/changes/{cid}/autonomous-execution")
     def api_autonomous_execution_status(cid:int):
         change_row(cid)
@@ -3453,6 +3486,60 @@ def create_app(settings=None):
     def api_incident_reopen(iid:int,reason:str=Form(...)):
         incident_row(iid)
         return incident_service.reopen(iid,reason)
+
+    # ---- E13.40: Parallel Execution Wave API ----------------------------
+    @app.get("/api/changes/{cid}/execution-wave")
+    def api_get_execution_wave(cid:int):
+        change_row(cid)
+        current=execution_wave_service.current_wave_for_change(cid)
+        return {"current_wave":current,"plan":execution_wave_service.plan_execution_wave(cid)}
+    @app.post("/api/changes/{cid}/execution-wave/plan")
+    def api_plan_execution_wave(cid:int):
+        change_row(cid)
+        return execution_wave_service.plan_execution_wave(cid)
+    @app.post("/api/changes/{cid}/execution-wave/run")
+    def api_run_execution_wave(cid:int):
+        change_row(cid)
+        return execution_wave_service.run_execution_wave(cid)
+    @app.post("/api/execution-waves/{wid}/integrate")
+    def api_integrate_execution_wave(wid:int):
+        if not execution_wave_service.get_wave(wid): raise HTTPException(404,"Execution wave not found")
+        return execution_wave_service.integrate_wave(wid)
+    @app.get("/api/execution-waves/{wid}")
+    def api_get_execution_wave_detail(wid:int):
+        wave=execution_wave_service.get_wave(wid)
+        if not wave: raise HTTPException(404,"Execution wave not found")
+        return wave
+    @app.get("/execution-waves/{wid}",response_class=HTMLResponse)
+    def execution_wave_detail_page(request:Request,wid:int):
+        wave=execution_wave_service.get_wave(wid)
+        if not wave: raise HTTPException(404,"Execution wave not found")
+        change=changes.get(wave["change_id"])
+        # E13.39: pairwise safety + actual-scope evidence for the tasks
+        # that actually launched -- collapsible raw technical evidence,
+        # composition only.
+        launched=[t for t in wave["tasks"] if t["reservation_state"]=="LAUNCHED"]
+        pairwise=[]
+        for i in range(len(launched)):
+            for j in range(i+1,len(launched)):
+                pairwise.append({"a":launched[i],"b":launched[j],
+                                  **parallel_safety_service.evaluate_pair(launched[i]["task_id"],launched[j]["task_id"])})
+        return render(request,"execution_wave_detail.html",wave=wave,change=change,pairwise=pairwise)
+    @app.get("/api/tasks/{tid}/parallel-safety")
+    def api_task_parallel_safety(tid:int):
+        task_row(tid)
+        return parallel_safety_service.conflicts_for_task(tid)
+    @app.get("/api/tasks/{tid}/parallel-conflicts")
+    def api_task_parallel_conflicts(tid:int):
+        t=task_row(tid)
+        if not t.get("change_id"): return {"task_id":tid,"conflicts":[]}
+        siblings=[s for s in changes.list_tasks_for_change(t["change_id"]) if s["id"]!=tid]
+        conflicts=[]
+        for s in siblings:
+            result=parallel_safety_service.evaluate_pair(tid,s["id"])
+            if result["result"]!="PARALLEL_SAFE":
+                conflicts.append({"task_id":s["id"],"title":s["title"],**result})
+        return {"task_id":tid,"conflicts":conflicts}
 
     @app.post("/api/tasks/{tid}/workspaces")
     def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form("")):

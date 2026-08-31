@@ -4,7 +4,7 @@
 <section class="panel"><h3>Tasks</h3>
 <p><small>Operational detail for debugging -- see the Overview tab for the human-facing lifecycle summary.</small></p>
 {% if data.rows %}
-<div class="table-scroll"><table><thead><tr><th>Task</th><th>Status</th><th>Stage</th><th>Next Action</th><th>Builders</th><th>Spec</th><th>Outputs</th><th>Execution Readiness</th></tr></thead><tbody>
+<div class="table-scroll"><table><thead><tr><th>Task</th><th>Status</th><th>Stage</th><th>Next Action</th><th>Builders</th><th>Spec</th><th>Outputs</th><th>Execution Readiness</th><th>Wave</th><th>Active Session</th></tr></thead><tbody>
 {% for row in data.rows %}<tr>
 <td><a href="/tasks/{{row.task.id}}">{{row.task.title}}</a><br><small>{{row.task.slug}}</small></td>
 <td><span class="badge {{row.status|lower}}">{{row.status.replace('_',' ')}}</span></td>
@@ -21,6 +21,8 @@
 {% elif er in ('COMPLETE','NOT_AUTONOMOUS_TASK') %}<span class="badge draft" title="{{row.execution_readiness.reason or ''}}">{{er.replace('_',' ')}}</span>
 {% else %}<span class="badge blocked" title="{{row.execution_readiness.reason or ''}}">{{er.replace('_',' ')}}</span>{% endif %}
 </td>
+<td>{% if row.wave %}<a href="/execution-waves/{{row.wave.wave_id}}">Wave #{{row.wave.wave_number}}</a><br><small>{{row.wave.safety_result or '—'}} · {{row.wave.provider or '—'}}</small>{% else %}—{% endif %}</td>
+<td>{% if row.active_session %}<span class="badge running">{{row.active_session.agent}} · {{row.active_session.status.replace('_',' ')}}</span>{% else %}—{% endif %}</td>
 </tr>{% endfor %}
 </tbody></table></div>
 {% else %}

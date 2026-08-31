@@ -121,4 +121,34 @@
 {% endif %}
 </section>
 
+<!-- PARALLEL execution (E13.38): explicit opt-in state, current wave,
+     active Builders vs. configured capacity -- composition only over
+     ExecutionWaveService's own real state, never a second scheduler. -->
+{% set pe = overview.parallel_execution %}
+<section class="panel phase-card" aria-label="Parallel Execution">
+<h3>Parallel</h3>
+<div class="wf-checklist">
+<div class="wf-check {{'wf-done' if pe.enabled else 'wf-skipped'}}">
+<span class="wf-mark">{{'✓' if pe.enabled else '—'}}</span>
+<span class="wf-label">{{'Enabled' if pe.enabled else 'Disabled'}}</span>
+{% if not pe.enabled %}<small> — opt in via PROJECT.yaml <code>engineering.parallel_execution.enabled</code></small>{% endif %}
+</div>
+<div class="wf-check {{'wf-current' if pe.active_builders else 'wf-future'}}">
+<span class="wf-mark">{{'●' if pe.active_builders else '○'}}</span>
+<span class="wf-label">Active Builders: {{pe.active_builders}} / {{pe.max_concurrent_builders}}</span>
+</div>
+</div>
+{% if pe.current_wave %}
+<p><a href="/execution-waves/{{pe.current_wave.id}}">Wave #{{pe.current_wave.wave_number}}</a> — <span class="badge {{'running' if pe.current_wave.status=='RUNNING' else ('pass' if pe.current_wave.status=='COMPLETE' else ('fail' if pe.current_wave.status in ('BLOCKED','FAILED') else ''))}}">{{pe.current_wave.status}}</span>
+<br><small>
+{% for t in pe.current_wave.tasks %}{{t.task_title}} — {{t.reservation_state}}{% if t.provider %} ({{t.provider}}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+</small></p>
+{% else %}
+<p><small>No execution wave has run for this Change yet.</small></p>
+{% endif %}
+{% if pe.enabled %}
+<p><button type="button" onclick="runReleaseAction('/api/changes/{{cid}}/execution-wave/run',this,{})">Run Wave</button></p>
+{% endif %}
+</section>
+
 {% endblock %}

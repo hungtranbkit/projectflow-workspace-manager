@@ -515,6 +515,15 @@ class AutonomousExecutionService:
             return {"outcome": readiness["readiness"], "task_id": task_id, "message": readiness["reason"]}
         return self._launch(task_id, readiness["repository_id"], readiness["provider"])
 
+    # ---- E13.16: the ONE launch path ExecutionWaveService also uses ------
+    def launch_reserved(self, task_id: int, repository_id: int, provider: str) -> dict:
+        """Same _launch() every other entry point (manual Start Builder,
+        run_change()'s single-task tick, launch_task_if_ready()) already
+        uses -- ExecutionWaveService calls this once per Task it has
+        already selected+reserved for a wave, never a second Supervisor/
+        launch mechanism."""
+        return self._launch(task_id, repository_id, provider)
+
     # ---- E8.10/E8.10-adjacent: launch (Supervisor stays the only path) --
     def _launch(self, task_id: int, repository_id: int, provider: str) -> dict:
         t = self._task(task_id)

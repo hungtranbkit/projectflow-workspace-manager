@@ -1,0 +1,45 @@
+{% extends 'base.html' %}{% import '_macros.html' as m %}{% block title %}Wave #{{wave.wave_number}}{% endblock %}{% block header_action %}{% if change %}<a href="/changes/{{change.id}}">← {{change.title}}</a>{% endif %}{% endblock %}{% block content %}
+
+{% set status_badge = {'PLANNED':'created','RUNNING':'running','PARTIAL':'created','COMPLETE':'pass','BLOCKED':'fail','FAILED':'fail'} %}
+{% set res_badge = {'RESERVED':'created','LAUNCHING':'running','LAUNCHED':'pass','RELEASED':'','FAILED':'fail'} %}
+
+<section class="status-hero state-{{'complete' if wave.status=='COMPLETE' else ('action_required' if wave.status in ('BLOCKED','FAILED') else 'working')}}" aria-label="Wave status">
+<div class="hero-kicker">{{wave.status}}</div>
+<h3>Execution Wave #{{wave.wave_number}}{% if change %} — {{change.title}}{% endif %}</h3>
+<p><small>Base commit <code>{{(wave.base_commit or '—')[:12]}}</code> · created {{wave.created_at}}{% if wave.started_at %} · started {{wave.started_at}}{% endif %}{% if wave.completed_at %} · completed {{wave.completed_at}}{% endif %}</small></p>
+</section>
+
+<section class="panel"><h3>Tasks in this Wave</h3>
+<div class="table-scroll"><table><thead><tr><th>Task</th><th>Safety</th><th>Provider</th><th>Reservation</th><th>Session</th></tr></thead><tbody>
+{% for t in wave.tasks %}<tr onclick="location.href='/tasks/{{t.task_id}}'" style="cursor:pointer">
+<td>{{t.task_title}}</td>
+<td><span class="badge {{'pass' if t.safety_result=='PARALLEL_SAFE' else ''}}">{{t.safety_result or '—'}}</span></td>
+<td>{{t.provider or '—'}}</td>
+<td><span class="badge {{res_badge.get(t.reservation_state,'')}}">{{t.reservation_state}}</span></td>
+<td>{{t.session_id or '—'}}</td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% if wave.status in ('RUNNING','PARTIAL') %}
+<p><button type="button" onclick="runReleaseAction('/api/execution-waves/{{wave.id}}/integrate',this,{})">Integrate Wave</button></p>
+{% endif %}
+</section>
+
+<section class="panel"><h3>Pairwise Safety</h3>
+{% if pairwise %}
+<div class="table-scroll"><table><thead><tr><th>Task A</th><th>Task B</th><th>Result</th><th>Reasons</th></tr></thead><tbody>
+{% for p in pairwise %}<tr>
+<td>{{p.a.task_title}}</td><td>{{p.b.task_title}}</td>
+<td><span class="badge {{'pass' if p.result=='PARALLEL_SAFE' else 'fail'}}">{{p.result}}</span></td>
+<td><small>{{p.reasons|join(', ') or '—'}}</small></td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% else %}
+{{ m.empty('Fewer than two launched Tasks', 'Nothing to compare pairwise.') }}
+{% endif %}
+</section>
+
+<section class="panel"><h3>Raw evidence</h3>
+{{ m.raw('Wave record', wave) }}
+</section>
+
+{% endblock %}

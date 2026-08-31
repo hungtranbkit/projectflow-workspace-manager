@@ -1348,6 +1348,58 @@ CREATE INDEX IF NOT EXISTS idx_incidents_change ON incidents(change_id);
 CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
 CREATE INDEX IF NOT EXISTS idx_incidents_project ON incidents(project_id);
 """),
+    # V30 (Phase E13: Parallel Multi-Agent Execution & Integration
+    # Waves). An ExecutionWave is a runtime scheduling interpretation of
+    # the EXISTING Task DAG (plans/plan_items/task_dependencies) -- never
+    # a second Plan. execution_waves/execution_wave_tasks are a thin
+    # audit model (E13.7); Task/AgentSession truth is never duplicated
+    # here, only referenced (session_id/workspace_id). task_reservations
+    # is the atomic double-launch guard (E13.14/15): task_id is its own
+    # PRIMARY KEY, so a second concurrent INSERT for the same Task fails
+    # outright on SQLite's own constraint -- no separate scheduler lock
+    # needed. plan_items.exclusive_resources is additive (E13.13): a
+    # JSON array of simple resource-key strings (e.g. "port:8080",
+    # "docker-compose:default") a Plan can declare when scope_hints
+    # alone can't express a shared runtime resource.
+    (30, """
+ALTER TABLE plan_items ADD COLUMN exclusive_resources TEXT NOT NULL DEFAULT '[]';
+CREATE TABLE IF NOT EXISTS execution_waves(
+  id INTEGER PRIMARY KEY,
+  change_id INTEGER NOT NULL REFERENCES changes(id),
+  wave_number INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PLANNED',
+  base_commit TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at TEXT,
+  completed_at TEXT,
+  UNIQUE(change_id, wave_number)
+);
+CREATE TABLE IF NOT EXISTS execution_wave_tasks(
+  id INTEGER PRIMARY KEY,
+  wave_id INTEGER NOT NULL REFERENCES execution_waves(id),
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  repository_id INTEGER REFERENCES repositories(id),
+  safety_result TEXT,
+  provider TEXT,
+  reservation_state TEXT NOT NULL DEFAULT 'RESERVED',
+  session_id INTEGER REFERENCES agent_sessions(id),
+  workspace_id INTEGER REFERENCES agent_workspaces(id),
+  task_base_commit TEXT,
+  result_metadata TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(wave_id, task_id)
+);
+CREATE TABLE IF NOT EXISTS task_reservations(
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id),
+  wave_id INTEGER REFERENCES execution_waves(id),
+  state TEXT NOT NULL DEFAULT 'RESERVED',
+  reserved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_execution_waves_change ON execution_waves(change_id);
+CREATE INDEX IF NOT EXISTS idx_execution_wave_tasks_wave ON execution_wave_tasks(wave_id);
+CREATE INDEX IF NOT EXISTS idx_execution_wave_tasks_task ON execution_wave_tasks(task_id);
+"""),
 ]
 
 
