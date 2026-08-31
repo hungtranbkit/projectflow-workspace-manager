@@ -305,6 +305,19 @@ class AutonomousExecutionService:
         if not change:
             return _item("NOT_AUTONOMOUS_TASK", "Change not found", task_id=task_id)
 
+        # P0.7/P0.10 audit finding: tasks.status is a real DB column with
+        # only three written values (BACKLOG/ACTIVE/CANCELLED -- see
+        # task_decision_service.STATUSES); a CANCELLED Task has no unmet
+        # dependencies of its own, so TaskDependencyService.readiness()
+        # (which only maps status=='DONE' to readiness='COMPLETE') falls
+        # through to readiness='READY' for it, and nothing later in this
+        # waterfall re-checks raw task status -- without this explicit
+        # check a CANCELLED Task could still be selected and (re)launched
+        # by list_auto_ready_tasks()/the wave scheduler, silently reusing
+        # its own stale, already-abandoned workspace.
+        if t.get("status") == "CANCELLED":
+            return _item("NOT_AUTONOMOUS_TASK", "Task is CANCELLED", task_id=task_id)
+
         readiness = self.task_dependencies.readiness(task_id, self.decision)
         if readiness["readiness"] == "COMPLETE":
             return _item("COMPLETE", "Task is already DONE", task_id=task_id)

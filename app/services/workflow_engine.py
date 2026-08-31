@@ -345,6 +345,20 @@ class TaskDependencyService:
             return {"task_id": task_id, "readiness": "COMPLETE", "unmet_dependencies": []}
         if own["status"] == "BLOCKED":
             return {"task_id": task_id, "readiness": "BLOCKED", "unmet_dependencies": []}
+        # P0.7/P0.10 audit finding: a CANCELLED Task has no unmet
+        # dependencies of its own, so without this explicit check it
+        # fell through to the unmet-dependency branch below and came
+        # back READY -- a real, reachable inconsistency (a deliberately
+        # superseded/withdrawn Task could still be selected by the
+        # scheduler, and still counted in ready_tasks/complete_tasks).
+        # CANCELLED is its own terminal readiness value here (not
+        # COMPLETE, not READY) -- it carries no positive OR negative
+        # weight in the Change's own completion calculus, matching
+        # TaskDecisionService.evaluate()'s own CANCELLED branch (test_
+        # readiness='NO', blocking=[]): a cancelled Task simply drops
+        # out of every operational bucket.
+        if own["status"] == "CANCELLED":
+            return {"task_id": task_id, "readiness": "CANCELLED", "unmet_dependencies": []}
         deps = self.dependencies_for(task_id)
         unmet = [d["depends_on_task_id"] for d in deps if decision.evaluate(d["depends_on_task_id"])["status"] != "DONE"]
         return {"task_id": task_id, "readiness": "WAITING_DEPENDENCY" if unmet else "READY", "unmet_dependencies": unmet}
@@ -563,7 +577,16 @@ class WorkflowService:
     def _gate_tests_pass(self, change_id: int, tasks: list[dict]) -> bool:
         """Reuses TaskDecisionService's own AUTOMATED_TESTS checklist
         item (test_runs-backed, pinned to exact HEAD) -- never a second
-        test-result calculation."""
+        test-result calculation.
+
+        P0.7/P0.10 audit finding: a CANCELLED Task's own checklist is
+        deliberately empty (TaskDecisionService._checklist() returns []
+        for CANCELLED), so counting it here made a single superseded/
+        withdrawn Task block this gate forever, with no evidence to
+        ever satisfy it -- a real, reachable dead end. A cancelled Task
+        carries no weight either way, so it is excluded here the same
+        way readiness() now excludes it from ready/complete."""
+        tasks = [t for t in tasks if t.get("status") != "CANCELLED"]
         if not tasks:
             return False
         for t in tasks:
@@ -574,6 +597,11 @@ class WorkflowService:
         return True
 
     def _gate_release_ready(self, change_id: int, tasks: list[dict]) -> bool:
+        # P0.7/P0.10 audit finding: same CANCELLED-blocks-forever issue
+        # as _gate_tests_pass -- a cancelled Task is never ready_for_main
+        # nor DONE and has no path to becoming either, so it must be
+        # excluded rather than counted as an unmet requirement.
+        tasks = [t for t in tasks if t.get("status") != "CANCELLED"]
         if not tasks:
             return False
         for t in tasks:

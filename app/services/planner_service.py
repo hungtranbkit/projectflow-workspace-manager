@@ -132,10 +132,27 @@ class PlannerAgentInvoker:
     dedicated real-invocation tests never shells out or spends real API
     budget."""
 
-    def __init__(self, runner=_default_runner, timeout=180, which=shutil.which):
+    def __init__(self, runner=_default_runner, timeout=180, which=shutil.which, max_attempts=2):
         self.runner = runner
         self.timeout = timeout
         self.which = which
+        # P0.8 audit (Productization Audit): bounded retry for the known
+        # E4-E6 real-provider flakiness class -- a structured, tool-less,
+        # single-turn invocation that fails at the SUBPROCESS/ENVELOPE
+        # level (non-zero exit, a timeout, or an envelope the CLI itself
+        # flags as an error/non-success -- e.g. stop_reason=tool_use
+        # despite --tools "") is a real, observed provider-side hiccup,
+        # not evidence the request itself is malformed. max_attempts=2
+        # (one retry) -- never infinite, and every retried attempt is a
+        # brand-new, stateless subprocess (this class's own fresh-
+        # context guarantee already holds per-call, so a retry changes
+        # nothing about that contract). What is deliberately NEVER
+        # retried: an exit-0 response whose stdout doesn't parse as the
+        # envelope JSON, or a successful envelope whose own "result"
+        # isn't a string -- both are genuine invalid-structured-response
+        # bugs in what the model produced, not a transient failure, and
+        # retrying them would just mask a real prompt/schema problem.
+        self.max_attempts = max(1, max_attempts)
 
     def invoke(self, provider: str, prompt: str, schema: dict, cwd) -> str:
         """Returns the raw JSON text the model produced (already
@@ -161,24 +178,41 @@ class PlannerAgentInvoker:
             # PLANNER_ASSIGNMENT_INVALID/PLANNER_EXECUTION_FAILED beats
             # a fragile best-effort text scrape.
             raise PlannerAgentError(f"Planner provider '{provider}' has no non-interactive structured-output path wired yet")
-        try:
-            result = self.runner(argv, str(cwd), self.timeout)
-        except subprocess.TimeoutExpired as exc:
-            raise PlannerAgentError(f"Planner invocation timed out after {self.timeout}s") from exc
-        except Exception as exc:
-            raise PlannerAgentError(f"Planner invocation failed: {exc}") from exc
-        if result.returncode != 0:
-            raise PlannerAgentError(f"Planner exited {result.returncode}: {(result.stderr or '')[:2000]}")
-        try:
-            envelope = json.loads(result.stdout)
-        except (TypeError, ValueError) as exc:
-            raise PlannerAgentError(f"Planner produced a non-JSON envelope: {exc}") from exc
-        if envelope.get("is_error") or envelope.get("subtype") != "success":
-            raise PlannerAgentError(f"Planner run reported an error: {envelope.get('result') or envelope}")
-        text = envelope.get("result")
-        if not isinstance(text, str):
-            raise PlannerAgentError("Planner envelope had no text result")
-        return text
+
+        last_error: PlannerAgentError | None = None
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                result = self.runner(argv, str(cwd), self.timeout)
+            except subprocess.TimeoutExpired as exc:
+                last_error = PlannerAgentError(f"Planner invocation timed out after {self.timeout}s (attempt {attempt}/{self.max_attempts})")
+                continue
+            except Exception as exc:
+                last_error = PlannerAgentError(f"Planner invocation failed: {exc} (attempt {attempt}/{self.max_attempts})")
+                continue
+            if result.returncode != 0:
+                last_error = PlannerAgentError(
+                    f"Planner exited {result.returncode} (attempt {attempt}/{self.max_attempts}): {(result.stderr or '')[:2000]}")
+                continue
+            try:
+                envelope = json.loads(result.stdout)
+            except (TypeError, ValueError) as exc:
+                # Never retried -- exit 0 with unparsable stdout is a
+                # genuine invalid-structured-response defect, not a
+                # transient provider failure.
+                raise PlannerAgentError(f"Planner produced a non-JSON envelope: {exc}") from exc
+            if envelope.get("is_error") or envelope.get("subtype") != "success":
+                last_error = PlannerAgentError(
+                    f"Planner run reported an error (attempt {attempt}/{self.max_attempts}, "
+                    f"stop_reason={envelope.get('stop_reason')!r}): {envelope.get('result') or envelope}")
+                continue
+            text = envelope.get("result")
+            if not isinstance(text, str):
+                # Never retried -- a successful envelope with the wrong
+                # inner shape is a genuine invalid-structured-response
+                # defect, not a transient provider failure.
+                raise PlannerAgentError("Planner envelope had no text result")
+            return text
+        raise last_error
 
 
 # ===================================================================
@@ -552,14 +586,33 @@ class PlannerService:
 
         from app.services.architecture_design_service import design_state_digest
         from app.services.test_design_service import test_design_state_digest
-        revision = (self.db.one("SELECT MAX(revision) AS r FROM plans WHERE change_id=?", (change_id,))["r"] or 0) + 1
-        plan_id = self.db.execute(
-            "INSERT INTO plans(change_id,workflow_run_id,revision,status,planner_provider,planner_role,input_context_digest,summary,assumptions,raw_output,spec_baseline_sha256,design_baseline_digest,test_design_baseline_digest) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (change_id, run["id"], revision, "DRAFT", provider, "PLANNER", digest,
-             str(parsed.get("summary") or ""), json.dumps(parsed.get("assumptions") or []), json.dumps(parsed),
-             context["spec"]["baseline_sha256"], design_state_digest(self.work_products, change_id),
-             test_design_state_digest(self.work_products, change_id)))
+        # P0.9 audit: plans.(change_id,revision) is UNIQUE, and the
+        # MAX(revision)+1 read above is a separate statement from the
+        # INSERT below -- two concurrent plan() calls for the same
+        # Change (a real possibility once anything can trigger re-
+        # planning without serializing on it, e.g. a double-submit or a
+        # future automated re-plan) can both compute the same next
+        # revision and collide. Retried on that exact collision, the
+        # same defensive pattern ExecutionWaveService.run_execution_wave()
+        # already uses for its own analogous wave_number race (E13).
+        plan_id = None
+        for _attempt in range(5):
+            revision = (self.db.one("SELECT MAX(revision) AS r FROM plans WHERE change_id=?", (change_id,))["r"] or 0) + 1
+            try:
+                plan_id = self.db.execute(
+                    "INSERT INTO plans(change_id,workflow_run_id,revision,status,planner_provider,planner_role,input_context_digest,summary,assumptions,raw_output,spec_baseline_sha256,design_baseline_digest,test_design_baseline_digest) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (change_id, run["id"], revision, "DRAFT", provider, "PLANNER", digest,
+                     str(parsed.get("summary") or ""), json.dumps(parsed.get("assumptions") or []), json.dumps(parsed),
+                     context["spec"]["baseline_sha256"], design_state_digest(self.work_products, change_id),
+                     test_design_state_digest(self.work_products, change_id)))
+                break
+            except Exception:
+                continue
+        if plan_id is None:
+            self.db.event("change", change_id, "PLANNER_OUTPUT_INVALID", "Could not allocate a plan revision (concurrent planning contention)")
+            return {"outcome": "PLANNER_EXECUTION_FAILED", "plan": None,
+                     "message": "Could not allocate a plan revision (concurrent planning contention)"}
         # OR IGNORE (plan_items has UNIQUE(plan_id,item_key)): a
         # malformed LLM output with a duplicate/missing key must never
         # crash the write path with an unhandled IntegrityError -- the
