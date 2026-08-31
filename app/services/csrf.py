@@ -1,0 +1,59 @@
+from __future__ import annotations
+import secrets
+
+from fastapi import HTTPException, Request
+
+"""ADR-003 (docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md): in-house
+double-submit-cookie CSRF, sized and shaped for the general B0.4 sweep
+across every session-cookie-authenticated mutating route -- but B0.1
+only applies it to the small number of NEW mutating routes it
+introduces itself (logout, API-token create/revoke). The 143 pre-
+existing routes are explicitly NOT swept here; that sweep is B0.3/
+B0.4's own scope (see B0 Phasing), not silently pulled forward.
+
+Bearer-token/webhook routes are never guarded by this (ADR-001/003's
+own reasoning: a request carrying no ambient browser credential is
+structurally immune to CSRF) -- `require_csrf` is only ever applied
+alongside `current_user` (a session-cookie-backed identity), never
+alongside API-token auth.
+
+Token bound into `request.session` (the same signed, tamper-evident
+cookie SessionMiddleware already provides for the session itself --
+never a second, separately-signed value) -- comparing the session-held
+value against the value the form/header actually sent is what proves
+the request came from a page that could read that session's own
+state, the standard double-submit property."""
+
+_SESSION_KEY = "csrf_token"
+
+
+def issue_csrf_token(request: Request) -> str:
+    """Idempotent within one session: returns the existing token if one
+    is already bound, only generates a fresh one the first time --
+    otherwise every page render would silently invalidate every other
+    open tab's already-embedded form token."""
+    existing = request.session.get(_SESSION_KEY)
+    if existing:
+        return existing
+    token = secrets.token_urlsafe(32)
+    request.session[_SESSION_KEY] = token
+    return token
+
+
+async def require_csrf(request: Request) -> None:
+    """FastAPI dependency: verifies a `csrf_token` form field (or
+    `X-CSRF-Token` header, for JS fetch()-based mutations -- see
+    ADR-003's own migration-cost note about base.html's shared fetch()
+    functions) against the session-bound value. 403, never a silent
+    pass-through, on any mismatch -- including "no session-bound token
+    at all" (a request arriving before issue_csrf_token() was ever
+    called for this session is treated as unverifiable, not trusted)."""
+    expected = request.session.get(_SESSION_KEY)
+    if not expected:
+        raise HTTPException(403, "CSRF_TOKEN_MISSING")
+    supplied = request.headers.get("x-csrf-token")
+    if not supplied:
+        form = await request.form()
+        supplied = form.get("csrf_token")
+    if not supplied or not secrets.compare_digest(str(supplied), expected):
+        raise HTTPException(403, "CSRF_TOKEN_INVALID")

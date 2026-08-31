@@ -1,0 +1,16 @@
+{% extends 'base.html' %}{% block title %}Sign in{% endblock %}{% block content %}
+<section class="panel" style="max-width:420px;margin:0 auto">
+<h3>Sign in to ProjectFlow</h3>
+{% if sent %}
+<div class="readybox"><b>Check your email.</b><p>If an account exists for that address, we sent a sign-in link. It expires in 15 minutes.</p></div>
+{% else %}
+<form method="post" action="/auth/login">
+<label>Email<input type="email" name="email" required autofocus placeholder="you@example.com"></label>
+<button type="submit">Send sign-in link</button>
+</form>
+{% endif %}
+{% if needs_bootstrap %}
+<p style="margin-top:18px"><small>First time setting up this instance? <a href="/auth/bootstrap">Use your setup token</a> instead.</small></p>
+{% endif %}
+</section>
+{% endblock %}

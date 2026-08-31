@@ -1420,6 +1420,50 @@ CREATE INDEX IF NOT EXISTS idx_execution_wave_tasks_task ON execution_wave_tasks
     (31, """
 CREATE INDEX IF NOT EXISTS idx_workspace_events_entity ON workspace_events(entity_type, entity_id);
 """),
+    # B0.1 (Hosted Platform Security Foundation, AuthN foundation) --
+    # ADR-002's own resolved design: email magic-link login, no password
+    # system (password_hash stays NULLable so adding one later is purely
+    # additive, never a migration fight -- ADR-002's own explicit
+    # requirement), API tokens for service/automation accounts, hashed
+    # single-use short-TTL login tokens (never a raw token persisted
+    # anywhere -- the same "never store the raw secret" discipline
+    # ADR-001 applied to GitHub installation tokens). No `sessions`
+    # table: the session itself is a signed, stateless cookie
+    # (Starlette's SessionMiddleware), never DB-backed, per ADR-002's
+    # own resolved design. `AUTH_MODE=none` (default, unchanged) never
+    # writes to any of these tables at all -- see docs/
+    # B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md.
+    (32, """
+CREATE TABLE IF NOT EXISTS users(
+  id INTEGER PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_login_at TEXT
+);
+CREATE TABLE IF NOT EXISTS login_tokens(
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  email TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_login_tokens_email ON login_tokens(email);
+CREATE INDEX IF NOT EXISTS idx_login_tokens_user ON login_tokens(user_id);
+CREATE TABLE IF NOT EXISTS api_tokens(
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  token_prefix TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_used_at TEXT,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
+"""),
 ]
 
 

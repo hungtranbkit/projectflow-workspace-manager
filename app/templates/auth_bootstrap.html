@@ -1,0 +1,12 @@
+{% extends 'base.html' %}{% block title %}First-time setup{% endblock %}{% block content %}
+<section class="panel" style="max-width:420px;margin:0 auto">
+<h3>Set up this ProjectFlow instance</h3>
+<p><small>Paste the setup token printed in this server's own log/console at startup.</small></p>
+{% if error %}<div class="alert">{{error}}</div>{% endif %}
+<form method="post" action="/auth/bootstrap">
+<label>Setup token<input type="text" name="token" value="{{token}}" required></label>
+<label>Your email<input type="email" name="email" required autofocus placeholder="you@example.com"></label>
+<button type="submit">Create account &amp; sign in</button>
+</form>
+</section>
+{% endblock %}

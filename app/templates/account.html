@@ -1,0 +1,23 @@
+{% extends 'base.html' %}{% block title %}Account{% endblock %}{% block content %}
+<section class="panel"><h3>Signed in as {{user.email}}</h3>
+<form method="post" action="/auth/logout"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><button type="submit" class="ghost">Sign out</button></form>
+</section>
+
+<section class="panel"><h3>API tokens</h3>
+<p><small>For CI/scripted access -- <code>Authorization: Bearer &lt;token&gt;</code>. Shown once at creation; not retrievable again.</small></p>
+{% if new_token %}<div class="readybox"><b>New token created</b><br><code>{{new_token}}</code><br><small>Copy it now -- it will not be shown again.</small></div>{% endif %}
+{% if tokens %}<div class="table-scroll"><table><thead><tr><th>Name</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>
+{% for t in tokens %}<tr>
+<td>{{t.name}}</td><td><code>{{t.token_prefix}}…</code></td><td><small>{{t.created_at}}</small></td>
+<td><small>{{t.last_used_at or '—'}}</small></td>
+<td>{% if t.revoked_at %}<span class="badge failed">Revoked</span>{% else %}<span class="badge ready">Active</span>{% endif %}</td>
+<td>{% if not t.revoked_at %}<form method="post" action="/account/api-tokens/{{t.id}}/revoke"><input type="hidden" name="csrf_token" value="{{csrf_token}}"><button type="submit" class="danger">Revoke</button></form>{% endif %}</td>
+</tr>{% endfor %}
+</tbody></table></div>{% else %}<p class="empty">No API tokens yet.</p>{% endif %}
+<form method="post" action="/account/api-tokens">
+<input type="hidden" name="csrf_token" value="{{csrf_token}}">
+<label>New token name<input type="text" name="name" required placeholder="e.g. CI pipeline"></label>
+<button type="submit">Create token</button>
+</form>
+</section>
+{% endblock %}

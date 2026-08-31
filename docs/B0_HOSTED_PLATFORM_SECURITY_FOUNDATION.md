@@ -1,11 +1,17 @@
 # B0 — Hosted Platform Security Foundation (spec, 2026-08)
 
-**Status: SPEC ONLY. Not started. Do not begin implementation
-automatically** — this document exists so a future, explicit "begin B0"
-instruction has a grounded, implementation-ready plan to start from, per
-Track A1's own closing instruction ("Do NOT begin B0 automatically") and
-this document's own request ("define B0 ... as an implementation-ready
-spec/plan; do not start broad B0 implementation").
+**Status: ADR-001 through ADR-004 approved as current product/
+engineering decisions. B0.1 (AuthN foundation) is IMPLEMENTED** —
+email magic-link login, self-hosted first-user console-token
+bootstrap, API tokens, in-house CSRF (ADR-003) applied to B0.1's own
+new routes, slowapi rate limiting (ADR-003) on the launch-blocking
+login-request endpoint (ADR-002). See the B0.1 implementation report
+(delivered alongside this update) for full acceptance-criteria
+coverage, test evidence (24 new tests, `tests/test_b01_authn.py`, plus
+the full 915-test regression suite passing unmodified), and residual
+risks. **B0.2 and later are NOT started — do not begin them
+automatically**; each still needs the same explicit go-ahead B0.1
+received.
 
 Track A1 (Performance Foundation & Simple Mode) is complete and verified
 in production — see `docs/TRACK_A1_PERFORMANCE_AND_SIMPLE_MODE.md` and
@@ -46,7 +52,7 @@ of commit `8e460e7`.
 | Secrets | No secrets table/column anywhere. GitHub integration deliberately never stores a token — shells out to the host's own already-authenticated `gh` CLI | `app/services/github_merge_service.py:6-13`'s own docstring: "never a hand-rolled OAuth flow or a raw access token handled by this app" |
 | Sandbox isolation | `SandboxManager`/`SandboxRuntimeService` exist and work, but are opt-in — Builder git worktrees run on the host filesystem by default; PROJECT.yaml commands execute via `shell=True` in several places with no sandboxing forced | `app/services/gate_waiver_service.py:60`, `app/services/test_runner.py:24`, `app/main.py:4313` |
 | Network boundary | `127.0.0.1` enforced at three independent layers: hard refusal of any other host/port, a matching default, and the systemd unit's own reasoning about staying local-only. No reverse proxy config anywhere in the repo | `scripts/start.sh:13-20`, `app/config.py:34`, `systemd/workspace-manager.service.in:12-19` |
-| Dependencies | fastapi, uvicorn, jinja2, python-multipart, PyYAML, websockets, ruamel.yaml. **Absent**: passlib/bcrypt, PyJWT/authlib, slowapi/fastapi-limiter, any session library. Starlette's own `SessionMiddleware` (itsdangerous) ships transitively via FastAPI but is unused — available at near-zero new-dependency cost | `pyproject.toml:11` |
+| Dependencies | fastapi, uvicorn, jinja2, python-multipart, PyYAML, websockets, ruamel.yaml. **Absent**: passlib/bcrypt, PyJWT/authlib, slowapi/fastapi-limiter, any session library. **Correction, made during B0.1 implementation** (superseding this row's own original claim below): `itsdangerous` — required by Starlette's `SessionMiddleware` — was verified NOT actually installed in this environment (`import itsdangerous` failed) despite this audit's original "ships transitively via FastAPI" claim; declared as an explicit direct dependency instead of relied upon implicitly. `slowapi`/`itsdangerous` are now both real, declared dependencies as of B0.1 (`pyproject.toml`) | `pyproject.toml:11` (original); corrected by direct verification during B0.1 implementation, see B0.1's own report |
 
 P0's own exact classification (`docs/PRODUCTIZATION_AUDIT.md:244-258`,
 gathered in that audit, not re-derived here): AuthN/AuthZ, multi-tenant
@@ -114,19 +120,25 @@ Matching this program's own named focus areas exactly:
 
 ## Proposed architecture per sub-area
 
-### B0.1 AuthN
+### B0.1 AuthN -- IMPLEMENTED
 Login mechanism **resolved — see ADR-002** below: email magic-link at
 launch, `password_hash` kept nullable on `users` for a purely-additive
 password option later, API tokens for service/automation accounts, and
 a self-hosted first-admin console-token bootstrap so `AUTH_MODE=
-required` never hard-requires SMTP just to get started. New tables
+required` never hard-requires SMTP just to get started. Implemented in
+`app/services/auth_service.py`, `app/services/email_sender.py`,
+`app/services/csrf.py`, migration 32 (`app/db.py`), and the `/auth/*`,
+`/account`, `/api/whoami` routes in `app/main.py` — see the B0.1
+implementation report for the full file/test map. New tables
 `users(id, email, password_hash, created_at, ...)` and `login_tokens
 (id, user_id, token_hash, created_at, expires_at, used_at)`; session
-issuance via Starlette's built-in `SessionMiddleware` (itsdangerous,
-already transitively available, zero new dependency) for the signed
-session cookie — separate from the short-lived login token itself.
-Login/verify/logout routes; a `current_user` FastAPI dependency
-injected wherever `AUTH_MODE=required`; a no-op fallback (today's exact
+issuance via Starlette's built-in `SessionMiddleware` (itsdangerous --
+**correction**: verified NOT actually transitively installed, added as
+an explicit direct dependency instead, see the corrected audit table
+row above) for the signed session cookie — separate from the
+short-lived login token itself. Login/verify/logout routes; a
+`current_user` FastAPI dependency injected wherever `AUTH_MODE=
+required`; a no-op fallback (today's exact
 behavior) wherever it's `none`.
 
 ### B0.2 AuthZ

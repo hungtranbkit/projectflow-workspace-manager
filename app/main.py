@@ -1,14 +1,18 @@
 from __future__ import annotations
 import asyncio
+import hashlib
 import json
+import logging
+import secrets
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
-from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 from app.config import load_settings
 from app.db import Database
 from app.repositories import discover_repositories
@@ -40,6 +44,12 @@ from app.services.evidence_store import EvidenceStore
 from app.services.change_service import ChangeService, ChangeError, CHANGE_TYPES, RISK_LEVELS as CHANGE_RISK_LEVELS, LIFECYCLE_STATES
 from app.services.change_list_summary_service import ChangeListSummaryService
 from app.services.simple_view_service import SimpleViewService, t as simple_t
+from app.services.auth_service import AuthService, AuthError
+from app.services.email_sender import EmailSenderService
+from app.services.csrf import issue_csrf_token, require_csrf
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from app.services.work_product_service import WorkProductService, WorkProductError, WORK_PRODUCT_KINDS, WORK_PRODUCT_STATUSES, DIRECTIONS as WP_DIRECTIONS
 from app.services.trace_service import TraceService
 from app.services.engineering_catalog import RoleCapabilityService, is_known_provider
@@ -310,6 +320,55 @@ def create_app(settings=None):
     app.state.test_design_lifecycle_service = test_design_lifecycle_service
     app.state.change_control_surface = change_control_surface
     app.state.task_execution_context_builder = task_execution_context_builder
+
+    # ---- B0.1: AuthN foundation ----------------------------------------
+    # docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md, ADR-002's resolved
+    # design: email magic-link login, API tokens for service/automation
+    # accounts, a self-hosted first-user console-token bootstrap so
+    # AUTH_MODE=required never hard-requires SMTP just to get started.
+    # AUTH_MODE=none (default, unchanged) never registers SessionMiddleware
+    # at all -- zero new behavior for the existing, real, already-verified
+    # single-user production deployment (Track A1's own live-verification
+    # pass), matching ADR-004's own "network boundary stays exactly as
+    # simple as today" reasoning. B0.1 deliberately does NOT sweep any of
+    # the 143 pre-existing routes behind current_user/AuthZ -- that is
+    # B0.3's own scope; see the B0.1 implementation report for the exact
+    # boundary.
+    email_sender = EmailSenderService(
+        host=settings.smtp_host, port=settings.smtp_port, user=settings.smtp_user,
+        password=settings.smtp_password, from_addr=settings.smtp_from, use_tls=settings.smtp_use_tls)
+    auth_service = AuthService(db, email_sender)
+    app.state.auth_service = auth_service
+    app.state.email_sender = email_sender
+    # ADR-003's own resolved rate-limiting choice (a maintained,
+    # pluggable-backend library) -- registered unconditionally (cheap,
+    # inert) but only ever actually applied to the two AUTH_MODE=required
+    # routes below (login-link request, bootstrap) that need a
+    # launch-blocking limit ahead of B0.5's general middleware rollout.
+    limiter = Limiter(key_func=get_remote_address)
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.state.bootstrap_token_hash = None
+    if settings.auth_mode == "required":
+        if not settings.session_secret:
+            raise RuntimeError(
+                "REFUSED: WORKSPACE_MANAGER_AUTH_MODE=required needs WORKSPACE_MANAGER_SESSION_SECRET "
+                "set (a real, random secret -- never a default) before this app will start.")
+        # https_only=False: this app has never assumed TLS termination
+        # itself (127.0.0.1-only today; a future hosted deployment's own
+        # reverse proxy is the TLS boundary, per ADR-003's own flagged-
+        # but-unresolved proxy-topology residual risk) -- same_site="lax"
+        # is the real CSRF-relevant control here, not the cookie's
+        # secure flag.
+        app.add_middleware(SessionMiddleware, secret_key=settings.session_secret,
+                            max_age=settings.session_max_age_days * 86400, same_site="lax", https_only=False)
+        if auth_service.user_count() == 0:
+            raw_bootstrap_token = secrets.token_urlsafe(24)
+            app.state.bootstrap_token_hash = hashlib.sha256(raw_bootstrap_token.encode("utf-8")).hexdigest()
+            logging.getLogger("projectflow.auth").warning(
+                "FIRST_USER_SETUP: no users exist yet on this instance. "
+                "Visit /auth/bootstrap?token=%s to create the first account.", raw_bootstrap_token)
+
     cleanup_worker.start(); agent_sessions.reconcile_on_startup()
     def render(request, name, **ctx):
         resp = templates.TemplateResponse(request=request, name=name, context={"settings": settings, "mode": _ui_mode(request), **ctx})
@@ -317,9 +376,14 @@ def create_app(settings=None):
         return resp
 
     # ---- Track A1.11/A1.12: Simple/Advanced mode selection -----------
-    # ProjectFlow has no full AuthN user model yet (A1.12's own explicit
-    # constraint) -- a plain cookie is the acceptable initial approach
-    # named there. Simple Mode is fully built and one click away
+    # ProjectFlow had no AuthN user model at all when this was written
+    # (A1.12's own explicit constraint at the time) -- a plain cookie was
+    # the acceptable initial approach named there. B0.1 has since added
+    # a real one (docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md), but
+    # this Simple/Advanced preference is a separate, per-browser display
+    # setting, not an AuthN concern -- deliberately left on its own
+    # cookie rather than folded into the new user session. Simple Mode
+    # is fully built and one click away
     # (?mode=simple, persisted back into the cookie so it sticks across
     # navigation, same as the existing filter-preserving convention
     # elsewhere in this file) -- but the NO-SIGNAL default below is
@@ -343,6 +407,142 @@ def create_app(settings=None):
         q = (request.query_params.get("mode") or "").strip().lower()
         if q in ("simple", "advanced"):
             response.set_cookie(_MODE_COOKIE, q, max_age=60*60*24*365, samesite="lax")
+
+    # ---- B0.1: AuthN routes ---------------------------------------------
+    def current_user(request: Request) -> dict | None:
+        """No-op under AUTH_MODE=none (todays exact behavior, per Design
+        Principle #2) -- never touches request.session at all in that
+        mode (SessionMiddleware isn't installed there; accessing
+        request.session without it raises). Checks the session cookie
+        first, then a Bearer API token -- either identifies the same
+        `users` row, so every caller of this dependency works with both
+        without needing to know which one was used."""
+        if settings.auth_mode != "required":
+            return None
+        uid = request.session.get("user_id")
+        if uid:
+            user = auth_service.get_user(uid)
+            if user:
+                return user
+        auth_header = request.headers.get("authorization") or ""
+        if auth_header.lower().startswith("bearer "):
+            return auth_service.user_for_api_token(auth_header[7:].strip())
+        return None
+
+    def _require_login_redirect(request: Request):
+        """Not a FastAPI dependency (deliberately) -- an HTML page needs a
+        302 to the login form, not a 401, and B0.1 only has a handful of
+        routes needing this (the general AuthZ dependency sweep across
+        the other 143 routes is B0.3's own scope, not pulled forward
+        here). Returns the user dict, or a RedirectResponse to render
+        directly (caller does `u = _require_login_redirect(request);
+        if not isinstance(u, dict): return u`)."""
+        if settings.auth_mode != "required":
+            raise HTTPException(404)
+        user = current_user(request)
+        if not user:
+            return RedirectResponse("/auth/login", 303)
+        return user
+
+    @app.get("/auth/login", response_class=HTMLResponse)
+    def auth_login_page(request: Request):
+        if settings.auth_mode != "required": raise HTTPException(404)
+        return render(request, "auth_login.html", needs_bootstrap=bool(app.state.bootstrap_token_hash))
+
+    @app.post("/auth/login")
+    @limiter.limit("5/minute")  # ADR-002/ADR-003: launch-blocking per-IP throttle on the link-request endpoint
+    def auth_login_request(request: Request, email: str = Form(...)):
+        if settings.auth_mode != "required": raise HTTPException(404)
+        auth_service.request_login(email)
+        # ADR-002's own enumeration mitigation: identical response whether
+        # or not the email is registered -- never branch on that here.
+        return render(request, "auth_login.html", needs_bootstrap=bool(app.state.bootstrap_token_hash), sent=True)
+
+    @app.get("/auth/verify", response_class=HTMLResponse)
+    def auth_verify_page(request: Request, token: str = ""):
+        """GET only ever PEEKS at the token (never consumes it) and shows
+        an explicit confirm-click page -- ADR-002's own phishing
+        mitigation against corporate email-security scanners silently
+        pre-fetching/"clicking" the raw link before the real user does."""
+        if settings.auth_mode != "required": raise HTTPException(404)
+        row = auth_service.peek_login_token(token)
+        return render(request, "auth_verify.html", token=token, email=row["email"] if row else None, valid=bool(row))
+
+    @app.post("/auth/verify")
+    def auth_verify_confirm(request: Request, token: str = Form(...)):
+        if settings.auth_mode != "required": raise HTTPException(404)
+        try:
+            user = auth_service.consume_login_token(token)
+        except AuthError:
+            return render(request, "auth_verify.html", token=token, email=None, valid=False)
+        request.session.clear(); request.session["user_id"] = user["id"]
+        return RedirectResponse("/account", 303)
+
+    @app.post("/auth/logout")
+    def auth_logout(request: Request, csrf: None = Depends(require_csrf)):
+        if settings.auth_mode != "required": raise HTTPException(404)
+        request.session.clear()
+        return RedirectResponse("/auth/login", 303)
+
+    @app.get("/auth/bootstrap", response_class=HTMLResponse)
+    def auth_bootstrap_page(request: Request, token: str = ""):
+        if settings.auth_mode != "required" or not app.state.bootstrap_token_hash: raise HTTPException(404)
+        return render(request, "auth_bootstrap.html", token=token, error=None)
+
+    @app.post("/auth/bootstrap")
+    @limiter.limit("5/minute")
+    def auth_bootstrap_submit(request: Request, token: str = Form(...), email: str = Form(...)):
+        if settings.auth_mode != "required" or not app.state.bootstrap_token_hash: raise HTTPException(404)
+        try:
+            user = auth_service.bootstrap(token, app.state.bootstrap_token_hash, email)
+        except AuthError as e:
+            return render(request, "auth_bootstrap.html", token=token, error=str(e))
+        # Setup is now closed for good (AuthService.bootstrap() itself
+        # already refuses once a user exists -- this additionally makes
+        # the GET page 404 too, not just reject the POST, so /auth/
+        # bootstrap stops being reachable at all the moment it's used.
+        app.state.bootstrap_token_hash = None
+        request.session.clear(); request.session["user_id"] = user["id"]
+        return RedirectResponse("/account", 303)
+
+    @app.get("/account", response_class=HTMLResponse)
+    def account_page(request: Request):
+        user = _require_login_redirect(request)
+        if not isinstance(user, dict): return user
+        return render(request, "account.html", user=user, tokens=auth_service.list_api_tokens(user["id"]),
+                      csrf_token=issue_csrf_token(request), new_token=None)
+
+    @app.post("/account/api-tokens", response_class=HTMLResponse)
+    def account_create_api_token(request: Request, name: str = Form(...), csrf: None = Depends(require_csrf)):
+        user = _require_login_redirect(request)
+        if not isinstance(user, dict): return user
+        _row, raw_token = auth_service.create_api_token(user["id"], name)
+        # The raw token is shown exactly once, here -- never retrievable
+        # again (matching ADR-001's own "never a raw access token
+        # persisted" discipline applied to GitHub installation tokens).
+        return render(request, "account.html", user=user, tokens=auth_service.list_api_tokens(user["id"]),
+                      csrf_token=issue_csrf_token(request), new_token=raw_token)
+
+    @app.post("/account/api-tokens/{token_id}/revoke")
+    def account_revoke_api_token(request: Request, token_id: int, csrf: None = Depends(require_csrf)):
+        user = _require_login_redirect(request)
+        if not isinstance(user, dict): return user
+        try: auth_service.revoke_api_token(user["id"], token_id)
+        except AuthError as e: raise HTTPException(404, str(e))
+        return RedirectResponse("/account", 303)
+
+    @app.get("/api/whoami")
+    def api_whoami(request: Request):
+        """Diagnostic/proof-of-mechanism endpoint (B0.1's own concrete
+        end-to-end evidence that current_user() works for both session-
+        cookie and Bearer-API-token identities) -- deliberately not
+        wired to gate any of the 143 pre-existing routes; that sweep is
+        B0.3's own scope."""
+        user = current_user(request)
+        return {"auth_mode": settings.auth_mode,
+                "authenticated": bool(user),
+                "email": user["email"] if user else None}
+
     def repo(repo_id):
         row = db.one("SELECT * FROM repositories WHERE id=? AND enabled=1", (repo_id,))
         if not row: raise HTTPException(404, "Enabled repository not found")

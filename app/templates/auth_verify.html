@@ -1,0 +1,17 @@
+{% extends 'base.html' %}{% block title %}Confirm sign-in{% endblock %}{% block content %}
+<section class="panel" style="max-width:420px;margin:0 auto">
+{% if valid %}
+<h3>Confirm sign-in</h3>
+<p>Sign in as <b>{{email}}</b>?</p>
+<p><small>If this isn't you, close this page -- nothing happens until you press the button below.</small></p>
+<form method="post" action="/auth/verify">
+<input type="hidden" name="token" value="{{token}}">
+<button type="submit">Confirm sign-in</button>
+</form>
+{% else %}
+<h3>Link invalid or expired</h3>
+<p>This sign-in link is invalid, expired, or has already been used.</p>
+<p><a href="/auth/login">Request a new one →</a></p>
+{% endif %}
+</section>
+{% endblock %}
