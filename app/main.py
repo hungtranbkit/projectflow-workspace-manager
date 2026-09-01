@@ -1804,13 +1804,14 @@ def create_app(settings=None):
         repo_ids=_visible_repo_ids(request)
         agents=_filter_rows(db.all("SELECT w.*,r.repo_name FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id WHERE w.status NOT IN ('CLOSED','DONE') ORDER BY w.updated_at DESC"),repo_ids,"repository_id")
         ints=_filter_rows(db.all("SELECT i.*,r.repo_name FROM integration_workspaces i JOIN repositories r ON r.id=i.repository_id WHERE i.status!='CLOSED' ORDER BY i.updated_at DESC"),repo_ids,"repository_id")
-        # B1.1(b) residual: running_sandboxes/cleanup_pending stay
-        # unfiltered aggregate COUNTs across every org (not per-row detail
-        # -- no title/content leaks, only a number) -- documented, not
-        # silently left, in docs/B1_HOSTED_SERVICE_READ_ISOLATION.md as a
-        # deliberately deferred low-severity item, not re-plumbed here.
-        running_sandboxes=sandboxes.running_count()
-        cleanup_pending=db.one("SELECT COUNT(*) n FROM sandboxes WHERE status='CLEANUP_ELIGIBLE'")["n"]
+        # B5.2 (docs/B5_TENANT_ISOLATION_COMPLETENESS.md): filtered
+        # BEFORE aggregation, closing the B1.1(b) residual -- never a
+        # global COUNT computed then hidden after. task_ids covers the
+        # indirect-ownership case (a REPOSITORY_TEST-owned sandbox has
+        # no direct repository_id, only a task_id).
+        task_ids=_visible_task_ids(request)
+        running_sandboxes=sandboxes.running_count(repo_ids,task_ids)
+        cleanup_pending=sandboxes.count("status='CLEANUP_ELIGIBLE'",repo_ids,task_ids)
         # Dashboard is Task-centric (section 48): every count below comes
         # from TaskDecisionService.evaluate() (via task_card_view), the
         # same source Kanban/List/Detail use -- never a raw worktree
@@ -5225,7 +5226,14 @@ def create_app(settings=None):
         where=(" WHERE "+" AND ".join(clauses)) if clauses else ""
         rows=_filter_polymorphic(request,"sandbox",db.all(f"SELECT s.*,r.repo_name,t.title task_title FROM sandboxes s LEFT JOIN repositories r ON r.id=s.repository_id LEFT JOIN tasks t ON t.id=s.task_id{where} ORDER BY s.updated_at DESC",tuple(params)))
         repo_ids=_visible_repo_ids(request)
-        return render(request,"sandboxes.html",sandboxes=[sandbox_view(r) for r in rows],running=sandboxes.running_count(),max_running=settings.max_running_sandboxes,
+        # B5.2: this "running" badge is a capacity indicator ("N of
+        # max_running slots used" -- settings.max_running_sandboxes is
+        # itself a real, unfiltered, whole-process ceiling, so this
+        # badge deliberately mirrors that same scope, just tenant-
+        # filtered) -- independent of this page's own status/task/repo
+        # filters above (rows), which must never change what this
+        # number means.
+        return render(request,"sandboxes.html",sandboxes=[sandbox_view(r) for r in rows],running=sandboxes.running_count(repo_ids,_visible_task_ids(request)),max_running=settings.max_running_sandboxes,
                       filters={"status":status,"task_id":task_id,"repository_id":repository_id,"owner_type":owner_type,"profile":profile},
                       tasks=_filter_rows(db.all("SELECT id,title FROM tasks ORDER BY title"),_visible_task_ids(request)),
                       repositories=_filter_rows(db.all("SELECT * FROM repositories WHERE enabled=1"),repo_ids))

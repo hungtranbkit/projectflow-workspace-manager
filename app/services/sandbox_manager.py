@@ -86,15 +86,51 @@ class SandboxManager:
         return Path(row["repo_path"]) if row else None
 
     # ---- capacity -------------------------------------------------
-    def running_count(self) -> int:
+    def running_count(self, repo_ids: set | None = None, task_ids: set | None = None) -> int:
         """State-consistency audit finding: CLEANUP_ELIGIBLE is a
         retention-countdown label, not a runtime state -- that sandbox's
         real container is still up and consuming a capacity slot for
         the whole grace window (cleanup() is what actually tears it
         down, never mark_cleanup_eligible() alone). Excluding it here
         previously let more real containers run simultaneously than
-        max_running actually allows once any Task started completing."""
-        return self.db.one("SELECT COUNT(*) n FROM sandboxes WHERE status IN ('RUNNING','STARTING','PROVISIONING','CLEANUP_ELIGIBLE')")["n"]
+        max_running actually allows once any Task started completing.
+
+        B5.2 (docs/B5_TENANT_ISOLATION_COMPLETENESS.md): `repo_ids`/
+        `task_ids` (both None = unrestricted -- the exact AUTH_MODE=none
+        precedent every B1-B4 filter already uses) restrict the COUNT
+        to sandboxes resolvable to a visible repository (the direct
+        `repository_id` FK) or a visible task (the indirect-ownership
+        case -- e.g. a REPOSITORY_TEST-owned sandbox has no direct repo
+        FK, only a task_id) -- filtered BEFORE aggregation, never
+        computed globally then hidden after. Deliberately NOT the
+        default: capacity_available() below always calls this
+        unfiltered on purpose -- max_running is a genuine whole-process
+        Docker-daemon capacity ceiling, not a per-tenant quota, and
+        computing it from a partial view would let combined tenant
+        usage silently exceed the real limit."""
+        return self.count("status IN ('RUNNING','STARTING','PROVISIONING','CLEANUP_ELIGIBLE')", repo_ids, task_ids)
+
+    def count(self, status_clause: str, repo_ids: set | None = None, task_ids: set | None = None) -> int:
+        """The general tenant-scoped sandbox COUNT running_count() itself
+        is built on -- exposed so other B5.2 call sites (the dashboard's
+        own cleanup_pending count, app/main.py) reuse the exact same
+        repository_id-direct-FK-or-task_id-indirect-ownership union
+        instead of a second implementation of it."""
+        if repo_ids is None and task_ids is None:
+            return self.db.one(f"SELECT COUNT(*) n FROM sandboxes WHERE {status_clause}")["n"]
+        repo_ids = repo_ids or set()
+        task_ids = task_ids or set()
+        clauses = []
+        params: list = []
+        if repo_ids:
+            clauses.append(f"repository_id IN ({','.join('?' for _ in repo_ids)})")
+            params.extend(repo_ids)
+        if task_ids:
+            clauses.append(f"(repository_id IS NULL AND task_id IN ({','.join('?' for _ in task_ids)}))")
+            params.extend(task_ids)
+        if not clauses:
+            return 0
+        return self.db.one(f"SELECT COUNT(*) n FROM sandboxes WHERE {status_clause} AND ({' OR '.join(clauses)})", tuple(params))["n"]
 
     def capacity_available(self) -> bool:
         return self.running_count() < self.max_running

@@ -39,23 +39,41 @@ than assume this register is still accurate elsewhere without checking.
   which predates E9's own `SecurityReviewService`. Cosmetic.
 - **UI complexity**: 13 Change Detail tabs, no Simple/Advanced mode
   split yet (P0.12 proposal only, not implemented).
-- **`GitHubMergeService.available()` routes a purely local, no-network
-  `git remote get-url origin` check through `self.runner`** — under
-  `AUTH_MODE=required` with no PAT/App configured, `self.runner` is
-  B0.7's/B3.1's own credential-resolving wrapper, which raises
-  `GitHubIntegrationError` for ANY call routed through it, including
-  this one that needs no credential at all. Found while building B4.1's
-  own `github_owner_repo()` (which hit this exact bug immediately and
-  was fixed to call `_default_runner` directly instead) — `available()`
-  itself was left unchanged: every existing call site already only
-  reaches it once real credentials are about to be needed for what
-  comes next, so it hasn't surfaced as a live bug, but it's the same
-  latent gap. Worth the same direct-call fix if it ever does.
 - **`pip`** (the installer, not a `pyproject.toml`-declared dependency)
   had 7 known advisories in this venv's 25.1.1 — upgraded locally to
   26.2.1 during B2's audit (an environment fix, not a repo change; a
   fresh venv bootstrap picks up whatever pip it starts with, not
   something this repo pins).
+
+## ALREADY_RESOLVED (B5, 2026-09 — see docs/B5_TENANT_ISOLATION_COMPLETENESS.md)
+
+- **`GitHubMergeService.available()` routes a purely local, no-network
+  `git remote get-url origin` check through `self.runner`** — B5.1,
+  fixed at the real root cause: `make_hosted_runner()`/`make_
+  installation_token_runner()` (`app/services/github_merge_service.py`)
+  now recognize this one exact, credential-free git invocation
+  (`_needs_no_credential()`, an exact match, never a prefix/substring
+  test) and skip their own credential requirement for it — `self.
+  runner`, the class's own established DI seam, stays intact for every
+  caller, including every existing test that injects a fake runner.
+  **Correction made during this phase's own implementation:** the
+  first draft instead made `available()` call `_default_runner`
+  directly (copying B4.1's own `github_owner_repo()`, which turned out
+  to have this exact same latent bug) — that broke 60 tests across 7
+  files whose own fake-runner injection this bypass defeated; caught
+  by this phase's own full regression run, fixed properly, both
+  methods re-verified against the same suite afterward (0 failures).
+- **Dashboard's/`/sandboxes`' `running`/`cleanup_pending` sandbox
+  counts were unfiltered aggregate COUNTs across every org** — B5.2,
+  fixed by filtering BEFORE aggregation (`SandboxManager.
+  running_count()`/`.count()` gain optional `repo_ids`/`task_ids`
+  params, reusing `AuthzService.visible_repository_ids()`/
+  `visible_task_ids()`, both already built in B1) — real evidence via
+  sandboxes created in two different orgs, count-difference asserted
+  directly. `capacity_available()`'s own call site is deliberately left
+  unfiltered — `max_running_sandboxes` is a real whole-process Docker-
+  daemon ceiling, never a per-tenant quota, proven unaffected with a
+  real multi-org test hitting the true combined limit.
 
 ## ALREADY_RESOLVED (B4, 2026-09 — see docs/B4_GITHUB_WEBHOOK_STATUS_INGESTION.md)
 

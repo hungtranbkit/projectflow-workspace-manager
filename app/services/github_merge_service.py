@@ -100,6 +100,22 @@ def token_runner(token: str):
     return runner
 
 
+# B5.1 (docs/B5_TENANT_ISOLATION_COMPLETENESS.md): the exact, narrow
+# set of git invocations that read ONLY local `.git/config` -- no
+# network, no GitHub authentication of any kind -- so make_hosted_
+# runner()/make_installation_token_runner() below must never require a
+# resolved credential for them. Exact-match on purpose (never a prefix/
+# substring test): a broader match risks accidentally exempting a real
+# network call (push/fetch/gh) from the credential requirement those
+# functions exist to enforce, which would be a real security regression
+# far worse than the bug this fixes.
+_LOCAL_ONLY_GIT_COMMANDS = {("git", "remote", "get-url", "origin")}
+
+
+def _needs_no_credential(argv: list[str]) -> bool:
+    return tuple(argv) in _LOCAL_ONLY_GIT_COMMANDS
+
+
 def make_hosted_runner(db, secrets_service):
     """The actual `AUTH_MODE=required` runner constructed once at app
     startup (`GitHubMergeService(runner=make_hosted_runner(db,
@@ -113,8 +129,17 @@ def make_hosted_runner(db, secrets_service):
     token at construction time (which would be wrong the moment two
     different organizations' repositories are both in play, and stale
     the moment a token is rotated mid-process). Stateless and
-    thread-safe: no shared mutable credential is ever held on `self`."""
+    thread-safe: no shared mutable credential is ever held on `self`.
+
+    B5.1: `_needs_no_credential()` short-circuits straight to
+    `_default_runner` for the narrow, exact-matched set of purely local
+    git invocations (currently just `git remote get-url origin`) that
+    never touch the network -- available()/github_owner_repo() call
+    this same self.runner seam for exactly that check, and must not be
+    forced through a credential requirement they don't actually need."""
     def runner(argv: list[str], cwd, timeout: int = 30) -> subprocess.CompletedProcess:
+        if _needs_no_credential(argv):
+            return _default_runner(argv, cwd, timeout)
         repo = db.one("SELECT organization_id FROM repositories WHERE repo_path=?", (str(cwd),))
         org_id = repo["organization_id"] if repo else None
         token = secrets_service.get_for_use(org_id, "github_token") if org_id else None
@@ -142,8 +167,13 @@ def make_installation_token_runner(db, github_app_service):
     GitHubIntegrationError("INSTALLATION_UNAVAILABLE", ...) shape
     make_hosted_runner's own "no token configured" case already uses --
     every existing GitHubMergeService caller needs no change, exactly
-    ADR-001's own "Migration path" requirement."""
+    ADR-001's own "Migration path" requirement.
+
+    B5.1: same `_needs_no_credential()` short-circuit as make_hosted_
+    runner() above, for the same reason."""
     def runner(argv: list[str], cwd, timeout: int = 30) -> subprocess.CompletedProcess:
+        if _needs_no_credential(argv):
+            return _default_runner(argv, cwd, timeout)
         repo = db.one("SELECT organization_id FROM repositories WHERE repo_path=?", (str(cwd),))
         org_id = repo["organization_id"] if repo else None
         org = db.one("SELECT github_installation_id FROM organizations WHERE id=?", (org_id,)) if org_id else None
@@ -175,7 +205,19 @@ class GitHubMergeService:
         remote must actually be a github.com URL. Whether `gh` is
         authenticated is discovered by the real API calls themselves
         (create_pr/pr_status/merge_pr), never assumed true just because
-        the remote looks right."""
+        the remote looks right.
+
+        B5.1 (docs/B5_TENANT_ISOLATION_COMPLETENESS.md): still calls
+        `self.runner`, deliberately -- an earlier draft of this fix
+        called `_default_runner` directly instead, which broke every
+        test that injects a fake `runner` (the established DI seam
+        this whole class is built around) to simulate "GitHub is
+        configured," since a bypassed seam never sees that fake. The
+        actual fix belongs one layer down: `make_hosted_runner()`/
+        `make_installation_token_runner()` themselves now recognize
+        this exact local, credential-free git invocation and skip
+        their own credential requirement for it -- see
+        `_needs_no_credential()`'s own docstring."""
         try:
             r = self.runner(["git", "remote", "get-url", "origin"], repo_path)
             return r.returncode == 0 and "github.com" in (r.stdout or "")
@@ -191,24 +233,13 @@ class GitHubMergeService:
         trailing `.git`); returns None for anything else (not a GitHub
         remote, or the check itself failed) -- never a guess.
 
-        Deliberately uses `_default_runner` directly, NEVER `self.
-        runner` -- under AUTH_MODE=required, `self.runner` is
-        make_hosted_runner()'s/make_installation_token_runner()'s own
-        credential-resolving wrapper (B0.7/B3.1), which requires a
-        resolved org token/installation for EVERY call routed through
-        it, including ones that need no such thing. `git remote get-url`
-        reads local `.git/config` only -- no network, no GitHub
-        authentication of any kind -- so routing it through a
-        credential-gated runner would make this "local, no-network"
-        helper spuriously fail (GitHubIntegrationError) for any org
-        with no PAT/App configured, which is exactly the common case
-        this phase's own read-only, best-effort ingestion must not
-        break on. available()'s own identical direct `self.runner` call
-        above has this same latent gap (pre-existing, predates B4, not
-        touched here -- available() is only ever called from routes
-        already gated on real credentials being needed for what comes
-        next, so it hasn't surfaced as a real bug in practice the way
-        it immediately did for this new, credential-independent method)."""
+        Uses `self.runner` (the same DI seam every other method here
+        does -- NOT a direct `_default_runner` call, B5.1's own
+        correction of this exact same mistake made when this method was
+        first written in B4; see available()'s own docstring for the
+        real reason). `make_hosted_runner()`/`make_installation_token_
+        runner()` recognize this exact local git invocation and skip
+        their own credential requirement for it."""
         try:
             r = _default_runner(["git", "remote", "get-url", "origin"], repo_path)
         except Exception:
