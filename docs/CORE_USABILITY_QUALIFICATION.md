@@ -410,6 +410,37 @@ for the rest of this program: never edit checkout files while a
 real-agent test that inspects `git status` of its own checkout is
 running in the background.
 
+**P1-6, evidence — first real-browser pass, 16/16 pass.**
+`tests/test_ui_high_frequency_screens.py`: a real uvicorn server (a
+free ephemeral port, disposable DB/worktree root) + real Playwright/
+Chromium navigation over dashboard, repositories, tasks, kanban,
+agents/live, changes, task detail, and change detail (with its own
+Reviews/Release tabs proven reachable, not dead links) — at both a
+1280px desktop and a real 375px mobile viewport. No real browser
+console errors on any screen, no horizontal overflow at either width,
+no dead link from the dashboard to any other named screen. No P1
+usability defect found on this first pass; nothing needed fixing.
+
+**P1-7, re-measured — the A1 list/change performance fix's own
+architectural signal is intact; wall-clock timing on this host is not
+currently a reliable regression indicator.** `scripts/benchmark_
+changes_list.py 100` (N=100 Changes × 5 Tasks): `db.connect()=1806`
+(~18/Change), matching `docs/TRACK_A1_PERFORMANCE_AND_SIMPLE_MODE.md`'s
+own documented post-fix target almost exactly — the bounded-query-count
+architecture A1 built is verified still in place, not regressed.
+Wall-clock (`GET /changes`: ~2.3-2.7s) is slower than A1's own
+documented **1.9s** figure at the same N, but this machine is a shared,
+multi-tenant host: `uptime` showed a load average of 3.9-5.6 on 12
+cores with `ps aux` confirming multiple, genuinely unrelated processes
+(another project's own pytest suite and several of its own uvicorn
+instances) actively running throughout this measurement, both with and
+without this program's OWN concurrent test load also active. Given the
+query-count evidence (the architecturally meaningful, host-independent
+signal) shows no regression, and wall-clock time on this specific host
+cannot currently be measured in isolation, this is reported honestly as
+inconclusive-on-wall-clock rather than claimed as either a clean pass
+or a regression — no fix attempted against an unconfirmed target.
+
 ## Stop condition
 
 PASS requires every P0 area closed (fixed or evidenced as already
