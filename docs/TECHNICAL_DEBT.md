@@ -15,11 +15,13 @@ than assume this register is still accurate elsewhere without checking.
 
 ## IMPORTANT
 
-- **Workspace identity is permanent** (`agent_workspaces.branch`/
-  `.worktree_path` UNIQUE, rows never deleted). The one workaround —
-  create a new Task rather than reuse the old one — is proven and
-  documented (ARCHITECTURE.md), but it is a real constraint a future
-  UI/automation layer must design around, not assume away.
+- **Workspace slot identity is permanent by design** (`agent_workspaces.
+  branch`/`.worktree_path` UNIQUE, rows never deleted). The one
+  workaround — create a new Task rather than reuse the old one — is
+  proven and documented (ARCHITECTURE.md), re-examined again at B7 with
+  no new evidence of insufficiency. Still a real constraint a future
+  UI/automation layer must design around, not assume away. (Distinct
+  from *repository* identity, which B7.1 fixed — see ALREADY_RESOLVED.)
 - **Real-provider structured-invocation layer still has a bounded,
   not unlimited, failure surface** — P0.8's retry (this audit) handles
   one class of transient failure; a persistently-unavailable provider
@@ -34,9 +36,6 @@ than assume this register is still accurate elsewhere without checking.
   gates (`review_fix_orchestrator.review_pass()`/`security_pass()`,
   `WorkflowService._gate_review_pass`/`_gate_security_pass`) already
   filter correctly — but worth tightening for consistency.
-- **`SECURITY_PASS` gate's docstring is stale** (`workflow_engine.py`)
-  — says "ProjectFlow has no distinct security-review data source yet",
-  which predates E9's own `SecurityReviewService`. Cosmetic.
 - **UI complexity**: 13 Change Detail tabs, no Simple/Advanced mode
   split yet (P0.12 proposal only, not implemented).
 - **`pip`** (the installer, not a `pyproject.toml`-declared dependency)
@@ -44,6 +43,25 @@ than assume this register is still accurate elsewhere without checking.
   26.2.1 during B2's audit (an environment fix, not a repo change; a
   fresh venv bootstrap picks up whatever pip it starts with, not
   something this repo pins).
+
+## ALREADY_RESOLVED (B7, 2026-09 — see docs/B7_WORKSPACE_REPOSITORY_IDENTITY.md)
+
+- **Repository identity was the filesystem path alone** — a renamed or
+  moved repository directory re-registered as an orphaned duplicate row,
+  disconnected from every Task/Change/Release/evidence row the old id
+  still owned. B7.1: `repositories.git_fingerprint` (a real git
+  root-commit-SHA hash, never the remote URL alone) plus a 4-branch
+  register() policy that rebinds the existing row only on deterministic
+  evidence (fingerprint match + old path confirmed missing), and a
+  bounded idempotent startup backfill for rows registered before B7.
+- **`SECURITY_PASS` gate's docstring being stale was itself stale
+  information** — this register previously claimed
+  `WorkflowService._gate_security_pass()`'s docstring still said
+  "ProjectFlow has no distinct security-review data source yet"; reading
+  the actual current source at B7 found that docstring was already
+  corrected (labeled "E9.24"), predating Track B entirely. The register
+  entry, not the code, was out of date — removed rather than re-fixing
+  code that was never actually broken.
 
 ## ALREADY_RESOLVED (B6, 2026-09 — see docs/B6_TRUSTED_PROXY_SUPPORT.md)
 

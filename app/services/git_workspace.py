@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import subprocess
 from dataclasses import dataclass
@@ -48,6 +49,35 @@ class GitWorkspaceService:
         return p
     def repo_slug(self, repo: Path) -> str:
         return slugify(repo.name)
+    def repo_fingerprint(self, path: str | Path) -> str | None:
+        """B7.1 (docs/B7_WORKSPACE_REPOSITORY_IDENTITY.md): DERIVED_
+        TRUTH -- a real, local, no-network git call, never the remote
+        URL alone (survives a rename/move/re-clone/remote change,
+        works for a local-only repo with no remote at all, never reads
+        or leaks anything from the remote config). `git rev-list
+        --max-parents=0 HEAD` returns every root commit reachable from
+        HEAD (almost always exactly one; more than one only for a
+        history that merged in genuinely unrelated roots) -- sorted
+        (order-independent) and SHA-256'd together into one comparable
+        value. None on any failure (no commits yet, not a git repo,
+        HEAD unborn) -- never a guessed/partial fingerprint. Known,
+        accepted limitation (not fixed here): a SHALLOW clone's
+        synthetic grafted root is not the true history root, so a
+        shallow and a full clone of the same repo can fingerprint
+        differently -- ProjectFlow's own registration flow always
+        operates on operator-supplied local checkouts, not CI-style
+        shallow clones, so this is real but low-probability for this
+        codebase's actual usage."""
+        try:
+            result = self._run(["git", "rev-list", "--max-parents=0", "HEAD"], Path(path), check=False)
+        except Exception:
+            return None
+        if result.returncode != 0:
+            return None
+        roots = sorted(line.strip() for line in result.stdout.splitlines() if line.strip())
+        if not roots:
+            return None
+        return hashlib.sha256(",".join(roots).encode("utf-8")).hexdigest()
     def _run(self, argv: list[str], cwd: Path, check=True, timeout=None) -> CommandResult:
         try: proc = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout or self.timeout, shell=False)
         except subprocess.TimeoutExpired as exc: raise GitCommandError(f"Command timed out: {argv[0:2]}") from exc

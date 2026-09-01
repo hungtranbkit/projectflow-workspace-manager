@@ -121,6 +121,20 @@ def create_app(settings=None):
             "before this app will start.")
     secrets_service = SecretsService(db, list(settings.secret_encryption_keys))
     git = GitWorkspaceService(settings.root, worktree_root=settings.worktree_root); launcher = TerminalLauncherService(settings, git)
+    # B7.1 (docs/B7_WORKSPACE_REPOSITORY_IDENTITY.md): a bounded,
+    # idempotent startup backfill -- computes git_fingerprint for any
+    # repository row registered before B7 (still NULL) whose path
+    # currently exists. Self-healing on every restart (a row that was
+    # missing at one startup and reappears by the next one gets
+    # fingerprinted then, no separate recovery step needed); a genuinely
+    # gone path or a fingerprint-less repo (no commits) just stays NULL,
+    # never a guess. Cheap: one local git call per not-yet-fingerprinted
+    # row, only ever runs once per row for the lifetime of that row.
+    for _row in db.all("SELECT id, repo_path FROM repositories WHERE git_fingerprint IS NULL"):
+        if Path(_row["repo_path"]).is_dir():
+            _fp = git.repo_fingerprint(_row["repo_path"])
+            if _fp:
+                db.execute("UPDATE repositories SET git_fingerprint=? WHERE id=?", (_fp, _row["id"]))
     # B1.2 (docs/B1_HOSTED_SERVICE_READ_ISOLATION.md, app/services/
     # ssrf_guard.py): a tenant's own PROJECT.yaml health-check URL is
     # validated (loopback/private/link-local/metadata-address rejected)
@@ -1888,17 +1902,76 @@ def create_app(settings=None):
     @app.get("/help", response_class=HTMLResponse)
     def help_page(request: Request): return render(request, "help.html")
 
+    def _repositories_with_identity_flags(rows: list) -> list:
+        """B7.1: two LIVE, computed-not-stored signals per row -- never
+        persisted, so they're always current, and a directory that
+        comes back (or a row that gets cleanly rebound) stops showing a
+        flag on the very next read, with nothing to invalidate. `path_missing`:
+        a real `Path.is_dir()` check. `possible_duplicate_of`: another
+        row (by id) sharing the same real `git_fingerprint` whose OWN
+        path is ALSO currently real (an ambiguous case -- see
+        register()'s own docstring; a fingerprint match against a
+        MISSING row is instead auto-rebound there, never surfaced as a
+        loose end here)."""
+        by_fp: dict[str, list[int]] = {}
+        for r in rows:
+            if r["git_fingerprint"]:
+                by_fp.setdefault(r["git_fingerprint"], []).append(r["id"])
+        out = []
+        for r in rows:
+            r = dict(r)
+            r["path_missing"] = not Path(r["repo_path"]).is_dir()
+            dupes = [rid for rid in by_fp.get(r["git_fingerprint"] or "", []) if rid != r["id"]] if r["git_fingerprint"] else []
+            r["possible_duplicate_of"] = dupes[0] if dupes and not r["path_missing"] else None
+            out.append(r)
+        return out
+
     @app.get("/repositories", response_class=HTMLResponse)
-    def repositories(request: Request): return render(request,"repositories.html",repositories=_filter_rows(db.all("SELECT * FROM repositories ORDER BY repo_name"),_visible_repo_ids(request)),discovered=discover_repositories(settings.root))
+    def repositories(request: Request):
+        rows=_filter_rows(db.all("SELECT * FROM repositories ORDER BY repo_name"),_visible_repo_ids(request))
+        return render(request,"repositories.html",repositories=_repositories_with_identity_flags(rows),discovered=discover_repositories(settings.root))
     @app.post("/api/repositories")
     def register(request: Request, repo_path: str=Form(...), repo_name: str=Form(""), default_branch: str=Form("main"), _csrf: None = Depends(_mutating_csrf)):
+        """B7.1 (docs/B7_WORKSPACE_REPOSITORY_IDENTITY.md): a renamed/
+        moved repo directory used to re-register as an orphaned
+        duplicate, disconnected from every Task/Change/Release row the
+        OLD row's id still owned. Now resolved by real evidence, never
+        guessed: (a) the SAME path re-registers exactly as before
+        (update-in-place, unchanged). (b) a NEW path whose fingerprint
+        matches EXACTLY ONE existing row, and that row's OWN old path
+        is confirmed missing from disk right now, is deterministic
+        evidence of a move -- rebinds that EXISTING row (same id, same
+        org link, same history) instead of inserting a new one;
+        github_owner_repo is cleared so it recomputes fresh (closing
+        B4.1's own remote-change staleness gap). (c) a fingerprint
+        match where the OTHER row's path still exists is ambiguous
+        (could be a real accidental duplicate, or a deliberately-kept-
+        separate second clone) -- registers as its own new row, exactly
+        like before, NEVER silently merged; surfaced as a live
+        possible-duplicate flag on /repositories instead. (d) no
+        fingerprint match -- ordinary new registration, unchanged."""
         # B0.3: registering a brand-new repository carries no org
         # reference at all yet (it doesn't belong to one until a later
         # /orgs/{id}/repositories/link) -- identity only, no role to check.
         _require_login_only(request)
         path=git.validate_repo(repo_path); default_branch=git.validate_branch(default_branch)
         if not git.base_exists(path,default_branch): raise GitSafetyError("Default branch missing")
-        db.execute("INSERT INTO repositories(repo_name,repo_path,default_branch) VALUES(?,?,?) ON CONFLICT(repo_path) DO UPDATE SET enabled=1,repo_name=excluded.repo_name,default_branch=excluded.default_branch",(slugify(repo_name or path.name),str(path),default_branch))
+        fingerprint=git.repo_fingerprint(path)
+        existing_same_path=db.one("SELECT id FROM repositories WHERE repo_path=?",(str(path),))
+        if not existing_same_path and fingerprint:
+            candidates=db.all("SELECT * FROM repositories WHERE git_fingerprint=?",(fingerprint,))
+            missing=[c for c in candidates if not Path(c["repo_path"]).is_dir()]
+            if len(missing)==1:
+                old=missing[0]
+                db.execute(
+                    "UPDATE repositories SET repo_path=?,enabled=1,repo_name=?,default_branch=?,git_fingerprint=?,github_owner_repo=NULL WHERE id=?",
+                    (str(path),slugify(repo_name or path.name),default_branch,fingerprint,old["id"]))
+                db.event("repository",old["id"],"REPOSITORY_REBOUND",f"old_path={old['repo_path']} new_path={path}")
+                return RedirectResponse("/repositories",303)
+        db.execute(
+            "INSERT INTO repositories(repo_name,repo_path,default_branch,git_fingerprint) VALUES(?,?,?,?) "
+            "ON CONFLICT(repo_path) DO UPDATE SET enabled=1,repo_name=excluded.repo_name,default_branch=excluded.default_branch,git_fingerprint=excluded.git_fingerprint",
+            (slugify(repo_name or path.name),str(path),default_branch,fingerprint))
         return RedirectResponse("/repositories",303)
     @app.get("/api/repositories")
     def api_repos(request: Request): return _filter_rows(db.all("SELECT * FROM repositories"),_visible_repo_ids(request))

@@ -179,6 +179,7 @@ button.is-loading::before,.button.is-loading::before{content:'';position:absolut
 .phase-card h3{font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
 .phase-card .wf-checklist{margin-bottom:0}
 .cards .warn{border-top:3px solid var(--amber)}
+small.warn{color:var(--amber);font-weight:600}
 .hd-item{padding:14px 0;border-bottom:1px solid var(--line)}
 .hd-item:last-child{border-bottom:0}
 .hd-item b{display:block;margin-bottom:4px}

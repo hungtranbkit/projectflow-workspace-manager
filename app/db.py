@@ -1578,6 +1578,20 @@ ALTER TABLE merge_records ADD COLUMN webhook_ci_status TEXT;
 ALTER TABLE merge_records ADD COLUMN webhook_mergeability TEXT;
 ALTER TABLE merge_records ADD COLUMN webhook_updated_at TEXT;
 """),
+    # B7.1 (docs/B7_WORKSPACE_REPOSITORY_IDENTITY.md): `repositories.
+    # repo_path` is the ONLY durable identity a repository has today --
+    # a renamed/moved directory re-registers as an orphaned duplicate,
+    # disconnected from every Task/Change/Release/evidence row the OLD
+    # id still owns. `git_fingerprint` is DERIVED_TRUTH (a real git
+    # root-commit-SHA hash, GitWorkspaceService.repo_fingerprint() --
+    # never the remote URL alone, survives a rename/move/re-clone/
+    # remote change, works for a local-only repo with no remote at
+    # all) -- nullable, computed lazily (at registration, and via a
+    # bounded startup backfill for rows registered before B7), never a
+    # guess when a repo has no commits to fingerprint.
+    (37, """
+ALTER TABLE repositories ADD COLUMN git_fingerprint TEXT;
+"""),
 ]
 
 

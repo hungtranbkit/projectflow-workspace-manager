@@ -95,3 +95,17 @@ git-level cleanup. The only working recovery pattern (proven in both
 E13's own suite and this audit's golden fixture) is a genuinely new
 Task carrying the retried intent forward, with the original Task marked
 `CANCELLED` — never "a fresh worktree for the same Task."
+
+This is workspace *slot* identity — distinct from *repository*
+identity, which used to be the filesystem path alone (a renamed/moved
+repo directory re-registered as an orphaned duplicate row). B7.1
+(`docs/B7_WORKSPACE_REPOSITORY_IDENTITY.md`) fixed that: `repositories.
+git_fingerprint` is a real, local, git-derived identity (SHA-256 of the
+sorted root-commit SHAs, `GitWorkspaceService.repo_fingerprint()`) that
+survives a rename/move/re-clone/remote change, and `register()` rebinds
+the existing row rather than duplicating it whenever the evidence for
+that is deterministic (fingerprint match + the old path confirmed
+missing). The workspace-slot limitation above remains unchanged and
+unfixed by B7 — re-examined again this phase, still no new evidence
+that today's "start a new Task" recovery pattern is actually
+insufficient in practice.
