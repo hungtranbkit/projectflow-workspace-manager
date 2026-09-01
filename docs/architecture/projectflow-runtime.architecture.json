@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "ProjectFlow Runtime Architecture",
-    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0.1-B0.7 + B1.1-B1.2 implemented",
+    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0-B3 implemented",
     "output": "projectflow-runtime.architecture.html",
     "animation": "trace",
     "visual_preset": "signal-flow",
@@ -14,7 +14,7 @@
     ],
     "repository": {
       "url": "https://github.com/hungtranbkit/projectflow-workspace-manager",
-      "revision": "b69d656fc0ba9ae481e116e6d196f2ba698ec74f"
+      "revision": "1f78d5b3042d9057279078369c82b9e6a6969c86"
     },
     "views": [
       {
@@ -51,7 +51,7 @@
           "github_integration",
           "background"
         ],
-        "note": "A Builder runs via the Supervisor; commands run host-side (none) or sandboxed (required, B0.6); GitHub via gh CLI or a stored PAT (B0.7)."
+        "note": "Builder runs via the Supervisor; sandboxed when required (B0.6); GitHub via gh CLI, an App install (B3.1), or a stored PAT (B0.7)."
       }
     ]
   },
@@ -86,7 +86,7 @@
       "sources": [
         {
           "path": "app/main.py",
-          "line": 102,
+          "line": 104,
           "label": "create_app()"
         }
       ]
@@ -135,12 +135,12 @@
         },
         {
           "path": "app/main.py",
-          "line": 542,
+          "line": 557,
           "label": "require_role()"
         },
         {
           "path": "app/main.py",
-          "line": 608,
+          "line": 623,
           "label": "require_read_role()"
         }
       ]
@@ -235,7 +235,7 @@
       "sources": [
         {
           "path": "app/db.py",
-          "line": 1555,
+          "line": 1564,
           "label": "Database"
         }
       ]
@@ -302,7 +302,7 @@
       "id": "github_integration",
       "type": "external",
       "label": "GitHub",
-      "sublabel": "host gh CLI, or a stored PAT (B0.7)",
+      "sublabel": "gh CLI, App install (B3.1), or a PAT (B0.7)",
       "tag": "PARTIAL",
       "pos": [
         830,
@@ -315,8 +315,13 @@
       "sources": [
         {
           "path": "app/services/github_merge_service.py",
-          "line": 117,
+          "line": 153,
           "label": "GitHubMergeService"
+        },
+        {
+          "path": "app/services/github_app_service.py",
+          "line": 88,
+          "label": "GitHubAppService"
         }
       ]
     }
@@ -419,7 +424,7 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "Implemented (current HEAD) -- B0.1-B0.7 + B1.1-B1.2",
+      "title": "Implemented (current HEAD) -- B0 through B3",
       "items": [
         "AuthN: email magic-link, API tokens, self-hosted bootstrap (B0.1)",
         "Organizations/tenants: membership, roles, invitations (B0.2)",
@@ -430,6 +435,9 @@
         "Encrypted org-scoped secret store + transcript/log redaction (B0.7)",
         "GET-route cross-org read isolation: require_read_role() + list filtering (B1.1)",
         "SSRF guard on tenant health-check URLs, AUTH_MODE=required only (B1.2)",
+        "releases._next_version() concurrency race fixed with real thread evidence (B2.1)",
+        "GitHub App JWT signing + installation-token minting + HMAC webhook (B3.1)",
+        "GET /health readiness endpoint, fails closed on a real DB check (B3.2)",
         "AUTH_MODE=none: zero new surface, the permanent self-hosted default (ADR-004)"
       ]
     },
@@ -437,9 +445,9 @@
       "dot": "amber",
       "title": "Known, explicitly deferred residual gaps",
       "items": [
-        "B0.7's GitHub consumer is a simplified per-org PAT, not ADR-001's full GitHub-App/JWT/installation-token design",
+        "Registering a real GitHub App on github.com is unbuilt -- needs a human GitHub account (B3.1 residual)",
         "Dashboard's running-sandbox/cleanup-pending counts stay unfiltered aggregate counts (B1.1 residual, low severity)",
-        "releases._next_version() SELECT-then-INSERT race -- real, deferred to B2+ per TECHNICAL_DEBT.md"
+        "pytest advisory PYSEC-2026-1845 needs a major-version decision, not made unilaterally (B2.3 residual)"
       ]
     }
   ]
