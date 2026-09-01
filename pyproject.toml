@@ -38,7 +38,14 @@ dependencies = ["fastapi>=0.110,<1", "uvicorn>=0.27,<1", "jinja2>=3.1,<4", "pyth
     "cryptography>=42,<51"]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9", "httpx>=0.27,<1"]
+# B4 (docs/B4_GITHUB_WEBHOOK_STATUS_INGESTION.md): B2/B3's own pip-audit
+# both flagged PYSEC-2026-1845 against pytest 8.4.2 (fixed 9.0.3) but
+# deferred bumping it as "a real compatibility decision, not made
+# unilaterally" -- re-examined here with real evidence instead of
+# assumption: pytest>=9,<10 installed, the full fast non-real suite
+# (1080+ tests) collected and ran clean, zero failures, before this pin
+# moved. Same "verify, then adopt" pattern as B2's cryptography bump.
+test = ["pytest>=9,<10", "httpx>=0.27,<1"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

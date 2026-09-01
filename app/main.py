@@ -32,7 +32,7 @@ from app.services.agent_session_manager import AgentSessionManager, SessionError
 from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source, LIVE_SESSION_STATUSES, humanize_blocker
 from app.services.user_state_view import user_task_state, progress_summary, humanize_enum
 from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
-from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES, make_hosted_runner, make_installation_token_runner
+from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES, FAIL_CONCLUSIONS, make_hosted_runner, make_installation_token_runner
 from app.services.github_app_service import GitHubAppService
 from app.services.operations import OperationInProgress, OperationService
 from app.services.deployment_service import DeploymentService, DeploymentError
@@ -1183,6 +1183,56 @@ def create_app(settings=None):
             raise HTTPException(400, str(e))
         return RedirectResponse(f"/orgs/{org_id}", 303)
 
+    # ---- B4.1/B4.3: webhook PR/CI ingestion (ADR-001's "phase 2") --------
+    def _resolve_repo_id_by_full_name(full_name: str) -> int | None:
+        """github_owner_repo is DERIVED_TRUTH (see github_merge_service.
+        py's own github_owner_repo() docstring) -- computed lazily, on
+        first webhook lookup, for whichever registered repositories
+        haven't been resolved yet, rather than eagerly at registration
+        time (no live/local check is forced onto the register-repo path
+        just to serve a feature that may never receive a single webhook
+        for that repo)."""
+        row = db.one("SELECT id FROM repositories WHERE github_owner_repo=?", (full_name,))
+        if row:
+            return row["id"]
+        for r in db.all("SELECT id, repo_path FROM repositories WHERE github_owner_repo IS NULL"):
+            computed = github_merge.github_owner_repo(r["repo_path"])
+            if computed:
+                db.execute("UPDATE repositories SET github_owner_repo=? WHERE id=?", (computed, r["id"]))
+                if computed == full_name:
+                    return r["id"]
+        return None
+
+    def _github_webhook_update(repo_id: int, *, pr_number: int | None = None, head_sha: str | None = None,
+                                ci_status: str | None = None, mergeability: str | None = None) -> None:
+        """The one place any of the three ingested event types writes --
+        matches an existing merge_records row via its own EXISTING
+        pr_number/head_sha columns (E10's own migration 10, kept fresh
+        by the live-poll path -- B4 only ever READS them here to find
+        the right row, never writes them; that stays the live-poll
+        path's own job unchanged). A PR/commit this row's pr_number/
+        head_sha don't (yet) know about -- e.g. a webhook arriving
+        before ProjectFlow's own create_pr() call has recorded this
+        exact PR -- is a safe no-op (this phase's own doc, acceptance
+        criterion 2), not an error. Only ever writes the NEW webhook_*
+        columns, distinct from ci_status/mergeability. Naturally
+        idempotent: a plain UPDATE to "current known state," safe under
+        GitHub's own at-least-once redelivery guarantee -- redelivering
+        the identical payload just writes the identical values again,
+        never a duplicate row (this phase's own doc, criterion 2b)."""
+        row = (db.one("SELECT id FROM merge_records WHERE repository_id=? AND pr_number=?", (repo_id, pr_number))
+               if pr_number is not None else None)
+        if not row and head_sha:
+            row = db.one("SELECT id FROM merge_records WHERE repository_id=? AND head_sha=?", (repo_id, head_sha))
+        if not row:
+            return
+        fields, params = [], []
+        if ci_status is not None: fields.append("webhook_ci_status=?"); params.append(ci_status)
+        if mergeability is not None: fields.append("webhook_mergeability=?"); params.append(mergeability)
+        fields.append("webhook_updated_at=CURRENT_TIMESTAMP")
+        params.append(row["id"])
+        db.execute(f"UPDATE merge_records SET {','.join(fields)} WHERE id=?", tuple(params))
+
     @app.post("/webhooks/github")
     async def github_webhook(request: Request):
         """ADR-001's own trust boundary #4: every inbound payload is
@@ -1191,13 +1241,20 @@ def create_app(settings=None):
         No CSRF (this is a server-to-server webhook, not a browser
         session -- the HMAC signature IS this route's own CSRF-
         equivalent) and no require_role() (GitHub itself is the caller,
-        not a logged-in ProjectFlow user). Handles `installation`
-        events with action `deleted` (ADR-001's own "Revoke, org-
-        initiated" offboarding flow); every other event/action is
-        accepted (200 -- the signature already proved it's genuinely
-        from GitHub) and ignored -- webhook-driven PR/check-run status
-        replacing polling is ADR-001's own explicit non-goal for this
-        initial cut."""
+        not a logged-in ProjectFlow user). Dispatches on the real
+        `X-Hub-Signature-256`-adjacent `X-GitHub-Event` header (not
+        merely guessed from payload shape -- every App-delivered
+        payload carries an `installation` object regardless of event
+        type, so checking for one is not sufficient to identify an
+        `installation` event specifically): `installation` events with
+        action `deleted` clear the org's installation id (ADR-001's own
+        "Revoke, org-initiated" flow, B3); `pull_request`/`check_run`/
+        `status` events update merge_records' read-only webhook snapshot
+        (B4.1-B4.3) -- ADR-001's own "worthwhile enhancement," never
+        used for a merge/gate decision (see this phase's own doc, Non-
+        goals). Every other event/action is accepted (200 -- the
+        signature already proved it's genuinely from GitHub) and
+        ignored."""
         if not settings.github_webhook_secret:
             raise HTTPException(404)
         body = await request.body()
@@ -1209,10 +1266,41 @@ def create_app(settings=None):
             payload = json.loads(body)
         except (TypeError, ValueError):
             raise HTTPException(400, "Invalid JSON payload")
-        if payload.get("action") == "deleted" and isinstance(payload.get("installation"), dict):
-            installation_id = payload["installation"].get("id")
-            if installation_id is not None:
-                org_service.clear_github_installation_by_installation_id(int(installation_id))
+        event = request.headers.get("x-github-event", "")
+        full_name = ((payload.get("repository") or {}).get("full_name"))
+        if event == "installation":
+            if payload.get("action") == "deleted" and isinstance(payload.get("installation"), dict):
+                installation_id = payload["installation"].get("id")
+                if installation_id is not None:
+                    org_service.clear_github_installation_by_installation_id(int(installation_id))
+        elif event == "pull_request" and full_name and isinstance(payload.get("pull_request"), dict):
+            repo_id = _resolve_repo_id_by_full_name(full_name)
+            if repo_id is not None:
+                pr = payload["pull_request"]
+                mergeability = "MERGED" if pr.get("merged") else (str(pr.get("mergeable_state") or "UNKNOWN")).upper()
+                _github_webhook_update(repo_id, pr_number=pr.get("number"), mergeability=mergeability)
+        elif event == "check_run" and full_name and isinstance(payload.get("check_run"), dict):
+            repo_id = _resolve_repo_id_by_full_name(full_name)
+            if repo_id is not None:
+                cr = payload["check_run"]
+                # Same mapping _parse()'s own live-poll path already
+                # uses (github_merge_service.py's FAIL_CONCLUSIONS) --
+                # one shared vocabulary for "what does this conclusion
+                # mean", not a second one invented here.
+                conclusion = (cr.get("conclusion") or "").upper()
+                ci_status = "PASS" if conclusion == "SUCCESS" else "FAIL" if conclusion in FAIL_CONCLUSIONS else "PENDING"
+                prs = cr.get("pull_requests") or []
+                if prs:
+                    for pr in prs:
+                        _github_webhook_update(repo_id, pr_number=pr.get("number"), ci_status=ci_status)
+                else:
+                    _github_webhook_update(repo_id, head_sha=cr.get("head_sha"), ci_status=ci_status)
+        elif event == "status" and full_name:
+            repo_id = _resolve_repo_id_by_full_name(full_name)
+            if repo_id is not None:
+                state = str(payload.get("state") or "").upper()
+                ci_status = "PASS" if state == "SUCCESS" else "FAIL" if state in ("FAILURE", "ERROR") else "PENDING"
+                _github_webhook_update(repo_id, head_sha=payload.get("sha"), ci_status=ci_status)
         return {"ok": True}
 
     # ---- B3.2: health/readiness -------------------------------------------

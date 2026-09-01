@@ -2,6 +2,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -35,6 +36,16 @@ path" section describes, ready to swap for a real App-based runner
 later without any call-site change."""
 
 PR_FIELDS = "number,url,state,mergeable,mergeStateStatus,headRefOid,baseRefName,statusCheckRollup,mergedAt,mergeCommit,title"
+
+# B4.1: matches both real forms `git remote get-url origin` produces for
+# a GitHub remote -- SSH ("git@github.com:owner/repo.git") and HTTPS
+# ("https://github.com/owner/repo[.git]"), trailing ".git" optional
+# either way. Anything else (a non-GitHub remote, GitHub Enterprise
+# Server's own different host, a malformed URL) intentionally does not
+# match -- github_owner_repo() returns None rather than guess.
+GITHUB_REMOTE_RE = re.compile(
+    r"^(?:git@github\.com:|(?:ssh|https?)://(?:git@)?github\.com/)"
+    r"(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$")
 
 # gh CLI's own `state` field is already the 3-value GitHub-normalizes-it-
 # for-you vocabulary (OPEN/CLOSED/MERGED), not the raw REST/GraphQL
@@ -170,6 +181,43 @@ class GitHubMergeService:
             return r.returncode == 0 and "github.com" in (r.stdout or "")
         except Exception:
             return False
+
+    def github_owner_repo(self, repo_path) -> str | None:
+        """B4.1 (docs/B4_GITHUB_WEBHOOK_STATUS_INGESTION.md): DERIVED_
+        TRUTH -- `git remote get-url origin`, parsed for the `owner/repo`
+        slug a webhook payload's own `repository.full_name` uses to
+        identify itself. Handles the two real forms git actually
+        produces for a GitHub remote (SSH and HTTPS, with or without a
+        trailing `.git`); returns None for anything else (not a GitHub
+        remote, or the check itself failed) -- never a guess.
+
+        Deliberately uses `_default_runner` directly, NEVER `self.
+        runner` -- under AUTH_MODE=required, `self.runner` is
+        make_hosted_runner()'s/make_installation_token_runner()'s own
+        credential-resolving wrapper (B0.7/B3.1), which requires a
+        resolved org token/installation for EVERY call routed through
+        it, including ones that need no such thing. `git remote get-url`
+        reads local `.git/config` only -- no network, no GitHub
+        authentication of any kind -- so routing it through a
+        credential-gated runner would make this "local, no-network"
+        helper spuriously fail (GitHubIntegrationError) for any org
+        with no PAT/App configured, which is exactly the common case
+        this phase's own read-only, best-effort ingestion must not
+        break on. available()'s own identical direct `self.runner` call
+        above has this same latent gap (pre-existing, predates B4, not
+        touched here -- available() is only ever called from routes
+        already gated on real credentials being needed for what comes
+        next, so it hasn't surfaced as a real bug in practice the way
+        it immediately did for this new, credential-independent method)."""
+        try:
+            r = _default_runner(["git", "remote", "get-url", "origin"], repo_path)
+        except Exception:
+            return None
+        if r.returncode != 0:
+            return None
+        url = (r.stdout or "").strip()
+        m = GITHUB_REMOTE_RE.match(url)
+        return f"{m.group('owner')}/{m.group('repo')}" if m else None
 
     def push_branch(self, repo_path, branch: str) -> None:
         """Real `git push` of the exact verified source branch to origin

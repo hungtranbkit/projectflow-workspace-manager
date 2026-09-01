@@ -1558,6 +1558,26 @@ CREATE INDEX IF NOT EXISTS idx_secret_access_log_org ON secret_access_log(org_id
     (35, """
 ALTER TABLE organizations ADD COLUMN github_installation_id INTEGER;
 """),
+    # B4 (docs/B4_GITHUB_WEBHOOK_STATUS_INGESTION.md, ADR-001's own
+    # "phase 2"): `github_owner_repo` is DERIVED_TRUTH -- parsed from
+    # `git remote get-url origin` (the exact same local, no-network
+    # check GitHubMergeService.available() already makes), never a
+    # second hand-entered value. merge_records already has real
+    # `pr_number`/`head_sha` columns (E10's own migration 10) kept fresh
+    # by the existing live-poll path -- B4 reads them to MATCH an
+    # incoming webhook event to the right row, never writes them (that
+    # remains the live-poll path's own job, unchanged). The three new
+    # `webhook_*` columns are a read-only, webhook-sourced SNAPSHOT,
+    # deliberately distinct from the existing `ci_status`/`mergeability`
+    # columns (which the live-poll path still exclusively owns) --
+    # never conflated, never used for a merge/gate decision (see this
+    # phase's own doc, Non-goals).
+    (36, """
+ALTER TABLE repositories ADD COLUMN github_owner_repo TEXT;
+ALTER TABLE merge_records ADD COLUMN webhook_ci_status TEXT;
+ALTER TABLE merge_records ADD COLUMN webhook_mergeability TEXT;
+ALTER TABLE merge_records ADD COLUMN webhook_updated_at TEXT;
+"""),
 ]
 
 

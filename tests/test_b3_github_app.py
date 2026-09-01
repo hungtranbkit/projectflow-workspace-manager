@@ -228,7 +228,8 @@ def test_webhook_valid_signature_clears_installation(git_repo, tmp_path):
                          ("Webhook Org", "webhook-org", 777))
     body = json.dumps({"action": "deleted", "installation": {"id": 777}}).encode("utf-8")
     r = client.post("/webhooks/github", content=body,
-                     headers={"X-Hub-Signature-256": _sign("whsec_test123", body), "Content-Type": "application/json"})
+                     headers={"X-Hub-Signature-256": _sign("whsec_test123", body), "X-GitHub-Event": "installation",
+                              "Content-Type": "application/json"})
     assert r.status_code == 200, r.text
     row = db.one("SELECT github_installation_id FROM organizations WHERE id=?", (org_id,))
     assert row["github_installation_id"] is None
@@ -264,7 +265,8 @@ def test_webhook_ignores_non_deletion_events(git_repo, tmp_path):
                          ("Webhook Org 3", "webhook-org-3", 779))
     body = json.dumps({"action": "created", "installation": {"id": 779}}).encode("utf-8")
     r = client.post("/webhooks/github", content=body,
-                     headers={"X-Hub-Signature-256": _sign("whsec_test123", body), "Content-Type": "application/json"})
+                     headers={"X-Hub-Signature-256": _sign("whsec_test123", body), "X-GitHub-Event": "installation",
+                              "Content-Type": "application/json"})
     assert r.status_code == 200, r.text
     row = db.one("SELECT github_installation_id FROM organizations WHERE id=?", (org_id,))
     assert row["github_installation_id"] == 779  # a non-deletion event never clears anything

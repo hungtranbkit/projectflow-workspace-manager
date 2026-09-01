@@ -39,16 +39,48 @@ than assume this register is still accurate elsewhere without checking.
   which predates E9's own `SecurityReviewService`. Cosmetic.
 - **UI complexity**: 13 Change Detail tabs, no Simple/Advanced mode
   split yet (P0.12 proposal only, not implemented).
-- **`pytest` 8.4.2 has one known advisory** (PYSEC-2026-1845 /
-  GHSA-6w46-j5rx-g56g), fixed in 9.0.3 — a test-only dependency, never
-  shipped in the running app, but `pyproject.toml`'s own `test =
-  ["pytest>=8,<9", ...]` caps below the fix; a major-version bump is a
-  real compatibility decision (B2's own audit, `pip-audit`), not made
-  unilaterally here. `pip` itself (the installer, not a `pyproject.
-  toml`-declared dependency) had 7 known advisories in this venv's
-  25.1.1 — upgraded locally to 26.2.1 during B2's audit (an environment
-  fix, not a repo change; a fresh venv bootstrap picks up whatever pip
-  it starts with, not something this repo pins).
+- **`GitHubMergeService.available()` routes a purely local, no-network
+  `git remote get-url origin` check through `self.runner`** — under
+  `AUTH_MODE=required` with no PAT/App configured, `self.runner` is
+  B0.7's/B3.1's own credential-resolving wrapper, which raises
+  `GitHubIntegrationError` for ANY call routed through it, including
+  this one that needs no credential at all. Found while building B4.1's
+  own `github_owner_repo()` (which hit this exact bug immediately and
+  was fixed to call `_default_runner` directly instead) — `available()`
+  itself was left unchanged: every existing call site already only
+  reaches it once real credentials are about to be needed for what
+  comes next, so it hasn't surfaced as a live bug, but it's the same
+  latent gap. Worth the same direct-call fix if it ever does.
+- **`pip`** (the installer, not a `pyproject.toml`-declared dependency)
+  had 7 known advisories in this venv's 25.1.1 — upgraded locally to
+  26.2.1 during B2's audit (an environment fix, not a repo change; a
+  fresh venv bootstrap picks up whatever pip it starts with, not
+  something this repo pins).
+
+## ALREADY_RESOLVED (B4, 2026-09 — see docs/B4_GITHUB_WEBHOOK_STATUS_INGESTION.md)
+
+- **`pytest` advisory PYSEC-2026-1845/GHSA-6w46-j5rx-g56g** — re-examined
+  with real evidence instead of the caution B2/B3 both defaulted to:
+  `pytest>=9,<10` (landed 9.1.1) installed, full collection + full fast
+  non-real regression (1080+ tests) ran clean, `pip-audit` confirms 0
+  remaining advisories — adopted (`pyproject.toml`).
+- **GitHub webhook-driven PR/CI status, ADR-001's own "phase 2"** — B4.1-
+  B4.3: `pull_request`/`check_run`/`status` events (real GitHub payload
+  shapes) now update `merge_records`' new `webhook_ci_status`/
+  `webhook_mergeability`/`webhook_updated_at` columns via B3's existing
+  HMAC-verified `/webhooks/github` route, matched against the row's own
+  existing `pr_number`/`head_sha` (E10's migration 10). Deliberately
+  read-only/supplementary — the 5 existing live `pr_status()` call
+  sites and every merge/gate-eligibility decision are untouched; no
+  real webhook delivery has been observed by this session, so trusting
+  this data for a merge-blocking decision remains B5+ work. A real,
+  separate correctness fix landed alongside: the webhook route now
+  dispatches on the actual `X-GitHub-Event` header, not payload-shape
+  guessing (every App-delivered payload carries an `installation`
+  object regardless of event type, so B3's original `action==
+  "deleted" and "installation" in payload` check was not actually
+  sufficient on its own, though no real payload had yet exercised the
+  gap).
 
 ## ALREADY_RESOLVED (B3, 2026-09 — see docs/B3_GITHUB_APP_INSTALLATION_ARCHITECTURE.md)
 

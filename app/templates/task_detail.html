@@ -685,6 +685,12 @@
 <div><small>Source → Target</small><code>{{m.source_branch}} → {{m.base_branch}}</code></div>
 <div><small>Verified</small><code>{{(m.verified_commit or '—')[:12]}}</code></div>
 </div>
+{% if m.webhook_updated_at %}
+{# B4.4: read-only, informational only -- never the eligibility signal
+   above (CI/Mergeability, still the live-poll path's own job); labeled
+   so it's never mistaken for the authoritative value. #}
+<p><small>GitHub webhook last reported: CI {{m.webhook_ci_status or '—'}}{% if m.webhook_mergeability %} · {{m.webhook_mergeability}}{% endif %} (as of {{m.webhook_updated_at}})</small></p>
+{% endif %}
 {% endif %}
 {% if m.merged_commit %}<p><small>Merge commit</small><code>{{m.merged_commit[:12]}}</code>{% if m.external_merge_reason %} <small>({{m.external_merge_reason}})</small>{% endif %}</p>{% endif %}
 {% set create_pr_running = m.create_pr_op and m.create_pr_op.status in ['QUEUED','RUNNING'] %}
