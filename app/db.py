@@ -1549,6 +1549,15 @@ CREATE TABLE IF NOT EXISTS secret_access_log(
 CREATE INDEX IF NOT EXISTS idx_secret_access_log_secret ON secret_access_log(secret_id);
 CREATE INDEX IF NOT EXISTS idx_secret_access_log_org ON secret_access_log(org_id);
 """),
+    # B3.1 (docs/B3_GITHUB_APP_INSTALLATION_ARCHITECTURE.md, ADR-001):
+    # an opaque integer, safe in a plain column (ADR-001's own
+    # "Credential/token types actually stored" section -- not a
+    # credential itself, just which GitHub App installation this org
+    # maps to). Nullable: an org may exist with no GitHub App installed
+    # at all (self-hosted BYOC via `gh` CLI, or B0.7's PAT fallback).
+    (35, """
+ALTER TABLE organizations ADD COLUMN github_installation_id INTEGER;
+"""),
 ]
 
 

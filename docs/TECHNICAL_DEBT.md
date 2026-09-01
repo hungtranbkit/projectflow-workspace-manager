@@ -50,6 +50,33 @@ than assume this register is still accurate elsewhere without checking.
   fix, not a repo change; a fresh venv bootstrap picks up whatever pip
   it starts with, not something this repo pins).
 
+## ALREADY_RESOLVED (B3, 2026-09 — see docs/B3_GITHUB_APP_INSTALLATION_ARCHITECTURE.md)
+
+- **B0.7's GitHub consumer was a simplified per-org PAT, not ADR-001's
+  full App/JWT design** — B3.1 builds the locally-completable subset:
+  real RS256 JWT signing (`app/services/github_app_service.py`, RFC
+  7518, GitHub's own claim shape, verified with a self-generated test
+  RSA keypair), `mint_installation_token()`'s real `POST /app/
+  installations/{id}/access_tokens` exchange (injectable HTTP
+  transport, tested without a live call), `make_installation_token_
+  runner()` (reuses B0.7's own `token_runner()` env-var injection
+  unchanged), the ADMIN-only `POST /orgs/{id}/github-installation`
+  callback, and a real HMAC-verified `POST /webhooks/github` handling
+  `installation.deleted` offboarding. **Still explicitly open**:
+  registering a real GitHub App on github.com needs a human with a
+  GitHub account — this environment cannot fabricate that as genuine
+  evidence, so end-to-end verification against a real installation
+  remains a residual for a real hosted deployment to close (same
+  reasoning B0.7 already gave, still true). When no App is configured,
+  `GitHubMergeService` keeps falling back to B0.7's PAT-based runner
+  unchanged.
+- **No health/readiness endpoint** — B3.2, a fresh finding (not
+  previously flagged): `scripts/start.sh`'s own liveness check scraped
+  the dashboard's `<title>` text, workable for self-hosted but not what
+  a real orchestrator expects. `GET /health` now exists: no auth, cheap
+  (one `SELECT 1`), fails closed (503, not a blind 200, if the DB query
+  itself fails).
+
 ## ALREADY_RESOLVED (B2, 2026-09 — see docs/B2_RELEASE_CONCURRENCY_AND_RESIDUAL_SECURITY.md)
 
 - **`releases._next_version()` SELECT-then-INSERT race** — B2.1, fixed

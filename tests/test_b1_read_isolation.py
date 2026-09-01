@@ -29,6 +29,7 @@ EXCLUDED_PREFIXES = (
     "/auth/", "/account", "/api/whoami", "/orgs",
     "/help", "/settings", "/api/engineering/", "/api/spec/",
     "/openapi.json", "/docs", "/redoc",  # FastAPI's own framework routes, not app data
+    "/health",  # B3.2: no tenant data, must work unauthenticated for a real health probe
 )
 # List routes -- filtered via _visible_repo_ids/_visible_task_ids/
 # _filter_polymorphic instead of a per-id Depends(), so this structural

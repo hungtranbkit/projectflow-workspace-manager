@@ -400,6 +400,14 @@ Same public method surface, same `runner` DI seam ADR-001's own
 "Migration path" already describes, so swapping in a real App-based
 runner later needs no call-site change.
 
+> **Update (B3, 2026-09):** the App-based `runner` this paragraph
+> anticipated is now built — `app/services/github_app_service.py`,
+> `make_installation_token_runner()` — see `docs/B3_GITHUB_APP_
+> INSTALLATION_ARCHITECTURE.md`. The one piece still genuinely
+> unbuilt is registering a real GitHub App on github.com itself (needs
+> a human with a GitHub account); this per-org-PAT path remains the
+> automatic fallback whenever no App is configured.
+
 ## ADR-001: GitHub authentication/authorization architecture for hosted multi-tenant mode
 
 **Status: DECIDED (design only — not implemented).** Resolves Open

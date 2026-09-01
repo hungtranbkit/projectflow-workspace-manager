@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from app.services.github_app_service import GitHubAppError
+
 """Real GitHub PR/merge execution via the `gh` CLI -- the same
 authenticated integration already used interactively in this
 environment (`gh auth status`), never a hand-rolled OAuth flow or a
@@ -110,6 +112,40 @@ def make_hosted_runner(db, secrets_service):
                 "INSTALLATION_UNAVAILABLE",
                 "No GitHub credential configured for this organization (store one at "
                 "/orgs/{id}/secrets as 'github_token').")
+        return token_runner(token)(argv, cwd, timeout)
+    return runner
+
+
+def make_installation_token_runner(db, github_app_service):
+    """B3.1 (docs/B3_GITHUB_APP_INSTALLATION_ARCHITECTURE.md, ADR-001):
+    the real, preferred `AUTH_MODE=required` runner once a GitHub App
+    is configured -- same shape as make_hosted_runner above (resolve
+    `repo_path -> organization`, then org -> credential, fresh on every
+    call, never bound at construction), one hop further:
+    `organizations.github_installation_id -> a freshly-minted
+    installation access token` instead of a stored per-org PAT. Reuses
+    token_runner()'s own env-var injection unchanged -- an installation
+    token is injected exactly the same way a PAT is (GH_TOKEN / the
+    GIT_CONFIG_COUNT Basic-auth mechanism); only how the token is
+    OBTAINED differs. GitHubAppError is translated to the same
+    GitHubIntegrationError("INSTALLATION_UNAVAILABLE", ...) shape
+    make_hosted_runner's own "no token configured" case already uses --
+    every existing GitHubMergeService caller needs no change, exactly
+    ADR-001's own "Migration path" requirement."""
+    def runner(argv: list[str], cwd, timeout: int = 30) -> subprocess.CompletedProcess:
+        repo = db.one("SELECT organization_id FROM repositories WHERE repo_path=?", (str(cwd),))
+        org_id = repo["organization_id"] if repo else None
+        org = db.one("SELECT github_installation_id FROM organizations WHERE id=?", (org_id,)) if org_id else None
+        installation_id = org["github_installation_id"] if org else None
+        if not installation_id:
+            raise GitHubIntegrationError(
+                "INSTALLATION_UNAVAILABLE",
+                "No GitHub App installation configured for this organization (an OWNER/ADMIN "
+                "can set one at POST /orgs/{id}/github-installation).")
+        try:
+            token, _expires_at = github_app_service.mint_installation_token(installation_id)
+        except GitHubAppError as exc:
+            raise GitHubIntegrationError("INSTALLATION_UNAVAILABLE", str(exc)) from exc
         return token_runner(token)(argv, cwd, timeout)
     return runner
 

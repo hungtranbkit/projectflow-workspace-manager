@@ -175,8 +175,13 @@ KNOWN_MANUAL_CREATE_ROUTES = {
 # AuthN identity/pre-org routes (B0.1) and the /orgs/* family (B0.2) --
 # already carry their own membership guard (_org_context) or are
 # structurally pre-identity (login/bootstrap/logout) and are explicitly
-# out of B0.3's "existing E1-E13 route surface" scope.
-EXCLUDED_PREFIXES = ("/auth/", "/account", "/orgs")
+# out of B0.3's "existing E1-E13 route surface" scope. /webhooks/ (B3.1,
+# docs/B3_GITHUB_APP_INSTALLATION_ARCHITECTURE.md) is a server-to-server
+# GitHub callback, not a browser session -- HMAC-verified against the
+# request body itself (see github_webhook()'s own docstring), which IS
+# its authz/CSRF equivalent; require_role()/CSRF assume a logged-in
+# ProjectFlow user, which a webhook caller structurally isn't.
+EXCLUDED_PREFIXES = ("/auth/", "/account", "/orgs", "/webhooks/")
 
 
 def test_every_mutating_route_carries_authz_or_is_accounted_for(client):

@@ -262,6 +262,34 @@ class OrganizationService:
         by a DIFFERENT org, matching link_repository()'s own boundary)."""
         return self.db.all("SELECT * FROM repositories WHERE organization_id IS NULL ORDER BY id")
 
+    # ---- B3.1: GitHub App installation mapping (ADR-001) --------------
+    def set_github_installation(self, org_id: int, installation_id: int, actor_user_id: int) -> None:
+        """ADR-001's own "Install" flow's app-side half -- ADMIN/OWNER
+        only, same _require_manage_role() every other org-mutating
+        action here already goes through."""
+        self._require_manage_role(org_id, actor_user_id)
+        self.db.execute("UPDATE organizations SET github_installation_id=? WHERE id=?", (installation_id, org_id))
+        self.db.event("organization", org_id, "GITHUB_INSTALLATION_SET", f"installation_id={installation_id} by={actor_user_id}")
+
+    def clear_github_installation_by_installation_id(self, installation_id: int) -> int | None:
+        """ADR-001's own "Revoke, org-initiated" offboarding flow -- an
+        `installation.deleted` webhook event carries only the
+        installation_id, never an org_id (GitHub has no concept of this
+        app's own organizations), so this resolves the matching org
+        itself rather than requiring the caller to know it. No actor/
+        role check -- called only from the HMAC-verified webhook route,
+        which authenticates the REQUEST (GitHub's own signature), not a
+        logged-in user. Returns the cleared org's id, or None if no org
+        had this installation_id (a webhook for an installation this
+        deployment never actually linked -- not an error, just a
+        no-op)."""
+        org = self.db.one("SELECT id FROM organizations WHERE github_installation_id=?", (installation_id,))
+        if not org:
+            return None
+        self.db.execute("UPDATE organizations SET github_installation_id=NULL WHERE id=?", (org["id"],))
+        self.db.event("organization", org["id"], "GITHUB_INSTALLATION_REVOKED", f"installation_id={installation_id}")
+        return org["id"]
+
     # ---- B0.1 -> B0.2 bootstrap migration ------------------------------
     def migrate_existing_data(self) -> dict:
         """Idempotent, safe, backward-compatible bootstrap-to-org

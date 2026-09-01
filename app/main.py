@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import secrets
@@ -31,7 +32,8 @@ from app.services.agent_session_manager import AgentSessionManager, SessionError
 from app.services.task_decision_service import TaskDecisionService, RISK_PROFILES as TDS_RISK_PROFILES, effective_task_prompt, prompt_source, LIVE_SESSION_STATUSES, humanize_blocker
 from app.services.user_state_view import user_task_state, progress_summary, humanize_enum
 from app.services.gate_waiver_service import GateWaiverError, GateWaiverService
-from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES, make_hosted_runner
+from app.services.github_merge_service import GitHubIntegrationError, GitHubMergeService, MERGED_STATES, make_hosted_runner, make_installation_token_runner
+from app.services.github_app_service import GitHubAppService
 from app.services.operations import OperationInProgress, OperationService
 from app.services.deployment_service import DeploymentService, DeploymentError
 from app.services.deployment_decision import deployment_view
@@ -147,8 +149,21 @@ def create_app(settings=None):
     # already-authenticated `gh` CLI session, exactly as always (the
     # class's own default `runner` -- never constructed with an
     # explicit override here, so its behavior is untouched).
-    github_merge = (GitHubMergeService(runner=make_hosted_runner(db, secrets_service))
-                     if settings.auth_mode == "required" else GitHubMergeService())
+    # B3.1 (docs/B3_GITHUB_APP_INSTALLATION_ARCHITECTURE.md): under
+    # AUTH_MODE=required, prefer the App-based installation-token
+    # runner once an App is actually configured (settings.github_app_id
+    # /_private_key -- both optional); otherwise fall back to B0.7's
+    # existing per-org PAT runner unchanged. GitHubAppService itself is
+    # always constructed (cheap, no I/O) so the org-installation admin
+    # route below can report configured() regardless of which runner
+    # ends up wired.
+    github_app_service = GitHubAppService(settings.github_app_id, settings.github_app_private_key)
+    if settings.auth_mode == "required":
+        github_merge = GitHubMergeService(
+            runner=make_installation_token_runner(db, github_app_service)
+            if github_app_service.configured() else make_hosted_runner(db, secrets_service))
+    else:
+        github_merge = GitHubMergeService()
     ops = OperationService(db)
     deployer = DeploymentService(db, git, enforce_ssrf_guard=(settings.auth_mode == "required"))
     contract_editor = RepositoryContractEditor(git)
@@ -1140,6 +1155,80 @@ def create_app(settings=None):
         return render(request, "org_secrets.html", org=org_service.get_org(org_id), role=role,
                       secrets=secrets_service.list_for_org(org_id), csrf_token=issue_csrf_token(request),
                       error=None, revealed={"name": name, "value": plaintext})
+
+    # ---- B3.1: GitHub App installation (ADR-001) -------------------------
+    @app.post("/orgs/{org_id}/github-installation", response_class=HTMLResponse)
+    @limiter.limit("20/minute")
+    def org_set_github_installation(request: Request, org_id: int, installation_id: str = Form(...),
+                                      csrf: None = Depends(require_csrf)):
+        """ADR-001's own "Install" flow's app-side half: an ADMIN/OWNER
+        (never a MEMBER/VIEWER) records the installation_id GitHub
+        assigned once this org's admin installed the App on GitHub's own
+        site. The redirect TO GitHub, and GitHub's own redirect back
+        with a real installation_id, both need a real registered App
+        this environment doesn't have -- explicitly out of scope (see
+        docs/B3_GITHUB_APP_INSTALLATION_ARCHITECTURE.md's Non-goals);
+        this route only accepts the resulting id, exactly as it would
+        from a real callback."""
+        ctx = _org_context(request, org_id)
+        if not isinstance(ctx, tuple): return ctx
+        user, role = ctx
+        iid = installation_id.strip()
+        if not iid.isdigit():
+            raise HTTPException(422, "installation_id must be a positive integer")
+        try:
+            org_service.set_github_installation(org_id, int(iid), user["id"])
+        except OrganizationError as e:
+            if e.code == "INSUFFICIENT_ROLE": raise HTTPException(403, str(e))
+            raise HTTPException(400, str(e))
+        return RedirectResponse(f"/orgs/{org_id}", 303)
+
+    @app.post("/webhooks/github")
+    async def github_webhook(request: Request):
+        """ADR-001's own trust boundary #4: every inbound payload is
+        HMAC-verified against the App's webhook secret BEFORE any
+        parsing -- untrusted network input, never trusted by default.
+        No CSRF (this is a server-to-server webhook, not a browser
+        session -- the HMAC signature IS this route's own CSRF-
+        equivalent) and no require_role() (GitHub itself is the caller,
+        not a logged-in ProjectFlow user). Handles `installation`
+        events with action `deleted` (ADR-001's own "Revoke, org-
+        initiated" offboarding flow); every other event/action is
+        accepted (200 -- the signature already proved it's genuinely
+        from GitHub) and ignored -- webhook-driven PR/check-run status
+        replacing polling is ADR-001's own explicit non-goal for this
+        initial cut."""
+        if not settings.github_webhook_secret:
+            raise HTTPException(404)
+        body = await request.body()
+        signature = request.headers.get("x-hub-signature-256", "")
+        expected = "sha256=" + hmac.new(settings.github_webhook_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        if not signature or not hmac.compare_digest(signature, expected):
+            raise HTTPException(401, "Invalid webhook signature")
+        try:
+            payload = json.loads(body)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Invalid JSON payload")
+        if payload.get("action") == "deleted" and isinstance(payload.get("installation"), dict):
+            installation_id = payload["installation"].get("id")
+            if installation_id is not None:
+                org_service.clear_github_installation_by_installation_id(int(installation_id))
+        return {"ok": True}
+
+    # ---- B3.2: health/readiness -------------------------------------------
+    @app.get("/health")
+    def health():
+        """No auth, no CSRF, no tenant data -- a real orchestrator/load-
+        balancer liveness probe, cheap enough to poll frequently (one
+        trivial query, never a full page render). Fails closed: a
+        broken DB connection is a real 503, never a blind 200 -- the
+        whole point of a health check is to be honest when something
+        IS wrong."""
+        try:
+            db.one("SELECT 1")
+        except Exception as exc:
+            return JSONResponse({"status": "unhealthy", "error": str(exc)}, status_code=503)
+        return {"status": "ok", "auth_mode": settings.auth_mode}
 
     def repo(repo_id):
         row = db.one("SELECT * FROM repositories WHERE id=? AND enabled=1", (repo_id,))

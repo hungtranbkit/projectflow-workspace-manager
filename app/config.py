@@ -39,6 +39,18 @@ class Settings:
     # session_secret: required whenever AUTH_MODE=required, checked at
     # startup in app/main.py, not silently skipped.
     secret_encryption_keys: tuple[str, ...] = ()
+    # B3.1 (docs/B3_GITHUB_APP_INSTALLATION_ARCHITECTURE.md, ADR-001):
+    # app-wide GitHub App credentials -- same "never in the database"
+    # precedent as session_secret/secret_encryption_keys, since these
+    # are ADR-001's own "app-wide, long-lived" credentials, never a
+    # per-tenant secret. All optional: an unconfigured App means
+    # GitHubMergeService falls back to B0.7's existing per-org PAT
+    # consumer, never a hard startup failure (unlike session_secret,
+    # which IS mandatory under AUTH_MODE=required -- an App is an
+    # enhancement, not a prerequisite for AUTH_MODE=required itself).
+    github_app_id: str | None = None
+    github_app_private_key: str | None = None
+    github_webhook_secret: str | None = None
 
     @property
     def worktree_root(self) -> Path:
@@ -80,4 +92,13 @@ def load_settings() -> Settings:
         smtp_use_tls=(os.getenv("WORKSPACE_MANAGER_SMTP_TLS", "true").strip().lower() not in ("0", "false", "no")),
         secret_encryption_keys=tuple(
             k.strip() for k in os.getenv("WORKSPACE_MANAGER_SECRET_ENCRYPTION_KEYS", "").split(",") if k.strip()),
+        github_app_id=os.getenv("WORKSPACE_MANAGER_GITHUB_APP_ID") or None,
+        # Real PEM content has embedded newlines -- a single-line env var
+        # (e.g. a systemd EnvironmentFile without quoting, or a shell
+        # export) commonly carries them as literal backslash-n; accepted
+        # either way, matching how other tools in this ecosystem (e.g.
+        # GOOGLE_APPLICATION_CREDENTIALS-adjacent conventions) handle it.
+        github_app_private_key=(
+            (os.getenv("WORKSPACE_MANAGER_GITHUB_APP_PRIVATE_KEY") or "").replace("\\n", "\n").strip() or None),
+        github_webhook_secret=os.getenv("WORKSPACE_MANAGER_GITHUB_WEBHOOK_SECRET") or None,
     )
