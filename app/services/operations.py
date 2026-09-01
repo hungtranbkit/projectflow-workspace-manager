@@ -26,6 +26,30 @@ class OperationService:
     def __init__(self, db):
         self.db = db
 
+    def reconcile_on_startup(self) -> None:
+        """P0-2 (docs/CORE_USABILITY_QUALIFICATION.md): a REAL,
+        reproduced bug -- the same shape as AgentSessionManager/
+        CleanupWorker/DeploymentService/TestRunner's own reconcile_on_
+        startup() fixes, but with a wider blast radius: this ledger is
+        shared by five real action routes (app/main.py) -- Merge Latest,
+        Mark Ready for Main, Push Integration, Create PR, Merge PR.
+        begin() raises OperationInProgress (caught by every one of those
+        routes as a silent redirect-back-to-the-same-page no-op)
+        whenever a QUEUED/RUNNING row already exists for that exact
+        (entity_type, entity_id, operation_type). These operations run
+        SYNCHRONOUSLY within their own request (never via run_async()'s
+        background thread) -- but the `begin()` INSERT still commits
+        BEFORE the real work runs, so a server process killed/restarted
+        mid-request (a real crash, a real redeploy) leaves that row
+        QUEUED/RUNNING forever, permanently blocking that exact button
+        for that exact entity from ever being clicked again. A server
+        restart honestly lost that in-flight request -- mark it FAILED
+        with a clear reason so the action is clickable again."""
+        for stuck in self.db.all("SELECT id, operation_type, status FROM operations WHERE status IN ('QUEUED','RUNNING')"):
+            self.db.execute(
+                "UPDATE operations SET status='FAILED',completed_at=CURRENT_TIMESTAMP,error=? WHERE id=?",
+                (f"{stuck['operation_type']} was {stuck['status']} when the server restarted; the in-flight request was lost. Retry.", stuck["id"]))
+
     def active(self, entity_type: str, entity_id: int, operation_type: str) -> dict | None:
         return self.db.one(
             "SELECT * FROM operations WHERE entity_type=? AND entity_id=? AND operation_type=? AND status IN ('QUEUED','RUNNING') ORDER BY id DESC LIMIT 1",

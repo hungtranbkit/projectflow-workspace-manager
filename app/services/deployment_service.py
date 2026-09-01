@@ -189,6 +189,30 @@ class DeploymentService:
         cols = ",".join(f"{k}=?" for k in fields)
         self.db.execute(f"UPDATE deployments SET {cols} WHERE id=?", (*fields.values(), deployment_id))
 
+    def reconcile_on_startup(self) -> None:
+        """P0-2 (docs/CORE_USABILITY_QUALIFICATION.md): a REAL,
+        reproduced bug, same shape as AgentSessionManager.reconcile_on_
+        startup() and CleanupWorker.reconcile()'s own sandbox fix --
+        create_deployment()/redeploy()/rollback() (app/main.py) all
+        refuse to act whenever `latest_deployment(...)['status']` is
+        still PENDING/PREPARING/BUILDING/DEPLOYING/VERIFYING, so a
+        deployment left in one of those by a process that restarted
+        mid-operation (the real background `spawn()` thread doing the
+        actual work dies with the OLD process) became permanently
+        unrecoverable: every one of those three routes just redirects
+        back to the same stuck row, forever, for that task/repo/
+        environment. A server restart honestly lost that in-process
+        work (identical reasoning to AgentSessionManager's own docstring
+        on this) -- mark it FAILED with a clear, real reason so a fresh
+        deployment/redeploy/rollback attempt is possible again."""
+        for stuck in self.db.all(
+                "SELECT id, status FROM deployments WHERE status IN ('PENDING','PREPARING','BUILDING','DEPLOYING','VERIFYING')"):
+            self._set(stuck["id"], status="FAILED",
+                       error=f"Deployment was {stuck['status']} when the server restarted; the in-process work was lost. Retry.",
+                       finished_at=datetime.now(timezone.utc).isoformat())
+            self.db.event("deployment", stuck["id"], "RECONCILE_STALE_OPERATION_STATE",
+                           f"was {stuck['status']}, left running after a prior process restart -- marked FAILED, retriable again")
+
     # ---- the real orchestration --------------------------------------------
     def deploy(self, deployment_id: int) -> None:
         """Dispatches the real BUILD (if needed) -> DEPLOY -> HEALTH ->

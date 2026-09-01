@@ -519,7 +519,7 @@ def create_app(settings=None):
         elif migration_result["action"] == "SKIPPED_AMBIGUOUS":
             auth_logger.warning("B0.2_MIGRATION: %s -- no repository was auto-assigned.", migration_result["reason"])
 
-    cleanup_worker.start(); agent_sessions.reconcile_on_startup()
+    cleanup_worker.start(); agent_sessions.reconcile_on_startup(); deployer.reconcile_on_startup(); runner.reconcile_on_startup(); ops.reconcile_on_startup()
     def render(request, name, **ctx):
         resp = templates.TemplateResponse(request=request, name=name, context={"settings": settings, "mode": _ui_mode(request), **ctx})
         _apply_mode_cookie(request, resp)
@@ -1616,6 +1616,33 @@ def create_app(settings=None):
     RISK_PROFILES=("LOW","NORMAL","HIGH")
     def latest_session_for_workspace(wid):
         return db.one("SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 1",(wid,))
+    def session_possibly_stuck(row, threshold_seconds=180):
+        """P0-3 (docs/CORE_USABILITY_QUALIFICATION.md): a session can be
+        genuinely alive (real PID, real PTY, status RUNNING) while
+        producing zero output for a long time -- a real interactive CLI
+        thinking, or a real interactive CLI actually hung waiting on
+        something nobody is watching for (a stalled network call, an
+        unexpected TUI prompt no one answers). Both look identical from
+        `status` alone. This is a heuristic INFORMATIONAL signal only
+        (never auto-fails/auto-kills anything, never gates a real
+        decision) -- a real agent can legitimately go quiet for a
+        couple of minutes mid-thought, so the threshold is deliberately
+        generous (3 minutes) to avoid alarm fatigue on normal sessions;
+        it exists so 'Last activity: 47 minutes ago' doesn't require the
+        user to do their own mental math against 'now' to notice
+        something looks wrong."""
+        if row["status"] not in ("STARTING","RUNNING","WAITING_FOR_INPUT"):
+            return False
+        ts = row["last_activity_at"] or row["started_at"]
+        if not ts:
+            return False
+        try:
+            last = datetime.fromisoformat(ts)
+        except ValueError:
+            return False
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - last).total_seconds() > threshold_seconds
     def activity_summary(sid, max_len=200):
         """One clean, human-readable line of 'what is this session doing
         right now' -- reads the LIVE in-process buffer (never the
@@ -1967,6 +1994,15 @@ def create_app(settings=None):
                     "UPDATE repositories SET repo_path=?,enabled=1,repo_name=?,default_branch=?,git_fingerprint=?,github_owner_repo=NULL WHERE id=?",
                     (str(path),slugify(repo_name or path.name),default_branch,fingerprint,old["id"]))
                 db.event("repository",old["id"],"REPOSITORY_REBOUND",f"old_path={old['repo_path']} new_path={path}")
+                # P0-2 (docs/CORE_USABILITY_QUALIFICATION.md): every
+                # EXISTING worktree for this repository (in-flight
+                # Builder/Integration sessions included) still points at
+                # the OLD repo_path at the git-internals level -- `git
+                # status` there fails outright until repaired. Best-
+                # effort, never blocks the rebind itself.
+                wt_paths=[r["worktree_path"] for r in db.all("SELECT worktree_path FROM agent_workspaces WHERE repository_id=?",(old["id"],))]
+                wt_paths+=[r["worktree_path"] for r in db.all("SELECT worktree_path FROM integration_workspaces WHERE repository_id=?",(old["id"],))]
+                git.repair_worktrees(path,wt_paths)
                 return RedirectResponse("/repositories",303)
         db.execute(
             "INSERT INTO repositories(repo_name,repo_path,default_branch,git_fingerprint) VALUES(?,?,?,?) "
@@ -2598,6 +2634,7 @@ def create_app(settings=None):
         for row in rows:
             sb=sandbox_for_workspace(row["workspace_id"]); row["sandbox_status"]=sb["status"] if sb else None; row["sandbox_health"]=sb["health_status"] if sb else None
             row["activity_hint"]=activity_summary(row["id"], 160)
+            row["possibly_stuck"]=session_possibly_stuck(row)
         return render(request,"agents_live.html",sessions=rows)
     @app.get("/workspaces/{wid}/sessions/{sid}",response_class=HTMLResponse)
     def session_detail(request:Request,wid:int,sid:int, _authz: None = Depends(require_read_role("workspace", "wid"))):
@@ -3448,6 +3485,7 @@ def create_app(settings=None):
             other=[a for a in settings.agents if a!=w["agent"]]
             w["default_reviewer"]=other[0] if other else w["agent"]
             w["last_activity_hint"]=activity_summary(w["session"]["id"], 200) if w["session"] else None
+            w["session_possibly_stuck"]=session_possibly_stuck(w["session"]) if w["session"] else False
 
         qa_required=decision.requires_qa(d["risk_profile"]); integration_required=decision.requires_integration(d["risk_profile"])
         # E9.32: Review/Fix panel -- read-only, all from ReviewFixOrchestratorService's

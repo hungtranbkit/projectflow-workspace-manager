@@ -9,7 +9,7 @@
 <td><span class="badge {{s.status|lower}}">{{s.status.replace('_',' ')}}</span></td>
 <td><code>{{s.activity_hint or '—'}}</code></td>
 <td>{% if s.sandbox_status %}<span class="badge {{s.sandbox_status|lower}}">{{s.sandbox_status}}{% if s.sandbox_health %} · {{s.sandbox_health}}{% endif %}</span>{% else %}—{% endif %}</td>
-<td><small>{{s.last_activity_at or s.started_at}}</small></td>
+<td><small>{{s.last_activity_at or s.started_at}}</small>{% if s.possibly_stuck %}<br><small class="warn">No output for a while — may be stuck</small>{% endif %}</td>
 <td><a class="ghost button" href="/workspaces/{{s.workspace_id}}/sessions/{{s.id}}">Open Live Terminal</a></td>
 </tr>{% endfor %}
 </tbody></table></div>

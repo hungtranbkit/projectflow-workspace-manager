@@ -19,6 +19,24 @@ class TestRunner:
             from app.services.sandbox_runtime import SandboxRuntimeService
             runner = SandboxedCommandRunner(SandboxRuntimeService(), mandatory=False)
         self.runner = runner
+    def reconcile_on_startup(self) -> None:
+        """P0-2 (docs/CORE_USABILITY_QUALIFICATION.md): a REAL,
+        reproduced bug, the same shape as AgentSessionManager/
+        CleanupWorker/DeploymentService's own reconcile_on_startup()
+        fixes. `/api/integrations/{iid}/test` (app/main.py) refuses a
+        new test run while `test_runs.status IN ('QUEUED','RUNNING')`
+        for that integration -- the real background thread (`start()`
+        below) doing that work dies with the OLD process on a server
+        restart mid-run, leaving the row QUEUED/RUNNING forever: the
+        no-op guard then blocks every future click for that Integration
+        permanently, not just the interrupted one. A server restart
+        honestly lost that in-process work -- mark it FAIL with a clear
+        reason so a fresh test run is possible again."""
+        for stuck in self.db.all("SELECT id, status FROM test_runs WHERE status IN ('QUEUED','RUNNING')"):
+            self.db.execute(
+                "UPDATE test_runs SET status='FAIL',finished_at=?,stderr_tail=? WHERE id=?",
+                (now(), f"Test run was {stuck['status']} when the server restarted; the in-process work was lost. Retry.", stuck["id"]))
+
     def start(self, kind: str, entity_id: int, path: Path):
         stages = load_contract(path)
         ids = [self.db.execute("INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit) VALUES(?,?,?,?,?,?)", (kind, entity_id, cmd, stage, "QUEUED", self.git.head(path))) for stage, cmd, _, _ in stages]

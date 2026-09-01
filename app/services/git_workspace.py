@@ -138,6 +138,31 @@ class GitWorkspaceService:
         self.git(repo, "worktree", "add", "--detach", str(path), commit)
         return path
 
+    def repair_worktrees(self, repo: str | Path, worktree_paths: list) -> None:
+        """P0-2 (docs/CORE_USABILITY_QUALIFICATION.md): a real git
+        limitation, reproduced directly -- every existing worktree's own
+        `.git` file (and the main repo's `.git/worktrees/<name>/gitdir`
+        back-reference) stores an ABSOLUTE path. Renaming/moving the
+        MAIN repo directory (now a real, supported operation since
+        B7.1's own repository rebind) leaves every worktree pointing at
+        a `.git/worktrees/...` path that no longer exists -- `git
+        status` there fails with `fatal: not a git repository` even
+        though nothing about the worktree's own files or commits
+        changed at all. `git worktree repair <path>...` is git's own
+        built-in fix for exactly this (re-links both directions using
+        the worktree's own still-valid on-disk location) -- called here
+        with the repository's now-current path so callers never have to
+        reason about this git internal themselves. Best-effort per
+        path: `check=False`, never raises -- one broken/already-removed
+        worktree path must never block repairing the others, and a
+        rebind's own success must never depend on git worktree
+        internals succeeding."""
+        repo = Path(repo)
+        for wt in worktree_paths:
+            if not Path(wt).is_dir():
+                continue
+            self._run(["git", "worktree", "repair", str(wt)], repo, check=False)
+
     def remove_baseline_probe(self, repo, path):
         """Force-remove a baseline probe worktree (see create_baseline_probe)
         -- unlike close(), never checks for a dirty tree, since a probe is

@@ -159,7 +159,7 @@
 {% if w.session %}<p><small>Prompt</small> <span class="badge {{w.session.prompt_status|lower}}"{% if w.session.prompt_status=='PENDING' and w.agent_status in ['STARTING','RUNNING','WAITING_FOR_INPUT'] %} data-running{% endif %}>{{'DELIVERED' if w.session.prompt_status=='DELIVERED' else ('DELIVERY FAILED' if w.session.prompt_status=='FAILED' else 'PENDING')}}</span></p>{% endif %}
 {% if w.sandbox %}<p><small>Sandbox</small> <span class="badge {{w.sandbox.row.status|lower}}">{{w.sandbox.row.status.replace('_',' ')}}{% if w.sandbox.row.status=='RUNNING' %} · {{w.sandbox.row.health_status}}{% endif %}</span> {% if w.sandbox.backend_url or w.sandbox.frontend_url %}<a class="ghost" href="{{w.sandbox.backend_url or w.sandbox.frontend_url}}" target="_blank" rel="noopener">Open App</a>{% endif %}</p>{% endif %}
 {% if w.last_activity_hint %}<p><small>Current activity</small><code>{{w.last_activity_hint}}</code></p>{% endif %}
-{% if w.session %}<p><small>Last activity</small><code>{{w.session.last_activity_at or w.session.started_at}}</code></p>{% endif %}
+{% if w.session %}<p><small>Last activity</small><code>{{w.session.last_activity_at or w.session.started_at}}</code>{% if w.session_possibly_stuck %} <span class="badge warn">No output for a while — may be stuck</span>{% endif %}</p>{% endif %}
 {% if w.detected_report %}
 {# Builder-completion-vs-live-session fix: AgentSession stays RUNNING --
    a live/interactive process does not mean the assigned source work is
