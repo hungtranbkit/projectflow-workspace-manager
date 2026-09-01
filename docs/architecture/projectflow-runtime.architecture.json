@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "ProjectFlow Runtime Architecture",
-    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0-B6 implemented",
+    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0-B7 implemented",
     "output": "projectflow-runtime.architecture.html",
     "animation": "trace",
     "visual_preset": "signal-flow",
@@ -14,7 +14,7 @@
     ],
     "repository": {
       "url": "https://github.com/hungtranbkit/projectflow-workspace-manager",
-      "revision": "074f25d02b7b88584c1755392f780490f0cf11ea"
+      "revision": "bb8a2015aab6d910ef93ae2e0da5cedb807617d2"
     },
     "views": [
       {
@@ -91,7 +91,7 @@
         },
         {
           "path": "app/main.py",
-          "line": 466,
+          "line": 481,
           "label": "ProxyHeadersMiddleware"
         }
       ]
@@ -140,12 +140,12 @@
         },
         {
           "path": "app/main.py",
-          "line": 584,
+          "line": 598,
           "label": "require_role()"
         },
         {
           "path": "app/main.py",
-          "line": 650,
+          "line": 664,
           "label": "require_read_role()"
         }
       ]
@@ -154,7 +154,7 @@
       "id": "repo_service",
       "type": "backend",
       "label": "Change / Repository Services",
-      "sublabel": "E1-E13 engineering lifecycle",
+      "sublabel": "E1-E13 lifecycle · B7.1 identity",
       "pos": [
         560,
         540
@@ -168,6 +168,11 @@
           "path": "app/services/change_service.py",
           "line": 50,
           "label": "ChangeService"
+        },
+        {
+          "path": "app/services/git_workspace.py",
+          "line": 52,
+          "label": "repo_fingerprint()"
         }
       ]
     },
@@ -330,7 +335,7 @@
         },
         {
           "path": "app/main.py",
-          "line": 1291,
+          "line": 1305,
           "label": "github_webhook()"
         }
       ]
@@ -434,7 +439,7 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "Implemented (current HEAD) -- B0 through B6",
+      "title": "Implemented (current HEAD) -- B0 through B7",
       "items": [
         "AuthN: email magic-link, API tokens, self-hosted bootstrap (B0.1)",
         "Organizations/tenants: membership, roles, invitations (B0.2)",
@@ -453,6 +458,7 @@
         "available() credential-routing fix + tenant-scoped sandbox aggregate counts (B5.1-B5.2)",
         "Trusted reverse-proxy support: real client IP + Secure cookie behind a proxy (B6.1)",
         "Webhook request body-size cap, rejected before full read (B6.2)",
+        "Repository identity: git-derived fingerprint survives rename/move/re-clone; rebinds on real evidence, never silently merges (B7.1)",
         "AUTH_MODE=none: zero new surface, the permanent self-hosted default (ADR-004)"
       ]
     },
@@ -461,8 +467,8 @@
       "title": "Known, explicitly deferred residual gaps",
       "items": [
         "Registering a real GitHub App on github.com is unbuilt -- needs a human GitHub account (B3.1 residual)",
-        "Webhook PR/CI data is read-only/supplementary -- not wired into any merge/gate decision yet, BLOCKED on real delivery evidence (B4/B6 residual)",
-        "Workspace identity is permanent -- a proven workaround exists, re-examined and declined as B0-B6 scope five times running"
+        "Webhook PR/CI data is read-only/supplementary -- not wired into any merge/gate decision yet, EXTERNALLY_BLOCKED on real delivery evidence (re-checked at B7, unchanged)",
+        "Workspace *slot* identity is permanent -- a proven workaround exists, re-examined and declined as B0-B7 scope six times running (distinct from repository identity, fixed at B7.1)"
       ]
     }
   ]
