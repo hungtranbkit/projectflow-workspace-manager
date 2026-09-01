@@ -51,6 +51,14 @@ class Settings:
     github_app_id: str | None = None
     github_app_private_key: str | None = None
     github_webhook_secret: str | None = None
+    # B6.1 (docs/B6_TRUSTED_PROXY_SUPPORT.md, closing ADR-003's own
+    # flagged residual): empty by default -- the same "off unless
+    # explicitly configured" precedent every other credential/trust
+    # setting here uses. Non-empty enables uvicorn's own
+    # ProxyHeadersMiddleware (a standard, already-transitive dependency,
+    # not hand-rolled), which only honors X-Forwarded-For/-Proto when
+    # the DIRECT connecting peer is itself in this list.
+    trusted_proxy_ips: tuple[str, ...] = ()
 
     @property
     def worktree_root(self) -> Path:
@@ -101,4 +109,6 @@ def load_settings() -> Settings:
         github_app_private_key=(
             (os.getenv("WORKSPACE_MANAGER_GITHUB_APP_PRIVATE_KEY") or "").replace("\\n", "\n").strip() or None),
         github_webhook_secret=os.getenv("WORKSPACE_MANAGER_GITHUB_WEBHOOK_SECRET") or None,
+        trusted_proxy_ips=tuple(
+            k.strip() for k in os.getenv("WORKSPACE_MANAGER_TRUSTED_PROXY_IPS", "").split(",") if k.strip()),
     )

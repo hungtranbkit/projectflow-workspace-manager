@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.config import load_settings
 from app.db import Database
 from app.repositories import discover_repositories
@@ -424,20 +425,46 @@ def create_app(settings=None):
             raise RuntimeError(
                 "REFUSED: WORKSPACE_MANAGER_AUTH_MODE=required needs WORKSPACE_MANAGER_SESSION_SECRET "
                 "set (a real, random secret -- never a default) before this app will start.")
-        # https_only=False: this app has never assumed TLS termination
-        # itself (127.0.0.1-only today; a future hosted deployment's own
-        # reverse proxy is the TLS boundary, per ADR-003's own flagged-
-        # but-unresolved proxy-topology residual risk) -- same_site="lax"
-        # is the real CSRF-relevant control here, not the cookie's
-        # secure flag.
+        # https_only: B6.1 (docs/B6_TRUSTED_PROXY_SUPPORT.md) closes
+        # ADR-003's own flagged-but-unresolved proxy-topology residual --
+        # True only once a trusted reverse proxy is actually configured
+        # (settings.trusted_proxy_ips, below), since only then does
+        # scope["scheme"] reliably reflect the ORIGINAL client's real
+        # scheme rather than this process's own plain-HTTP loopback
+        # reality (127.0.0.1-only today, no TLS anywhere -- the default,
+        # empty-config case keeps this False, byte-for-byte the same as
+        # every prior phase). same_site="lax" is the real CSRF-relevant
+        # control either way, not the cookie's secure flag.
         app.add_middleware(SessionMiddleware, secret_key=settings.session_secret,
-                            max_age=settings.session_max_age_days * 86400, same_site="lax", https_only=False)
+                            max_age=settings.session_max_age_days * 86400, same_site="lax",
+                            https_only=bool(settings.trusted_proxy_ips))
         if auth_service.user_count() == 0:
             raw_bootstrap_token = secrets.token_urlsafe(24)
             app.state.bootstrap_token_hash = hashlib.sha256(raw_bootstrap_token.encode("utf-8")).hexdigest()
             logging.getLogger("projectflow.auth").warning(
                 "FIRST_USER_SETUP: no users exist yet on this instance. "
                 "Visit /auth/bootstrap?token=%s to create the first account.", raw_bootstrap_token)
+
+    # ---- B6.1: trusted reverse-proxy support -----------------------------
+    # docs/B6_TRUSTED_PROXY_SUPPORT.md: off by default (settings.
+    # trusted_proxy_ips is empty unless explicitly configured, the same
+    # "REFUSED/off unless configured" precedent every other credential/
+    # trust setting in this app uses) -- zero behavior change for
+    # AUTH_MODE=none and for AUTH_MODE=required with no proxy configured
+    # yet. Uvicorn's own ProxyHeadersMiddleware (already a transitive
+    # dependency, not hand-rolled) only rewrites scope["client"]/
+    # scope["scheme"] from X-Forwarded-For/-Proto when the DIRECT
+    # connecting peer is itself in this trusted list -- a request from
+    # anywhere else has those headers ignored entirely, so an untrusted
+    # caller can never spoof its way past this. Added LAST (after
+    # SessionMiddleware above) so it becomes the OUTERMOST layer and
+    # rewrites scope before anything else -- slowapi's own
+    # get_remote_address() and SessionMiddleware's https_only check --
+    # ever reads it, applied independent of AUTH_MODE since this is a
+    # general HTTP-layer correctness concern, not an auth-mode-specific
+    # one.
+    if settings.trusted_proxy_ips:
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=list(settings.trusted_proxy_ips))
 
     # ---- B0.2: Organizations/Tenants -----------------------------------
     # docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md, Design Principle #3:
@@ -1233,6 +1260,33 @@ def create_app(settings=None):
         params.append(row["id"])
         db.execute(f"UPDATE merge_records SET {','.join(fields)} WHERE id=?", tuple(params))
 
+    # B6.2 (docs/B6_TRUSTED_PROXY_SUPPORT.md): a real webhook payload for
+    # the three event types this app ingests is a few KB; 1 MiB is
+    # generous headroom, never unbounded.
+    WEBHOOK_MAX_BODY_BYTES = 1024 * 1024
+
+    async def _read_capped_body(request: Request, max_bytes: int) -> bytes:
+        """Rejects (413) BEFORE reading the body in full, both for an
+        honest oversized Content-Length declaration (cheapest case, zero
+        bytes actually read) and for a request that lies about/omits
+        Content-Length (bounded by capping the real stream read instead
+        of one unbounded `await request.body()`)."""
+        declared = request.headers.get("content-length")
+        if declared is not None:
+            try:
+                if int(declared) > max_bytes:
+                    raise HTTPException(413, "Payload too large")
+            except ValueError:
+                pass
+        chunks = []
+        total = 0
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > max_bytes:
+                raise HTTPException(413, "Payload too large")
+            chunks.append(chunk)
+        return b"".join(chunks)
+
     @app.post("/webhooks/github")
     async def github_webhook(request: Request):
         """ADR-001's own trust boundary #4: every inbound payload is
@@ -1257,7 +1311,7 @@ def create_app(settings=None):
         ignored."""
         if not settings.github_webhook_secret:
             raise HTTPException(404)
-        body = await request.body()
+        body = await _read_capped_body(request, WEBHOOK_MAX_BODY_BYTES)
         signature = request.headers.get("x-hub-signature-256", "")
         expected = "sha256=" + hmac.new(settings.github_webhook_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
         if not signature or not hmac.compare_digest(signature, expected):

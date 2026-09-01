@@ -45,6 +45,31 @@ than assume this register is still accurate elsewhere without checking.
   fresh venv bootstrap picks up whatever pip it starts with, not
   something this repo pins).
 
+## ALREADY_RESOLVED (B6, 2026-09 — see docs/B6_TRUSTED_PROXY_SUPPORT.md)
+
+- **Session cookie `https_only=False` / rate limiting keyed by the raw
+  ASGI peer address** — both were ADR-003's own flagged-but-unresolved
+  proxy-topology residual, restated twice (the session-cookie comment,
+  and B0.5's own "no reverse proxy in front of it yet" note). B6.1:
+  `settings.trusted_proxy_ips` (new, off by default) installs uvicorn's
+  own `ProxyHeadersMiddleware` — only rewrites `scope["client"]`/
+  `scope["scheme"]` from `X-Forwarded-For`/`-Proto` when the DIRECT
+  connecting peer is itself trusted, closing both gaps with one
+  standard, already-a-direct-dependency mechanism: `SessionMiddleware`'s
+  `https_only` now correctly reflects the real scheme once a trusted
+  proxy is configured, and `slowapi`'s `get_remote_address` correctly
+  keys on the real client IP instead of the shared proxy IP. Proven at
+  the raw ASGI level (trusted vs. untrusted peer, both directions) and
+  end-to-end (the `Secure` cookie flag, real independent per-client
+  rate-limit budgets). `AUTH_MODE=none` and the empty-config default
+  are byte-for-byte unchanged.
+- **`POST /webhooks/github` had no request body-size cap** — B6.2, a
+  fresh finding from this phase's own audit (not previously flagged):
+  `await request.body()` read the full body, unbounded, BEFORE the
+  HMAC check even ran. Now rejects (413) an oversized body via a
+  `Content-Length` pre-check plus a capped streaming read (bounded even
+  if the header lies), before any parsing.
+
 ## ALREADY_RESOLVED (B5, 2026-09 — see docs/B5_TENANT_ISOLATION_COMPLETENESS.md)
 
 - **`GitHubMergeService.available()` routes a purely local, no-network
