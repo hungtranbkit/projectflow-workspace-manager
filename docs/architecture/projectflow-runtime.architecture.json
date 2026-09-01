@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "ProjectFlow Runtime Architecture",
-    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0-B3 implemented",
+    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0-B4 implemented",
     "output": "projectflow-runtime.architecture.html",
     "animation": "trace",
     "visual_preset": "signal-flow",
@@ -14,7 +14,7 @@
     ],
     "repository": {
       "url": "https://github.com/hungtranbkit/projectflow-workspace-manager",
-      "revision": "1f78d5b3042d9057279078369c82b9e6a6969c86"
+      "revision": "40f063cb7347e1aad956b063689320ef25839fab"
     },
     "views": [
       {
@@ -51,7 +51,7 @@
           "github_integration",
           "background"
         ],
-        "note": "Builder runs via the Supervisor; sandboxed when required (B0.6); GitHub via gh CLI, an App install (B3.1), or a stored PAT (B0.7)."
+        "note": "Builder runs via the Supervisor, sandboxed when required (B0.6); GitHub out via gh/App/PAT, in via an HMAC-verified webhook (B4)."
       }
     ]
   },
@@ -302,7 +302,7 @@
       "id": "github_integration",
       "type": "external",
       "label": "GitHub",
-      "sublabel": "gh CLI, App install (B3.1), or a PAT (B0.7)",
+      "sublabel": "gh CLI/App/PAT out, HMAC webhook in (B4)",
       "tag": "PARTIAL",
       "pos": [
         830,
@@ -315,13 +315,18 @@
       "sources": [
         {
           "path": "app/services/github_merge_service.py",
-          "line": 153,
+          "line": 164,
           "label": "GitHubMergeService"
         },
         {
           "path": "app/services/github_app_service.py",
           "line": 88,
           "label": "GitHubAppService"
+        },
+        {
+          "path": "app/main.py",
+          "line": 1237,
+          "label": "github_webhook()"
         }
       ]
     }
@@ -424,7 +429,7 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "Implemented (current HEAD) -- B0 through B3",
+      "title": "Implemented (current HEAD) -- B0 through B4",
       "items": [
         "AuthN: email magic-link, API tokens, self-hosted bootstrap (B0.1)",
         "Organizations/tenants: membership, roles, invitations (B0.2)",
@@ -438,6 +443,8 @@
         "releases._next_version() concurrency race fixed with real thread evidence (B2.1)",
         "GitHub App JWT signing + installation-token minting + HMAC webhook (B3.1)",
         "GET /health readiness endpoint, fails closed on a real DB check (B3.2)",
+        "Webhook-driven PR/CI status ingestion, read-only supplementary signal (B4.1-B4.3)",
+        "pytest bumped to 9.x, verified with a real clean full-suite run (B4.0)",
         "AUTH_MODE=none: zero new surface, the permanent self-hosted default (ADR-004)"
       ]
     },
@@ -446,8 +453,8 @@
       "title": "Known, explicitly deferred residual gaps",
       "items": [
         "Registering a real GitHub App on github.com is unbuilt -- needs a human GitHub account (B3.1 residual)",
-        "Dashboard's running-sandbox/cleanup-pending counts stay unfiltered aggregate counts (B1.1 residual, low severity)",
-        "pytest advisory PYSEC-2026-1845 needs a major-version decision, not made unilaterally (B2.3 residual)"
+        "Webhook PR/CI data is read-only/supplementary -- not wired into any merge/gate decision yet (B4 residual)",
+        "Dashboard's running-sandbox/cleanup-pending counts stay unfiltered aggregate counts (B1.1 residual, low severity)"
       ]
     }
   ]
