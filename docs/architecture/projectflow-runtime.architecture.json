@@ -3,7 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "ProjectFlow Runtime Architecture",
-    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0-B4 implemented",
+    "subtitle": "workspace-manager · single-process FastAPI · SQLite · B0-B6 implemented",
     "output": "projectflow-runtime.architecture.html",
     "animation": "trace",
     "visual_preset": "signal-flow",
@@ -14,7 +14,7 @@
     ],
     "repository": {
       "url": "https://github.com/hungtranbkit/projectflow-workspace-manager",
-      "revision": "40f063cb7347e1aad956b063689320ef25839fab"
+      "revision": "074f25d02b7b88584c1755392f780490f0cf11ea"
     },
     "views": [
       {
@@ -27,7 +27,7 @@
           "repo_service",
           "database"
         ],
-        "note": "A request enters the one FastAPI process, is identified (or not, under AUTH_MODE=none), and reaches the E1-E13 services backed by SQLite."
+        "note": "A request (optionally via a trusted reverse proxy, B6.1) enters the one FastAPI process and reaches the E1-E13 services backed by SQLite."
       },
       {
         "id": "tenant-boundary",
@@ -74,7 +74,7 @@
       "id": "api_entry",
       "type": "backend",
       "label": "FastAPI App",
-      "sublabel": "create_app() · route handlers",
+      "sublabel": "create_app() (B6.1 proxy-aware)",
       "pos": [
         300,
         500
@@ -86,8 +86,13 @@
       "sources": [
         {
           "path": "app/main.py",
-          "line": 104,
+          "line": 105,
           "label": "create_app()"
+        },
+        {
+          "path": "app/main.py",
+          "line": 466,
+          "label": "ProxyHeadersMiddleware"
         }
       ]
     },
@@ -135,12 +140,12 @@
         },
         {
           "path": "app/main.py",
-          "line": 557,
+          "line": 584,
           "label": "require_role()"
         },
         {
           "path": "app/main.py",
-          "line": 623,
+          "line": 650,
           "label": "require_read_role()"
         }
       ]
@@ -235,7 +240,7 @@
       "sources": [
         {
           "path": "app/db.py",
-          "line": 1564,
+          "line": 1584,
           "label": "Database"
         }
       ]
@@ -315,7 +320,7 @@
       "sources": [
         {
           "path": "app/services/github_merge_service.py",
-          "line": 164,
+          "line": 194,
           "label": "GitHubMergeService"
         },
         {
@@ -325,7 +330,7 @@
         },
         {
           "path": "app/main.py",
-          "line": 1237,
+          "line": 1291,
           "label": "github_webhook()"
         }
       ]
@@ -429,7 +434,7 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "Implemented (current HEAD) -- B0 through B4",
+      "title": "Implemented (current HEAD) -- B0 through B6",
       "items": [
         "AuthN: email magic-link, API tokens, self-hosted bootstrap (B0.1)",
         "Organizations/tenants: membership, roles, invitations (B0.2)",
@@ -445,6 +450,9 @@
         "GET /health readiness endpoint, fails closed on a real DB check (B3.2)",
         "Webhook-driven PR/CI status ingestion, read-only supplementary signal (B4.1-B4.3)",
         "pytest bumped to 9.x, verified with a real clean full-suite run (B4.0)",
+        "available() credential-routing fix + tenant-scoped sandbox aggregate counts (B5.1-B5.2)",
+        "Trusted reverse-proxy support: real client IP + Secure cookie behind a proxy (B6.1)",
+        "Webhook request body-size cap, rejected before full read (B6.2)",
         "AUTH_MODE=none: zero new surface, the permanent self-hosted default (ADR-004)"
       ]
     },
@@ -453,8 +461,8 @@
       "title": "Known, explicitly deferred residual gaps",
       "items": [
         "Registering a real GitHub App on github.com is unbuilt -- needs a human GitHub account (B3.1 residual)",
-        "Webhook PR/CI data is read-only/supplementary -- not wired into any merge/gate decision yet (B4 residual)",
-        "Dashboard's running-sandbox/cleanup-pending counts stay unfiltered aggregate counts (B1.1 residual, low severity)"
+        "Webhook PR/CI data is read-only/supplementary -- not wired into any merge/gate decision yet, BLOCKED on real delivery evidence (B4/B6 residual)",
+        "Workspace identity is permanent -- a proven workaround exists, re-examined and declined as B0-B6 scope five times running"
       ]
     }
   ]
