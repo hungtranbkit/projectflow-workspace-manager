@@ -441,6 +441,65 @@ cannot currently be measured in isolation, this is reported honestly as
 inconclusive-on-wall-clock rather than claimed as either a clean pass
 or a regression — no fix attempted against an unconfirmed target.
 
+## Stability-first continuation (feature-freeze policy)
+
+Continued per an explicit feature-freeze instruction: no new tracks/
+features, only reliability fixes for the existing system, GitHub App
+registration/webhook-authority explicitly kept EXTERNALLY_BLOCKED and
+not pursued further. Two more real P0 defects found via the
+failure/recovery matrix's own remaining named scenarios:
+
+**P0, fixed — `sqlite3.OperationalError: database is locked` was
+completely unhandled.** Reproduced directly: a real second connection
+holding a genuine EXCLUSIVE write lock for longer than `Database.
+connect()`'s own 10s busy-timeout escaped as a raw, unhandled
+exception — indistinguishable from a real code defect, no "retry"
+guidance, and (in production, not the test harness) would have
+surfaced as a bare 500 with no clean message. Fixed: a new
+`sqlite3.OperationalError` exception handler, matching the same
+request-type-aware (HTML/JSON) shape every other domain-error handler
+in this app already uses, returning a clear 503 "temporarily busy"
+message. Proven with real timing (~11s of an actual held lock, twice —
+once through an HTML route, once through a JSON `/api/*` route),
+`tests/test_db_locked_handled_cleanly.py`, 2/2 pass.
+
+**P0, fixed — an interrupted migration produced an opaque, context-free
+error on retry.** A real B4-phase incident, reproduced again directly:
+`Database.init()`'s `executescript()` applies each statement as it
+goes (SQLite auto-commits DDL, never atomically) — a script that fails
+partway through leaves earlier statements' effects committed but that
+version never gets marked applied in `schema_migrations`, so the next
+startup retries the WHOLE script from statement 1, which now fails
+with a bare "duplicate column"/"table already exists" naming neither
+the stuck migration version nor what actually happened. Fixed:
+`init()` now wraps each migration's `executescript()` call and
+re-raises with the exact migration version and a clear explanation of
+what an interrupted-and-retried migration looks like — never an
+attempt at automatic reconciliation (this codebase's own established
+"REFUSED, never guessed" precedent for anything data-safety-adjacent),
+just an honest, actionable error in place of a cryptic one. Proven
+with a real, deliberately-broken 2-statement migration injected for
+the test only, a real `Database.init()` call that fails, and a second
+real `Database.init()` call (simulating a restart) against the same
+now-partially-migrated file, confirming the retry's own error names
+the exact stuck version, `tests/test_interrupted_migration_clear_
+error.py`, 1/1 pass.
+
+Other named failure/recovery matrix items re-checked against current
+code, found already correct, no fix needed: missing/deleted repo path
+recovery (B7.1's `path_missing` flag is computed live per-request,
+never stored, so a path reappearing needs nothing to invalidate —
+already proven in `tests/test_b7_repository_identity.py`); duplicate/
+idempotent button submission (already covered broadly by this
+program's own five `OperationInProgress`/busy-status fixes plus
+`ON CONFLICT DO UPDATE` upserts already in `register()`); stale
+browser/session state (`test_backend_reverifies_even_if_client_state_
+stale`, pre-existing). No duplicated flow, redundant state, or dead
+code was found during this pass that caused an actual reliability
+problem — none consolidated (the feature-freeze/simplification
+instruction is to fix problems that exist, not to refactor
+speculatively).
+
 ## Stop condition
 
 PASS requires every P0 area closed (fixed or evidenced as already

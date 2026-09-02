@@ -1628,7 +1628,34 @@ class Database:
             applied = {r[0] for r in db.execute("SELECT version FROM schema_migrations").fetchall()}
             for version, sql in MIGRATIONS:
                 if version in applied: continue
-                db.executescript(sql)
+                # P0 (docs/CORE_USABILITY_QUALIFICATION.md failure/
+                # recovery matrix: 'interrupted migration'): reproduced
+                # directly -- executescript() applies each statement as
+                # it goes (SQLite auto-commits DDL), never atomically,
+                # so a script that fails partway through leaves earlier
+                # statements' effects committed but this version never
+                # gets INSERTed into schema_migrations. The NEXT startup
+                # then retries the WHOLE script from statement 1, which
+                # now fails with an opaque "duplicate column"/"table
+                # already exists" error that names neither the stuck
+                # migration version nor what actually happened -- a real
+                # incident during this project's own B4 phase, confirmed
+                # to still reproduce exactly this way. Never attempted
+                # automatic reconciliation here (this codebase's own
+                # established "REFUSED, never guessed" precedent for
+                # anything data-safety-adjacent) -- just a clear, honest
+                # error naming the exact migration and the real cause,
+                # so an operator isn't left debugging a cryptic SQLite
+                # message with no context at all.
+                try:
+                    db.executescript(sql)
+                except sqlite3.OperationalError as exc:
+                    raise sqlite3.OperationalError(
+                        f"Migration {version} failed partway through and could not be completed: {exc}. "
+                        f"This usually means an earlier attempt at migration {version} was interrupted "
+                        f"(a crash/restart mid-migration) and partially applied -- inspect the real schema "
+                        f"(PRAGMA table_info/sqlite_master) against this migration's own SQL before retrying; "
+                        f"do not delete or guess at the fix without comparing them.") from exc
                 db.execute("INSERT INTO schema_migrations(version) VALUES(?)", (version,))
     @contextmanager
     def connect(self):

@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import secrets
+import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1859,6 +1860,27 @@ def create_app(settings=None):
     @app.exception_handler(GitSafetyError)
     @app.exception_handler(GitCommandError)
     async def git_error(request, exc): return HTMLResponse(f"<h1>Action blocked</h1><pre>{str(exc)}</pre><a href='javascript:history.back()'>Back</a>", status_code=409)
+
+    @app.exception_handler(sqlite3.OperationalError)
+    async def db_busy_error(request, exc):
+        """P0 (docs/CORE_USABILITY_QUALIFICATION.md failure/recovery
+        matrix: 'DB locked/transient write failure'): reproduced
+        directly -- Database.connect()'s own `timeout=10` already
+        absorbs ordinary contention (SQLite's own busy-wait retries
+        silently inside that window), but a write genuinely held open
+        longer than that (a runaway VACUUM, an unusually large
+        migration, extreme concurrent load) previously escaped as a
+        raw, unhandled sqlite3.OperationalError -- a bare 500 with no
+        clean message, indistinguishable from a real code defect and
+        giving the user no idea a plain retry would very likely work.
+        Never silently retried here (this handler doesn't know whether
+        the failed write was itself safe to blindly replay) -- always a
+        clear, honest 503 instead, same request-type-aware shape
+        (HTML/JSON) the other domain-error handlers already use."""
+        message = "Database is temporarily busy -- please retry in a moment." if "locked" in str(exc).lower() else str(exc)
+        if request.url.path.startswith("/api/"):
+            return JSONResponse({"ok": False, "code": "DATABASE_BUSY", "message": message}, status_code=503)
+        return HTMLResponse(f"<h1>Temporarily unavailable</h1><pre>{message}</pre><a href='javascript:history.back()'>Back</a>", status_code=503)
 
     @app.exception_handler(SandboxError)
     @app.exception_handler(SandboxContractError)
