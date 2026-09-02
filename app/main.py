@@ -4490,6 +4490,7 @@ def create_app(settings=None):
 
     # ---- E10: Integration, Release, Deploy & Runtime Verification ----
     integration_service=IntegrationService(db,work_products,worktree_manager,review_fix_orchestrator,git)
+    integration_service.reconcile_on_startup()
     app.state.integration_service=integration_service
     release_service=ReleaseService(db,changes,work_products,workflow_service,human_decisions,deployer,
         _resolve_project_policy_for_change)
@@ -4544,6 +4545,7 @@ def create_app(settings=None):
     execution_wave_service=ExecutionWaveService(
         db,changes,autonomous_execution_service,parallel_safety_service,integration_service,git,
         _resolve_project_policy_for_change)
+    execution_wave_service.reconcile_on_startup()
     app.state.execution_wave_service=execution_wave_service
 
     @app.get("/api/changes/{cid}/autonomous-execution")

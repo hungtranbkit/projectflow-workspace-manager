@@ -28,6 +28,47 @@ than assume this register is still accurate elsewhere without checking.
   still fails the whole invocation after 2 attempts, by design (never
   infinite retry). Acceptable, but worth monitoring in production.
 
+## IMPORTANT (process, from the Core Usability & Critical Bug
+## Qualification — docs/CORE_USABILITY_QUALIFICATION.md)
+
+- **Standing "reconcile-on-startup" check for any future background-
+  work site.** This program found and fixed a single recurring bug
+  class in five places (`SandboxManager`/`CleanupWorker`,
+  `DeploymentService`, `TestRunner`, `OperationService`, plus
+  `AgentSessionManager` already correct pre-existing): a background
+  thread or in-request operation commits a "busy" status before doing
+  real work, and the route(s) gating that same operation refuse to act
+  again while status looks busy — correct for a concurrent second
+  click, permanently wrong once the owning process is gone (restart/
+  crash). A second full repo-wide sweep (this same program's own later
+  pass) confirmed no further instance exists as of `41271b5`, but any
+  *new* code that spawns a background thread or writes a "QUEUED"/
+  "RUNNING"/"PENDING"-shaped status before doing real work must add its
+  own `reconcile_on_startup()` (same name, same pattern, wired at app
+  startup) as part of that change — not treated as a one-time fix.
+  Evidence: `docs/CORE_USABILITY_QUALIFICATION.md`'s own findings log;
+  `tests/test_sandbox_stuck_busy_after_restart.py`,
+  `tests/test_deployment_stuck_after_restart.py`,
+  `tests/test_integration_test_run_stuck_after_restart.py`,
+  `tests/test_operations_stuck_after_restart.py`.
+- **`GET /changes` wall-clock re-measurement on an isolated host.**
+  `scripts/benchmark_changes_list.py`'s own `db.connect()` count
+  (~18/Change) confirms Track A1's query-count fix is intact and not
+  regressed; wall-clock time (~2.3-2.7s at N=100, vs. A1's own
+  documented 1.9s) could not be measured cleanly on this shared,
+  multi-tenant host (confirmed via `uptime`/`ps aux` showing genuinely
+  unrelated concurrent load throughout every measurement attempt).
+  Re-measure on a quiet/isolated host before concluding either way;
+  do not optimize against this number until it is measured cleanly.
+- **Restart/crash confirmation during real pilot use.** This program's
+  restart-recovery fixes are proven with real, repeated restarts in a
+  disposable test environment (`create_app()` against the same DB
+  file, real Docker where applicable) — the strongest evidence
+  available without a live pilot. A real production restart during
+  active pilot use remains the strongest remaining confirmation; watch
+  for it specifically rather than assuming the disposable-environment
+  evidence is the last word.
+
 ## NICE_TO_HAVE
 
 - **`review_runs` "most recent row" read in `TaskDecisionService.

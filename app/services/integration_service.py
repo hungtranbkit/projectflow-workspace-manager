@@ -36,6 +36,30 @@ class IntegrationService:
         self.git = git
         self.runner = runner
 
+    def reconcile_on_startup(self) -> None:
+        """P0 BLOCKER (docs/CORE_USABILITY_QUALIFICATION.md, final
+        stability pass): a REAL, reproduced defect found during a
+        repo-wide audit for stuck-forever busy state, and the most
+        severe one this program found -- `repository_integration_locks.
+        repository_id` is a real PRIMARY KEY, this class's own atomic
+        single-writer lock for 'an integration is in progress for this
+        repository right now' (_lock()/_unlock(), see integrate_task()'s
+        own try/finally). A Python `finally` block only protects against
+        an in-process exception -- it does NOT run if the process itself
+        is killed/crashes/restarts mid-integration, so a hard kill
+        between `_lock()` succeeding and the matching `_unlock()` left
+        this exact repository PERMANENTLY unable to integrate ANYTHING
+        ever again (confirmed real: a stale row makes every future
+        `_lock()` call for that repository return False forever, and
+        integrate_task() then always returns 'LOCKED' -- there is no UI
+        action anywhere that clears this table). Every row here is
+        always safe to clear at startup, not just ones matching some
+        status set -- same reasoning as ExecutionWaveService.reconcile_
+        on_startup()'s own task_reservations fix: a lock surviving to
+        the next process start is BY DEFINITION stale, nothing
+        legitimate holds one across a restart."""
+        self.db.execute("DELETE FROM repository_integration_locks")
+
     # ---- E10.1: consume E9's own readiness, never re-derive it ------------
     def preflight_integration(self, task_id: int) -> dict:
         return self.review_fix_orchestrator.integration_readiness(task_id)

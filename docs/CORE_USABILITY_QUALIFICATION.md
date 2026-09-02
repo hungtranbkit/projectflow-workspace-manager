@@ -500,6 +500,73 @@ problem — none consolidated (the feature-freeze/simplification
 instruction is to fix problems that exist, not to refactor
 speculatively).
 
+## Final stability hardening pass (second, more thorough restart/busy audit)
+
+A repo-wide re-audit specifically for PK/UNIQUE-based "acquire on
+INSERT, release on DELETE" lock mechanisms (a different search
+strategy than the earlier status-column sweep) found two more real,
+reproducible instances of the exact same underlying bug class — a
+Python `try/finally` protects against an in-process exception, but
+never against the process itself being killed:
+
+**P0 BLOCKER, fixed — a stale `repository_integration_locks` row
+permanently blocked ALL future integration for an entire repository.**
+The most severe defect this whole program found. `IntegrationService.
+_lock()`/`_unlock()` (repository_id as the real PRIMARY KEY) is held
+across `integrate_task()` via `try/finally` — a hard kill between
+`_lock()` succeeding and `_unlock()` running (the `finally` block
+never runs at all if the process itself dies, not just if an
+exception is raised) left that exact repository unable to integrate
+anything, ever again, with no UI action anywhere able to clear it.
+Confirmed real via a direct `_lock()`/`_lock()` reproduction. Fixed:
+`IntegrationService.reconcile_on_startup()` (new, wired at app
+startup) unconditionally clears the table — every row is inherently
+transient, there is no legitimate case for one surviving a restart.
+Proven with a real restart, `tests/test_integration_lock_stuck_
+after_restart.py`, 2/2 pass.
+
+**P0, fixed — a stale `task_reservations` row permanently blocked one
+Task from the parallel-execution-wave scheduler.** `ExecutionWaveService`'s
+own atomic single-writer claim (`task_reservations.task_id` as a real
+PRIMARY KEY) is released "the moment a launch succeeds or fails" per
+its own module docstring — but that reasoning only covers the launch's
+two LOGICAL outcomes, not the process dying between the INSERT and the
+DELETE a few lines later in the same call. Confirmed real via a direct
+INSERT-collision reproduction, and via a full real wave-scheduling run
+that silently skips the stale Task forever. Fixed:
+`ExecutionWaveService.reconcile_on_startup()` (new, wired at app
+startup) unconditionally clears the table. Proven with a real restart
+and a real subsequent wave run that successfully launches the
+previously-stuck Task, `tests/test_execution_wave_reservation_stuck_
+after_restart.py`, 2/2 pass.
+
+**P1, fixed — duplicate-click race on baseline-failure reproduction.**
+Found while re-verifying the earlier sweep was complete: `GateWaiverService.
+start_reproduction()` had no duplicate-click guard at all (unlike
+every other background-work route in this app) — two real concurrent
+clicks raced onto the same reused probe worktree path, one failing
+with a confusing raw git error. Fixed with the same duplicate-click-
+guard convention already used everywhere else (reflect the existing
+in-flight run back). Proven with a real double-click (realistic
+timing, not a pathological same-microsecond thread race — matching
+this codebase's own accepted race-tolerance level elsewhere, e.g.
+`OperationService.begin()`'s identical SELECT-then-INSERT shape),
+`tests/test_baseline_reproduction_duplicate_click.py`, 1/1 pass.
+
+Audit method for this pass: enumerated every `PRIMARY KEY`/`UNIQUE`
+constraint in the schema used as a natural-key lock (2 found, both
+fixed), every `status IN (...)`-shaped busy-gate again (no new
+instance beyond the five from the first pass), every `threading.Thread`
+background-work site again (`gate_waiver_service.py` — the one file
+not yet individually checked in the first pass — found the duplicate-
+click gap above; its own use of the shared `test_runs` table is
+already covered by `TestRunner.reconcile_on_startup()`'s existing
+type-agnostic query), and every human-workflow status transition that
+merely *looks* busy-shaped (`incidents.REPRODUCING`, `product_
+acceptance.PENDING`) — confirmed by reading the actual code that these
+are correctly gated on a human's own next action, not a background
+worker's, so a restart loses nothing they were waiting on anyway.
+
 ## Stop condition
 
 PASS requires every P0 area closed (fixed or evidenced as already

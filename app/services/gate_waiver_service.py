@@ -45,7 +45,26 @@ class GateWaiverService:
         """Queues a REPRODUCE_BASELINE run (a test_runs row, workspace_type
         'baseline') and starts the real reproduction in a background
         thread. Returns the run id immediately so a caller/route can
-        redirect without blocking on a multi-minute test command."""
+        redirect without blocking on a multi-minute test command.
+
+        Duplicate-click guard (real, reproduced defect this program's
+        own final stability pass found): create_baseline_probe()
+        reuses the SAME on-disk worktree path for a given (repo,
+        commit) pair -- a genuine double-click used to race two
+        background threads onto that one path, one of them failing
+        with a real but confusing `fatal: ... already exists` git
+        error instead of being cleanly blocked. Same convention as
+        every other duplicate-click guard in this app (test_
+        integration()'s own `active=... status IN ('QUEUED','RUNNING')`
+        check in app/main.py): a second call while one is already
+        genuinely in flight for this exact (repository, base_commit,
+        gate) reflects the SAME existing run id back, never starts a
+        second thread."""
+        active = self.db.one(
+            "SELECT id FROM test_runs WHERE workspace_type='baseline' AND workspace_id=? AND tested_commit=? AND stage=? AND status IN ('QUEUED','RUNNING') ORDER BY id DESC LIMIT 1",
+            (repository_id, base_commit, gate))
+        if active:
+            return active["id"]
         try:
             stages = load_contract(Path(repo_path))
         except ContractError as exc:

@@ -62,6 +62,30 @@ class ExecutionWaveService:
         self.git = git
         self.project_policy_resolver = project_policy_resolver
 
+    def reconcile_on_startup(self) -> None:
+        """P0 (docs/CORE_USABILITY_QUALIFICATION.md, final stability
+        pass): a REAL, reproduced defect found during a repo-wide audit
+        for stuck-forever busy state -- task_reservations.task_id is a
+        real PRIMARY KEY, this class's own atomic single-writer lock
+        for 'this Task is being launched into a wave right now' (see
+        this module's own docstring: 'Reservations are short-lived:
+        released the moment a launch succeeds ... or fails'). That
+        reasoning only covers the launch's own two LOGICAL outcomes --
+        not the process itself dying between the INSERT (run_execution_
+        wave()) and the matching DELETE a few lines later in the same
+        call. A row surviving to the next process start is BY
+        DEFINITION stale (nothing legitimate holds a reservation across
+        a restart; the real AgentSession -- already covered by
+        AgentSessionManager.reconcile_on_startup() -- is the ongoing
+        truth from the moment a launch succeeds, never this table) --
+        confirmed real: a stale row makes that exact Task permanently
+        unreservable by every future wave-scheduling attempt forever,
+        with nothing to clear it. Every row in this table is always
+        safe to clear at startup, not just ones matching some status
+        set -- there is no 'reservation that should legitimately
+        survive a restart' case at all."""
+        self.db.execute("DELETE FROM task_reservations")
+
     # ---- E13.8/E13.9: policy ----------------------------------------------
     def get_parallel_policy(self, change: dict | None) -> dict:
         policy = dict(_DEFAULT_PARALLEL_POLICY)
