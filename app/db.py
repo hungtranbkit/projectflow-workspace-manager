@@ -1592,6 +1592,29 @@ ALTER TABLE merge_records ADD COLUMN webhook_updated_at TEXT;
     (37, """
 ALTER TABLE repositories ADD COLUMN git_fingerprint TEXT;
 """),
+    # Terminal MCP #109 / ProjectFlow #36: this is an association table,
+    # never a second task queue. durable_task_id points at Terminal MCP's
+    # canonical receipt; task/workspace/branch/worktree remain ProjectFlow
+    # truth and are copied only into the returned projection.
+    (38, """
+CREATE TABLE IF NOT EXISTS terminal_runtime_associations(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  workspace_id INTEGER NOT NULL REFERENCES agent_workspaces(id),
+  backend TEXT NOT NULL CHECK(backend IN ('tmux','herdr-core')),
+  node_id TEXT NOT NULL,
+  native_session_id TEXT NOT NULL,
+  durable_task_id TEXT,
+  status TEXT NOT NULL DEFAULT 'unknown',
+  status_source TEXT NOT NULL DEFAULT 'unobserved',
+  observed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(backend,node_id,native_session_id),
+  UNIQUE(task_id,workspace_id,backend,node_id)
+);
+CREATE INDEX IF NOT EXISTS idx_terminal_runtime_task ON terminal_runtime_associations(task_id);
+"""),
 ]
 
 
