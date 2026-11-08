@@ -13,6 +13,7 @@ import shutil
 import pytest
 
 from app.services.planner_service import PlannerAgentError
+from tests.planner_double import install_planner_test_double
 
 
 def register(client, repo, name="demo"):
@@ -47,7 +48,7 @@ def set_fake_plan(client, plan_dict):
             stdout = json.dumps(envelope)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = fake_runner
+    install_planner_test_double(client.app.state.planner_service.invoker, fake_runner)
 
 
 def minimal_valid_plan(**overrides):
@@ -166,6 +167,12 @@ def test_valid_output_produces_plan_ready(client, git_repo):
     assert r.json()["plan"]["status"] == "VALIDATED"
 
 
+def test_fake_runner_does_not_require_provider_cli_on_ci(client, git_repo):
+    client.app.state.planner_service.invoker.which = lambda _name: None
+    _cid, response = create_and_plan(client, git_repo, profile="VIBE")
+    assert response.json()["outcome"] == "PLAN_READY"
+
+
 def test_malformed_envelope_produces_execution_failed_no_plan_row(client, git_repo):
     root, repo = git_repo
     rid = register(client, repo, "demo")
@@ -178,7 +185,7 @@ def test_malformed_envelope_produces_execution_failed_no_plan_row(client, git_re
             stdout = "not json at all {{{"
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = bad_runner
+    install_planner_test_double(client.app.state.planner_service.invoker, bad_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLANNER_EXECUTION_FAILED"
     assert r.json()["plan"] is None
@@ -198,7 +205,7 @@ def test_malformed_inner_result_produces_output_invalid_no_plan_row(client, git_
             stdout = json.dumps(envelope)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    install_planner_test_double(client.app.state.planner_service.invoker, runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLANNER_OUTPUT_INVALID"
     assert client.get(f"/api/changes/{cid}/plans").json() == []
@@ -537,6 +544,7 @@ def test_task_decision_service_unaffected_by_materialized_task(client, git_repo)
 
 # ============================================================= Real Planner test (E4.21)
 
+@pytest.mark.live_agent
 @pytest.mark.skipif(not shutil.which("claude"), reason="real `claude` CLI not available in this environment")
 def test_real_planner_invocation_end_to_end(client, git_repo):
     """E4.21: one safe, real, non-fake Planner invocation. Disposable

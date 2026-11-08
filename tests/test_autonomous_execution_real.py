@@ -31,7 +31,10 @@ import pytest
 
 from tests.test_autonomous_execution import register, new_change
 
-pytestmark = pytest.mark.skipif(shutil.which("claude") is None, reason="real `claude` CLI not installed on this host")
+pytestmark = [
+    pytest.mark.live_agent,
+    pytest.mark.skipif(shutil.which("claude") is None, reason="real `claude` CLI not installed on this host"),
+]
 
 
 def _seed_buggy_fixture(repo):
