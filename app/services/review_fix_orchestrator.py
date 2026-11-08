@@ -253,7 +253,8 @@ class ReviewFixOrchestratorService:
             sid = self._start_builder_session(ws_row)
         except Exception as exc:
             self.db.event("task", fix_task["id"], "AUTO_EXECUTION_FAILED", str(exc)[:500])
-            return {"outcome": "EXECUTION_FAILED", "task_id": task_id, "governing_task_id": fix_task["id"], "message": str(exc)}
+            return {"outcome": "EXECUTION_FAILED", "task_id": task_id, "governing_task_id": fix_task["id"],
+                    "fix_task_id": fix_task["id"], "message": str(exc)}
         self.db.event("task", fix_task["id"], "AUTO_BUILDER_LAUNCHED", f"session={sid} workspace={ws['id']} provider=fix")
         return {"outcome": "FIX_BUILDER_LAUNCHED", "task_id": task_id, "governing_task_id": fix_task["id"],
                 "fix_task_id": fix_task["id"], "session_id": sid, "workspace_id": ws["id"]}

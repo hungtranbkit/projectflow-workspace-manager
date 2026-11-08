@@ -581,6 +581,7 @@ _pytestmark_real = _pytest.mark.skipif(_shutil.which("claude") is None, reason="
 
 
 @_pytestmark_real
+@_pytest.mark.live_agent
 def test_real_claude_builder_launches_through_execution_wave_path(client, git_repo):
     """E13.42: 'run at least one real Claude Builder separately through
     the same path' -- run_execution_wave() (never a second launch

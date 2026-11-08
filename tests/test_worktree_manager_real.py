@@ -24,7 +24,10 @@ from tests.test_autonomous_execution_real import (
     _seed_buggy_fixture, _pytest_passes, _trust_claude_dir, _restore_claude_dir,
 )
 
-pytestmark = pytest.mark.skipif(shutil.which("claude") is None, reason="real `claude` CLI not installed on this host")
+pytestmark = [
+    pytest.mark.live_agent,
+    pytest.mark.skipif(shutil.which("claude") is None, reason="real `claude` CLI not installed on this host"),
+]
 
 
 def test_real_worktree_isolation_fixture_end_to_end(client, git_repo):

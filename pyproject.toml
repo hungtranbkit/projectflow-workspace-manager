@@ -53,3 +53,6 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "live_agent: requires a separately provisioned and authenticated real agent CLI",
+]

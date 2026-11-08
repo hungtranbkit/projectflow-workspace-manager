@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from tests.planner_double import install_planner_test_double
 import yaml
 
 from app.launchers import AgentLauncher
@@ -73,7 +74,7 @@ def set_fake(client, payload):
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    install_planner_test_double(client.app.state.planner_service.invoker, runner)
 
 
 def ra_payload(**overrides):
@@ -374,7 +375,7 @@ def test_bounded_refinement_loop_never_infinite(client, git_repo, spec_env):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = cycling_runner
+    install_planner_test_double(client.app.state.planner_service.invoker, cycling_runner)
 
     result = client.app.state.spec_lifecycle_service.run_lifecycle(cid, provider="claude", max_rounds=3)
     assert result["outcome"] == "NEEDS_REFINEMENT"
@@ -505,7 +506,7 @@ def test_plan_valid_requirement_ids_resolve(client, git_repo, spec_env):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = plan_runner
+    install_planner_test_double(client.app.state.planner_service.invoker, plan_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLAN_READY", r.json()
 
@@ -523,7 +524,7 @@ def test_fictional_requirement_id_rejected(client, git_repo, spec_env):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = plan_runner
+    install_planner_test_double(client.app.state.planner_service.invoker, plan_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLAN_INVALID"
     assert any("unknown requirement id" in e for e in r.json()["validation"]["errors"])
@@ -542,7 +543,7 @@ def test_baseline_staleness_visible(client, git_repo, spec_env):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = plan_runner
+    install_planner_test_double(client.app.state.planner_service.invoker, plan_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     plan_id = r.json()["plan"]["id"]
 
@@ -578,7 +579,7 @@ def test_plan_spec_drift_when_referenced_requirement_disappears(client, git_repo
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = plan_runner
+    install_planner_test_double(client.app.state.planner_service.invoker, plan_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     plan_id = r.json()["plan"]["id"]
     assert r.json()["outcome"] == "PLAN_READY"
@@ -644,6 +645,7 @@ def test_production_specs_root_never_touched_by_this_suite():
     assert "feat-workflow-profile-api.yaml" not in names
 
 
+@pytest.mark.live_agent
 def test_real_spec_lifecycle_end_to_end(client, git_repo, spec_env):
     """E5.24: one safe, real, non-fake Spec Lifecycle run against a
     disposable Change and an isolated tmp_path specs_root (spec_env) --

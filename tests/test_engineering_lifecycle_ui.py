@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from tests.planner_double import install_planner_test_double
 import yaml
 
 
@@ -76,7 +77,7 @@ def set_fake(client, payload):
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    install_planner_test_double(client.app.state.planner_service.invoker, runner)
 
 
 def create_workflow(client, cid, profile="CONTROLLED"):
