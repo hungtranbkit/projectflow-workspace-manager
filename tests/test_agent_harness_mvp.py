@@ -137,7 +137,9 @@ def test_verifier_is_mandatory(store):
 def test_reconcile_due_expires_every_overdue_child_and_requires_cleanup(store):
     a = create(store, key='overdue-a', child='task a', ttl=timedelta(hours=1))
     b = create(store, key='overdue-b', child='task b', ttl=timedelta(hours=2))
-    c = create(store, key='not-due', child='task c', ttl=timedelta(hours=4))
+    c = store.create(key='not-due', main_goal='unrelated project goal',
+                     child_goal='task c', dod='one result', agent='codex',
+                     node='dell-linux', created_at=T, ttl=timedelta(hours=4))
     store.dispatch(a.id, external_task_id='running-a', at=T)
     store.dispatch(b.id, external_task_id='running-b', at=T)
     at = T + timedelta(hours=3)
