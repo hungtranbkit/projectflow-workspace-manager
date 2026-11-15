@@ -30,7 +30,7 @@ async def main(name):
         r,w = (streams.read_stream, streams.write_stream) if hasattr(streams, "read_stream") else streams[:2]
         async with ClientSession(r,w) as c:
             await c.initialize()
-            s = await call(c,"inspect",targets=[name],tail_lines=4,compact=True)
+            s = await call(c,"inspect",targets=[name],tail_lines=14,compact=True)
             targets = s.get("result",{}).get("targets",[])
             if len(targets)!=1 or targets[0].get("session")!=name:
                 raise RuntimeError("session ownership readback mismatch")
