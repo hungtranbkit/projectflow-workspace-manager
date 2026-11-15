@@ -85,6 +85,20 @@ python scripts/harness_parent.py install --plan-file /path/to/plan.json
 The parent requires an independent pytest final acceptance and never infers
 main-goal success merely because a child completed.
 
+## Codex coding-task scope guard
+
+Before making an automatic local commit, the Harness independently checks the
+real Git delta. Only modified tracked Python implementation files are allowed;
+changes to tests, conftest.py, setup.py, configuration or unknown untracked
+outputs are refused. An agent's assertion that tests pass is never sufficient.
+The acceptance test must already exist in the isolated repository and must
+remain unchanged. Known context/cache outputs are archived separately rather
+than committed. On scope refusal, the worktree stays for review; no automatic
+push, merge or deletion of unknown files takes place.
+
+This guard is a staging safety check, not a substitute for separate code review
+or a full regression run.
+
 ## Limits
 
 - This is a verified staging Harness, not yet connected to the three project
