@@ -82,8 +82,13 @@ def archive_known_generated(repo: Path, state_root: Path, task_id: int) -> bool:
     files: list[tuple[Path, str]] = []
     for rel in names:
         parts = Path(rel).parts
-        candidate = (repo / rel).resolve()
-        if repo not in candidate.parents or not candidate.is_file() or candidate.is_symlink():
+        raw = repo / rel
+        if raw.is_symlink() or any(
+                (repo / Path(*parts[:i])).is_symlink()
+                for i in range(1, len(parts))):
+            return False
+        candidate = raw.resolve()
+        if repo not in candidate.parents or not candidate.is_file():
             return False
         is_cache = ("__pycache__" in parts and candidate.suffix == ".pyc")
         is_pytest = ".pytest_cache" in parts
@@ -117,6 +122,37 @@ def archive_known_generated(repo: Path, state_root: Path, task_id: int) -> bool:
     after = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
                            capture_output=True, text=True, timeout=10)
     return after.returncode == 0 and not after.stdout.strip()
+
+
+def preserve_run_evidence(folder: Path, task_id: int) -> bool:
+    """Retain original artifacts for audit instead of deleting accepted refs.
+
+    The owner-only state directory is persistent; deleting a temporary unit
+    must not destroy the result, patch, test proof or audit logs.
+    """
+    names = ("job.json", "result.json", "changes.patch", "test-output.txt",
+             "agent.log", "agent-output.txt", "heartbeat.json", "dispatch-receipt.json")
+    record = {}
+    for name in names:
+        file = folder / name
+        if file.is_symlink():
+            return False
+        if not file.exists():
+            continue
+        if not file.is_file() or file.stat().st_size > 50_000_000:
+            return False
+        record[name] = hashlib.sha256(file.read_bytes()).hexdigest()
+    if "job.json" not in record:
+        return False
+    manifest = folder / "evidence-manifest.json"
+    if manifest.exists():
+        try:
+            saved = json.loads(manifest.read_text(encoding="utf-8"))
+            return saved == {"task_id": task_id, "files": record}
+        except (OSError, ValueError):
+            return False
+    atomic_json(manifest, {"task_id": task_id, "files": record})
+    return manifest.is_file()
 
 
 class ManagedHarness:
@@ -259,6 +295,9 @@ class ManagedHarness:
         # than stdout, depending on the installed systemd version.
         receipt = (p.stdout or "") + (p.stderr or "")
         if p.returncode or f"Running as unit: {unit}" not in receipt:
+            atomic_json(run_dir / "dispatch-receipt.json", {
+                "task_id": task.id, "unit": unit, "status": "unconfirmed",
+                "returncode": p.returncode, "at": utcnow().isoformat()})
             self.store.fail(task.id, at=utcnow(), reason="systemd dispatch was not confirmed")
             # A failed receipt does not prove a child was never launched.
             # Keep WIP occupied until the owned unit is independently checked.
@@ -388,14 +427,14 @@ class ManagedHarness:
                         continue
                     clean = archive_known_generated(Path(row["repo"]), self.state_root, task.id)
                     dirty = not clean
+                    evidence_ok = preserve_run_evidence(folder, task.id)
                     task = self.store.cleanup(
                         task.id, at=utcnow(), executor_stopped=True,
                         no_active_refs=True, dirty_worktree=dirty,
-                        evidence_preserved=result_file.is_file() or task.state == "EXPIRED",
+                        evidence_preserved=evidence_ok,
                         deletion_verified=True)
-                    if task.cleanup_state == "CLEANED_VERIFIED":
-                        # Preserve the durable database checkpoint and hashes.
-                        shutil.rmtree(folder)
+                    # Keep folder as a durable, mode-0700 evidence bundle.
+                    # Never delete artifact_ref, original patch or test logs.
                 results.append({"task_id": task.id, "state": task.state,
                                 "cleanup": self.store.get(task.id).cleanup_state,
                                 "unit_result": status.get("Result"),
