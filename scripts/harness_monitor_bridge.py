@@ -220,7 +220,8 @@ async def verify_external_task(task_id: str) -> dict[str, Any]:
         async with ClientSession(read, write) as client:
             await client.initialize()
             response = decode_mcp(await client.call_tool(
-                "terminal_task_status", {"task_id": task_id}))
+                "terminal_turn", {"action": "task", "task_id": task_id,
+                                  "compact": True}))
     if response.get("status") != "OK":
         raise HarnessError("external task backend not confirmed")
     details = response.get("result", {})
