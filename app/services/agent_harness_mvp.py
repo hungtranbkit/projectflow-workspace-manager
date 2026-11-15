@@ -152,6 +152,38 @@ class HarnessStore:
             task_id = cur.lastrowid
         return self.get(task_id)
 
+    def list_tasks(self, *, main_goal: str | None = None) -> list[Task]:
+        """Current durable task snapshot for a monitor parent, not live agent proof."""
+        with self._connect() as db:
+            if main_goal is None:
+                rows = db.execute("SELECT * FROM harness_tasks ORDER BY id").fetchall()
+            else:
+                rows = db.execute("SELECT * FROM harness_tasks WHERE main_goal=? ORDER BY id",
+                                  (main_goal,)).fetchall()
+        return [self._task(row) for row in rows]
+
+    def reconcile_due(self, *, at: datetime) -> list[Task]:
+        """Persist all overdue tasks; never pretend that expiring kills a process.
+
+        A separate authorized supervisor must verify cancellation and cleanup.
+        Idempotent even if two scheduler ticks race on the same SQLite DB.
+        """
+        now = _dt(at)
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute("""SELECT id FROM harness_tasks
+                WHERE state NOT IN ('DONE_VERIFIED','FAILED','EXPIRED') AND expires_at<=?
+                ORDER BY id""", (_iso(now),)).fetchall()
+            ids = [int(row["id"]) for row in rows]
+            for task_id in ids:
+                db.execute("""UPDATE harness_tasks
+                    SET state='EXPIRED', verified_at=?, cleanup_state='CLEANUP_PENDING'
+                    WHERE id=?""", (_iso(now), task_id))
+                self._event(db, task_id, now, "EXPIRED", {
+                    "reason": "deadline reached; process cancellation NOT verified",
+                    "cleanup": "CLEANUP_PENDING"})
+        return [self.get(i) for i in ids]
+
     def _expire_if_due(self, task_id: int, now: datetime) -> None:
         # Make expiry durable in its own committed transaction: a subsequent
         # refused mutation must not roll it back.
@@ -160,8 +192,9 @@ class HarnessStore:
             if row is None:
                 raise HarnessError("task not found")
             if row["state"] not in TERMINAL and _dt(now) >= _from_iso(row["expires_at"]):
-                db.execute("UPDATE harness_tasks SET state='EXPIRED',verified_at=? WHERE id=?",
-                           (_iso(now), task_id))
+                db.execute("""UPDATE harness_tasks SET
+                    state='EXPIRED', verified_at=?, cleanup_state='CLEANUP_PENDING'
+                    WHERE id=?""", (_iso(now), task_id))
                 self._event(db, task_id, now, "EXPIRED", {
                     "reason": "TTL reached; external cancel still needs independent confirmation"})
 
