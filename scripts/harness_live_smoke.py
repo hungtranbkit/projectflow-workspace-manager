@@ -1,8 +1,9 @@
 """Operator-invoked live Harness smoke test against LOCAL Terminal MCP.
 
 One isolated shell session, no existing sessions, repositories, services or
-production data are modified. This is an end-to-end executor smoke test, not
-proof that a Claude/Codex agent was run. Default deadline: 10 minutes.
+production data are modified. HARNESS_EXECUTOR=codex runs the genuine Codex CLI
+in read-only mode inside that shell and independently validates its output file.
+Default deadline: 10 minutes.
 Run only on the Terminal MCP host with an authorised local MCP connection.
 """
 from __future__ import annotations
@@ -51,6 +52,14 @@ async def call(client, action, **params):
 
 async def exercise(client):
     now = datetime.now(timezone.utc)
+    mode = os.environ.get("HARNESS_EXECUTOR", "shell").strip().lower()
+    if mode not in {"shell", "codex"}:
+        raise RuntimeError("HARNESS_EXECUTOR must be shell or codex")
+    codex_cwd = Path(os.environ.get(
+        "HARNESS_CODEX_WORKDIR",
+        "/home/dell/workspace/harness-mvp-impl-20261115")).resolve()
+    if mode == "codex" and (not codex_cwd.is_dir() or not (codex_cwd/".git").exists()):
+        raise RuntimeError("Codex requires an existing isolated Git clone")
     nonce = secrets.token_hex(5)
     name = f"harness-smoke-{nonce}"
     marker = f"HARNESS_PROBE_{nonce}"
@@ -59,19 +68,40 @@ async def exercise(client):
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     store = HarnessStore(state / "harness-mvp.db")
     task = store.create(key=name, main_goal="MVP Harness: one task executes, verifies and cleans safely",
-                        child_goal=f"Verify one isolated shell command {nonce}",
+                        child_goal=f"Verify one isolated {mode} command {nonce}",
                         dod="Observed command output AND matching on-disk artifact, followed by verified session cleanup",
-                        agent="shell", node="dell-linux", created_at=now, ttl=timedelta(minutes=10))
-    output = {"harness_task_id": task.id, "child": name, "stage": "CREATED"}
+                        agent=mode, node="dell-linux", created_at=now, ttl=timedelta(minutes=10))
+    output = {"harness_task_id": task.id, "child": name, "executor": mode, "stage": "CREATED"}
     try:
         created = await call(client, "create_session", target=name, agent_type="shell",
                              node="dell-linux", working_directory="/home/dell/workspace")
         cr = created.get("result", {})
         if created.get("status") != "OK" or cr.get("session") != name or cr.get("state") not in {"READY","IDLE"}:
             raise RuntimeError("session was not explicitly created and READY")
-        payload = f"from pathlib import Path; Path({str(artifact)!r}).write_text({marker!r}); print({marker!r})"
+        if mode == "codex":
+            prompt = (
+                f"Read-only one-task harness smoke. Reply with EXACTLY {marker} "
+                "as your complete answer. Do not run tools or modify any files."
+            )
+            command = ("codex exec --sandbox read-only --cd " + shlex.quote(str(codex_cwd))
+                       + " --output-last-message " + shlex.quote(str(artifact))
+                       + " " + shlex.quote(prompt))
+        else:
+            payload = f"from pathlib import Path; Path({str(artifact)!r}).write_text({marker!r}); print({marker!r})"
+            command = "python3 -c " + shlex.quote(payload)
         sent = await call(client, "send_wait", target=name,
-                          text="python3 -c " + shlex.quote(payload), timeout=15, compact=True)
+                          text=command, timeout=20, compact=True)
+        # Continue the same server-side wait token, never resend the prompt.
+        for _ in range(5):
+            wait = sent.get("wait", {})
+            if wait.get("status") == "MATCHED" and wait.get("state") == "IDLE":
+                break
+            if wait.get("status") != "PENDING" or not wait.get("resume_token"):
+                raise RuntimeError("task completion was not confirmed")
+            sent = await call(client, "resume",
+                              resume_token=wait["resume_token"], timeout=20, compact=True)
+        else:
+            raise RuntimeError("bounded completion wait exceeded")
         receipt = sent.get("send", {})
         if receipt.get("status") != "SUBMIT_CONFIRMED":
             raise RuntimeError("no confirmed submission receipt")
@@ -91,7 +121,7 @@ async def exercise(client):
         output["observed_state"] = task.state
         tail = status.get("tail","")
         readback = artifact.read_text() if artifact.is_file() else None
-        has_proof = state_name == "IDLE" and marker in tail and readback == marker
+        has_proof = state_name == "IDLE" and marker in tail and readback is not None and readback.strip() == marker
         if not has_proof:
             raise RuntimeError("did not verify command output and artifact independently")
         sha = hashlib.sha256(readback.encode()).hexdigest()
@@ -100,7 +130,7 @@ async def exercise(client):
                             test_evidence=f"command-tail:{marker}",
                             runtime_readback=f"sha256:{sha}",
                             verifier=lambda a,t,r: a==str(artifact) and marker in t
-                                and r==f"sha256:{sha}" and artifact.read_text()==marker)
+                                and r==f"sha256:{sha}" and artifact.read_text().strip()==marker
         output["stage"] = "DONE_VERIFIED"
         output["artifact_sha256"] = sha
         # Re-check terminal status before official confirmed deletion.
@@ -113,6 +143,10 @@ async def exercise(client):
         proof = dr.get("receipt",{})
         # Server owns authorization and task/watch/lease checks.
         gone = dr.get("deleted") is True and proof.get("tmux_absent_verified") is True
+        if gone:
+            listing = await call(client, "list_sessions", compact=True)
+            present = listing.get("result", {}).get("sessions", [])
+            gone = not any(item.get("name") == name for item in present)
         task = store.cleanup(task.id, at=datetime.now(timezone.utc),
                              executor_stopped=state_name=="IDLE", no_active_refs=gone,
                              dirty_worktree=False, evidence_preserved=True,
@@ -120,6 +154,7 @@ async def exercise(client):
         output["cleanup"] = task.cleanup_state
         if gone:
             artifact.unlink(missing_ok=True)
+            output["artifact_removed"] = not artifact.exists()
         else:
             output["cleanup_reason"] = str(dr.get("error","cleanup not confirmed"))[:120]
         output["event_count"] = len(store.events(task.id))
