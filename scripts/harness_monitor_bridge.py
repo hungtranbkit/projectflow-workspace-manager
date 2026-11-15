@@ -92,9 +92,13 @@ def init_schema(db: sqlite3.Connection) -> None:
             external_task_id TEXT NOT NULL UNIQUE,
             session_name TEXT NOT NULL,
             backend_node TEXT NOT NULL,
-            registered_at TEXT NOT NULL
+            registered_at TEXT NOT NULL,
+            provenance TEXT NOT NULL DEFAULT 'LOCAL_MCP'
         );
     """)
+    cols = {r[1] for r in db.execute("PRAGMA table_info(harness_monitor_receipts)")}
+    if "provenance" not in cols:
+        db.execute("ALTER TABLE harness_monitor_receipts ADD COLUMN provenance TEXT NOT NULL DEFAULT 'LOCAL_MCP'")
 
 
 def bootstrap(registry: dict[str, dict[str, Any]], db_path: Path) -> dict[str, int]:
@@ -242,7 +246,10 @@ def register(
     ident: str, *, child_goal: str, dod: str, agent: str,
     node: str, session_name: str, task_id: str,
     ttl_seconds: int, backend: dict[str, Any],
+    provenance: str = "LOCAL_MCP",
 ) -> dict[str, Any]:
+    if provenance not in {"LOCAL_MCP", "CENTRAL_ATTESTED"}:
+        raise HarnessError("unrecognized task receipt provenance")
     if not (0 < ttl_seconds <= 86400):
         raise HarnessError("external child TTL must be between 1 second and 24 hours")
     if not all(isinstance(x, str) and x.strip()
@@ -283,11 +290,61 @@ def register(
             ttl=timedelta(seconds=ttl_seconds))
         task = store.dispatch(task.id, external_task_id=task_id, at=now())
         db.execute("""INSERT INTO harness_monitor_receipts
-            (automation_id,task_id,external_task_id,session_name,backend_node,registered_at)
-            VALUES (?,?,?,?,?,?)""",
-            (ident, task.id, task_id, session_name, node, now().isoformat()))
+            (automation_id,task_id,external_task_id,session_name,backend_node,registered_at,provenance)
+            VALUES (?,?,?,?,?,?,?)""",
+            (ident, task.id, task_id, session_name, node, now().isoformat(), provenance))
     return {"task_id": task.id, "state": task.state, "idempotent": False,
-            "backend_receipt": task_id, "RUNNING_VERIFIED": False}
+            "backend_receipt": task_id, "provenance": provenance,
+            "RUNNING_VERIFIED": False}
+
+
+def observe_attested(
+    registry: dict[str, dict[str, Any]], db_path: Path,
+    automation_id: str, task_ref: str, backend: dict[str, Any]
+) -> dict[str, Any]:
+    """Import a trusted caller's central tool readback, NEVER auto-accept DoD.
+
+    This command cannot cryptographically prove the provided JSON came from
+    the global Terminal MCP tool. Therefore RUNNING_VERIFIED is disallowed
+    here, even for a model-reported RUNNING state.
+    """
+    store = HarnessStore(db_path)
+    with connect(db_path) as db:
+        entry, binding = require_binding(automation_id, registry, db)
+        row = db.execute("""SELECT * FROM harness_monitor_receipts
+                            WHERE automation_id=? AND external_task_id=?""",
+                         (automation_id, task_ref)).fetchone()
+    if not row or row["provenance"] != "CENTRAL_ATTESTED":
+        raise HarnessError("no registered central-attested task")
+    remote = (backend.get("result") or {}).get("task", {})
+    if (backend.get("status") != "OK" or not isinstance(remote, dict)
+            or remote.get("task_id") != task_ref
+            or remote.get("target") != row["session_name"]
+            or remote.get("state") not in {"RUNNING", "PENDING", "QUEUED",
+                "DISPATCHED", "DONE", "FAILED", "BLOCKED", "WAITING_INPUT",
+                "CANCELLED", "EXPIRED"}):
+        raise HarnessError("controller attestation task/target mismatch")
+    task = store.get(row["task_id"])
+    state = remote["state"]
+    if task.state in TERMINAL:
+        return {"task_id": task.id, "state": task.state, "idempotent": True}
+    if state in {"FAILED", "CANCELLED", "EXPIRED"}:
+        task = store.fail(task.id, at=now(),
+                          reason=f"central reported {state}; must reconcile cleanup")
+        task = store.cleanup(task.id, at=now(), executor_stopped=False,
+                             no_active_refs=False, dirty_worktree=False,
+                             evidence_preserved=False, deletion_verified=False)
+    else:
+        mapped = ("FINISHED" if state == "DONE" else
+                  "BLOCKED" if state in {"BLOCKED", "WAITING_INPUT"} else "UNKNOWN")
+        task = store.observe(task.id, backend_state=mapped, process_alive=None if
+                             mapped != "FINISHED" else False,
+                             at=now(), evidence_ref=f"central-attested:{task_ref}")
+    return {"task_id": task.id, "state": task.state,
+            "backend_reported_state": state,
+            "provenance": "CENTRAL_ATTESTED_NOT_CRYPTO_VERIFIED",
+            "DoD": "REQUIRES_INDEPENDENT_ACCEPTANCE",
+            "cleanup": task.cleanup_state}
 
 
 async def reconcile_external(
@@ -302,13 +359,18 @@ async def reconcile_external(
     with connect(db_path) as db:
         init_schema(db)
         rows = db.execute("""SELECT m.automation_id,m.task_id,m.external_task_id,
-                                    m.session_name,m.backend_node
+                                    m.session_name,m.backend_node,m.provenance
                             FROM harness_monitor_receipts m
                             ORDER BY m.task_id""").fetchall()
         pending = [dict(x) for x in rows if store.get(x["task_id"]).state not in TERMINAL]
     changed: list[dict[str, Any]] = []
     for item in pending:
         current = store.get(item["task_id"])
+        if item["provenance"] == "CENTRAL_ATTESTED":
+            changed.append({"id": current.id, "monitor": item["automation_id"],
+                            "task_state": current.state, "backend_state": "UNAVAILABLE_LOCAL",
+                            "note": "central-only task: global Terminal MCP readback required"})
+            continue
         try:
             entry = registry[item["automation_id"]]
             with connect(db_path) as db:
@@ -374,7 +436,8 @@ async def reconcile_external(
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("action", choices=("bootstrap", "status", "register", "reconcile"))
+    p.add_argument("action", choices=("bootstrap", "status", "register",
+                                      "register-attested", "observe-attested", "reconcile"))
     p.add_argument("--registry", default=str(REGISTRY))
     p.add_argument("--db", default=str(STATE_DB))
     p.add_argument("--automation-id")
@@ -384,6 +447,7 @@ def main() -> None:
     p.add_argument("--node")
     p.add_argument("--session")
     p.add_argument("--task-id")
+    p.add_argument("--attestation-json", help="Sanitized readback from GLOBAL connected Terminal MCP; not locally verifiable")
     p.add_argument("--ttl-seconds", type=int, default=86400)
     args = p.parse_args()
     registry = load_registry(Path(args.registry))
@@ -394,16 +458,24 @@ def main() -> None:
         output = status(registry, db_path, args.automation_id)
     elif args.action == "reconcile":
         output = asyncio.run(reconcile_external(registry, db_path))
+    elif args.action == "observe-attested":
+        if not all((args.automation_id, args.task_id, args.attestation_json)):
+            p.error("observe-attested needs monitor id, durable task id and central tool readback")
+        output = observe_attested(registry, db_path, args.automation_id,
+                                  args.task_id, json.loads(args.attestation_json))
     else:
         if not all((args.automation_id, args.child_goal, args.dod,
                     args.agent, args.node, args.session, args.task_id)):
             p.error("register needs monitor ID, atomic child, DoD, agent, node, session and durable task ID")
-        backend = asyncio.run(verify_external_task(args.task_id))
+        backend = (asyncio.run(verify_external_task(args.task_id))
+                   if args.action == "register" else
+                   json.loads(args.attestation_json or "{}"))
         output = register(
             registry, db_path, args.automation_id,
             child_goal=args.child_goal, dod=args.dod, agent=args.agent,
             node=args.node, session_name=args.session, task_id=args.task_id,
-            ttl_seconds=args.ttl_seconds, backend=backend)
+            ttl_seconds=args.ttl_seconds, backend=backend,
+            provenance=("LOCAL_MCP" if args.action == "register" else "CENTRAL_ATTESTED"))
     print("HARNESS_MONITOR=" + json.dumps(output, ensure_ascii=False, sort_keys=True))
 
 
