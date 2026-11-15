@@ -55,11 +55,11 @@ def test_coding_requires_existing_pytest_and_isolated_branch(repo, tmp_path):
         "user.email=harness-qa@localhost", "commit", "-m", "test baseline")
     with pytest.raises(HarnessError, match="pytest"):
         manager.launch(main_goal="main", child_goal="child", expected="tests/missing.py",
-                       repo=str(repo), executor="codex-task", ttl_seconds=20)
+                       repo=str(repo), executor="codex-task", ttl_seconds=20, allowed_files=["calc.py"])
     git("-C", repo, "checkout", "-b", "main")
     with pytest.raises(HarnessError, match="harness/"):
         manager.launch(main_goal="main", child_goal="child", expected="tests/test_calc.py",
-                       repo=str(repo), executor="codex-task", ttl_seconds=20)
+                       repo=str(repo), executor="codex-task", ttl_seconds=20, allowed_files=["calc.py"])
 
 
 def test_cleanup_archives_only_previously_untracked_known_files(repo, tmp_path):
@@ -93,7 +93,7 @@ def test_coding_delta_rejects_test_file_tampering(repo):
     git("-C", repo, "-c", "user.name=Harness QA", "-c",
         "user.email=harness-qa@localhost", "commit", "-m", "baseline test")
     target.write_text("def test_add(): assert False\n")
-    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py", ["calc.py"])
     assert not valid
     assert "outside implementation" in reason
 
@@ -101,30 +101,30 @@ def test_coding_delta_rejects_test_file_tampering(repo):
 def test_coding_delta_rejects_config_and_unknown_untracked(repo):
     (repo / "calc.py").write_text("VALUE = 2\n")
     (repo / "settings.yml").write_text("dangerous: true\n")
-    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py", ["calc.py"])
     assert not valid and "unknown untracked" in reason
     (repo / "settings.yml").unlink()
     (repo / ".github").mkdir()
     (repo / ".github/config.py").write_text("VALUE = 2")
-    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py", ["calc.py"])
     assert not valid
     (repo / ".github/config.py").unlink()
     (repo / "calc.py").write_text("VALUE = 2\n")
-    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py", ["calc.py"])
     assert valid, reason
 
 
 def test_coding_delta_accepts_source_change_and_generated_context(repo):
     (repo / "calc.py").write_text("VALUE = 2\n")
     (repo / "PROJECT_CONTEXT.md").write_text("task report")
-    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py", ["calc.py"])
     assert valid, reason
 
 
 def test_coding_delta_rejects_staged_changes(repo):
     (repo / "calc.py").write_text("VALUE = 3\n")
     git("-C", repo, "add", "calc.py")
-    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py", ["calc.py"])
     assert not valid and "staged" in reason
 
 
@@ -157,6 +157,8 @@ def test_malicious_agent_test_rewrite_never_commits(repo, tmp_path, monkeypatch)
         "task_id": 90, "unit": "harness-child-90-0123456789.service",
         "repo": str(repo), "run_dir": str(work), "executor": "codex-task",
         "expected": "tests/test_calc.py", "prompt": "Fix VALUE",
+        "test_sha": __import__("hashlib").sha256(test_file.read_bytes()).hexdigest(),
+        "approved_files": ["calc.py"],
     }
     spec_path = work / "job.json"
     spec_path.write_text(json.dumps(spec))
