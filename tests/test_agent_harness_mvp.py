@@ -132,3 +132,48 @@ def test_verifier_is_mandatory(store):
         store.accept(t.id, at=T+timedelta(minutes=2), artifact_ref='a',
                      test_evidence='exit0', runtime_readback='r', verifier=lambda a,b,c: False)
     assert store.get(t.id).state != 'DONE_VERIFIED'
+
+
+def test_reconcile_due_expires_every_overdue_child_and_requires_cleanup(store):
+    a = create(store, key='overdue-a', child='task a', ttl=timedelta(hours=1))
+    b = create(store, key='overdue-b', child='task b', ttl=timedelta(hours=2))
+    c = create(store, key='not-due', child='task c', ttl=timedelta(hours=4))
+    store.dispatch(a.id, external_task_id='running-a', at=T)
+    store.dispatch(b.id, external_task_id='running-b', at=T)
+    at = T + timedelta(hours=3)
+    changed = store.reconcile_due(at=at)
+    assert [t.id for t in changed] == [a.id, b.id]
+    assert all(t.state == 'EXPIRED' and t.cleanup_state == 'CLEANUP_PENDING' for t in changed)
+    assert store.get(c.id).state == 'NOT_DISPATCHED'
+    assert store.reconcile_due(at=at) == []
+    assert sum(e['event'] == 'EXPIRED' for e in store.events(a.id)) == 1
+    with pytest.raises(HarnessError, match='EXPIRED'):
+        store.dispatch(a.id, external_task_id='resend-is-forbidden', at=at)
+
+
+def test_reconcile_does_not_expire_already_accepted_child(store):
+    a = create(store, key='accepted', child='accepted result', ttl=timedelta(hours=1))
+    store.dispatch(a.id, external_task_id='test-a', at=T)
+    store.observe(a.id, backend_state='FINISHED', process_alive=False,
+                  at=T+timedelta(minutes=1))
+    store.accept(a.id, at=T+timedelta(minutes=2),
+                 artifact_ref='a', test_evidence='t', runtime_readback='r',
+                 verifier=lambda a,t,r: True)
+    assert store.reconcile_due(at=T+timedelta(hours=3)) == []
+    assert store.get(a.id).state == 'DONE_VERIFIED'
+
+
+def test_expire_single_path_also_flags_cleanup_pending(store):
+    a = create(store, key='expired-dispatch', child='expiring', ttl=timedelta(minutes=5))
+    with pytest.raises(HarnessError):
+        store.dispatch(a.id, external_task_id='late', at=T+timedelta(minutes=6))
+    assert store.get(a.id).state == 'EXPIRED'
+    assert store.get(a.id).cleanup_state == 'CLEANUP_PENDING'
+
+
+def test_parent_tasks_snapshot_filter(store):
+    a = create(store, key='a', child='one')
+    b = store.create(key='b', main_goal='different locked goal', child_goal='other',
+                     dod='one result', agent='codex', node='dell-linux', created_at=T)
+    assert [t.id for t in store.list_tasks()] == [a.id, b.id]
+    assert [t.id for t in store.list_tasks(main_goal=a.main_goal)] == [a.id]
