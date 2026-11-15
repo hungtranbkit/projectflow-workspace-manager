@@ -67,17 +67,18 @@ The Codex smoke needs an isolated clone at
   accepted the task and confirmed session deletion:
   `executor=codex`, `DONE_VERIFIED`, `CLEANED_VERIFIED`,
   `artifact_removed=true`; `harness_task_id=2`.
-- The local unit suite passed **17/17 tests** on Dell again after the
-  Codex-mode smoke patch, and the branch checkout was clean.
+- The local unit suite passed **24/24 tests** on Dell after adding parent WIP
+  limits and the expiry reconciliation CLI, and the branch checkout was clean.
 
 ## NOT YET a production unattended harness
 
-This MVP is **operator-invoked**, not a continuously running executor or a
-replacement for ChatGPT Automations. It does **not** yet provision child
-monitors, enforce real process termination exactly at 24 hours, integrate
-ProjectFlow task queues, or prove a long-running coding/PR/deploy acceptance.
-The task TTL stops a late dispatch when reconciled; an actual watchdog and
-authorized cancel confirmation are separate future gates. Never call a
+The one-task execution smoke remains **operator-invoked**. A narrowly scoped
+**staging systemd timer** on Dell now runs the SQLite deadline reconciler every
+five minutes. It records `EXPIRED` and `CLEANUP_PENDING` durably; it does NOT
+kill a task/process, create child monitors, run agent loops, integrate with
+production ProjectFlow task queues, or prove long-running code/PR/deploy
+acceptance. Real process group cancellation and authorized stop confirmation
+remain separate future gates. Never call a
 submitted receipt `RUNNING` without observed live activity.
 
 Do not merge/deploy to production, grant broad rights, modify Codex trust,
@@ -95,3 +96,38 @@ states. Do not report it deleted or auto-approve its trust prompt.
 Direct ChatGPT `terminal_turn` still lacks an exposed confirmation field;
 tracked in [Terminal MCP #119](https://github.com/hungtranbkit/terminal-mcp/issues/119).
 The local SDK exposes `args={"confirm":true}` and the smoke has verified it.
+
+## Parent checkpoint and staging deadline timer (15 November 2026)
+
+- Parent goal is immutable; the SQLite store enforces **at most 2 outstanding
+  children** per main goal transactionally. A terminal child with
+  `CLEANUP_PENDING` still occupies its slot; cloning/restarting it does not
+  silently free capacity.
+- `scripts/harness_reconcile.py` reads child task states and can mark all due
+  jobs `EXPIRED` with cleanup still pending. Its default is read-only; write
+  requires the explicit `--apply` flag. Repeated runs are idempotent.
+- `scripts/harness_staging_timer.sh install|status|remove` manages ONLY the
+  opt-in `projectflow-harness-reconcile-staging.timer` in the user's systemd
+  instance on Dell; it requires a pre-existing staging SQLite DB and does not
+  touch any other timers or production services. The current Dell staging timer
+  is **enabled/active** with five-minute calendar cadence; the service's first
+  actual invocation succeeded with exit code 0.
+- `tests/test_agent_harness_reconcile_cli.py` exercises the real CLI against
+  a disposable database, checking dry-run, expiry and no duplicate events.
+
+Check/read a parent without changing state:
+
+```bash
+python scripts/harness_reconcile.py --main-goal 'MVP Harness: one task executes, verifies and cleans safely'
+bash scripts/harness_staging_timer.sh status
+```
+
+For staging removal (retains SQLite events):
+
+```bash
+bash scripts/harness_staging_timer.sh remove
+```
+
+**Limit:** The 24h deadline is currently bounded by the next scheduler tick;
+it does not prove that an already running CLI process was forcibly terminated
+at exactly 24h. Never call `EXPIRED` a successful process cancellation.
