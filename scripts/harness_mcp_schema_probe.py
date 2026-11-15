@@ -10,7 +10,7 @@ async def main():
             await c.initialize()
             for tool in (await c.list_tools()).tools:
                 if tool.name in {"terminal_turn","terminal_delete_session","terminal_status","terminal_send_task","terminal_task_status","terminal_list_sessions","terminal_start_task","terminal_create_session"} or ("task_status" in tool.name):
-                    s=tool.inputSchema or {}
+                    s=tool.input_schema or {}
                     print(tool.name, "required=",s.get("required",[]),"fields=",list(s.get("properties",{})))
 
 asyncio.run(main())
