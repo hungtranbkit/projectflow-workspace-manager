@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import json
+import subprocess
 
 import pytest
 
@@ -32,6 +33,13 @@ def fixture_repo(tmp_path):
     repo = tmp_path / "repo"
     (repo / "tests").mkdir(parents=True)
     (repo / "tests/test_accept.py").write_text("def test_accept(): assert False\n")
+    subprocess.run(["git", "-C", str(repo), "init", "-b", "harness/test"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "add", "tests/test_accept.py"],
+                   check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=Harness Test",
+                    "-c", "user.email=qa@localhost", "commit",
+                    "-m", "test: acceptance baseline"], check=True, capture_output=True)
     return repo
 
 
