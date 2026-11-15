@@ -37,7 +37,7 @@ PYTHONPATH=. /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python
     -m pytest -q tests/test_agent_harness_mvp.py tests/test_agent_harness_terminal.py
 
 # Check local MCP availability, read-only:
-./scripts/harness_mcp_probe.py  # or invoke with Terminal MCP's Python venv
+/home/dell/workspace/terminal-mcp/.venv/bin/python scripts/harness_mcp_probe.py
 
 # Real Codex agent smoke, read-only and no login/trust bypass:
 HARNESS_EXECUTOR=codex \
@@ -67,8 +67,8 @@ The Codex smoke needs an isolated clone at
   accepted the task and confirmed session deletion:
   `executor=codex`, `DONE_VERIFIED`, `CLEANED_VERIFIED`,
   `artifact_removed=true`; `harness_task_id=2`.
-- The local unit suite passed **17 tests** on Dell before the final
-  Codex-mode smoke patch; re-run after changes before considering merge.
+- The local unit suite passed **17/17 tests** on Dell again after the
+  Codex-mode smoke patch, and the branch checkout was clean.
 
 ## NOT YET a production unattended harness
 
@@ -83,3 +83,15 @@ submitted receipt `RUNNING` without observed live activity.
 Do not merge/deploy to production, grant broad rights, modify Codex trust,
 delete unrelated sessions, or claim full-monitoring integration based only
 on this smoke result.
+
+### Cleanup limitations
+
+The smoke creates and deletes only its own `harness-smoke-*` shell session.
+A separate manually created Codex session `harness-codex-live-20261115`
+remains blocked on the workspace-trust prompt and is **not** part of the
+successful smoke. The official MCP tool classifies it as WAITING_INPUT/UNKNOWN
+according to observation depth; the safe cleanup helper refuses uncertain
+states. Do not report it deleted or auto-approve its trust prompt.
+Direct ChatGPT `terminal_turn` still lacks an exposed confirmation field;
+tracked in [Terminal MCP #119](https://github.com/hungtranbkit/terminal-mcp/issues/119).
+The local SDK exposes `args={"confirm":true}` and the smoke has verified it.
