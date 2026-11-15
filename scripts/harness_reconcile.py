@@ -16,8 +16,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services.agent_harness_mvp import HarnessStore
-from harness_managed_exec import ManagedHarness
-from harness_parent import tick_all
+from scripts.harness_managed_exec import ManagedHarness
+from scripts.harness_parent import tick_all
 
 TERMINAL = {"DONE_VERIFIED", "FAILED", "EXPIRED"}
 
