@@ -288,9 +288,87 @@ def register(
             "backend_receipt": task_id, "RUNNING_VERIFIED": False}
 
 
+async def reconcile_external(
+    registry: dict[str, dict[str, Any]], db_path: Path,
+) -> dict[str, Any]:
+    """Read back real Terminal MCP durable tasks; no implicit acceptance/deletion.
+
+    A FINISHED remote agent still needs project-specific independent DoD.
+    UNKNOWN and backend errors never become fake RUNNING or DONE events.
+    """
+    store = HarnessStore(db_path)
+    with connect(db_path) as db:
+        init_schema(db)
+        rows = db.execute("""SELECT m.automation_id,m.task_id,m.external_task_id,
+                                    m.session_name,m.backend_node
+                            FROM harness_monitor_receipts m
+                            ORDER BY m.task_id""").fetchall()
+        pending = [dict(x) for x in rows if store.get(x["task_id"]).state not in TERMINAL]
+    changed: list[dict[str, Any]] = []
+    for item in pending:
+        current = store.get(item["task_id"])
+        try:
+            entry = registry[item["automation_id"]]
+            with connect(db_path) as db:
+                require_binding(item["automation_id"], registry, db)
+            if not entry["configured_enabled"]:
+                raise HarnessError("monitor is paused; no external action allowed")
+            result = await verify_external_task(item["external_task_id"])
+            backend = result["result"]["task"]
+            if (backend.get("target") != item["session_name"]
+                    or backend.get("task_id") != item["external_task_id"]):
+                raise HarnessError("external task/session mismatch on readback")
+            state = backend["state"]
+            if state in {"FAILED", "CANCELLED", "EXPIRED"}:
+                current = store.fail(
+                    current.id, at=now(),
+                    reason=f"Terminal MCP {state}; cleanup requires separate proof")
+            else:
+                backend_time = backend.get("updated_at")
+                progress = (datetime.fromtimestamp(float(backend_time), timezone.utc)
+                            if isinstance(backend_time, (int, float)) else None)
+                live = (state == "RUNNING" and backend.get("running_confirmed") is True
+                        and backend.get("turn_state") == "RUNNING"
+                        and (backend.get("watcher") or {}).get("alive") is True)
+                if state == "DONE":
+                    mapped, live = "FINISHED", False
+                elif state in {"WAITING_INPUT", "BLOCKED"}:
+                    mapped, live = "BLOCKED", False
+                elif state == "RUNNING":
+                    mapped = "RUNNING"
+                else:
+                    mapped = "UNKNOWN"
+                if (current.verified_at is None
+                        or now() - current.verified_at >= timedelta(minutes=10)
+                        or mapped == "FINISHED" and current.state != "NOT_RUNNING"):
+                    current = store.observe(
+                        current.id, backend_state=mapped,
+                        process_alive=True if live else False if mapped == "FINISHED" else None,
+                        progress_at=progress if live else None,
+                        evidence_ref=f"terminal-mcp-task:{item['external_task_id']}",
+                        at=now())
+            changed.append({
+                "id": current.id, "monitor": item["automation_id"],
+                "task_state": current.state, "backend_state": state,
+                "cleanup": current.cleanup_state,
+                "note": "Remote completion does NOT establish independent DoD",
+            })
+        except Exception as exc:
+            # Any unexpected backend failure retains prior state, even if a
+            # remote process might have completed. Expose the error, not PASS.
+            changed.append({
+                "id": item["task_id"], "monitor": item["automation_id"],
+                "task_state": store.get(item["task_id"]).state,
+                "backend_state": "UNKNOWN",
+                "error": f"{type(exc).__name__}: {str(exc)[:160]}",
+            })
+    return {"observed_at": now().isoformat(), "checked": len(pending),
+            "results": changed, "unverified_completion_requires_DoD": True}
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("action", choices=("bootstrap", "status", "register"))
+    p.add_argument("action", choices=("bootstrap", "status", "register", "reconcile"))
     p.add_argument("--registry", default=str(REGISTRY))
     p.add_argument("--db", default=str(STATE_DB))
     p.add_argument("--automation-id")
@@ -308,6 +386,8 @@ def main() -> None:
         output = bootstrap(registry, db_path)
     elif args.action == "status":
         output = status(registry, db_path, args.automation_id)
+    elif args.action == "reconcile":
+        output = asyncio.run(reconcile_external(registry, db_path))
     else:
         if not all((args.automation_id, args.child_goal, args.dod,
                     args.agent, args.node, args.session, args.task_id)):
