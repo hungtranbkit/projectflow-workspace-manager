@@ -223,7 +223,8 @@ async def verify_external_task(task_id: str) -> dict[str, Any]:
                 "terminal_turn", {"action": "task", "task_id": task_id,
                                   "compact": True}))
     if response.get("status") != "OK":
-        raise HarnessError("external task backend not confirmed")
+        error = (response.get("result") or {}).get("error", "UNKNOWN")
+        raise HarnessError(f"external task backend not confirmed: {response.get('status')}/{str(error)[:64]}")
     details = response.get("result", {})
     actual = details.get("task", {}) if isinstance(details, dict) else {}
     if (not isinstance(actual, dict)
