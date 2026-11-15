@@ -53,8 +53,8 @@ def test_coding_requires_existing_pytest_and_isolated_branch(repo, tmp_path):
     git("-C", repo, "add", "tests/test_calc.py")
     git("-C", repo, "-c", "user.name=Harness QA", "-c",
         "user.email=harness-qa@localhost", "commit", "-m", "test baseline")
-    with pytest.raises(HarnessError, match="pytest"):
-        manager.launch(main_goal="main", child_goal="child", expected="tests/missing.py",
+    with pytest.raises(HarnessError, match="unsafe test"):
+        manager.launch(main_goal="main", child_goal="child", expected="tests/test_missing.py",
                        repo=str(repo), executor="codex-task", ttl_seconds=20, allowed_files=["calc.py"])
     git("-C", repo, "checkout", "-b", "main")
     with pytest.raises(HarnessError, match="harness/"):
