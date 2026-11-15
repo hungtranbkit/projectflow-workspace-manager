@@ -338,9 +338,13 @@ async def reconcile_external(
                     mapped = "RUNNING"
                 else:
                     mapped = "UNKNOWN"
-                if (current.verified_at is None
-                        or now() - current.verified_at >= timedelta(minutes=10)
-                        or mapped == "FINISHED" and current.state != "NOT_RUNNING"):
+                expected_state = (
+                    "RUNNING_VERIFIED" if mapped == "RUNNING" and live
+                    else "NOT_RUNNING" if mapped == "FINISHED"
+                    else "BLOCKED" if mapped == "BLOCKED" else "UNKNOWN")
+                if (current.state != expected_state
+                        or current.verified_at is None
+                        or now() - current.verified_at >= timedelta(minutes=10)):
                     current = store.observe(
                         current.id, backend_state=mapped,
                         process_alive=True if live else False if mapped == "FINISHED" else None,
