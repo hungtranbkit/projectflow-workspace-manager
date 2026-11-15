@@ -189,9 +189,14 @@ class ManagedHarness:
                 VALUES (?,?,?,?,?,?,?)""",
                 (task.id, unit, str(run_dir), str(project), executor,
                  hashlib.sha256(expected.encode()).hexdigest(), now.isoformat()))
+        remaining_seconds = int((task.expires_at - utcnow()).total_seconds())
+        if remaining_seconds < 1:
+            self.store.expire(task.id, at=utcnow())
+            return {"task_id": task.id, "state": "EXPIRED", "unit": unit,
+                    "reason": "not enough time left for an authorized dispatch"}
         command = [
             "systemd-run", "--user", f"--unit={unit.removesuffix('.service')}",
-            f"--property=RuntimeMaxSec={ttl_seconds}s",
+            f"--property=RuntimeMaxSec={remaining_seconds}s",
             "--property=KillMode=control-group",
             "--property=NoNewPrivileges=yes", "--property=Restart=no",
             f"--working-directory={project}",
@@ -213,7 +218,7 @@ class ManagedHarness:
         # Store receipt only; NEVER call this verified RUNNING.
         self.store.dispatch(task.id, external_task_id=unit, at=utcnow())
         return {"task_id": task.id, "state": "DISPATCHED", "unit": unit,
-                "deadline": task.expires_at.isoformat(), "hard_ttl_seconds": ttl_seconds}
+                "deadline": task.expires_at.isoformat(), "hard_ttl_seconds": remaining_seconds}
 
     def reconcile(self) -> list[dict[str, Any]]:
         results = []
