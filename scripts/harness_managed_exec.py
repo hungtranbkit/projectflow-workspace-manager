@@ -538,6 +538,11 @@ def validate_coding_delta(project: Path, test_path: str,
     others = subprocess.run(
         ["git", "-C", str(project), "ls-files", "--others", "--exclude-standard", "-z"],
         capture_output=True, timeout=10)
+    ignored = subprocess.run(
+        ["git", "-C", str(project), "ls-files", "--others", "--ignored",
+         "--exclude-standard", "-z"], capture_output=True, timeout=10)
+    if ignored.returncode or ignored.stdout:
+        return False, "ignored untracked files prevent safe acceptance"
     if any(p.returncode for p in (changed, staged, others)):
         return False, "git diff status unavailable"
     if staged.stdout:
@@ -585,6 +590,20 @@ def sandboxed_pytest(spec: dict[str, Any], test_path: str) -> subprocess.Complet
                                  capture_output=True, timeout=10)
     if image_check.returncode:
         raise RuntimeError("pinned local pytest sandbox image missing")
+    expected_image_id = "sha256:ba2a442b7b20fbdc91c6b99d545a438597c7fe255beeb94eaa6ea2056ed7d105"
+    try:
+        installed_image_id = json.loads(image_check.stdout)[0]["Id"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise RuntimeError("Docker image identity unavailable")
+    if installed_image_id != expected_image_id:
+        raise RuntimeError("pytest Docker image digest changed without review")
+    start = datetime.fromisoformat(spec["created_at"])
+    if start.tzinfo is None:
+        raise RuntimeError("untrusted deadline timestamp")
+    remaining = int((start + timedelta(seconds=int(spec["ttl_seconds"])) - utcnow()).total_seconds())
+    if remaining < 2:
+        raise RuntimeError("deadline expired before sandboxed acceptance")
+    test_budget = max(1, min(100, remaining - 1))
     command = [
         "docker", "run", "--rm", "--pull=never", "--network=none",
         "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
@@ -592,11 +611,13 @@ def sandboxed_pytest(spec: dict[str, Any], test_path: str) -> subprocess.Complet
         "--tmpfs=/tmp:rw,nosuid,nodev,size=64m",
         "--mount", f"type=bind,src={repo},dst=/repo,readonly",
         "--workdir=/repo", "--env=PYTHONDONTWRITEBYTECODE=1",
+        "--env=PYTHONPYCACHEPREFIX=/tmp/pyc",
         "--env=PYTHONPATH=/repo", image,
-        "timeout", "--signal=TERM", "--kill-after=2s", "100s",
+        "timeout", "--signal=TERM", "--kill-after=2s", f"{test_budget}s",
         "python", "-m", "pytest", "-q", "-p", "no:cacheprovider", test_path,
     ]
-    return subprocess.run(command, capture_output=True, text=True, timeout=115)
+    return subprocess.run(command, capture_output=True, text=True,
+                          timeout=min(115, test_budget + 8))
 
 
 def worker(spec_file: Path) -> int:
