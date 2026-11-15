@@ -1,4 +1,5 @@
 """Bounded no-network tests of Terminal MCP adapter verification rules."""
+import asyncio
 import json
 from types import SimpleNamespace
 import pytest
@@ -20,8 +21,10 @@ class FakeMCP:
                                content=[SimpleNamespace(text=json.dumps(data))])
 
 
-@pytest.mark.asyncio
-async def test_dispatch_receipt_never_implies_running():
+def test_dispatch_receipt_never_implies_running():
+    asyncio.run(_test_dispatch_receipt_never_implies_running())
+
+async def _test_dispatch_receipt_never_implies_running():
     backend = FakeMCP([{"status": "SUBMIT_CONFIRMED", "result": {"submission_id": "abc"}}])
     adapter = TerminalMCPAdapter(backend)
     receipt = await adapter.dispatch("harness-probe-1234", "one task", request_key="probe-1234")
@@ -31,8 +34,10 @@ async def test_dispatch_receipt_never_implies_running():
     assert backend.calls[0][1]["action"] == "start"
 
 
-@pytest.mark.asyncio
-async def test_create_rejects_unsafe_name_and_cwd():
+def test_create_rejects_unsafe_name_and_cwd():
+    asyncio.run(_test_create_rejects_unsafe_name_and_cwd())
+
+async def _test_create_rejects_unsafe_name_and_cwd():
     adapter = TerminalMCPAdapter(FakeMCP([]))
     with pytest.raises(TerminalAdapterError):
         await adapter.create("production-agent", agent_type="codex", node="dell-linux", cwd="/home/dell/workspace")
@@ -40,8 +45,10 @@ async def test_create_rejects_unsafe_name_and_cwd():
         await adapter.create("harness-probe-1234", agent_type="codex", node="dell-linux", cwd="/")
 
 
-@pytest.mark.asyncio
-async def test_create_and_cleanup_require_verified_deleted_and_absence():
+def test_create_and_cleanup_require_verified_deleted_and_absence():
+    asyncio.run(_test_create_and_cleanup_require_verified_deleted_and_absence())
+
+async def _test_create_and_cleanup_require_verified_deleted_and_absence():
     name = "harness-probe-1234"
     backend = FakeMCP([
         {"status": "OK", "result": {"session": name, "state": "READY"}},
@@ -57,8 +64,10 @@ async def test_create_and_cleanup_require_verified_deleted_and_absence():
         await adapter.cleanup(name)
 
 
-@pytest.mark.asyncio
-async def test_cleanup_refuses_running_without_calling_delete():
+def test_cleanup_refuses_running_without_calling_delete():
+    asyncio.run(_test_cleanup_refuses_running_without_calling_delete())
+
+async def _test_cleanup_refuses_running_without_calling_delete():
     name = "harness-probe-1234"
     backend = FakeMCP([
         {"status": "OK", "result": {"session": name, "state": "READY"}},
@@ -71,8 +80,10 @@ async def test_cleanup_refuses_running_without_calling_delete():
     assert len(backend.calls) == 2
 
 
-@pytest.mark.asyncio
-async def test_cleanup_no_absence_proof_returns_false():
+def test_cleanup_no_absence_proof_returns_false():
+    asyncio.run(_test_cleanup_no_absence_proof_returns_false())
+
+async def _test_cleanup_no_absence_proof_returns_false():
     name = "harness-probe-1234"
     backend = FakeMCP([
         {"status": "OK", "result": {"session": name, "state": "READY"}},
