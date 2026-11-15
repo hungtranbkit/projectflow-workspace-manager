@@ -582,6 +582,46 @@ def validate_coding_delta(project: Path, test_path: str,
     return True, "verified exact preapproved source-only change"
 
 
+def snapshot_tracked_sources(repo: Path, destination: Path) -> dict[str, str]:
+    """Take an immutable-test input copy of ONLY tracked, non-symlink files.
+
+    Never copy ignored files, secrets, external symlinks, .git hooks or caches.
+    The snapshot is read-only inside Docker, and retained for independent
+    commit-to-tested-tree validation.
+    """
+    if destination.exists():
+        raise RuntimeError("test snapshot already exists")
+    git = subprocess.run(
+        ["git", "-C", str(repo), "-c", "core.fsmonitor=false",
+         "ls-files", "-z"], capture_output=True, timeout=10)
+    if git.returncode:
+        raise RuntimeError("cannot enumerate trusted source files")
+    files = [x.decode() for x in git.stdout.split(b"\x00") if x]
+    if not files or len(files) > 4000:
+        raise RuntimeError("repository snapshot limits exceeded")
+    destination.mkdir(parents=True, mode=0o755)
+    hashes = {}
+    total_bytes = 0
+    for rel in files:
+        src = repo / rel
+        parts = Path(rel).parts
+        if (not rel or src.is_symlink() or not src.is_file()
+                or repo not in src.resolve().parents
+                or any((repo / Path(*parts[:i])).is_symlink()
+                       for i in range(1,len(parts)))):
+            raise RuntimeError("symlink/foreign tracked file in acceptance snapshot")
+        size = src.stat().st_size
+        total_bytes += size
+        if total_bytes > 80_000_000:
+            raise RuntimeError("repository snapshot exceeds 80MB")
+        dst = destination / rel
+        dst.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+        shutil.copyfile(src, dst, follow_symlinks=False)
+        dst.chmod(0o644)
+        hashes[rel] = hashlib.sha256(dst.read_bytes()).hexdigest()
+    return hashes
+
+
 def sandboxed_pytest(spec: dict[str, Any], test_path: str) -> subprocess.CompletedProcess[str]:
     """Run potentially attacker-modified pytest ONLY in a no-network container.
 
@@ -589,6 +629,11 @@ def sandboxed_pytest(spec: dict[str, Any], test_path: str) -> subprocess.Complet
     are passed in. The runner image is locally provisioned and never pulled.
     """
     repo = Path(spec["repo"]).resolve(strict=True)
+    # A tracked-only snapshot fixes the race between tests and Git commit:
+    # no agent can change what pytest actually imported during acceptance.
+    snapshot = Path(spec.get("test_snapshot", str(repo))).resolve(strict=True)
+    if not snapshot.is_dir():
+        raise RuntimeError("missing read-only source snapshot")
     image = "projectflow-harness-pytest:9.0.2"
     if not shutil.which("docker"):
         raise RuntimeError("Docker test isolation unavailable")
@@ -615,7 +660,7 @@ def sandboxed_pytest(spec: dict[str, Any], test_path: str) -> subprocess.Complet
         "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
         "--pids-limit=64", "--memory=512m", "--cpus=1", "--user=65534:65534",
         "--tmpfs=/tmp:rw,nosuid,nodev,size=64m",
-        "--mount", f"type=bind,src={repo},dst=/repo,readonly",
+        "--mount", f"type=bind,src={snapshot},dst=/repo,readonly",
         "--workdir=/repo", "--env=PYTHONDONTWRITEBYTECODE=1",
         "--env=PYTHONPYCACHEPREFIX=/tmp/pyc",
         "--env=PYTHONPATH=/repo", installed_image_id,
