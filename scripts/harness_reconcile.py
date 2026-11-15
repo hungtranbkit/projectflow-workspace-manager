@@ -17,6 +17,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services.agent_harness_mvp import HarnessStore
 from harness_managed_exec import ManagedHarness
+from harness_parent import tick_all
 
 TERMINAL = {"DONE_VERIFIED", "FAILED", "EXPIRED"}
 
@@ -59,8 +60,12 @@ def main() -> None:
         manager = ManagedHarness(db, db.parent)
         managed = manager.reconcile()
     newly_expired = store.reconcile_due(at=now) if args.apply else []
+    # Only explicitly registered and enabled staging plans may dispatch
+    # children; no automatic arbitrary goal generation or hidden approval.
+    parents = tick_all(manager, db.parent) if args.apply else []
     result = snapshot(store, now, main_goal=args.main_goal)
     result["managed_units"] = managed
+    result["parent_plans"] = parents
     result["mode"] = "APPLY" if args.apply else "READ_ONLY"
     result["new_expired_ids"] = [t.id for t in newly_expired]
     print("HARNESS_RECONCILE=" + json.dumps(result, ensure_ascii=False, sort_keys=True))
