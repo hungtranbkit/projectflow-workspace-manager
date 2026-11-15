@@ -534,21 +534,35 @@ def worker(spec_file: Path) -> int:
                 + spec["expected"] + ". Do not modify tests, settings or other projects.",
             ], spec, run_dir)
             test_path = spec["expected"]
-            acceptance = subprocess.run(
-                [sys.executable, "-m", "pytest", "-q", test_path],
-                cwd=spec["repo"], capture_output=True, text=True, timeout=120)
-            (run_dir / "test-output.txt").write_text(
-                (acceptance.stdout + acceptance.stderr)[-12000:], encoding="utf-8")
-            additional["test_exit"] = acceptance.returncode
-            additional["acceptance_path"] = hashlib.sha256(test_path.encode()).hexdigest()
-            if rc == 0 and acceptance.returncode == 0:
-                allowed, explanation = validate_coding_delta(
-                    Path(spec["repo"]).resolve(), test_path)
-                additional["scope_verified"] = allowed
-                if not allowed:
-                    additional["scope_refusal"] = explanation
+            # Check change scope and unchanged test content BEFORE running any
+            # potentially untrusted code; subprocess host pytest is forbidden.
+            allowed, explanation = validate_coding_delta(
+                Path(spec["repo"]).resolve(), test_path, spec.get("approved_files"))
+            if hashlib.sha256((Path(spec["repo"]) / test_path).read_bytes()).hexdigest() != spec["test_sha"]:
+                allowed, explanation = False, "acceptance test content changed"
+            additional["scope_verified"] = allowed
+            additional["scope_refusal"] = None if allowed else explanation
+            if not allowed:
+                rc = 127
+            if rc == 0:
+                acceptance = sandboxed_pytest(spec, test_path)
+                (run_dir / "test-output.txt").write_text(
+                    (acceptance.stdout + acceptance.stderr)[-12000:], encoding="utf-8")
+                additional["test_exit"] = acceptance.returncode
+                additional["acceptance_path"] = hashlib.sha256(test_path.encode()).hexdigest()
+                if acceptance.returncode != 0:
+                    rc = 126
+            if rc == 0:
+                # Detect changes made by leftover asynchronous agent actions
+                # while the sandbox test ran; refusal preserves work for review.
+                still_allowed, reason = validate_coding_delta(
+                    Path(spec["repo"]).resolve(), test_path, spec.get("approved_files"))
+                if not still_allowed or hashlib.sha256(
+                        (Path(spec["repo"]) / test_path).read_bytes()).hexdigest() != spec["test_sha"]:
+                    additional["scope_verified"] = False
+                    additional["scope_refusal"] = reason or "changed while testing"
                     rc = 127
-            if rc == 0 and acceptance.returncode == 0:
+            if rc == 0:
                 diff = subprocess.run(["git", "-C", spec["repo"], "diff", "--binary"],
                                       capture_output=True, text=True, timeout=10)
                 patch = run_dir / "changes.patch"
@@ -557,9 +571,21 @@ def worker(spec_file: Path) -> int:
                     rc = 126  # no verifiable code delta
                 else:
                     additional["patch_sha256"] = hashlib.sha256(patch.read_bytes()).hexdigest()
-                    subprocess.run(["git", "-C", spec["repo"], "add", "-u"], check=True, timeout=10)
+                    # Stage ONLY explicitly authorized implementation paths.
+                    subprocess.run(
+                        ["git", "-C", spec["repo"], "-c", "core.fsmonitor=false",
+                         "add", "--", *spec["approved_files"]], check=True, timeout=10)
+                    staged = subprocess.run(
+                        ["git", "-C", spec["repo"], "diff", "--cached",
+                         "--name-only", "-z"], capture_output=True, timeout=10)
+                    staged_names = {v.decode() for v in staged.stdout.split(b"\x00") if v}
+                    if staged.returncode or not staged_names or not staged_names.issubset(
+                            set(spec["approved_files"])):
+                        raise RuntimeError("unsafe staged changes; no commit")
                     committed = subprocess.run(
-                        ["git", "-C", spec["repo"], "commit", "-m", f"harness: finish task {spec['task_id']}"],
+                        ["git", "-C", spec["repo"], "-c", "core.hooksPath=/dev/null",
+                         "-c", "core.fsmonitor=false", "commit", "-m",
+                         f"harness: finish task {spec['task_id']}"],
                         capture_output=True, text=True, timeout=15)
                     rc = committed.returncode
                     if rc == 0:
@@ -576,8 +602,10 @@ def worker(spec_file: Path) -> int:
                 f"Reply with EXACTLY {spec['expected']} and no other text. "
                 "Do not execute tools or edit files.",
             ], spec, run_dir)
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, subprocess.TimeoutExpired,
+            subprocess.CalledProcessError, ValueError, KeyError) as exc:
         rc = 125
+        additional["worker_error"] = type(exc).__name__
     if output.is_file():
         out_sha = hashlib.sha256(output.read_bytes()).hexdigest()
     else:
