@@ -263,7 +263,7 @@ class ManagedHarness:
                         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
                             backend_verified = False
                     self.store.observe(task.id, backend_state="RUNNING",
-                                       process_alive=backend_verified,
+                                       process_alive=True if backend_verified else None,
                                        at=utcnow(), progress_at=progress_time if backend_verified else None,
                                        evidence_ref=f"systemd:{unit}:child-pid-heartbeat")
                 if task.state not in TERMINAL and result_file.is_file() and stopped:
