@@ -89,7 +89,7 @@ class ManagedHarness:
                repo: str, executor: str = "codex", ttl_seconds: int = 600) -> dict[str, Any]:
         if not 0 < ttl_seconds <= MAX_SECONDS:
             raise HarnessError("hard TTL must be between 1s and 24h")
-        if executor not in {"codex", "echo-probe", "sleep-probe"}:
+        if executor not in {"codex", "codex-task", "echo-probe", "sleep-probe"}:
             raise HarnessError("unsupported executor")
         if not expected or len(expected) > 2000 or not main_goal.strip() or not child_goal.strip():
             raise HarnessError("missing atomic goal / expected evidence")
@@ -100,11 +100,19 @@ class ManagedHarness:
                                 capture_output=True, text=True, timeout=10)
         if status.returncode or status.stdout.strip():
             raise HarnessError("refused: dirty or unverified worktree")
+        if executor == "codex-task":
+            branch = subprocess.run(["git", "-C", str(project), "branch", "--show-current"],
+                                    capture_output=True, text=True, timeout=10)
+            if branch.returncode or not branch.stdout.strip().startswith("harness/"):
+                raise HarnessError("coding tasks require an isolated harness/* branch")
+            acceptance = (project / expected).resolve()
+            if project not in acceptance.parents or not acceptance.is_file() or acceptance.suffix != ".py":
+                raise HarnessError("coding tasks require one existing pytest file inside repo")
         # All generated input/output stays outside the Git worktree.
         now = utcnow()
         task = self.store.create(
             key=f"managed-{secrets.token_hex(10)}", main_goal=main_goal,
-            child_goal=child_goal, dod="exact challenge + zero exit + independent output SHA",
+            child_goal=child_goal, dod=("tracked patch + pytest PASS + local commit" if executor == "codex-task" else "exact challenge + zero exit + independent output SHA"),
             agent=executor, node="dell-linux", created_at=now,
             ttl=timedelta(seconds=ttl_seconds))
         token = secrets.token_hex(5)
@@ -114,7 +122,7 @@ class ManagedHarness:
         spec_path = run_dir / "job.json"
         spec = {
             "task_id": task.id, "unit": unit, "executor": executor,
-            "repo": str(project), "expected": expected, "run_dir": str(run_dir),
+            "repo": str(project), "expected": expected, "prompt": child_goal, "run_dir": str(run_dir),
             "created_at": now.isoformat(), "ttl_seconds": ttl_seconds,
         }
         atomic_json(spec_path, spec)
@@ -183,9 +191,23 @@ class ManagedHarness:
                         and report.get("unit") == unit
                         and report.get("exit_code") == 0
                         and report.get("output_sha256") == hashlib.sha256(output.encode()).hexdigest()
-                        and hashlib.sha256(output.strip().encode()).hexdigest() == expected_sha
                         and status.get("Result") in {"success", ""}
                     )
+                    if row["executor"] == "codex-task":
+                        patch = folder / "changes.patch"
+                        test_output = folder / "test-output.txt"
+                        commit = subprocess.run(["git", "-C", row["repo"], "rev-parse", "HEAD"],
+                                                capture_output=True, text=True, timeout=10)
+                        verified = (verified
+                                    and report.get("test_exit") == 0
+                                    and report.get("acceptance_path") == expected_sha
+                                    and patch.is_file() and patch.stat().st_size > 0
+                                    and report.get("patch_sha256") == hashlib.sha256(patch.read_bytes()).hexdigest()
+                                    and test_output.is_file()
+                                    and commit.returncode == 0
+                                    and report.get("commit_sha") == commit.stdout.strip())
+                    else:
+                        verified = verified and hashlib.sha256(output.strip().encode()).hexdigest() == expected_sha
                     # Reconciliation may occur after the deadline although
                     # the worker finished before it. Use the persisted finish
                     # time, not the time at which the monitor woke up.
@@ -255,6 +277,7 @@ def worker(spec_file: Path) -> int:
     output = run_dir / "agent-output.txt"
     mode = spec["executor"]
     rc = 1
+    additional: dict[str, Any] = {}
     try:
         if mode == "sleep-probe":
             subprocess.run(["/usr/bin/sleep", "25"], check=False)
@@ -263,6 +286,43 @@ def worker(spec_file: Path) -> int:
         elif mode == "echo-probe":
             output.write_text(spec["expected"] + "\n", encoding="utf-8")
             rc = 0
+        elif mode == "codex-task":
+            cli = shutil.which("codex")
+            if not cli:
+                raise RuntimeError("Codex CLI unavailable")
+            code_run = subprocess.run([
+                cli, "exec", "--sandbox", "workspace-write", "-C", spec["repo"],
+                "--output-last-message", str(output),
+                spec["prompt"] + " Change ONLY the existing implementation needed for "
+                + spec["expected"] + ". Do not modify tests, settings or other projects.",
+            ], capture_output=True, text=True)
+            rc = code_run.returncode
+            test_path = spec["expected"]
+            acceptance = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", test_path],
+                cwd=spec["repo"], capture_output=True, text=True, timeout=120)
+            (run_dir / "test-output.txt").write_text(
+                (acceptance.stdout + acceptance.stderr)[-12000:], encoding="utf-8")
+            additional["test_exit"] = acceptance.returncode
+            additional["acceptance_path"] = hashlib.sha256(test_path.encode()).hexdigest()
+            if rc == 0 and acceptance.returncode == 0:
+                diff = subprocess.run(["git", "-C", spec["repo"], "diff", "--binary"],
+                                      capture_output=True, text=True, timeout=10)
+                patch = run_dir / "changes.patch"
+                patch.write_text(diff.stdout, encoding="utf-8")
+                if not diff.stdout.strip():
+                    rc = 126  # no verifiable code delta
+                else:
+                    additional["patch_sha256"] = hashlib.sha256(patch.read_bytes()).hexdigest()
+                    subprocess.run(["git", "-C", spec["repo"], "add", "-u"], check=True, timeout=10)
+                    committed = subprocess.run(
+                        ["git", "-C", spec["repo"], "commit", "-m", f"harness: finish task {spec['task_id']}"],
+                        capture_output=True, text=True, timeout=15)
+                    rc = committed.returncode
+                    if rc == 0:
+                        head = subprocess.run(["git", "-C", spec["repo"], "rev-parse", "HEAD"],
+                                              capture_output=True, text=True, timeout=10)
+                        additional["commit_sha"] = head.stdout.strip()
         elif mode == "codex":
             cli = shutil.which("codex")
             if not cli:
@@ -283,6 +343,7 @@ def worker(spec_file: Path) -> int:
     atomic_json(run_dir / "result.json", {
         "task_id": spec["task_id"], "unit": spec["unit"],
         "exit_code": rc, "output_sha256": out_sha, "finished_at": utcnow().isoformat(),
+        **additional,
     })
     return rc
 
@@ -296,7 +357,7 @@ def main() -> None:
     cli.add_argument("--child-goal")
     cli.add_argument("--expected")
     cli.add_argument("--repo")
-    cli.add_argument("--executor", default="codex", choices=["codex", "echo-probe", "sleep-probe"])
+    cli.add_argument("--executor", default="codex", choices=["codex", "codex-task", "echo-probe", "sleep-probe"])
     cli.add_argument("--ttl-seconds", type=int, default=600)
     cli.add_argument("--spec")
     args = cli.parse_args()
