@@ -135,8 +135,16 @@ class ManagedHarness:
                 repo TEXT NOT NULL,
                 executor TEXT NOT NULL,
                 expected_sha TEXT NOT NULL,
-                recorded_at TEXT NOT NULL
+                recorded_at TEXT NOT NULL,
+                base_sha TEXT NOT NULL DEFAULT '',
+                test_sha TEXT NOT NULL DEFAULT '',
+                approved_files_json TEXT NOT NULL DEFAULT '[]'
             )""")
+            existing = {r[1] for r in db.execute("PRAGMA table_info(harness_managed_units)")}
+            for column in ("base_sha", "test_sha", "approved_files_json"):
+                if column not in existing:
+                    spec = "TEXT NOT NULL DEFAULT '[]'" if column == "approved_files_json" else "TEXT NOT NULL DEFAULT ''"
+                    db.execute(f"ALTER TABLE harness_managed_units ADD COLUMN {column} {spec}")
 
     def _rows(self) -> list[sqlite3.Row]:
         with sqlite3.connect(self.db_path) as db:
@@ -144,7 +152,8 @@ class ManagedHarness:
             return db.execute("SELECT * FROM harness_managed_units ORDER BY task_id").fetchall()
 
     def launch(self, *, main_goal: str, child_goal: str, expected: str,
-               repo: str, executor: str = "codex", ttl_seconds: int = 600) -> dict[str, Any]:
+               repo: str, executor: str = "codex", ttl_seconds: int = 600,
+               allowed_files: list[str] | None = None) -> dict[str, Any]:
         if not 0 < ttl_seconds <= MAX_SECONDS:
             raise HarnessError("hard TTL must be between 1s and 24h")
         if executor not in {"codex", "codex-task", "echo-probe", "sleep-probe"}:
@@ -158,14 +167,53 @@ class ManagedHarness:
                                 capture_output=True, text=True, timeout=10)
         if status.returncode or status.stdout.strip():
             raise HarnessError("refused: dirty or unverified worktree")
+        base = subprocess.run(["git", "-C", str(project), "rev-parse", "HEAD"],
+                              capture_output=True, text=True, timeout=10)
+        if base.returncode or not re.fullmatch(r"[0-9a-f]{40}", base.stdout.strip()):
+            raise HarnessError("cannot establish immutable base commit")
+        base_sha = base.stdout.strip()
+        test_sha = ""
+        approved: list[str] = []
         if executor == "codex-task":
+            if not isinstance(allowed_files, list) or not 1 <= len(allowed_files) <= 10:
+                raise HarnessError("coding requires explicit 1-10 source file allowlist")
+            approved = [str(p) for p in allowed_files]
+            if len(set(approved)) != len(approved):
+                raise HarnessError("duplicate approved source path")
+            for rel in approved:
+                path = project / rel
+                if (not rel or rel.startswith("/") or any(x in {".", ".."} for x in rel.split("/"))
+                    or not rel.endswith(".py") or not path.is_file() or path.is_symlink()
+                    or path.resolve().parent != project and project not in path.resolve().parents
+                    or any(x in {"tests", "test", ".github", ".venv", "migrations"} for x in Path(rel).parts)
+                    or Path(rel).name.startswith("test_") or Path(rel).name.endswith("_test.py")
+                    or Path(rel).name in {"conftest.py", "setup.py", "config.py", "settings.py"}):
+                    raise HarnessError("unsafe or ambiguous allowlisted source path")
+                tracked = subprocess.run(["git", "-C", str(project), "ls-files",
+                                          "--error-unmatch", "--", rel],
+                                         capture_output=True, timeout=10)
+                if tracked.returncode:
+                    raise HarnessError("approved path must already be tracked")
             branch = subprocess.run(["git", "-C", str(project), "branch", "--show-current"],
                                     capture_output=True, text=True, timeout=10)
             if branch.returncode or not branch.stdout.strip().startswith("harness/"):
                 raise HarnessError("coding tasks require an isolated harness/* branch")
-            acceptance = (project / expected).resolve()
-            if project not in acceptance.parents or not acceptance.is_file() or acceptance.suffix != ".py":
-                raise HarnessError("coding tasks require one existing pytest file inside repo")
+            if (expected.startswith("/") or any(x in {".", ".."} for x in expected.split("/"))
+                    or not expected.startswith("tests/") or not Path(expected).name.startswith("test_")
+                    or not expected.endswith(".py")):
+                raise HarnessError("coding requires one canonical tests/test_*.py path")
+            raw_test = project / expected
+            acceptance = raw_test.resolve()
+            if (raw_test.is_symlink() or project not in acceptance.parents
+                    or not acceptance.is_file() or acceptance != raw_test
+                    or any(x.is_symlink() for x in [project / Path(*Path(expected).parts[:i])
+                                                   for i in range(1,len(Path(expected).parts))])):
+                raise HarnessError("unsafe test symlink or file outside repo")
+            tracked = subprocess.run(["git", "-C", str(project), "ls-files",
+                                      "--error-unmatch", "--", expected],capture_output=True,timeout=10)
+            if tracked.returncode:
+                raise HarnessError("acceptance test must be tracked")
+            test_sha = hashlib.sha256(acceptance.read_bytes()).hexdigest()
         # All generated input/output stays outside the Git worktree.
         now = utcnow()
         task = self.store.create(
@@ -182,14 +230,17 @@ class ManagedHarness:
             "task_id": task.id, "unit": unit, "executor": executor,
             "repo": str(project), "expected": expected, "prompt": child_goal, "run_dir": str(run_dir),
             "created_at": now.isoformat(), "ttl_seconds": ttl_seconds,
+            "base_sha": base_sha, "test_sha": test_sha, "approved_files": approved,
         }
         atomic_json(spec_path, spec)
         with sqlite3.connect(self.db_path) as db:
             db.execute("""INSERT INTO harness_managed_units
-                (task_id,unit,run_dir,repo,executor,expected_sha,recorded_at)
-                VALUES (?,?,?,?,?,?,?)""",
+                (task_id,unit,run_dir,repo,executor,expected_sha,recorded_at,
+                 base_sha,test_sha,approved_files_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (task.id, unit, str(run_dir), str(project), executor,
-                 hashlib.sha256(expected.encode()).hexdigest(), now.isoformat()))
+                 hashlib.sha256(expected.encode()).hexdigest(), now.isoformat(),
+                 base_sha, test_sha, json.dumps(approved)))
         remaining_seconds = int((task.expires_at - utcnow()).total_seconds())
         if remaining_seconds < 1:
             self.store.expire(task.id, at=utcnow())
@@ -516,6 +567,8 @@ def main() -> None:
     cli.add_argument("--repo")
     cli.add_argument("--executor", default="codex", choices=["codex", "codex-task", "echo-probe", "sleep-probe"])
     cli.add_argument("--ttl-seconds", type=int, default=600)
+    cli.add_argument("--allowed-files", nargs="*", default=None,
+                     help="explicit tracked Python sources permitted for codex-task")
     cli.add_argument("--spec")
     args = cli.parse_args()
     if args.action == "worker":
@@ -528,7 +581,8 @@ def main() -> None:
             cli.error("start requires --main-goal, --child-goal, --expected, --repo")
         response = manager.launch(main_goal=args.main_goal, child_goal=args.child_goal,
                                   expected=args.expected, repo=args.repo,
-                                  executor=args.executor, ttl_seconds=args.ttl_seconds)
+                                  executor=args.executor, ttl_seconds=args.ttl_seconds,
+                                  allowed_files=args.allowed_files)
     elif args.action == "reconcile":
         response = {"managed": manager.reconcile()}
     else:
