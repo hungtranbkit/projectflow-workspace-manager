@@ -707,7 +707,16 @@ def worker(spec_file: Path) -> int:
             if not allowed:
                 rc = 127
             if rc == 0:
-                acceptance = sandboxed_pytest(spec, test_path)
+                test_snapshot = run_dir / "test-snapshot"
+                snapshot_hashes = snapshot_tracked_sources(Path(spec["repo"]).resolve(),
+                                                          test_snapshot)
+                additional["tested_sources_sha"] = {
+                    rel: snapshot_hashes[rel] for rel in spec["approved_files"]}
+                additional["tested_test_sha"] = snapshot_hashes.get(test_path)
+                if additional["tested_test_sha"] != spec["test_sha"]:
+                    raise RuntimeError("snapshot acceptance test changed")
+                acceptance = sandboxed_pytest({**spec, "test_snapshot": str(test_snapshot)},
+                                             test_path)
                 (run_dir / "test-output.txt").write_text(
                     (acceptance.stdout + acceptance.stderr)[-12000:], encoding="utf-8")
                 additional["test_exit"] = acceptance.returncode
@@ -719,10 +728,15 @@ def worker(spec_file: Path) -> int:
                 # while the sandbox test ran; refusal preserves work for review.
                 still_allowed, reason = validate_coding_delta(
                     Path(spec["repo"]).resolve(), test_path, spec.get("approved_files"))
-                if not still_allowed or hashlib.sha256(
-                        (Path(spec["repo"]) / test_path).read_bytes()).hexdigest() != spec["test_sha"]:
+                tested = additional.get("tested_sources_sha", {})
+                same_bytes = all(
+                    hashlib.sha256((Path(spec["repo"]) / rel).read_bytes()).hexdigest() == digest
+                    for rel, digest in tested.items()
+                )
+                if (not still_allowed or not same_bytes or hashlib.sha256(
+                        (Path(spec["repo"]) / test_path).read_bytes()).hexdigest() != spec["test_sha"]):
                     additional["scope_verified"] = False
-                    additional["scope_refusal"] = reason or "changed while testing"
+                    additional["scope_refusal"] = reason if not still_allowed else "source changed since isolated test"
                     rc = 127
             if rc == 0:
                 diff = subprocess.run(["git", "-C", spec["repo"], "diff", "--binary"],
