@@ -48,6 +48,11 @@ def validate(plan: dict[str, Any]) -> None:
         seen.add(step["goal"])
         if step["executor"] not in {"echo-probe", "codex", "codex-task"}:
             raise ValueError("parent executor not approved")
+        if step["executor"] == "codex-task":
+            allowed = step.get("allowed_files")
+            if not isinstance(allowed, list) or not 1 <= len(allowed) <= 10 or not all(
+                    isinstance(p, str) and p.endswith(".py") for p in allowed):
+                raise ValueError("coding child requires explicit reviewed allowed_files")
         ttl = step.get("ttl_seconds", 600)
         if type(ttl) is not int or not 0 < ttl <= MAX_SECONDS:
             raise ValueError("child duration must be 1s-24h")
@@ -124,7 +129,8 @@ def tick_one(plan: dict[str, Any], worker: ManagedHarness, root: Path,
         result = worker.launch(
             main_goal=plan["main_goal"], child_goal=step["goal"],
             expected=step["expected"], repo=step["repo"],
-            executor=step["executor"], ttl_seconds=step.get("ttl_seconds", 600))
+            executor=step["executor"], ttl_seconds=step.get("ttl_seconds", 600),
+            allowed_files=step.get("allowed_files"))
         return {"main_goal": plan["main_goal"], "state": "CHILD_DISPATCHED",
                 "passed": passed, "total": len(plan["steps"]),
                 "child": step["goal"], "dispatch": result}
