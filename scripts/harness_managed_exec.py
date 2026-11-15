@@ -115,10 +115,16 @@ def archive_known_generated(repo: Path, state_root: Path, task_id: int) -> bool:
         candidate.unlink()
     # Only empty known cache directories are pruned, never user directories.
     for folder in [repo / ".pytest_cache", repo / "tests" / "__pycache__", repo / "__pycache__"]:
+        if folder.is_symlink():
+            return False  # Never enter an ignored symlink to another directory
         if folder.is_dir():
-            for current, dirs, files_here in os.walk(folder, topdown=False):
+            for current, dirs, files_here in os.walk(folder, topdown=False, followlinks=False):
+                path = Path(current)
+                if (path.is_symlink() or repo not in path.resolve().parents
+                        or any((path / child).is_symlink() for child in dirs)):
+                    return False
                 if not dirs and not files_here:
-                    Path(current).rmdir()
+                    path.rmdir()
     after = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
                            capture_output=True, text=True, timeout=10)
     return after.returncode == 0 and not after.stdout.strip()
@@ -612,7 +618,7 @@ def sandboxed_pytest(spec: dict[str, Any], test_path: str) -> subprocess.Complet
         "--mount", f"type=bind,src={repo},dst=/repo,readonly",
         "--workdir=/repo", "--env=PYTHONDONTWRITEBYTECODE=1",
         "--env=PYTHONPYCACHEPREFIX=/tmp/pyc",
-        "--env=PYTHONPATH=/repo", image,
+        "--env=PYTHONPATH=/repo", installed_image_id,
         "timeout", "--signal=TERM", "--kill-after=2s", f"{test_budget}s",
         "python", "-m", "pytest", "-q", "-p", "no:cacheprovider", test_path,
     ]
