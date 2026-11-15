@@ -19,6 +19,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -243,6 +244,28 @@ class ManagedHarness:
                     active = status.get("ActiveState") in {"active", "activating", "reloading"}
                     pid = status.get("MainPID")
                 stopped = not active and pid in {"0", ""}
+                if task.state not in TERMINAL and active and pid not in {"0", ""}:
+                    heartbeat = folder / "heartbeat.json"
+                    backend_verified = False
+                    progress_time = None
+                    if heartbeat.is_file():
+                        try:
+                            beat = json.loads(heartbeat.read_text(encoding="utf-8"))
+                            progress_time = datetime.fromisoformat(beat["observed_at"])
+                            child_pid = int(beat["child_pid"])
+                            cgroup = Path(f"/proc/{child_pid}/cgroup").read_text(encoding="utf-8")
+                            backend_verified = (
+                                beat.get("task_id") == task.id
+                                and beat.get("unit") == unit and unit in cgroup
+                                and progress_time.tzinfo is not None
+                                and timedelta(0) <= utcnow() - progress_time <= timedelta(minutes=1)
+                            )
+                        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+                            backend_verified = False
+                    self.store.observe(task.id, backend_state="RUNNING",
+                                       process_alive=backend_verified,
+                                       at=utcnow(), progress_at=progress_time if backend_verified else None,
+                                       evidence_ref=f"systemd:{unit}:child-pid-heartbeat")
                 if task.state not in TERMINAL and result_file.is_file() and stopped:
                     report = json.loads(result_file.read_text(encoding="utf-8"))
                     output_file = folder / "agent-output.txt"
@@ -332,6 +355,27 @@ class ManagedHarness:
         return results
 
 
+def execute_with_heartbeat(command: list[str], spec: dict[str, Any],
+                           run_dir: Path) -> int:
+    """Observe an actual child PID, never an idle CLI composer or submit ACK."""
+    log_file = run_dir / "agent.log"
+    with open(log_file, "ab") as log:
+        os.fchmod(log.fileno(), 0o600)
+        process = subprocess.Popen(command, cwd=spec["repo"],
+                                   stdout=log, stderr=log)
+        while process.poll() is None:
+            atomic_json(run_dir / "heartbeat.json", {
+                "task_id": spec["task_id"], "unit": spec["unit"],
+                "child_pid": process.pid, "observed_at": utcnow().isoformat(),
+                "log_bytes": log_file.stat().st_size,
+            })
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                continue
+        return int(process.returncode)
+
+
 def worker(spec_file: Path) -> int:
     spec = json.loads(spec_file.read_text(encoding="utf-8"))
     run_dir = Path(spec["run_dir"]).resolve()
@@ -341,9 +385,8 @@ def worker(spec_file: Path) -> int:
     additional: dict[str, Any] = {}
     try:
         if mode == "sleep-probe":
-            subprocess.run(["/usr/bin/sleep", "25"], check=False)
+            rc = execute_with_heartbeat(["/usr/bin/sleep", "25"], spec, run_dir)
             output.write_text("unexpected", encoding="utf-8")
-            rc = 0
         elif mode == "echo-probe":
             output.write_text(spec["expected"] + "\n", encoding="utf-8")
             rc = 0
@@ -351,13 +394,12 @@ def worker(spec_file: Path) -> int:
             cli = shutil.which("codex")
             if not cli:
                 raise RuntimeError("Codex CLI unavailable")
-            code_run = subprocess.run([
+            rc = execute_with_heartbeat([
                 cli, "exec", "--sandbox", "workspace-write", "-C", spec["repo"],
                 "--output-last-message", str(output),
                 spec["prompt"] + " Change ONLY the existing implementation needed for "
                 + spec["expected"] + ". Do not modify tests, settings or other projects.",
-            ], capture_output=True, text=True)
-            rc = code_run.returncode
+            ], spec, run_dir)
             test_path = spec["expected"]
             acceptance = subprocess.run(
                 [sys.executable, "-m", "pytest", "-q", test_path],
@@ -388,13 +430,12 @@ def worker(spec_file: Path) -> int:
             cli = shutil.which("codex")
             if not cli:
                 raise RuntimeError("Codex CLI unavailable")
-            proc = subprocess.run([
+            rc = execute_with_heartbeat([
                 cli, "exec", "--sandbox", "read-only", "-C", spec["repo"],
                 "--output-last-message", str(output),
                 f"Reply with EXACTLY {spec['expected']} and no other text. "
                 "Do not execute tools or edit files.",
-            ], capture_output=True, text=True)
-            rc = proc.returncode
+            ], spec, run_dir)
     except (OSError, RuntimeError) as exc:
         rc = 125
     if output.is_file():
