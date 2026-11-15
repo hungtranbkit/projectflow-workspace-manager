@@ -61,6 +61,63 @@ def unit_status(unit: str) -> dict[str, str]:
     return pairs
 
 
+def archive_known_generated(repo: Path, state_root: Path, task_id: int) -> bool:
+    """Clean only *new*, narrowly known agent/cache extras after preserving bytes.
+
+    Launch requires a clean repository; never delete arbitrary untracked files.
+    A post-run unknown source file or a modified tracked file blocks cleanup.
+    """
+    tracked = subprocess.run(["git", "-C", str(repo), "diff", "--quiet"], timeout=10)
+    staged = subprocess.run(["git", "-C", str(repo), "diff", "--cached", "--quiet"], timeout=10)
+    if tracked.returncode or staged.returncode:
+        return False
+    others = subprocess.run(["git", "-C", str(repo), "ls-files", "--others",
+                             "--exclude-standard", "-z"], capture_output=True, timeout=10)
+    if others.returncode:
+        return False
+    names = [p.decode("utf-8") for p in others.stdout.split(b"\x00") if p]
+    if not names:
+        return True
+    files: list[tuple[Path, str]] = []
+    for rel in names:
+        parts = Path(rel).parts
+        candidate = (repo / rel).resolve()
+        if repo not in candidate.parents or not candidate.is_file() or candidate.is_symlink():
+            return False
+        is_cache = ("__pycache__" in parts and candidate.suffix == ".pyc")
+        is_pytest = ".pytest_cache" in parts
+        is_note = rel == "PROJECT_CONTEXT.md" and candidate.stat().st_size < 1000000
+        if not (is_cache or is_pytest or is_note):
+            return False
+        files.append((candidate, rel))
+    retained = state_root / "retained" / str(task_id)
+    retained.mkdir(mode=0o700, parents=True, exist_ok=True)
+    index = []
+    for candidate, rel in files:
+        saved = retained / rel
+        saved.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        shutil.copy2(candidate, saved)
+        src_sha = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        if hashlib.sha256(saved.read_bytes()).hexdigest() != src_sha:
+            return False
+        index.append({"path": rel, "sha256": src_sha})
+    atomic_json(retained / "manifest.json", {"task_id": task_id, "archived": index})
+    for candidate, rel in files:
+        saved = retained / rel
+        if hashlib.sha256(candidate.read_bytes()).digest() != hashlib.sha256(saved.read_bytes()).digest():
+            return False
+        candidate.unlink()
+    # Only empty known cache directories are pruned, never user directories.
+    for folder in [repo / ".pytest_cache", repo / "tests" / "__pycache__", repo / "__pycache__"]:
+        if folder.is_dir():
+            for current, dirs, files_here in os.walk(folder, topdown=False):
+                if not dirs and not files_here:
+                    Path(current).rmdir()
+    after = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
+                           capture_output=True, text=True, timeout=10)
+    return after.returncode == 0 and not after.stdout.strip()
+
+
 class ManagedHarness:
     """Durable one-job ownership and reconciliation; no generic process kill."""
 
@@ -249,9 +306,8 @@ class ManagedHarness:
                         results.append({"task_id": task.id, "state": task.state,
                                         "cleanup": "PENDING", "reason": "unit not stopped"})
                         continue
-                    git = subprocess.run(["git", "-C", row["repo"], "status", "--porcelain"],
-                                         capture_output=True, text=True, timeout=10)
-                    dirty = git.returncode != 0 or bool(git.stdout.strip())
+                    clean = archive_known_generated(Path(row["repo"]), self.state_root, task.id)
+                    dirty = not clean
                     task = self.store.cleanup(
                         task.id, at=utcnow(), executor_stopped=True,
                         no_active_refs=True, dirty_worktree=dirty,
