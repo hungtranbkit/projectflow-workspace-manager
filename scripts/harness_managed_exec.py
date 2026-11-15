@@ -199,6 +199,31 @@ def verify_coding_commit(row: sqlite3.Row, report: dict[str, Any], folder: Path)
         if (patch_file.is_symlink() or not patch_file.is_file()
                 or committed_patch != patch_file.read_bytes().strip()):
             return False
+        # Prove the committed blob is byte-identical to the immutable
+        # snapshot that Docker actually tested, rather than trusting the
+        # agent's patch summary or a path-only precommit recheck.
+        tested = report.get("tested_sources_sha")
+        snapshot = folder / "test-snapshot"
+        if (not isinstance(tested, dict) or set(tested) != set(allow)
+                or not snapshot.is_dir() or snapshot.is_symlink()
+                or report.get("tested_test_sha") != test_sha):
+            return False
+        pinned_test = snapshot / test_rel
+        if (pinned_test.is_symlink() or not pinned_test.is_file()
+                or snapshot not in pinned_test.resolve().parents
+                or hashlib.sha256(pinned_test.read_bytes()).hexdigest() != test_sha):
+            return False
+        for rel, expected_digest in tested.items():
+            checked = snapshot / rel
+            if (checked.is_symlink() or not checked.is_file()
+                    or snapshot not in checked.resolve().parents
+                    or hashlib.sha256(checked.read_bytes()).hexdigest() != expected_digest):
+                return False
+            blob = subprocess.run(
+                ["git", "-C", str(repo), "-c", "core.fsmonitor=false",
+                 "show", f"{head}:{rel}"], capture_output=True, timeout=10)
+            if blob.returncode or hashlib.sha256(blob.stdout).hexdigest() != expected_digest:
+                return False
         # No later mutation of the accepted tracked code may occur unnoticed.
         if git_bytes("diff", "--name-only", "HEAD"):
             return False
