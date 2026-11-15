@@ -40,7 +40,7 @@ async def main(name):
             # has not begun an agent task. Other input waits are protected.
             blocked_trust=(state=="WAITING_INPUT" and "trust prompt" in reason.lower())
             if state!="IDLE" and not blocked_trust:
-                raise RuntimeError("refused: active/unknown session")
+                raise RuntimeError(f"refused: state={state!r} reason={reason[:100]!r}")
             d=await call(c,"delete_session",target=name,args={"confirm":True})
             result=d.get("result",{})
             gone=result.get("deleted") is True and result.get("receipt",{}).get("tmux_absent_verified") is True
