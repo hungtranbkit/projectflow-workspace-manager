@@ -19,7 +19,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.harness_managed_exec import ManagedHarness, MAX_SECONDS, atomic_json
+from scripts.harness_managed_exec import ManagedHarness, MAX_SECONDS, atomic_json, sandboxed_pytest
 
 PLAN_ID = re.compile(r"^[a-z0-9][a-z0-9-]{3,48}$")
 STATES_OK = {"DONE_VERIFIED"}
@@ -81,16 +81,34 @@ def install(plan: dict[str, Any], root: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if path.exists():
         raise ValueError("plan already registered: immutable goal cannot be overwritten")
+    # Pin the independent final test BEFORE ANY child may write to this repo.
+    final = plan["final_acceptance"]
+    repo = Path(final["repo"]).resolve(strict=True)
+    test_rel = final["test"]
+    test_raw = repo / test_rel
+    test = test_raw.resolve(strict=True)
+    if (not test_rel.startswith("tests/test_") or not test_rel.endswith(".py")
+            or test_rel != Path(test_rel).as_posix() or test_raw.is_symlink()
+            or test_raw != test or repo not in test.parents or not test.is_file()):
+        raise ValueError("final acceptance must be an existing canonical tracked test")
+    tracked = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "--error-unmatch", "--", test_rel],
+        capture_output=True, timeout=10)
+    if tracked.returncode != 0:
+        raise ValueError("final acceptance test must already be tracked")
+    pinned_test_sha = hashlib.sha256(test.read_bytes()).hexdigest()
     # Record exact plan, no secrets, no mutable timestamps or token substitution.
     atomic_json(path, plan)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     atomic_json(path.parent / f"{plan['plan_id']}.lock.json",
-                {"sha256": digest, "main_goal": plan["main_goal"]})
+                {"sha256": digest, "main_goal": plan["main_goal"],
+                 "final_test_sha": pinned_test_sha})
     return path
 
 
 def tick_one(plan: dict[str, Any], worker: ManagedHarness, root: Path,
-             *, python: str = sys.executable) -> dict[str, Any]:
+             *, python: str = sys.executable,
+             final_test_sha: str | None = None) -> dict[str, Any]:
     validate(plan)
     status_file = root / "parents" / f"{plan['plan_id']}.status.json"
     if status_file.is_file():
@@ -140,14 +158,21 @@ def tick_one(plan: dict[str, Any], worker: ManagedHarness, root: Path,
     final = plan["final_acceptance"]
     repo = Path(final["repo"]).resolve()
     test_path = (repo / final["test"]).resolve()
-    if not test_path.is_file() or repo not in test_path.parents:
+    raw_test = repo / final["test"]
+    if (not raw_test.is_file() or raw_test.is_symlink()
+            or repo not in test_path.parents or raw_test != test_path
+            or not final_test_sha
+            or hashlib.sha256(test_path.read_bytes()).hexdigest() != final_test_sha):
         return {"main_goal": plan["main_goal"], "state": "BLOCKED_ACCEPTANCE",
-                "reason": "independent test file is missing"}
-    result = subprocess.run(
-        [python, "-m", "pytest", "-q", final["test"]],
-        cwd=repo, capture_output=True, text=True, timeout=120,
-        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-    )
+                "reason": "independent test missing, altered or unpinned"}
+    try:
+        result = sandboxed_pytest({
+            "repo": str(repo), "created_at": datetime.now(timezone.utc).isoformat(),
+            "ttl_seconds": 120,
+        }, final["test"])
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        return {"main_goal": plan["main_goal"], "state": "BLOCKED_ACCEPTANCE",
+                "reason": f"isolated acceptance unavailable: {type(exc).__name__}"}
     summary = {"main_goal": plan["main_goal"], "plan_id": plan["plan_id"],
                "passed": passed, "total": len(plan["steps"]),
                "state": "DONE_VERIFIED" if result.returncode == 0 else "BLOCKED_ACCEPTANCE",
@@ -177,13 +202,16 @@ def tick_all(worker: ManagedHarness, root: Path, *, python: str = sys.executable
                 raise ValueError("GOAL_DRIFT: immutable parent lock missing")
             lock = json.loads(lock_path.read_text(encoding="utf-8"))
             if (lock.get("sha256") != hashlib.sha256(raw).hexdigest()
-                    or lock.get("main_goal") != plan["main_goal"]):
+                    or lock.get("main_goal") != plan["main_goal"]
+                    or not isinstance(lock.get("final_test_sha"), str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", lock["final_test_sha"])):
                 raise ValueError("GOAL_DRIFT: registered plan changed; refuse dispatch")
             if plan["main_goal"] in used_main_goals:
                 raise ValueError("a main goal has multiple active parent plans")
             used_main_goals.add(plan["main_goal"])
             responses.append({"plan": plan["plan_id"],
-                              **tick_one(plan, worker, root, python=python)})
+                              **tick_one(plan, worker, root, python=python,
+                                         final_test_sha=lock["final_test_sha"])})
         except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
             responses.append({"plan": path.stem, "state": "BLOCKED",
                               "reason": f"{type(exc).__name__}: {str(exc)[:180]}"})
