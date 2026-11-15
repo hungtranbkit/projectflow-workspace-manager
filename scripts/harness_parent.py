@@ -8,6 +8,7 @@ parents, no extra ChatGPT Automations, no automated rewriting of a failed goal.
 from __future__ import annotations
 
 import argparse
+import hashlib
 from datetime import datetime, timezone
 import json
 import os
@@ -77,6 +78,9 @@ def install(plan: dict[str, Any], root: Path) -> Path:
         raise ValueError("plan already registered: immutable goal cannot be overwritten")
     # Record exact plan, no secrets, no mutable timestamps or token substitution.
     atomic_json(path, plan)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    atomic_json(path.parent / f"{plan['plan_id']}.lock.json",
+                {"sha256": digest, "main_goal": plan["main_goal"]})
     return path
 
 
@@ -156,11 +160,19 @@ def tick_all(worker: ManagedHarness, root: Path, *, python: str = sys.executable
     responses = []
     used_main_goals: set[str] = set()
     for path in sorted(folder.glob("*.json")):
-        if path.name.endswith(".status.json") or path.is_symlink():
+        if path.name.endswith((".status.json", ".lock.json")) or path.is_symlink():
             continue
         try:
-            plan = json.loads(path.read_text(encoding="utf-8"))
+            raw = path.read_bytes()
+            plan = json.loads(raw)
             validate(plan)
+            lock_path = path.parent / f"{plan['plan_id']}.lock.json"
+            if not lock_path.is_file() or lock_path.is_symlink():
+                raise ValueError("GOAL_DRIFT: immutable parent lock missing")
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            if (lock.get("sha256") != hashlib.sha256(raw).hexdigest()
+                    or lock.get("main_goal") != plan["main_goal"]):
+                raise ValueError("GOAL_DRIFT: registered plan changed; refuse dispatch")
             if plan["main_goal"] in used_main_goals:
                 raise ValueError("a main goal has multiple active parent plans")
             used_main_goals.add(plan["main_goal"])
@@ -191,7 +203,7 @@ def main() -> None:
         result = {"parents": tick_all(worker, root)}
     else:
         result = {"plans": sorted(p.name for p in (root / "parents").glob("*.json")
-                                  if not p.name.endswith(".status.json"))}
+                                  if not p.name.endswith((".status.json", ".lock.json")))}
     print("HARNESS_PARENT=" + json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 
