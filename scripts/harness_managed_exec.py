@@ -133,7 +133,10 @@ class ManagedHarness:
             sys.executable, str(Path(__file__).resolve()), "worker", "--spec", str(spec_path),
         ]
         p = subprocess.run(command, capture_output=True, text=True, timeout=15)
-        if p.returncode or f"Running as unit: {unit}" not in p.stdout:
+        # systemd-run may write its successful unit receipt to stderr rather
+        # than stdout, depending on the installed systemd version.
+        receipt = (p.stdout or "") + (p.stderr or "")
+        if p.returncode or f"Running as unit: {unit}" not in receipt:
             self.store.fail(task.id, at=utcnow(), reason="systemd dispatch was not confirmed")
             return {"task_id": task.id, "state": "FAILED", "unit": unit,
                     "reason": "systemd dispatch failed or unverified; cleanup pending"}
