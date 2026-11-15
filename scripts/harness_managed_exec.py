@@ -285,6 +285,7 @@ class ManagedHarness:
                                                 capture_output=True, text=True, timeout=10)
                         verified = (verified
                                     and report.get("test_exit") == 0
+                                    and report.get("scope_verified") is True
                                     and report.get("acceptance_path") == expected_sha
                                     and patch.is_file() and patch.stat().st_size > 0
                                     and report.get("patch_sha256") == hashlib.sha256(patch.read_bytes()).hexdigest()
@@ -376,6 +377,53 @@ def execute_with_heartbeat(command: list[str], spec: dict[str, Any],
         return int(process.returncode)
 
 
+def validate_coding_delta(project: Path, test_path: str) -> tuple[bool, str]:
+    """Fail closed if Codex modified tests, config or unrelated tracked files.
+
+    This narrow MVP accepts a tracked Python implementation patch only.
+    Unknown untracked files remain for human review; generated context/cache
+    are handled separately by the archived-cleanup procedure.
+    """
+    changed = subprocess.run(
+        ["git", "-C", str(project), "diff", "--name-only", "-z"],
+        capture_output=True, timeout=10)
+    staged = subprocess.run(
+        ["git", "-C", str(project), "diff", "--cached", "--name-only", "-z"],
+        capture_output=True, timeout=10)
+    others = subprocess.run(
+        ["git", "-C", str(project), "ls-files", "--others", "--exclude-standard", "-z"],
+        capture_output=True, timeout=10)
+    if any(p.returncode != 0 for p in (changed, staged, others)):
+        return False, "git diff status unavailable"
+    # A previously clean branch cannot safely accept staged changes placed
+    # by the agent. Never include them in the automated commit.
+    if staged.stdout:
+        return False, "unexpected staged changes"
+    names = [Path(p.decode("utf-8")) for p in changed.stdout.split(b"\x00") if p]
+    if not names:
+        return False, "no tracked implementation change"
+    for path in names:
+        if (not path.parts or path.is_absolute() or path.suffix != ".py"
+                or path.as_posix() == test_path or path.name in {"conftest.py", "setup.py"}
+                or any(part in {"tests", "test", ".github", ".venv", "migrations"}
+                       for part in path.parts)):
+            return False, f"refused tracked change outside implementation: {path}"
+        actual = (project / path).resolve()
+        if project not in actual.parents or not actual.is_file() or actual.is_symlink():
+            return False, "unsafe implementation path"
+    for path_bytes in others.stdout.split(b"\x00"):
+        if not path_bytes:
+            continue
+        path = Path(path_bytes.decode("utf-8"))
+        # Only recognized agent note/caches may remain for the evidence
+        # archiver. Any other file prevents a successful automatic commit.
+        if not (path.as_posix() == "PROJECT_CONTEXT.md"
+                or ("__pycache__" in path.parts and path.suffix == ".pyc")
+                or ".pytest_cache" in path.parts):
+            return False, f"unknown untracked agent output: {path}"
+    return True, "verified implementation-only change"
+
+
 def worker(spec_file: Path) -> int:
     spec = json.loads(spec_file.read_text(encoding="utf-8"))
     run_dir = Path(spec["run_dir"]).resolve()
@@ -408,6 +456,13 @@ def worker(spec_file: Path) -> int:
                 (acceptance.stdout + acceptance.stderr)[-12000:], encoding="utf-8")
             additional["test_exit"] = acceptance.returncode
             additional["acceptance_path"] = hashlib.sha256(test_path.encode()).hexdigest()
+            if rc == 0 and acceptance.returncode == 0:
+                allowed, explanation = validate_coding_delta(
+                    Path(spec["repo"]).resolve(), test_path)
+                additional["scope_verified"] = allowed
+                if not allowed:
+                    additional["scope_refusal"] = explanation
+                    rc = 127
             if rc == 0 and acceptance.returncode == 0:
                 diff = subprocess.run(["git", "-C", spec["repo"], "diff", "--binary"],
                                       capture_output=True, text=True, timeout=10)
