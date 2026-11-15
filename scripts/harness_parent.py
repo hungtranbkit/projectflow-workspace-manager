@@ -18,7 +18,7 @@ import sys
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from harness_managed_exec import ManagedHarness, MAX_SECONDS, atomic_json
+from scripts.harness_managed_exec import ManagedHarness, MAX_SECONDS, atomic_json
 
 PLAN_ID = re.compile(r"^[a-z0-9][a-z0-9-]{3,48}$")
 STATES_OK = {"DONE_VERIFIED"}
