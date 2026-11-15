@@ -91,7 +91,7 @@ def test_parent_never_claims_done_without_independent_main_test(tmp_path):
     fake = SimpleNamespace(store=store, launch=lambda **kwargs: None)
     response = tick_one(p, fake, tmp_path)
     assert response["state"] == "BLOCKED_ACCEPTANCE"
-    assert response["final_test_exit"] != 0
+    assert "unpinned" in response["reason"]
     assert not (tmp_path / "parents/parent-qa-test.status.json").exists()
 
 
