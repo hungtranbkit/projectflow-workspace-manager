@@ -165,5 +165,6 @@ def test_malicious_agent_test_rewrite_never_commits(repo, tmp_path, monkeypatch)
     assert worker(spec_path) != 0
     outcome = json.loads((work / "result.json").read_text())
     assert outcome.get("scope_verified") is False
-    assert "outside implementation" in outcome.get("scope_refusal", "")
+    assert outcome.get("scope_refusal") in {"acceptance test content changed",
+                                             "refused tracked change outside implementation allowlist: tests/test_calc.py"}
     assert git("-C", repo, "rev-parse", "HEAD").stdout.strip() == head_before
