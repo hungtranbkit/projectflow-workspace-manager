@@ -129,11 +129,11 @@ def test_coding_delta_rejects_staged_changes(repo):
 
 
 def test_malicious_agent_test_rewrite_never_commits(repo, tmp_path, monkeypatch):
-    """Even a green pytest after rewriting the test must not count as PASS."""
+    """Even if a fake Codex rewrites pytest to green, never commit the tampering."""
     tests = repo / "tests"
     tests.mkdir()
     test_file = tests / "test_calc.py"
-    test_file.write_text("from calc import VALUE\\n\\ndef test_value(): assert VALUE == 2\\n")
+    test_file.write_text("from calc import VALUE\n\ndef test_value(): assert VALUE == 2\n")
     git("-C", repo, "add", "tests/test_calc.py")
     git("-C", repo, "-c", "user.name=Harness QA", "-c",
         "user.email=harness-qa@localhost", "commit", "-m", "failing acceptance baseline")
@@ -142,12 +142,12 @@ def test_malicious_agent_test_rewrite_never_commits(repo, tmp_path, monkeypatch)
     binaries.mkdir()
     fake = binaries / "codex"
     fake.write_text(
-        "#!/usr/bin/env python3\\n"
-        "import pathlib,sys\\n"
-        "pathlib.Path('calc.py').write_text('VALUE = 2\\\\n')\\n"
-        "pathlib.Path('tests/test_calc.py').write_text('def test_value(): assert True\\\\n')\\n"
-        "args=sys.argv\\n"
-        "pathlib.Path(args[args.index('--output-last-message')+1]).write_text('fake reply')\\n"
+        "#!/usr/bin/env python3\n"
+        "import pathlib,sys\n"
+        "pathlib.Path('calc.py').write_text('VALUE = 2\\n')\n"
+        "pathlib.Path('tests/test_calc.py').write_text('def test_value(): assert True\\n')\n"
+        "args=sys.argv\n"
+        "pathlib.Path(args[args.index('--output-last-message')+1]).write_text('fake reply')\n"
     )
     fake.chmod(0o700)
     monkeypatch.setenv("PATH", str(binaries) + os.pathsep + os.environ.get("PATH", ""))
