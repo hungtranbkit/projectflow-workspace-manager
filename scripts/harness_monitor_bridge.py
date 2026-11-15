@@ -221,15 +221,17 @@ async def verify_external_task(task_id: str) -> dict[str, Any]:
             await client.initialize()
             response = decode_mcp(await client.call_tool(
                 "terminal_task_status", {"task_id": task_id}))
-    if response.get("status") in {"FAILED", "ERROR", "NOT_FOUND", "DENIED"}:
+    if response.get("status") != "OK":
         raise HarnessError("external task backend not confirmed")
-    # Terminal MCP may return envelope or a direct task payload.
-    details = response.get("result", response)
-    if not isinstance(details, dict) or not details:
-        raise HarnessError("missing task state readback")
-    echoed = details.get("task_id") or details.get("id")
-    if echoed and str(echoed) != task_id:
-        raise HarnessError("backend task identifier mismatch")
+    details = response.get("result", {})
+    actual = details.get("task", {}) if isinstance(details, dict) else {}
+    if (not isinstance(actual, dict)
+            or str(actual.get("task_id")) != task_id
+            or actual.get("mode") not in {"agent", "shell"}
+            or actual.get("state") not in
+            {"QUEUED", "PENDING", "DISPATCHED", "RUNNING", "WAITING_INPUT",
+             "BLOCKED", "DONE", "FAILED", "CANCELLED", "EXPIRED", "IDLE"}):
+        raise HarnessError("missing or mismatched real durable task readback")
     return response
 
 
@@ -246,8 +248,15 @@ def register(
         raise HarnessError("one child goal, DoD, node and session required")
     if agent not in VALID_AGENTS or not TASK_RE.fullmatch(task_id):
         raise HarnessError("agent or durable external task id invalid")
-    if backend.get("status") in {"FAILED", "ERROR", "DENIED", "NOT_FOUND"}:
+    if backend.get("status") != "OK":
         raise HarnessError("backend receipt not validated")
+    task_backend = (backend.get("result") or {}).get("task")
+    if (not isinstance(task_backend, dict)
+            or task_backend.get("task_id") != task_id
+            or task_backend.get("target") != session_name
+            or task_backend.get("agent") != agent
+            or task_backend.get("mode") not in {"agent", "shell"}):
+        raise HarnessError("task receipt target/agent mismatch; refuse registration")
     store = HarnessStore(db_path)
     with connect(db_path) as db:
         init_schema(db)
