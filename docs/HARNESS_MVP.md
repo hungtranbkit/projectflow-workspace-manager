@@ -1,42 +1,85 @@
-# Agent Harness MVP: one task, no false RUNNING
+# Agent Harness MVP — one task, real evidence
 
-This is an isolated **state-machine proof of concept**, not a production executor.
-It belongs in `app/services/agent_harness_mvp.py` and uses only Python stdlib.
-The API records evidence supplied by trusted callers; it **does not** launch
-or terminate actual Claude/Codex processes or delete worktrees. No network,
-secrets, background scheduling, or privileged permissions are required.
+**Scope:** One atomic child task with immutable main goal, SQLite checkpoint,
+24-hour maximum declared deadline, safe dispatch classification, independently
+verified acceptance, and verified cleanup. No production changes or automatic
+permissions. See PR #40 and Issue #39.
 
-## Guarantees implemented
+## What is implemented
 
-- Immutable main and child goal; one output/DoD; one idempotency key.
-- Creation deadline at most 24h and refusal to dispatch once expired.
-- `DISPATCHED` receipt never counts as `RUNNING_VERIFIED`.
-- `RUNNING_VERIFIED` requires backend RUNNING, process alive, a fresh (<60m)
-  progress marker, and a nonempty evidence reference.
-- A shell returning to its prompt or an IDLE agent is `NOT_RUNNING`.
-- `DONE_VERIFIED` requires artifact, test, and runtime readback references.
-- Cleanup is `CLEANED_VERIFIED` only with independent stop/deletion evidence,
-  no active task refs, preserved evidence, and a clean worktree.
-- SQLite event log records the transitions for reconciliation after restart.
+- `app/services/agent_harness_mvp.py`: persistent state and event log,
+  reject duplicate live goals, refuse late dispatches, distinguish
+  `DISPATCHED` / `RUNNING_VERIFIED` / `NOT_RUNNING` / `BLOCKED` /
+  `DONE_VERIFIED`. A process that finished quickly may be
+  `NOT_RUNNING` at inspection and still be accepted **only** with
+  independently validated artifact, test proof, and runtime readback.
+- `app/services/agent_harness_terminal.py`: reusable authorized MCP adapter
+  for session creation, durable dispatch, bounded status readback and
+  confirmed cleanup. It refuses to delete sessions it did not create and
+  refuses deletion unless they are safely IDLE. The backend verifies task
+  references and tmux tombstones; the adapter checks session absence.
+- `scripts/harness_live_smoke.py`: local E2E smoke runner. Creates **its own**
+  disposable shell session, invokes either a harmless shell command or a
+  real **Codex CLI** command with read-only sandbox, verifies output and
+  artifact, accepts the child task, deletes the owned session via the
+  officially supported `terminal_turn(args={"confirm":true})` and
+  removes the temporary output. The SQLite evidence remains.
+- `tests/test_agent_harness_mvp.py` and
+  `tests/test_agent_harness_terminal.py`: fail-closed unit tests.
 
-## Run tests
+## Dell usage (operator-controlled)
+
+Run on the Dell with the already installed ProjectFlow and Terminal MCP venvs:
 
 ```bash
-python -m pytest -q tests/test_agent_harness_mvp.py
+cd /home/dell/workspace/harness-mvp-impl-20261115
+PYTHONPATH=. /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python \
+    -m pytest -q tests/test_agent_harness_mvp.py tests/test_agent_harness_terminal.py
+
+# Check local MCP availability, read-only:
+./scripts/harness_mcp_probe.py  # or invoke with Terminal MCP's Python venv
+
+# Real Codex agent smoke, read-only and no login/trust bypass:
+HARNESS_EXECUTOR=codex \
+  /home/dell/workspace/terminal-mcp/.venv/bin/python \
+  scripts/harness_live_smoke.py
+
+# Shell-only smoke:
+HARNESS_EXECUTOR=shell \
+  /home/dell/workspace/terminal-mcp/.venv/bin/python \
+  scripts/harness_live_smoke.py
 ```
 
-## Not yet implemented / block before production
+The Codex smoke needs an isolated clone at
+`/home/dell/workspace/harness-mvp-impl-20261115` (override with
+`HARNESS_CODEX_WORKDIR`). The local MCP URL defaults to
+`http://127.0.0.1:8766/mcp` (override with `HARNESS_MCP_URL`);
+**do not expose this endpoint**.
 
-1. Terminal MCP adapter that supplies authenticated task receipts, process
-   status and evidence. No attempt to fake this integration.
-2. Background executor that invokes deadline reconciliation on schedule and
-   a verified cancel/stop against actual process groups. Expiry state is not
-   proof of termination.
-3. Independent evidence verifier (not user-supplied arbitrary strings) and
-   automated cleanup of approved temporary resources.
+## Live evidence — 15 November 2026
 
-**Next acceptance test:** on a disposable repository, launch a harmless
-Codex task via the existing Terminal MCP durable `start` path, record the
-receipt, check real execution state in a later independent check, validate the
-artifact/tests, then verify safe session cleanup. Production/approval gates
-remain unchanged.
+- Official Terminal MCP client established connection; 340 tools returned.
+- Dell shell executor: `DONE_VERIFIED`, `CLEANED_VERIFIED`, and
+  `artifact_removed=true` in the updated runner.
+- Real Codex CLI v0.166.0 (`--sandbox read-only`) answered the unique
+  challenge. In the **same task lifecycle**, Harness independently read the
+  Codex `--output-last-message` file and session output, verified its SHA,
+  accepted the task and confirmed session deletion:
+  `executor=codex`, `DONE_VERIFIED`, `CLEANED_VERIFIED`,
+  `artifact_removed=true`; `harness_task_id=2`.
+- The local unit suite passed **17 tests** on Dell before the final
+  Codex-mode smoke patch; re-run after changes before considering merge.
+
+## NOT YET a production unattended harness
+
+This MVP is **operator-invoked**, not a continuously running executor or a
+replacement for ChatGPT Automations. It does **not** yet provision child
+monitors, enforce real process termination exactly at 24 hours, integrate
+ProjectFlow task queues, or prove a long-running coding/PR/deploy acceptance.
+The task TTL stops a late dispatch when reconciled; an actual watchdog and
+authorized cancel confirmation are separate future gates. Never call a
+submitted receipt `RUNNING` without observed live activity.
+
+Do not merge/deploy to production, grant broad rights, modify Codex trust,
+delete unrelated sessions, or claim full-monitoring integration based only
+on this smoke result.
