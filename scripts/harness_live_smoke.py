@@ -130,7 +130,7 @@ async def exercise(client):
                             test_evidence=f"command-tail:{marker}",
                             runtime_readback=f"sha256:{sha}",
                             verifier=lambda a,t,r: a==str(artifact) and marker in t
-                                and r==f"sha256:{sha}" and artifact.read_text().strip()==marker
+                                and r==f"sha256:{sha}" and artifact.read_text().strip()==marker)
         output["stage"] = "DONE_VERIFIED"
         output["artifact_sha256"] = sha
         # Re-check terminal status before official confirmed deletion.
