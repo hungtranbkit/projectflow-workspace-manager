@@ -155,6 +155,55 @@ def preserve_run_evidence(folder: Path, task_id: int) -> bool:
     return manifest.is_file()
 
 
+def verify_coding_commit(row: sqlite3.Row, report: dict[str, Any], folder: Path) -> bool:
+    """Independently recheck DB-pinned base, test and exact committed files."""
+    try:
+        repo = Path(row["repo"]).resolve(strict=True)
+        base = row["base_sha"]
+        test_sha = row["test_sha"]
+        allow = json.loads(row["approved_files_json"])
+        spec = json.loads((folder / "job.json").read_text(encoding="utf-8"))
+        test_rel = spec["expected"]
+        if (not re.fullmatch(r"[0-9a-f]{40}", base)
+                or not test_sha or not isinstance(allow, list)
+                or not allow or not isinstance(test_rel, str)
+                or hashlib.sha256(test_rel.encode()).hexdigest() != row["expected_sha"]
+                or not test_rel.startswith("tests/") or "/../" in test_rel):
+            return False
+        test = repo / test_rel
+        if (test.is_symlink() or not test.is_file() or repo not in test.resolve().parents
+                or hashlib.sha256(test.read_bytes()).hexdigest() != test_sha):
+            return False
+        def git_bytes(*args: str) -> bytes:
+            p = subprocess.run(["git", "-C", str(repo), "-c", "core.fsmonitor=false",
+                                *args], capture_output=True, timeout=10)
+            if p.returncode:
+                raise HarnessError("cannot verify committed Git state")
+            return p.stdout.strip()
+        head = git_bytes("rev-parse", "HEAD").decode()
+        prev = git_bytes("rev-parse", "HEAD^").decode()
+        if head != report.get("commit_sha") or prev != base:
+            return False
+        changed = git_bytes("diff", "--name-only", "-z", base, head)
+        changed_names = {v.decode() for v in changed.split(b"\x00") if v}
+        if not changed_names or not changed_names.issubset(set(allow)):
+            return False
+        committed_patch = git_bytes("diff", "--binary", base, head)
+        patch_file = folder / "changes.patch"
+        if (patch_file.is_symlink() or not patch_file.is_file()
+                or committed_patch != patch_file.read_bytes().strip()):
+            return False
+        # No later mutation of the accepted tracked code may occur unnoticed.
+        if git_bytes("diff", "--name-only", "HEAD"):
+            return False
+        if git_bytes("diff", "--cached", "--name-only", "HEAD"):
+            return False
+        return True
+    except (OSError, ValueError, TypeError, KeyError,
+            json.JSONDecodeError, subprocess.TimeoutExpired, HarnessError):
+        return False
+
+
 class ManagedHarness:
     """Durable one-job ownership and reconciliation; no generic process kill."""
 
@@ -377,11 +426,13 @@ class ManagedHarness:
                                     and report.get("test_exit") == 0
                                     and report.get("scope_verified") is True
                                     and report.get("acceptance_path") == expected_sha
-                                    and patch.is_file() and patch.stat().st_size > 0
+                                    and patch.is_file() and not patch.is_symlink()
+                                    and patch.stat().st_size > 0
                                     and report.get("patch_sha256") == hashlib.sha256(patch.read_bytes()).hexdigest()
-                                    and test_output.is_file()
+                                    and test_output.is_file() and not test_output.is_symlink()
                                     and commit.returncode == 0
-                                    and report.get("commit_sha") == commit.stdout.strip())
+                                    and report.get("commit_sha") == commit.stdout.strip()
+                                    and verify_coding_commit(row, report, folder))
                     else:
                         verified = verified and hashlib.sha256(output.strip().encode()).hexdigest() == expected_sha
                     # Reconciliation may occur after the deadline although
