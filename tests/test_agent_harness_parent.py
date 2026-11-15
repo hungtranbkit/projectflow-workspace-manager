@@ -7,7 +7,7 @@ import json
 import pytest
 
 from app.services.agent_harness_mvp import HarnessStore
-from scripts.harness_parent import validate, tick_one
+from scripts.harness_parent import validate, tick_one, tick_all, install
 
 
 T = datetime.now(timezone.utc)
@@ -85,3 +85,21 @@ def test_parent_never_claims_done_without_independent_main_test(tmp_path):
     assert response["state"] == "BLOCKED_ACCEPTANCE"
     assert response["final_test_exit"] != 0
     assert not (tmp_path / "parents/parent-qa-test.status.json").exists()
+
+
+def test_parent_plan_hash_lock_prevents_goal_drift(tmp_path):
+    repo = fixture_repo(tmp_path)
+    root = tmp_path / "state"
+    root.mkdir()
+    p = plan(repo)
+    path = install(p, root)
+    original = json.loads(path.read_text())
+    original["main_goal"] = "silently changed goal"
+    path.write_text(json.dumps(original))
+    store = HarnessStore(tmp_path / "harness.db")
+    fake = SimpleNamespace(store=store, launch=lambda **kw: (_ for _ in ()).throw(
+        AssertionError("GOAL_DRIFT dispatched an agent")))
+    outcome = tick_all(fake, root)
+    assert outcome[0]["state"] == "BLOCKED"
+    assert "GOAL_DRIFT" in outcome[0]["reason"]
+    assert store.list_tasks() == []
