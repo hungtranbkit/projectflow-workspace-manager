@@ -1,12 +1,14 @@
 """Unit tests: managed hard-TTL guards and conservative owned extra cleanup."""
 from pathlib import Path
 import json
+import os
+import sys
 import subprocess
 from datetime import datetime, timezone
 import pytest
 
 from scripts.harness_managed_exec import (
-    ManagedHarness, archive_known_generated, unit_status, validate_coding_delta,
+    ManagedHarness, archive_known_generated, unit_status, validate_coding_delta, worker,
 )
 from app.services.agent_harness_mvp import HarnessError
 
@@ -124,3 +126,42 @@ def test_coding_delta_rejects_staged_changes(repo):
     git("-C", repo, "add", "calc.py")
     valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
     assert not valid and "staged" in reason
+
+
+def test_malicious_agent_test_rewrite_never_commits(repo, tmp_path, monkeypatch):
+    """Even a green pytest after rewriting the test must not count as PASS."""
+    tests = repo / "tests"
+    tests.mkdir()
+    test_file = tests / "test_calc.py"
+    test_file.write_text("from calc import VALUE\\n\\ndef test_value(): assert VALUE == 2\\n")
+    git("-C", repo, "add", "tests/test_calc.py")
+    git("-C", repo, "-c", "user.name=Harness QA", "-c",
+        "user.email=harness-qa@localhost", "commit", "-m", "failing acceptance baseline")
+    head_before = git("-C", repo, "rev-parse", "HEAD").stdout.strip()
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    fake = binaries / "codex"
+    fake.write_text(
+        "#!/usr/bin/env python3\\n"
+        "import pathlib,sys\\n"
+        "pathlib.Path('calc.py').write_text('VALUE = 2\\\\n')\\n"
+        "pathlib.Path('tests/test_calc.py').write_text('def test_value(): assert True\\\\n')\\n"
+        "args=sys.argv\\n"
+        "pathlib.Path(args[args.index('--output-last-message')+1]).write_text('fake reply')\\n"
+    )
+    fake.chmod(0o700)
+    monkeypatch.setenv("PATH", str(binaries) + os.pathsep + os.environ.get("PATH", ""))
+    work = tmp_path / "run"
+    work.mkdir()
+    spec = {
+        "task_id": 90, "unit": "harness-child-90-0123456789.service",
+        "repo": str(repo), "run_dir": str(work), "executor": "codex-task",
+        "expected": "tests/test_calc.py", "prompt": "Fix VALUE",
+    }
+    spec_path = work / "job.json"
+    spec_path.write_text(json.dumps(spec))
+    assert worker(spec_path) != 0
+    outcome = json.loads((work / "result.json").read_text())
+    assert outcome.get("scope_verified") is False
+    assert "outside implementation" in outcome.get("scope_refusal", "")
+    assert git("-C", repo, "rev-parse", "HEAD").stdout.strip() == head_before
