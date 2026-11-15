@@ -191,3 +191,57 @@ def test_mcp_decoder_rejects_unstructured_or_error():
     with pytest.raises(HarnessError):
         bridge.decode_mcp(SimpleNamespace(is_error=False, structured_content=None,
                                           content=[SimpleNamespace(text="not json")]))
+
+
+def test_central_receipt_is_a_checkpoint_not_running_proof(source, wired):
+    ident = active_parent(source)
+    task = bridge.register(
+        registry=source, db_path=wired, ident=ident,
+        child_goal="one global controller task", dod="runtime check",
+        agent="codex", node="dell-linux", session_name="harness-demo",
+        task_id="dt_proof_001", ttl_seconds=3600,
+        backend=backend(), provenance="CENTRAL_ATTESTED",
+    )
+    assert task["state"] == "DISPATCHED"
+    assert task["RUNNING_VERIFIED"] is False
+    observed = bridge.observe_attested(source, wired, ident, "dt_proof_001",
+                                        backend(state="RUNNING"))
+    assert observed["state"] == "UNKNOWN"  # central JSON alone never proves process liveness
+    observed = bridge.observe_attested(source, wired, ident, "dt_proof_001",
+                                        backend(state="DONE"))
+    assert observed["state"] == "NOT_RUNNING"
+    assert observed["DoD"] == "REQUIRES_INDEPENDENT_ACCEPTANCE"
+    assert HarnessStore(wired).get(task["task_id"]).state != "DONE_VERIFIED"
+    summary = asyncio.run(bridge.reconcile_external(source, wired))
+    assert summary["results"][0]["backend_state"] == "UNAVAILABLE_LOCAL"
+
+
+def test_central_attested_failed_task_still_blocks_cleanup(source, wired):
+    ident = active_parent(source)
+    task = bridge.register(
+        registry=source, db_path=wired, ident=ident,
+        child_goal="global task failed", dod="post-failure review",
+        agent="codex", node="dell-linux", session_name="harness-demo",
+        task_id="dt_proof_001", ttl_seconds=3600,
+        backend=backend(), provenance="CENTRAL_ATTESTED",
+    )
+    outcome = bridge.observe_attested(source, wired, ident, "dt_proof_001",
+                                      backend(state="FAILED"))
+    assert outcome["state"] == "FAILED"
+    assert outcome["cleanup"] == "CLEANUP_PENDING"
+    assert bridge.status(source, wired, ident)["monitors"][0]["outstanding_children"] == 1
+
+
+def test_attestation_wrong_session_is_refused(source, wired):
+    ident = active_parent(source)
+    task = bridge.register(
+        registry=source, db_path=wired, ident=ident,
+        child_goal="central task", dod="one proof",
+        agent="codex", node="dell-linux", session_name="harness-demo",
+        task_id="dt_proof_001", ttl_seconds=3600,
+        backend=backend(), provenance="CENTRAL_ATTESTED",
+    )
+    with pytest.raises(HarnessError, match="task/target"):
+        bridge.observe_attested(source, wired, ident, "dt_proof_001",
+                               backend(session="different"))
+    assert HarnessStore(wired).get(task["task_id"]).state == "DISPATCHED"
