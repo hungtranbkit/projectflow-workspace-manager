@@ -177,3 +177,34 @@ def test_parent_tasks_snapshot_filter(store):
                      dod='one result', agent='codex', node='dell-linux', created_at=T)
     assert [t.id for t in store.list_tasks()] == [a.id, b.id]
     assert [t.id for t in store.list_tasks(main_goal=a.main_goal)] == [a.id]
+
+
+def test_parent_wip_limit_two_children_and_cleanup_release(store):
+    a = create(store, key='wip-a', child='first')
+    b = create(store, key='wip-b', child='second')
+    with pytest.raises(HarnessError, match='WIP limit'):
+        create(store, key='wip-c', child='third')
+    # A terminal task whose cleanup is still pending must keep its slot.
+    store.fail(a.id, at=T+timedelta(minutes=1), reason='failed test')
+    store.cleanup(a.id, at=T+timedelta(minutes=2),
+                  executor_stopped=False, no_active_refs=False,
+                  dirty_worktree=True, evidence_preserved=True,
+                  deletion_verified=False)
+    with pytest.raises(HarnessError, match='WIP limit'):
+        create(store, key='wip-c', child='third')
+    store.cleanup(a.id, at=T+timedelta(minutes=3),
+                  executor_stopped=True, no_active_refs=True,
+                  dirty_worktree=False, evidence_preserved=True,
+                  deletion_verified=True)
+    c = create(store, key='wip-c', child='third')
+    assert c.state == 'NOT_DISPATCHED'
+    assert b.state == 'NOT_DISPATCHED'
+
+
+def test_overdue_cleanup_occupies_parent_slot(store):
+    a = create(store, key='exp-a', child='first', ttl=timedelta(minutes=1))
+    create(store, key='exp-b', child='second')
+    store.reconcile_due(at=T+timedelta(minutes=2))
+    assert store.get(a.id).state == 'EXPIRED'
+    with pytest.raises(HarnessError, match='WIP limit'):
+        create(store, key='exp-c', child='third')
