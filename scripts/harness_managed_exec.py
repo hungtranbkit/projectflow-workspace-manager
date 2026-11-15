@@ -428,13 +428,17 @@ def execute_with_heartbeat(command: list[str], spec: dict[str, Any],
         return int(process.returncode)
 
 
-def validate_coding_delta(project: Path, test_path: str) -> tuple[bool, str]:
-    """Fail closed if Codex modified tests, config or unrelated tracked files.
+def validate_coding_delta(project: Path, test_path: str,
+                          allowed_files: list[str] | None = None) -> tuple[bool, str]:
+    """Require exact preapproved tracked source paths and reject all other edits.
 
-    This narrow MVP accepts a tracked Python implementation patch only.
-    Unknown untracked files remain for human review; generated context/cache
-    are handled separately by the archived-cleanup procedure.
+    A filename heuristic is never an authorization policy: codex-task must
+    receive its explicit reviewed source allowlist from the immutable launch.
     """
+    if not allowed_files or len(set(allowed_files)) != len(allowed_files):
+        return False, "missing or duplicate source allowlist"
+    if not test_path.startswith("tests/") or test_path != Path(test_path).as_posix():
+        return False, "ambiguous acceptance test path"
     changed = subprocess.run(
         ["git", "-C", str(project), "diff", "--name-only", "-z"],
         capture_output=True, timeout=10)
@@ -444,35 +448,65 @@ def validate_coding_delta(project: Path, test_path: str) -> tuple[bool, str]:
     others = subprocess.run(
         ["git", "-C", str(project), "ls-files", "--others", "--exclude-standard", "-z"],
         capture_output=True, timeout=10)
-    if any(p.returncode != 0 for p in (changed, staged, others)):
+    if any(p.returncode for p in (changed, staged, others)):
         return False, "git diff status unavailable"
-    # A previously clean branch cannot safely accept staged changes placed
-    # by the agent. Never include them in the automated commit.
     if staged.stdout:
         return False, "unexpected staged changes"
-    names = [Path(p.decode("utf-8")) for p in changed.stdout.split(b"\x00") if p]
+    names = [p.decode("utf-8") for p in changed.stdout.split(b"\x00") if p]
     if not names:
         return False, "no tracked implementation change"
-    for path in names:
-        if (not path.parts or path.is_absolute() or path.suffix != ".py"
-                or path.as_posix() == test_path or path.name in {"conftest.py", "setup.py"}
-                or any(part in {"tests", "test", ".github", ".venv", "migrations"}
-                       for part in path.parts)):
-            return False, f"refused tracked change outside implementation: {path}"
-        actual = (project / path).resolve()
-        if project not in actual.parents or not actual.is_file() or actual.is_symlink():
-            return False, "unsafe implementation path"
+    for rel in names:
+        if rel not in allowed_files or rel == test_path:
+            return False, f"refused tracked change outside implementation allowlist: {rel}"
+        path = project / rel
+        if path.is_symlink() or not path.is_file() or project not in path.resolve().parents:
+            return False, f"unsafe source symlink/path: {rel}"
     for path_bytes in others.stdout.split(b"\x00"):
         if not path_bytes:
             continue
-        path = Path(path_bytes.decode("utf-8"))
-        # Only recognized agent note/caches may remain for the evidence
-        # archiver. Any other file prevents a successful automatic commit.
-        if not (path.as_posix() == "PROJECT_CONTEXT.md"
-                or ("__pycache__" in path.parts and path.suffix == ".pyc")
-                or ".pytest_cache" in path.parts):
-            return False, f"unknown untracked agent output: {path}"
-    return True, "verified implementation-only change"
+        rel = path_bytes.decode("utf-8")
+        p = project / rel
+        parts = Path(rel).parts
+        if (p.is_symlink() or not p.is_file() or project not in p.resolve().parents
+                or any((project / Path(*parts[:i])).is_symlink()
+                       for i in range(1, len(parts)))):
+            return False, "unknown symlink or foreign untracked path"
+        recognized = (
+            rel == "PROJECT_CONTEXT.md"
+            or ("__pycache__" in parts and p.suffix == ".pyc")
+            or ".pytest_cache" in parts
+        )
+        if not recognized:
+            return False, f"unknown untracked agent output: {rel}"
+    return True, "verified exact preapproved source-only change"
+
+
+def sandboxed_pytest(spec: dict[str, Any], test_path: str) -> subprocess.CompletedProcess[str]:
+    """Run potentially attacker-modified pytest ONLY in a no-network container.
+
+    No Docker socket, secrets, host home, or writable repository bind mounts
+    are passed in. The runner image is locally provisioned and never pulled.
+    """
+    repo = Path(spec["repo"]).resolve(strict=True)
+    image = "projectflow-harness-pytest:9.0.2"
+    if not shutil.which("docker"):
+        raise RuntimeError("Docker test isolation unavailable")
+    image_check = subprocess.run(["docker", "image", "inspect", image],
+                                 capture_output=True, timeout=10)
+    if image_check.returncode:
+        raise RuntimeError("pinned local pytest sandbox image missing")
+    command = [
+        "docker", "run", "--rm", "--pull=never", "--network=none",
+        "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
+        "--pids-limit=64", "--memory=512m", "--cpus=1", "--user=65534:65534",
+        "--tmpfs=/tmp:rw,nosuid,nodev,size=64m",
+        "--mount", f"type=bind,src={repo},dst=/repo,readonly",
+        "--workdir=/repo", "--env=PYTHONDONTWRITEBYTECODE=1",
+        "--env=PYTHONPATH=/repo", image,
+        "timeout", "--signal=TERM", "--kill-after=2s", "100s",
+        "python", "-m", "pytest", "-q", "-p", "no:cacheprovider", test_path,
+    ]
+    return subprocess.run(command, capture_output=True, text=True, timeout=115)
 
 
 def worker(spec_file: Path) -> int:
