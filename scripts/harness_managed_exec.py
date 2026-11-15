@@ -138,6 +138,11 @@ class ManagedHarness:
         receipt = (p.stdout or "") + (p.stderr or "")
         if p.returncode or f"Running as unit: {unit}" not in receipt:
             self.store.fail(task.id, at=utcnow(), reason="systemd dispatch was not confirmed")
+            # A failed receipt does not prove a child was never launched.
+            # Keep WIP occupied until the owned unit is independently checked.
+            with sqlite3.connect(self.db_path) as db:
+                db.execute("UPDATE harness_tasks SET cleanup_state='CLEANUP_PENDING' WHERE id=?",
+                           (task.id,))
             return {"task_id": task.id, "state": "FAILED", "unit": unit,
                     "reason": "systemd dispatch failed or unverified; cleanup pending"}
         # Store receipt only; NEVER call this verified RUNNING.
@@ -181,22 +186,35 @@ class ManagedHarness:
                         and hashlib.sha256(output.strip().encode()).hexdigest() == expected_sha
                         and status.get("Result") in {"success", ""}
                     )
-                    self.store.observe(task.id, backend_state="FINISHED",
-                                       process_alive=False, at=utcnow(),
-                                       evidence_ref=f"systemd:{unit}:result")
-                    if verified:
-                        sha = hashlib.sha256(output.encode()).hexdigest()
-                        self.store.accept(
-                            task.id, at=utcnow(), artifact_ref=str(output_file),
-                            test_evidence=f"worker-exit=0:{unit}",
-                            runtime_readback=f"sha256:{sha}",
-                            verifier=lambda a, t, r: (
-                                Path(a).is_file() and "worker-exit=0" in t
-                                and r == f"sha256:{sha}"
-                                and Path(a).read_text(encoding="utf-8").strip() == output.strip()
-                            ))
+                    # Reconciliation may occur after the deadline although
+                    # the worker finished before it. Use the persisted finish
+                    # time, not the time at which the monitor woke up.
+                    try:
+                        finished = datetime.fromisoformat(report["finished_at"])
+                        if finished.tzinfo is None:
+                            raise ValueError("timezone required")
+                    except (KeyError, ValueError, TypeError):
+                        finished = utcnow()
+                        verified = False
+                    if finished > task.expires_at:
+                        self.store.expire(task.id, at=utcnow())
                     else:
-                        self.store.fail(task.id, at=utcnow(), reason="output/exit/systemd proof failed")
+                        self.store.observe(task.id, backend_state="FINISHED",
+                                           process_alive=False, at=finished,
+                                           evidence_ref=f"systemd:{unit}:result")
+                        if verified:
+                            sha = hashlib.sha256(output.encode()).hexdigest()
+                            self.store.accept(
+                                task.id, at=finished, artifact_ref=str(output_file),
+                                test_evidence=f"worker-exit=0:{unit}",
+                                runtime_readback=f"sha256:{sha}",
+                                verifier=lambda a, t, r: (
+                                    Path(a).is_file() and "worker-exit=0" in t
+                                    and r == f"sha256:{sha}"
+                                    and Path(a).read_text(encoding="utf-8").strip() == output.strip()
+                                ))
+                        else:
+                            self.store.fail(task.id, at=utcnow(), reason="output/exit/systemd proof failed")
                 elif task.state not in TERMINAL and utcnow() >= task.expires_at:
                     self.store.expire(task.id, at=utcnow())
                 task = self.store.get(task.id)
