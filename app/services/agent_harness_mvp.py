@@ -14,6 +14,7 @@ import sqlite3
 from typing import Any, Callable
 
 MAX_TTL = timedelta(hours=24)
+MAX_ACTIVE_CHILDREN = 2
 FRESH_WINDOW = timedelta(minutes=60)
 TERMINAL = frozenset({"DONE_VERIFIED", "FAILED", "EXPIRED"})
 
@@ -134,6 +135,8 @@ class HarnessStore:
         if not all(isinstance(v, str) and v.strip() for v in (key, main_goal, child_goal, dod, agent, node)):
             raise HarnessError("all task fields are required")
         with self._connect() as db:
+            # Serialize capacity and duplicate checks across concurrent workers.
+            db.execute("BEGIN IMMEDIATE")
             # One active task for exactly the same main/child goal; not a hidden
             # way to spawn duplicates with new request keys.
             dup = db.execute("""SELECT id FROM harness_tasks WHERE main_goal=? AND child_goal=?
@@ -141,6 +144,15 @@ class HarnessStore:
                 (main_goal, child_goal)).fetchone()
             if dup is not None:
                 raise HarnessError(f"duplicate active child task {dup['id']}")
+            # A completed/expired child with unverified cleanup still owns
+            # resources. Do not create a third worker just because a previous
+            # agent reported DONE or hit its TTL.
+            outstanding = db.execute("""SELECT COUNT(*) FROM harness_tasks
+                WHERE main_goal=? AND
+                (state NOT IN ('DONE_VERIFIED','FAILED','EXPIRED')
+                 OR cleanup_state='CLEANUP_PENDING')""", (main_goal,)).fetchone()[0]
+            if outstanding >= MAX_ACTIVE_CHILDREN:
+                raise HarnessError("parent WIP limit: two outstanding child tasks")
             try:
                 cur = db.execute("""INSERT INTO harness_tasks
                     (task_key,main_goal,child_goal,dod,agent,node,state,created_at,expires_at)
