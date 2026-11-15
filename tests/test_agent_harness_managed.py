@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 from scripts.harness_managed_exec import (
-    ManagedHarness, archive_known_generated, unit_status,
+    ManagedHarness, archive_known_generated, unit_status, validate_coding_delta,
 )
 from app.services.agent_harness_mvp import HarnessError
 
@@ -81,3 +81,46 @@ def test_cleanup_never_deletes_unknown_untracked_files(repo, tmp_path):
     assert not archive_known_generated(repo, tmp_path / "state", 9)
     assert unknown.read_text() == "do not delete"
     assert (repo / "PROJECT_CONTEXT.md").exists()
+
+
+def test_coding_delta_rejects_test_file_tampering(repo):
+    (repo / "tests").mkdir()
+    target = repo / "tests/test_calc.py"
+    target.write_text("def test_add(): assert True\n")
+    git("-C", repo, "add", "tests/test_calc.py")
+    git("-C", repo, "-c", "user.name=Harness QA", "-c",
+        "user.email=harness-qa@localhost", "commit", "-m", "baseline test")
+    target.write_text("def test_add(): assert False\n")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    assert not valid
+    assert "outside implementation" in reason
+
+
+def test_coding_delta_rejects_config_and_unknown_untracked(repo):
+    (repo / "calc.py").write_text("VALUE = 2\n")
+    (repo / "settings.yml").write_text("dangerous: true\n")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    assert not valid and "unknown untracked" in reason
+    (repo / "settings.yml").unlink()
+    (repo / ".github").mkdir()
+    (repo / ".github/config.py").write_text("VALUE = 2")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    assert not valid
+    (repo / ".github/config.py").unlink()
+    (repo / "calc.py").write_text("VALUE = 2\n")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    assert valid, reason
+
+
+def test_coding_delta_accepts_source_change_and_generated_context(repo):
+    (repo / "calc.py").write_text("VALUE = 2\n")
+    (repo / "PROJECT_CONTEXT.md").write_text("task report")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    assert valid, reason
+
+
+def test_coding_delta_rejects_staged_changes(repo):
+    (repo / "calc.py").write_text("VALUE = 3\n")
+    git("-C", repo, "add", "calc.py")
+    valid, reason = validate_coding_delta(repo, "tests/test_calc.py")
+    assert not valid and "staged" in reason
