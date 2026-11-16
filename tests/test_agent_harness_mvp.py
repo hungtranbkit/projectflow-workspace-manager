@@ -210,3 +210,47 @@ def test_overdue_cleanup_occupies_parent_slot(store):
     assert store.get(a.id).state == 'EXPIRED'
     with pytest.raises(HarnessError, match='WIP limit'):
         create(store, key='exp-c', child='third')
+
+
+def test_done_without_cleanup_holds_parent_wip_slot(store):
+    one = create(store, key="one-done-wip", child="child one")
+    create(store, key="two-done-wip", child="child two")
+    store.dispatch(one.id, external_task_id="a-real-receipt", at=T)
+    store.observe(one.id, backend_state="FINISHED", process_alive=False,
+                  at=T + timedelta(minutes=1))
+    done = store.accept(
+        one.id, at=T + timedelta(minutes=2), artifact_ref="sha256:test",
+        test_evidence="independent-test-exit-0", runtime_readback="runtime-proof",
+        verifier=lambda a, b, c: bool(a and b and c))
+    assert done.state == "DONE_VERIFIED"
+    assert done.cleanup_state == "CLEANUP_PENDING"
+    with pytest.raises(HarnessError, match="WIP limit"):
+        create(store, key="three-done-wip", child="child three")
+    store.cleanup(one.id, at=T + timedelta(minutes=3),
+                  executor_stopped=True, no_active_refs=True,
+                  dirty_worktree=False, evidence_preserved=True,
+                  deletion_verified=True)
+    assert create(store, key="three-done-wip", child="child three").state == "NOT_DISPATCHED"
+
+
+def test_failed_without_cleanup_holds_parent_wip_slot(store):
+    one = create(store, key="one-failed-wip", child="failed one")
+    create(store, key="two-failed-wip", child="failed two")
+    failed = store.fail(one.id, at=T + timedelta(minutes=1), reason="test failed")
+    assert failed.state == "FAILED"
+    assert failed.cleanup_state == "CLEANUP_PENDING"
+    with pytest.raises(HarnessError, match="WIP limit"):
+        create(store, key="three-failed-wip", child="third child")
+
+
+def test_cannot_reuse_old_child_goal_after_verified_cleanup(store):
+    original = create(store, key="child-once", child="one immutable step")
+    store.fail(original.id, at=T + timedelta(minutes=1), reason="unsupported path")
+    store.cleanup(original.id, at=T + timedelta(minutes=2),
+                  executor_stopped=True, no_active_refs=True,
+                  dirty_worktree=False, evidence_preserved=True,
+                  deletion_verified=True)
+    with pytest.raises(HarnessError, match="previously attempted child task"):
+        create(store, key="same-goal-new-key", child="one immutable step")
+    # A rescope is a new child with a different, more testable DoD.
+    assert create(store, key="rescope-unique", child="one reduced verified step").id > original.id

@@ -96,3 +96,40 @@ investigation, but must not report a Harness-enforced child as running.
 
 Tracking branch: `feat/harness-monitor-integration-20261116` in
 `hungtranbkit/projectflow-workspace-manager`.
+
+
+## Independent technical monitor-to-Harness acceptance (one-shot)
+
+Run this only on trusted Dell, from a CLEAN deployed main checkout with the
+existing Harness SQLite DB and user-systemd timer:
+
+~~~bash
+PF=/home/dell/workspace/projectflow-workspace-manager/.venv/bin/python
+MAIN=/home/dell/workspace/projectflow-harness-main-20261115
+cd "$MAIN"
+$PF scripts/harness_monitor_canary.py --monitor-id 6af65f5c6cdc8191a2ecc2f47085bea6 --launch
+$PF scripts/harness_monitor_canary.py --monitor-id 6af698c9a5308191899c6a7e013cee5f --launch
+systemctl --user start projectflow-harness-reconcile-staging.service
+$PF scripts/harness_monitor_bridge.py status
+~~~
+
+Each task writes a unique marker using the existing systemd-owned echo-probe
+executor, testing only the monitor-to-immutable-goal-to-checkpoint and cleanup.
+Child goal includes CANARY ONLY and project_DoD is NOT_TESTED_BY_CANARY.
+It is NOT a CDTM source-license approval or a Screen Remote native hardware
+acceptance, and it cannot authorize Facebook posts, browser control, spending,
+permissions or a downstream merge/deploy.
+
+Repeated launches never duplicate the same canary. Paused monitors and the
+maintenance cleanup monitor are forbidden to start a canary.
+
+## Fail-closed WIP invariant
+
+A task reaching DONE_VERIFIED or FAILED now becomes CLEANUP_PENDING immediately;
+it still consumes one of two parent WIP slots until independent cleanup proof.
+EXPIRED behaves likewise. Even after cleanup, repeating the same child goal
+with a new key is refused; a genuinely new scoped goal is required.
+
+The service does not infer business completion from these canaries. Terminal
+MCP controller task IDs may be invisible to the Dell local MCP endpoint;
+CENTRAL_ATTESTED receipts are never cryptographic RUNNING/DONE proof.

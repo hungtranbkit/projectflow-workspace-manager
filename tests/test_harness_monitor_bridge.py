@@ -245,3 +245,23 @@ def test_attestation_wrong_session_is_refused(source, wired):
         bridge.observe_attested(source, wired, ident, "dt_proof_001",
                                backend(session="different"))
     assert HarnessStore(wired).get(task["task_id"]).state == "DISPATCHED"
+
+
+def test_local_remote_failure_keeps_parent_wip_until_safe_cleanup(source, wired, monkeypatch):
+    ident = active_parent(source)
+    record = bridge.register(
+        registry=source, db_path=wired, ident=ident,
+        child_goal="agent failed but session may remain", dod="independent runtime proof",
+        agent="codex", node="dell-linux", session_name="harness-demo",
+        task_id="dt_proof_001", ttl_seconds=3600,
+        backend=backend(), provenance="LOCAL_MCP",
+    )
+    async def fail(_):
+        return backend(state="FAILED")
+
+    monkeypatch.setattr(bridge, "verify_external_task", fail)
+    report = asyncio.run(bridge.reconcile_external(source, wired))
+    task = HarnessStore(wired).get(record["task_id"])
+    assert report["results"][0]["task_state"] == "FAILED"
+    assert task.cleanup_state == "CLEANUP_PENDING"
+    assert bridge.status(source, wired, ident)["monitors"][0]["outstanding_children"] == 1
