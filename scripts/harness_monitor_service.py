@@ -94,7 +94,31 @@ def reconcile(
         except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError,
                 json.JSONDecodeError) as exc:
             record["errors"].append(f"{stage}:{type(exc).__name__}:{str(exc)[:100]}")
-    record["healthy"] = record["scheduler_healthy"] and record["bridge_healthy"]
+    # Explicitly separate technical scheduler health from agent lifecycle.
+    # A completed cron tick cannot be claimed as a completed child or project.
+    from app.services.agent_harness_mvp import HarnessStore
+    try:
+        tasks = HarnessStore(db).list_tasks()
+        record["agent_verified_count"] = sum(
+            t.state in {"RUNNING_VERIFIED", "DONE_VERIFIED"} for t in tasks)
+        record["agent_verified"] = record["agent_verified_count"] > 0
+        record["stalled_children"] = [
+            t.id for t in tasks if t.state in {"STALLED", "BLOCKED", "UNKNOWN"}]
+        record["cleanup_pending"] = [
+            t.id for t in tasks if t.cleanup_state == "CLEANUP_PENDING"]
+        record["dispatch_unverified"] = [
+            t.id for t in tasks
+            if t.state in {"NOT_DISPATCHED", "DISPATCHED"}
+            and (datetime.now(timezone.utc) - t.created_at).total_seconds() >= 600
+        ]
+        record["task_count"] = len(tasks)
+    except (OSError, ValueError, RuntimeError) as exc:
+        record["errors"].append(f"snapshot:{type(exc).__name__}:{str(exc)[:80]}")
+    record["healthy"] = (record["scheduler_healthy"] and record["bridge_healthy"]
+                         and not record["errors"])
+    record["attention_required"] = bool(
+        record.get("stalled_children") or record.get("cleanup_pending")
+        or record.get("dispatch_unverified"))
     # Always persist the real health before reporting success or failure.
     atomic_json(health_file, record)
     return (0 if record["healthy"] else 1), record
