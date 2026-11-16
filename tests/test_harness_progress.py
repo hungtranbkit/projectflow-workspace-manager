@@ -156,3 +156,23 @@ def test_report_includes_labeled_project_and_child_timers(runtime):
     assert "13%" in text or "12%" in text
     assert "còn 21h 00m" in text
     assert "dự án không có deadline 24h" in text
+
+
+def test_finished_task_still_has_a_time_bar_without_negative_remaining(runtime):
+    db, registry = runtime
+    store = HarnessStore(db)
+    origin = NOW - timedelta(minutes=10)
+    task = store.create(key="completed-time-bar", main_goal=registry[ZGH]["main_goal"],
+                        child_goal="CANARY ONLY: ended task with time evidence",
+                        dod="one technical readback", agent="codex", node="dell-linux",
+                        created_at=origin, ttl=timedelta(hours=2))
+    store.fail(task.id, at=origin + timedelta(minutes=3), reason="ended task")
+    store.cleanup(task.id, at=origin + timedelta(minutes=4),
+                  executor_stopped=True, no_active_refs=True,
+                  dirty_worktree=False, evidence_preserved=True,
+                  deletion_verified=True)
+    snap = progress.summarize(db, reference=NOW)
+    html = progress.html(snap)
+    assert "Task gần nhất" in html
+    assert "đã kết thúc; không còn đồng hồ đếm ngược" in html
+    assert f"#{task.id}" in html
