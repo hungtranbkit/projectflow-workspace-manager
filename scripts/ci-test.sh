@@ -31,4 +31,4 @@ case "$tier" in
     exit 2
     ;;
 esac
-exec python3 -m pytest -q --disable-warnings "$@"
+exec "${PYTHON:-python3}" -m pytest -q --disable-warnings "$@"
