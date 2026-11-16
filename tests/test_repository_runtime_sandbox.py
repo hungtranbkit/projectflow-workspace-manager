@@ -240,7 +240,14 @@ def test_configured_repo_shows_create_sandbox_on_workspace_page(client, git_repo
 
 
 # --------------------------------------------------------------- real test config
-@pytest.mark.skipif(subprocess.run(["docker", "info"], capture_output=True, timeout=10).returncode != 0, reason="docker daemon not reachable")
+def _docker_available():
+    try:
+        return subprocess.run(["docker", "info"], capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+@pytest.mark.skipif(not _docker_available(), reason="docker daemon not reachable")
 def test_test_configuration_pass_provisions_real_isolated_sandbox(client, git_repo):
     root, _ = git_repo
     repo = make_sandboxable_no_contract(root, "sbtest")

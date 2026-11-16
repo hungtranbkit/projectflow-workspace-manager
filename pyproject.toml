@@ -45,7 +45,7 @@ dependencies = ["fastapi>=0.110,<1", "uvicorn>=0.27,<1", "jinja2>=3.1,<4", "pyth
 # assumption: pytest>=9,<10 installed, the full fast non-real suite
 # (1080+ tests) collected and ran clean, zero failures, before this pin
 # moved. Same "verify, then adopt" pattern as B2's cryptography bump.
-test = ["pytest>=9,<10", "httpx>=0.27,<1"]
+test = ["pytest>=9,<10", "httpx>=0.27,<1", "pytest-timeout>=2.4,<3"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
@@ -53,3 +53,5 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+markers = ["live_provider: calls authenticated external Claude CLI; requires isolated opt-in qualification"]

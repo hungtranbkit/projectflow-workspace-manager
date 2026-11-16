@@ -6,6 +6,9 @@ needed -- the disposable repo's 'test' gate is a plain, fast pytest
 command against a tiny probe test file, not a sandbox."""
 from __future__ import annotations
 import subprocess
+import sys
+import shlex
+import json
 import time
 
 import pytest
@@ -32,7 +35,8 @@ def make_repo(root, name, broken=True, second_broken=False):
     run(repo, "git", "config", "user.name", "t")
     (repo / "PROJECT.yaml").write_text(
         "schema_version: 1\nproject: {code: " + name + "}\nsource: {root: .}\n"
-        "commands:\n  preflight: {command: 'true'}\n  test: {command: 'python3 -B -m pytest -q -p no:cacheprovider tests_probe'}\n"
+        "commands:\n  preflight: {command: 'true'}\n  test: {command: "
+        + json.dumps(shlex.quote(sys.executable) + " -B -m pytest -q -p no:cacheprovider tests_probe") + "}\n"
         "ci: {required: [preflight, test]}\n"
     )
     (repo / "tests_probe").mkdir()

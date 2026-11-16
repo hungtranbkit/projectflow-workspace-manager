@@ -11,6 +11,7 @@ scheduler mechanics, so "real" here means real git/subprocess/session/DB
 evidence, never fake stand-ins for those."""
 from __future__ import annotations
 import json
+import sys
 import subprocess
 import threading
 import time
@@ -447,14 +448,14 @@ def test_real_two_task_wave_parallel_safe_full_closed_loop(client, git_repo):
     (wt_a / "backend.py").write_text("def backend_value():\n    return 42\n")
     subprocess.run(["git", "add", "backend.py"], cwd=wt_a, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "fix backend_value"], cwd=wt_a, check=True, capture_output=True)
-    r = subprocess.run(["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_backend.py"], cwd=wt_a, capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_backend.py"], cwd=wt_a, capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     assert r.returncode == 0, r.stdout + r.stderr
 
     wt_b = client.app.state.git.validate_worktree(by_task[b]["worktree_path"])
     (wt_b / "frontend.py").write_text("def frontend_label():\n    return 'ready'\n")
     subprocess.run(["git", "add", "frontend.py"], cwd=wt_b, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "fix frontend_label"], cwd=wt_b, check=True, capture_output=True)
-    r = subprocess.run(["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_frontend.py"], cwd=wt_b, capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_frontend.py"], cwd=wt_b, capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     assert r.returncode == 0, r.stdout + r.stderr
 
     # Canonical checkout untouched throughout.
@@ -581,6 +582,7 @@ _pytestmark_real = _pytest.mark.skipif(_shutil.which("claude") is None, reason="
 
 
 @_pytestmark_real
+@_pytest.mark.live_provider
 def test_real_claude_builder_launches_through_execution_wave_path(client, git_repo):
     """E13.42: 'run at least one real Claude Builder separately through
     the same path' -- run_execution_wave() (never a second launch

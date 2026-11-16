@@ -48,6 +48,7 @@ def set_fake_plan(client, plan_dict):
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = fake_runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
 
 
 def minimal_valid_plan(**overrides):
@@ -179,6 +180,7 @@ def test_malformed_envelope_produces_execution_failed_no_plan_row(client, git_re
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = bad_runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLANNER_EXECUTION_FAILED"
     assert r.json()["plan"] is None
@@ -199,6 +201,7 @@ def test_malformed_inner_result_produces_output_invalid_no_plan_row(client, git_
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLANNER_OUTPUT_INVALID"
     assert client.get(f"/api/changes/{cid}/plans").json() == []
@@ -538,6 +541,7 @@ def test_task_decision_service_unaffected_by_materialized_task(client, git_repo)
 # ============================================================= Real Planner test (E4.21)
 
 @pytest.mark.skipif(not shutil.which("claude"), reason="real `claude` CLI not available in this environment")
+@pytest.mark.live_provider
 def test_real_planner_invocation_end_to_end(client, git_repo):
     """E4.21: one safe, real, non-fake Planner invocation. Disposable
     Change/workflow, real `claude -p --json-schema` subprocess call, no
