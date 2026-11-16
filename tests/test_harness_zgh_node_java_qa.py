@@ -90,7 +90,7 @@ def test_offline_docker_command_is_privilege_restricted(repo, tmp_path, monkeypa
     assert "--cap-drop=ALL" in docker
     assert "--security-opt=no-new-privileges" in docker
     assert "--pull=never" in docker
-    assert "src=" + str(snap.resolve()) + ",dst=/repo,readonly" in docker
+    assert "type=bind,src=" + str(snap.resolve()) + ",dst=/repo,readonly" in docker
     assert qa.IMAGE_ID in docker
 
 
@@ -120,11 +120,15 @@ def test_readonly_qa_worker_does_not_claim_business_e2e():
 
 
 def test_bridge_qa_only_for_enabled_zalo_monitor(tmp_path):
+    from app.services.agent_harness_mvp import HarnessStore
     source = bridge.load_registry()
     active = bridge.ZGH_V2_AUTOMATION_ID
     assert source[active]["configured_enabled"]
+    db = tmp_path / "harness.db"
+    HarnessStore(db)
+    bridge.bootstrap(source, db)
     # Explicit fixed script is the only accepted TestDoD; no arbitrary shell.
     with pytest.raises(HarnessError, match="pinned integration script"):
-        bridge.launch_managed_child(source, tmp_path / "not-needed.db", active,
+        bridge.launch_managed_child(source, db, active,
             child_goal="Node QA", repo_dir=tmp_path, executor="zgh-node-java-qa",
             test_path="../evil.sh")
