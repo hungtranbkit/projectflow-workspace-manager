@@ -168,3 +168,77 @@ def test_malicious_agent_test_rewrite_never_commits(repo, tmp_path, monkeypatch)
     assert outcome.get("scope_refusal") in {"acceptance test content changed",
                                              "refused tracked change outside implementation allowlist: tests/test_calc.py"}
     assert git("-C", repo, "rev-parse", "HEAD").stdout.strip() == head_before
+
+
+
+def test_zgh_qa_rejects_wrong_script_and_unreviewed_workspace(repo, tmp_path):
+    manager = ManagedHarness(tmp_path / "harness.db", tmp_path / "state")
+    (repo / "scripts").mkdir()
+    (repo / "scripts/v2-source-integration-tests.sh").write_text(
+        "#!/usr/bin/env bash\nset -e\n")
+    git("-C", repo, "add", "scripts")
+    git("-C", repo, "-c", "user.name=QA", "-c",
+        "user.email=qa@localhost", "commit", "-m", "test script")
+    with pytest.raises(HarnessError, match="pinned ZGH"):
+        manager.launch(main_goal="ZGH", child_goal="QA", expected="scripts/evil.sh",
+                       repo=str(repo), executor="zgh-node-java-qa",
+                       ttl_seconds=300)
+    with pytest.raises(HarnessError, match="isolated Dell workspace"):
+        manager.launch(main_goal="ZGH", child_goal="QA",
+                       expected="scripts/v2-source-integration-tests.sh",
+                       repo=str(repo), executor="zgh-node-java-qa",
+                       ttl_seconds=300)
+    assert not manager.store.list_tasks()
+
+
+
+def test_heartbeat_cannot_forever_masquerade_as_real_progress(tmp_path):
+    from datetime import timedelta
+    from scripts.harness_managed_exec import verified_log_progress
+    from app.services.agent_harness_mvp import HarnessStore
+    db = tmp_path / "progress.db"
+    HarnessStore(db)
+    start = datetime(2026, 11, 16, 12, tzinfo=timezone.utc)
+    assert verified_log_progress(db, 11, 0, start) == start
+    # Heartbeat updated but no new output: last REAL progress stays pinned.
+    assert verified_log_progress(db, 11, 0, start + timedelta(minutes=12)) == start
+    assert verified_log_progress(db, 11, 70, start + timedelta(minutes=13)) == start + timedelta(minutes=13)
+    assert verified_log_progress(db, 11, 70, start + timedelta(minutes=24)) == start + timedelta(minutes=13)
+
+
+def test_progress_rejects_non_numeric_and_future_clock(tmp_path):
+    from datetime import timedelta
+    from scripts.harness_managed_exec import verified_log_progress
+    from app.services.agent_harness_mvp import HarnessStore
+    db = tmp_path / "progress.db"
+    HarnessStore(db)
+    start = datetime(2026, 11, 16, 12, tzinfo=timezone.utc)
+    with pytest.raises(HarnessError, match="invalid worker"):
+        verified_log_progress(db, 12, -4, start)
+    verified_log_progress(db, 12, 0, start)
+    with pytest.raises(HarnessError, match="historical"):
+        verified_log_progress(db, 12, 0, start - timedelta(minutes=2))
+
+
+
+def test_unknown_future_executor_cannot_be_misclassified_as_failed(tmp_path):
+    from datetime import timedelta
+    from app.services.agent_harness_mvp import HarnessStore
+    import sqlite3
+    manager = ManagedHarness(tmp_path / "harness.db", tmp_path / "state")
+    start = datetime.now(timezone.utc)
+    task = manager.store.create(
+        key="future-executor", main_goal="one stable goal",
+        child_goal="newer QA worker", dod="independent test",
+        agent="future", node="dell-linux", created_at=start,
+        ttl=timedelta(minutes=5))
+    with sqlite3.connect(manager.db_path) as db:
+        db.execute("""INSERT INTO harness_managed_units
+            (task_id,unit,run_dir,repo,executor,expected_sha,recorded_at)
+            VALUES (?,?,?,?,?,?,?)""",
+            (task.id, "harness-child-99-1234567890.service",
+             str(tmp_path / "state" / "runs" / "future"), str(tmp_path),
+             "future-qa-v9", "sha256:unknown", start.isoformat()))
+    report = manager.reconcile()
+    assert report[0]["error"].startswith("unknown executor")
+    assert manager.store.get(task.id).state == "NOT_DISPATCHED"

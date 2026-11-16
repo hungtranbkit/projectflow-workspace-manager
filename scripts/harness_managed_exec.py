@@ -138,7 +138,8 @@ def preserve_run_evidence(folder: Path, task_id: int) -> bool:
     must not destroy the result, patch, test proof or audit logs.
     """
     names = ("job.json", "result.json", "changes.patch", "test-output.txt",
-             "agent.log", "agent-output.txt", "heartbeat.json", "dispatch-receipt.json")
+             "agent.log", "agent-output.txt", "heartbeat.json", "dispatch-receipt.json",
+             "qa-source-manifest.json")
     record = {}
     for name in names:
         file = folder / name
@@ -236,6 +237,46 @@ def verify_coding_commit(row: sqlite3.Row, report: dict[str, Any], folder: Path)
         return False
 
 
+def verified_log_progress(
+    db_path: Path, task_id: int, log_bytes: int, observed_at: datetime,
+) -> datetime:
+    """Durably track actual worker output growth, not periodic heartbeat alone.
+
+    A heartbeat confirms a PID; it does NOT certify useful agent progress.
+    After ten minutes without new output, ManagedHarness marks STALLED while
+    retaining the owned process and original hard deadline for safe review.
+    """
+    if type(log_bytes) is not int or log_bytes < 0 or log_bytes > 500_000_000:
+        raise HarnessError("invalid worker log byte count")
+    if observed_at.tzinfo is None:
+        raise HarnessError("worker progress requires timezone")
+    with closing(sqlite3.connect(db_path)) as db, db:
+        db.execute("""CREATE TABLE IF NOT EXISTS harness_managed_progress (
+            task_id INTEGER PRIMARY KEY,
+            last_log_bytes INTEGER NOT NULL,
+            last_growth_at TEXT NOT NULL
+        )""")
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT last_log_bytes,last_growth_at FROM harness_managed_progress WHERE task_id=?",
+            (task_id,)).fetchone()
+        if row is None:
+            progress = observed_at
+            db.execute("""INSERT INTO harness_managed_progress
+                (task_id,last_log_bytes,last_growth_at) VALUES (?,?,?)""",
+                (task_id, log_bytes, progress.isoformat()))
+        elif log_bytes > row[0]:
+            progress = observed_at
+            db.execute("""UPDATE harness_managed_progress SET
+                last_log_bytes=?,last_growth_at=? WHERE task_id=?""",
+                (log_bytes, progress.isoformat(), task_id))
+        else:
+            progress = datetime.fromisoformat(row[1])
+            if progress.tzinfo is None or progress > observed_at:
+                raise HarnessError("invalid historical worker progress timestamp")
+    return progress
+
+
 class ManagedHarness:
     """Durable one-job ownership and reconciliation; no generic process kill."""
 
@@ -273,7 +314,7 @@ class ManagedHarness:
                allowed_files: list[str] | None = None) -> dict[str, Any]:
         if not 0 < ttl_seconds <= MAX_SECONDS:
             raise HarnessError("hard TTL must be between 1s and 24h")
-        if executor not in {"codex", "codex-task", "echo-probe", "sleep-probe"}:
+        if executor not in {"codex", "codex-task", "zgh-node-java-qa", "echo-probe", "sleep-probe"}:
             raise HarnessError("unsupported executor")
         if not expected or len(expected) > 2000 or not main_goal.strip() or not child_goal.strip():
             raise HarnessError("missing atomic goal / expected evidence")
@@ -331,6 +372,32 @@ class ManagedHarness:
             if tracked.returncode:
                 raise HarnessError("acceptance test must be tracked")
             test_sha = hashlib.sha256(acceptance.read_bytes()).hexdigest()
+        if executor == "zgh-node-java-qa":
+            from scripts.harness_zgh_node_java_qa import RUNNER
+            if expected != RUNNER or allowed_files not in (None, []):
+                raise HarnessError("QA accepts only the pinned ZGH Node/JDK21 test script")
+            if Path(project).is_symlink() or Path("/home/dell/workspace") not in project.parents:
+                raise HarnessError("ZGH QA requires an isolated Dell workspace checkout")
+            origin = subprocess.run(["git", "-C", str(project), "remote", "get-url", "origin"],
+                                    capture_output=True, text=True, timeout=10)
+            if origin.returncode or origin.stdout.strip() not in {
+                    "https://github.com/hungtranbkit/zalo-group-hub.git",
+                    "https://github.com/hungtranbkit/zalo-group-hub",
+                    "git@github.com:hungtranbkit/zalo-group-hub.git"}:
+                raise HarnessError("QA requires exact reviewed repository origin")
+            branch = subprocess.run(["git", "-C", str(project), "branch", "--show-current"],
+                                    capture_output=True, text=True, timeout=10)
+            if branch.returncode or not branch.stdout.strip().startswith("harness/"):
+                raise HarnessError("QA requires isolated harness/* Git branch")
+            source_script = project / RUNNER
+            if source_script.is_symlink() or not source_script.is_file():
+                raise HarnessError("pinned ZGH script missing or symlink")
+            tracked = subprocess.run(["git", "-C", str(project), "ls-files",
+                                      "--error-unmatch", "--", RUNNER],
+                                     capture_output=True, timeout=10)
+            if tracked.returncode:
+                raise HarnessError("QA script must already be tracked")
+            test_sha = hashlib.sha256(source_script.read_bytes()).hexdigest()
         # All generated input/output stays outside the Git worktree.
         now = utcnow()
         task = self.store.create(
@@ -394,9 +461,17 @@ class ManagedHarness:
 
     def reconcile(self) -> list[dict[str, Any]]:
         results = []
+        known_executors = {"codex", "codex-task", "echo-probe", "sleep-probe",
+                           "zgh-node-java-qa"}
         for row in self._rows():
             task = self.store.get(row["task_id"])
             if task.cleanup_state == "CLEANED_VERIFIED":
+                continue
+            if row["executor"] not in known_executors:
+                # An older code release must never label a newer executor's
+                # successful result FAILED simply because it cannot verify it.
+                results.append({"task_id": task.id,
+                                "error": "unknown executor: upgrade reconciler; preserve WIP"})
                 continue
             unit = row["unit"]
             folder = Path(row["run_dir"]).resolve()
@@ -433,10 +508,17 @@ class ManagedHarness:
                             )
                         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
                             backend_verified = False
+                    useful_progress = None
+                    if backend_verified:
+                        size = beat.get("log_bytes")
+                        growth_at = verified_log_progress(
+                            self.db_path, task.id, size, utcnow())
+                        if timedelta(0) <= utcnow() - growth_at <= timedelta(minutes=10):
+                            useful_progress = growth_at
                     self.store.observe(task.id, backend_state="RUNNING",
                                        process_alive=True if backend_verified else None,
-                                       at=utcnow(), progress_at=progress_time if backend_verified else None,
-                                       evidence_ref=f"systemd:{unit}:child-pid-heartbeat")
+                                       at=utcnow(), progress_at=useful_progress,
+                                       evidence_ref=f"systemd:{unit}:pid-and-log-growth")
                 if task.state not in TERMINAL and result_file.is_file() and stopped:
                     report = json.loads(result_file.read_text(encoding="utf-8"))
                     output_file = folder / "agent-output.txt"
@@ -449,7 +531,13 @@ class ManagedHarness:
                         and report.get("output_sha256") == hashlib.sha256(output.encode()).hexdigest()
                         and status.get("Result") in {"success", ""}
                     )
-                    if row["executor"] == "codex-task":
+                    if row["executor"] == "zgh-node-java-qa":
+                        from scripts.harness_zgh_node_java_qa import PROOF, independently_verify
+                        verified = (
+                            verified and output.strip() == PROOF
+                            and independently_verify(row, report, folder)
+                        )
+                    elif row["executor"] == "codex-task":
                         patch = folder / "changes.patch"
                         test_output = folder / "test-output.txt"
                         commit = subprocess.run(["git", "-C", row["repo"], "rev-parse", "HEAD"],
@@ -794,6 +882,11 @@ def worker(spec_file: Path) -> int:
                         head = subprocess.run(["git", "-C", spec["repo"], "rev-parse", "HEAD"],
                                               capture_output=True, text=True, timeout=10)
                         additional["commit_sha"] = head.stdout.strip()
+        elif mode == "zgh-node-java-qa":
+            from scripts.harness_zgh_node_java_qa import PROOF, run_verified_qa
+            additional = run_verified_qa(spec, run_dir)
+            rc = 0 if additional["qa_pass"] is True else 126
+            output.write_text((PROOF if rc == 0 else "QA_FAILED") + "\n", encoding="utf-8")
         elif mode == "codex":
             cli = shutil.which("codex")
             if not cli:
@@ -829,7 +922,7 @@ def main() -> None:
     cli.add_argument("--child-goal")
     cli.add_argument("--expected")
     cli.add_argument("--repo")
-    cli.add_argument("--executor", default="codex", choices=["codex", "codex-task", "echo-probe", "sleep-probe"])
+    cli.add_argument("--executor", default="codex", choices=["codex", "codex-task", "zgh-node-java-qa", "echo-probe", "sleep-probe"])
     cli.add_argument("--ttl-seconds", type=int, default=600)
     cli.add_argument("--allowed-files", nargs="*", default=None,
                      help="explicit tracked Python sources permitted for codex-task")
