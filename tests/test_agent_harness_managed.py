@@ -168,3 +168,24 @@ def test_malicious_agent_test_rewrite_never_commits(repo, tmp_path, monkeypatch)
     assert outcome.get("scope_refusal") in {"acceptance test content changed",
                                              "refused tracked change outside implementation allowlist: tests/test_calc.py"}
     assert git("-C", repo, "rev-parse", "HEAD").stdout.strip() == head_before
+
+
+
+def test_zgh_qa_rejects_wrong_script_and_unreviewed_workspace(repo, tmp_path):
+    manager = ManagedHarness(tmp_path / "harness.db", tmp_path / "state")
+    (repo / "scripts").mkdir()
+    (repo / "scripts/v2-source-integration-tests.sh").write_text(
+        "#!/usr/bin/env bash\nset -e\n")
+    git("-C", repo, "add", "scripts")
+    git("-C", repo, "-c", "user.name=QA", "-c",
+        "user.email=qa@localhost", "commit", "-m", "test script")
+    with pytest.raises(HarnessError, match="pinned ZGH"):
+        manager.launch(main_goal="ZGH", child_goal="QA", expected="scripts/evil.sh",
+                       repo=str(repo), executor="zgh-node-java-qa",
+                       ttl_seconds=300)
+    with pytest.raises(HarnessError, match="isolated Dell workspace"):
+        manager.launch(main_goal="ZGH", child_goal="QA",
+                       expected="scripts/v2-source-integration-tests.sh",
+                       repo=str(repo), executor="zgh-node-java-qa",
+                       ttl_seconds=300)
+    assert not manager.store.list_tasks()
