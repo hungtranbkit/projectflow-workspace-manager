@@ -445,6 +445,11 @@ def launch_managed_child(
     actual_remote = raw[len(matching[0]):].removesuffix(".git").strip("/")
     if actual_remote != expected_remote:
         raise HarnessError("project origin does not match locked monitor repo")
+    current_branch = subprocess.run(
+        ["git", "-C", str(selected), "branch", "--show-current"],
+        capture_output=True, text=True, timeout=10)
+    if current_branch.returncode or not current_branch.stdout.strip().startswith("harness/"):
+        raise HarnessError("monitor task requires an isolated harness/* branch")
 
     impl = manager_type or ManagedHarness
     manager = impl(db_path, db_path.parent)
