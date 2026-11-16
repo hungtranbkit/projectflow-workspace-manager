@@ -68,6 +68,7 @@ def set_fake(client, payload):
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
 
 
 def tc(key, req=None, acc=None, inv=None, level="INTEGRATION", ttype="POSITIVE", **overrides):
@@ -352,6 +353,7 @@ def test_review_receives_real_deterministic_coverage_not_model_claim(client, git
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
     client.post(f"/api/changes/{cid}/tests/review", data={"provider": "claude"})
     assert "deterministic_coverage_report" in captured["prompt"]
     assert "REQ-002" in captured["prompt"]  # the uncovered requirement is visible to the reviewer
@@ -378,6 +380,7 @@ def test_bounded_refinement_loop_never_infinite(client, git_repo, tdesign_env):
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = cycling_runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
 
     result = client.app.state.test_design_lifecycle_service.run_design(cid, provider="claude")
     assert result["outcome"] == "NEEDS_REFINEMENT"
@@ -616,6 +619,7 @@ def test_production_specs_root_never_touched_by_this_suite():
     assert "feat-thing.yaml" not in names
 
 
+@pytest.mark.live_provider
 def test_real_test_design_lifecycle_end_to_end(client, git_repo, tdesign_env):
     """E7.23: one safe, real, non-fake Test Design lifecycle run against
     a disposable Change and an isolated tmp_path specs_root (tdesign_env)

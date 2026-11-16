@@ -27,6 +27,7 @@ def set_fake(client, payload):
             stderr = ""
         return R()
     client.app.state.code_review_service.invoker.runner = runner
+    client.app.state.code_review_service.invoker.which = lambda name: "/test-only/" + name
 
 
 PASS = {"verdict": "PASS", "findings": [], "summary": "looks good"}
@@ -182,6 +183,7 @@ def test_code_review_uses_real_diff_not_builder_reasoning(client, git_repo):
             stderr = ""
         return R()
     client.app.state.code_review_service.invoker.runner = runner
+    client.app.state.code_review_service.invoker.which = lambda name: "/test-only/" + name
     client.post(f"/api/tasks/{tid}/review/code")
     assert "def feature():" in captured["prompt"]  # the real diff content, verbatim
     assert "feature.py" in captured["prompt"]
@@ -249,6 +251,7 @@ def test_security_review_produces_dedicated_work_product(client, git_repo):
     cid = new_change(client, "Security WP change", project_id=rid)
     tid, w = _committed_task(client, cid)
     client.app.state.security_review_service.invoker.runner = client.app.state.code_review_service.invoker.runner
+    client.app.state.security_review_service.invoker.which = lambda name: "/test-only/" + name
     set_fake(client, {"verdict": "PASS", "findings": []})
     body = client.post(f"/api/tasks/{tid}/review/security")
     body = body.json()
@@ -428,7 +431,9 @@ def test_security_critical_finding_blocks(client, git_repo):
             stderr = ""
         return R()
     client.app.state.code_review_service.invoker.runner = runner
+    client.app.state.code_review_service.invoker.which = lambda name: "/test-only/" + name
     client.app.state.security_review_service.invoker.runner = runner
+    client.app.state.security_review_service.invoker.which = lambda name: "/test-only/" + name
 
     client.app.state.review_fix_orchestrator.tick(tid)  # code review runs
     result = client.app.state.review_fix_orchestrator.tick(tid)  # security review runs

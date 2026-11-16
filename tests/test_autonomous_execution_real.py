@@ -293,3 +293,5 @@ def test_real_autonomous_builder_fixture_end_to_end(client, git_repo):
     assert after_head == before_head, "the live ProjectFlow checkout's HEAD must never move during this test"
     assert after_status == before_status, "the live ProjectFlow checkout's working tree must never change during this test"
     print("REAL E8 TEST -- live ProjectFlow checkout confirmed untouched (HEAD and working tree both unchanged).")
+
+pytestmark = [pytestmark, pytest.mark.live_provider]

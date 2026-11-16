@@ -77,6 +77,7 @@ def set_fake(client, payload):
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
 
 
 def create_workflow(client, cid, profile="CONTROLLED"):

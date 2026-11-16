@@ -74,6 +74,7 @@ def set_fake(client, payload):
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
 
 
 def ra_payload(**overrides):
@@ -375,6 +376,7 @@ def test_bounded_refinement_loop_never_infinite(client, git_repo, spec_env):
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = cycling_runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
 
     result = client.app.state.spec_lifecycle_service.run_lifecycle(cid, provider="claude", max_rounds=3)
     assert result["outcome"] == "NEEDS_REFINEMENT"
@@ -506,6 +508,7 @@ def test_plan_valid_requirement_ids_resolve(client, git_repo, spec_env):
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = plan_runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLAN_READY", r.json()
 
@@ -524,6 +527,7 @@ def test_fictional_requirement_id_rejected(client, git_repo, spec_env):
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = plan_runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLAN_INVALID"
     assert any("unknown requirement id" in e for e in r.json()["validation"]["errors"])
@@ -543,6 +547,7 @@ def test_baseline_staleness_visible(client, git_repo, spec_env):
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = plan_runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     plan_id = r.json()["plan"]["id"]
 
@@ -579,6 +584,7 @@ def test_plan_spec_drift_when_referenced_requirement_disappears(client, git_repo
             stderr = ""
         return R()
     client.app.state.planner_service.invoker.runner = plan_runner
+    client.app.state.planner_service.invoker.which = lambda name: "/test-only/" + name
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     plan_id = r.json()["plan"]["id"]
     assert r.json()["outcome"] == "PLAN_READY"
@@ -644,6 +650,7 @@ def test_production_specs_root_never_touched_by_this_suite():
     assert "feat-workflow-profile-api.yaml" not in names
 
 
+@pytest.mark.live_provider
 def test_real_spec_lifecycle_end_to_end(client, git_repo, spec_env):
     """E5.24: one safe, real, non-fake Spec Lifecycle run against a
     disposable Change and an isolated tmp_path specs_root (spec_env) --

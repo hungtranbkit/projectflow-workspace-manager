@@ -10,6 +10,8 @@ git/subprocess/HTTP, never fake stand-ins for those."""
 from __future__ import annotations
 import http.server
 import json
+import sys
+import shlex
 import subprocess
 import threading
 import time
@@ -107,7 +109,7 @@ service:
     url: http://127.0.0.1:{port}/health
 commands:
   preflight: {{command: 'true'}}
-  test: {{command: 'python3 -m pytest -q test_src.py'}}
+  test: {{command: {python_test_command}}}
   build:
     command: "python3 build.py"
     working_directory: .
@@ -135,7 +137,8 @@ def make_release_repo(root, name="demo", port=19999):
     (repo / "src.py").write_text("def feature():\n    return 1\n")
     (repo / "test_src.py").write_text("from src import feature\n\n\ndef test_feature():\n    assert feature() == 1\n")
     (repo / "build.py").write_text(BUILD_PY)
-    (repo / "PROJECT.yaml").write_text(PROJECT_YAML.format(name=name, port=port))
+    (repo / "PROJECT.yaml").write_text(PROJECT_YAML.format(name=name, port=port, python_test_command=json.dumps(
+        shlex.quote(sys.executable) + " -m pytest -q test_src.py")))
     run(repo, "git", "add", ".")
     run(repo, "git", "commit", "-m", "base + release contract")
     run(repo, "git", "remote", "add", "origin", str(repo))

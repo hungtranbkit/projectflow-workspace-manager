@@ -279,3 +279,5 @@ def test_real_security_review_catches_path_traversal(client, git_repo):
     assert real_after_head == before_head
     assert real_after_status == before_status
     print("REAL E9 TEST -- live ProjectFlow checkout confirmed untouched.")
+
+pytestmark = [pytestmark, pytest.mark.live_provider]

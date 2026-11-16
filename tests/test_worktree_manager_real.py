@@ -175,3 +175,5 @@ def test_real_worktree_isolation_fixture_end_to_end(client, git_repo):
     assert not Path(worktree).is_dir()
     assert repo.is_dir()
     print("REAL E8.5 TEST -- managed worktree explicitly cleaned up; canonical repo untouched.")
+
+pytestmark = [pytestmark, pytest.mark.live_provider]
