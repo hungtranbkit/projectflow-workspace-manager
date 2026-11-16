@@ -79,9 +79,13 @@ def read_gates(path: Path = DEFAULT_GATES) -> dict[str, dict[str, Any]]:
             if type(gate.get("weight")) is not int or not 0 < gate["weight"] <= 100:
                 raise HarnessError("invalid gate weight")
             if gate["status"] == "PASSED":
-                if not gate.get("proof") or not gate.get("accepted_at"):
+                if not gate.get("proof") or not (gate.get("accepted_at") or gate.get("accepted_on")):
                     raise HarnessError("PASS requires acceptance proof + date")
-                aware(gate["accepted_at"])
+                if gate.get("accepted_at"):
+                    aware(gate["accepted_at"])
+                else:
+                    from datetime import date
+                    date.fromisoformat(gate["accepted_on"])
         out[ident] = g
     return out
 
@@ -299,6 +303,21 @@ def html(snapshot: dict[str, Any]) -> str:
                       f'hạn {escape(t["deadline_local"])}</div></div>']
         if not m["active_tasks"]:
             parts.append('<p class="small">Không có task nào đang chiếm WIP.</p>')
+        finished = [t for t in m["recent_tasks"] if t["finished"]]
+        if finished:
+            parts.append('<div class="small"><strong>Task gần nhất — đã kết thúc</strong></div>')
+        for t in finished[-3:][::-1]:
+            parts += ['<div class="task">',
+                      f'<div class="row"><strong>#{t["id"]} '
+                      f'{escape(t["state"])}</strong>'
+                      f'<span>{escape(t["cleanup"])}</span></div>',
+                      f'<div class="track" role="progressbar" aria-label="Hạn mức task kết thúc" '
+                      f'aria-valuenow="{t["time_used_percent"]}" aria-valuemin="0" '
+                      f'aria-valuemax="100"><div class="fill time" '
+                      f'style="width:{t["time_used_percent"]}%"></div></div>',
+                      f'<div class="small">Đã dùng {escape(t["time_used_label"])} '
+                      f'/ {escape(t["time_budget_label"])} · đã kết thúc; '
+                      f'không còn đồng hồ đếm ngược</div></div>']
         parts.append('</section>')
     parts += ['<p class="small">Thanh xanh = % gate đã được xác nhận bằng chứng. '
               'Thanh cam = % hạn mức thời gian task đã tiêu thụ. '
