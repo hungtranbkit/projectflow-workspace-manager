@@ -159,7 +159,7 @@ def test_report_has_visual_slope_and_gap_but_project_has_no_24h_deadline(store):
     assert 'trajectory-original-baseline' in web
     assert "Mốc tham chiếu 7 ngày" in web
     assert "10%" in web
-    assert "không có task nào đang chiếm WIP" in web.lower()
+    assert "không có task nào đang chiếm wip" in web.lower()
 
 
 def test_nonexistent_plan_or_late_adjustment_fails_closed(store):
