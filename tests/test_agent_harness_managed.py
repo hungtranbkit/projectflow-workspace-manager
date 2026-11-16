@@ -189,3 +189,32 @@ def test_zgh_qa_rejects_wrong_script_and_unreviewed_workspace(repo, tmp_path):
                        repo=str(repo), executor="zgh-node-java-qa",
                        ttl_seconds=300)
     assert not manager.store.list_tasks()
+
+
+
+def test_heartbeat_cannot_forever_masquerade_as_real_progress(tmp_path):
+    from datetime import timedelta
+    from scripts.harness_managed_exec import verified_log_progress
+    from app.services.agent_harness_mvp import HarnessStore
+    db = tmp_path / "progress.db"
+    HarnessStore(db)
+    start = datetime(2026, 11, 16, 12, tzinfo=timezone.utc)
+    assert verified_log_progress(db, 11, 0, start) == start
+    # Heartbeat updated but no new output: last REAL progress stays pinned.
+    assert verified_log_progress(db, 11, 0, start + timedelta(minutes=12)) == start
+    assert verified_log_progress(db, 11, 70, start + timedelta(minutes=13)) == start + timedelta(minutes=13)
+    assert verified_log_progress(db, 11, 70, start + timedelta(minutes=24)) == start + timedelta(minutes=13)
+
+
+def test_progress_rejects_non_numeric_and_future_clock(tmp_path):
+    from datetime import timedelta
+    from scripts.harness_managed_exec import verified_log_progress
+    from app.services.agent_harness_mvp import HarnessStore
+    db = tmp_path / "progress.db"
+    HarnessStore(db)
+    start = datetime(2026, 11, 16, 12, tzinfo=timezone.utc)
+    with pytest.raises(HarnessError, match="invalid worker"):
+        verified_log_progress(db, 12, -4, start)
+    verified_log_progress(db, 12, 0, start)
+    with pytest.raises(HarnessError, match="historical"):
+        verified_log_progress(db, 12, 0, start - timedelta(minutes=2))
