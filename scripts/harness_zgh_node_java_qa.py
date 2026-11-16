@@ -68,6 +68,13 @@ def pinned_snapshot(repo: Path, head: str, folder: Path) -> tuple[str, int]:
                     sink.write(chunk)
             dest.chmod(0o644)
             entries.append((name, digest.hexdigest()))
+    # systemd's UMask=0077 can turn mkdir(mode=0755) into 0700.
+    # Explicitly make ONLY the disposable test snapshot traversable to the
+    # unprivileged Docker UID; the owner-only run root stays protected.
+    for item in folder.rglob("*"):
+        if item.is_dir():
+            item.chmod(0o755)
+    folder.chmod(0o755)
     manifest_bytes = json.dumps(sorted(entries), separators=(",", ":")).encode()
     manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
     (folder.parent / "qa-source-manifest.json").write_bytes(manifest_bytes)
@@ -116,7 +123,9 @@ def sandbox_qa(
         "--env=HOME=/tmp", "--env=PATH=/opt/jdk21/bin:/usr/local/bin:/usr/bin:/bin",
         IMAGE_ID, "timeout", "--signal=TERM", "--kill-after=2s",
         f"{budget}s", "bash", "-c",
-        "cp -a /repo/. /work/; chmod -R u+w /work; bash scripts/v2-source-integration-tests.sh",
+        "mkdir -p /work/src && cp -a /repo/. /work/src/ && "
+        "chmod -R u+w /work/src && cd /work/src && "
+        "bash scripts/v2-source-integration-tests.sh",
     ]
     return runner(cmd, capture_output=True, text=True,
                   timeout=min(135, budget + 12))
