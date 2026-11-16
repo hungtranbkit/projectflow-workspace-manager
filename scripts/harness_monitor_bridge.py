@@ -410,8 +410,11 @@ def launch_managed_child(
         expected_remote = entry["repo"]
 
     # Only a clean project-owned Git clone under Dell workspace is accepted.
-    root = workspace_root.resolve(strict=True)
-    selected = repo_dir.resolve(strict=True)
+    try:
+        root = workspace_root.resolve(strict=True)
+        selected = repo_dir.resolve(strict=True)
+    except OSError as exc:
+        raise HarnessError("repo must be inside approved workspace root") from exc
     if root not in selected.parents or selected == root:
         raise HarnessError("repo must be inside approved workspace root")
     if not (selected / ".git").exists():
