@@ -494,6 +494,11 @@ def launch_managed_child(
             raise HarnessError("explicit source allowlist required")
         if not isinstance(test_path, str) or not test_path.strip():
             raise HarnessError("existing independent pytest required")
+    elif executor == "zgh-node-java-qa":
+        from scripts.harness_zgh_node_java_qa import RUNNER
+        if (automation_id != ZGH_V2_AUTOMATION_ID or test_path != RUNNER
+                or allowed_files not in (None, []) or proof_token is not None):
+            raise HarnessError("ZGH offline QA is restricted to the exact pinned integration script")
     elif executor == "codex":
         # A read-only agent probe is technical connectivity evidence ONLY.
         # No arbitrary natural-language goal is accepted in this mode.
@@ -550,7 +555,7 @@ def launch_managed_child(
     manager = impl(db_path, db_path.parent)
     receipt = manager.launch(
         main_goal=main_goal, child_goal=child_goal,
-        expected=test_path if executor == "codex-task" else proof_token,
+        expected=(proof_token if executor == "codex" else test_path),
         repo=str(selected), executor=executor,
         ttl_seconds=ttl_seconds, allowed_files=allowed_files)
     if receipt.get("state") not in {"DISPATCHED", "FAILED", "EXPIRED"}:
@@ -566,6 +571,7 @@ def launch_managed_child(
         "durable_origin": "HARNESS_SQLITE",
         "independent_project_DoD": (
             "NOT_TESTED_BY_AGENT_PROBE" if executor == "codex"
+            else "QA_TESTS_ONLY_NOT_DEVICE_E2E" if executor == "zgh-node-java-qa"
             else "NOT_VERIFIED_BY_DISPATCH"),
         "next": "existing systemd Harness reconciler verifies tests, diff and cleanup",
     }
@@ -673,7 +679,8 @@ def main() -> None:
     p.add_argument("--task-id")
     p.add_argument("--repo-dir", help="clean isolated harness/* Git project clone")
     p.add_argument("--test-path", help="preexisting tracked pytest acceptance relative path")
-    p.add_argument("--executor", choices=("codex-task", "codex"), default="codex-task")
+    p.add_argument("--executor", choices=("codex-task", "codex", "zgh-node-java-qa"),
+                   default="codex-task")
     p.add_argument("--proof-token", help="strict read-only Codex connectivity marker")
     p.add_argument("--allowed-file", action="append", default=[],
                    help="one explicitly reviewed tracked source file")
