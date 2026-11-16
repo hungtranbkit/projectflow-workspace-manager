@@ -138,7 +138,8 @@ def preserve_run_evidence(folder: Path, task_id: int) -> bool:
     must not destroy the result, patch, test proof or audit logs.
     """
     names = ("job.json", "result.json", "changes.patch", "test-output.txt",
-             "agent.log", "agent-output.txt", "heartbeat.json", "dispatch-receipt.json")
+             "agent.log", "agent-output.txt", "heartbeat.json", "dispatch-receipt.json",
+             "qa-source-manifest.json")
     record = {}
     for name in names:
         file = folder / name
@@ -273,7 +274,7 @@ class ManagedHarness:
                allowed_files: list[str] | None = None) -> dict[str, Any]:
         if not 0 < ttl_seconds <= MAX_SECONDS:
             raise HarnessError("hard TTL must be between 1s and 24h")
-        if executor not in {"codex", "codex-task", "echo-probe", "sleep-probe"}:
+        if executor not in {"codex", "codex-task", "zgh-node-java-qa", "echo-probe", "sleep-probe"}:
             raise HarnessError("unsupported executor")
         if not expected or len(expected) > 2000 or not main_goal.strip() or not child_goal.strip():
             raise HarnessError("missing atomic goal / expected evidence")
@@ -331,6 +332,32 @@ class ManagedHarness:
             if tracked.returncode:
                 raise HarnessError("acceptance test must be tracked")
             test_sha = hashlib.sha256(acceptance.read_bytes()).hexdigest()
+        if executor == "zgh-node-java-qa":
+            from scripts.harness_zgh_node_java_qa import RUNNER
+            if expected != RUNNER or allowed_files not in (None, []):
+                raise HarnessError("QA accepts only the pinned ZGH Node/JDK21 test script")
+            if Path(project).is_symlink() or Path("/home/dell/workspace") not in project.parents:
+                raise HarnessError("ZGH QA requires an isolated Dell workspace checkout")
+            origin = subprocess.run(["git", "-C", str(project), "remote", "get-url", "origin"],
+                                    capture_output=True, text=True, timeout=10)
+            if origin.returncode or origin.stdout.strip() not in {
+                    "https://github.com/hungtranbkit/zalo-group-hub.git",
+                    "https://github.com/hungtranbkit/zalo-group-hub",
+                    "git@github.com:hungtranbkit/zalo-group-hub.git"}:
+                raise HarnessError("QA requires exact reviewed repository origin")
+            branch = subprocess.run(["git", "-C", str(project), "branch", "--show-current"],
+                                    capture_output=True, text=True, timeout=10)
+            if branch.returncode or not branch.stdout.strip().startswith("harness/"):
+                raise HarnessError("QA requires isolated harness/* Git branch")
+            source_script = project / RUNNER
+            if source_script.is_symlink() or not source_script.is_file():
+                raise HarnessError("pinned ZGH script missing or symlink")
+            tracked = subprocess.run(["git", "-C", str(project), "ls-files",
+                                      "--error-unmatch", "--", RUNNER],
+                                     capture_output=True, timeout=10)
+            if tracked.returncode:
+                raise HarnessError("QA script must already be tracked")
+            test_sha = hashlib.sha256(source_script.read_bytes()).hexdigest()
         # All generated input/output stays outside the Git worktree.
         now = utcnow()
         task = self.store.create(
@@ -449,7 +476,13 @@ class ManagedHarness:
                         and report.get("output_sha256") == hashlib.sha256(output.encode()).hexdigest()
                         and status.get("Result") in {"success", ""}
                     )
-                    if row["executor"] == "codex-task":
+                    if row["executor"] == "zgh-node-java-qa":
+                        from scripts.harness_zgh_node_java_qa import PROOF, independently_verify
+                        verified = (
+                            verified and output.strip() == PROOF
+                            and independently_verify(row, report, folder)
+                        )
+                    elif row["executor"] == "codex-task":
                         patch = folder / "changes.patch"
                         test_output = folder / "test-output.txt"
                         commit = subprocess.run(["git", "-C", row["repo"], "rev-parse", "HEAD"],
@@ -794,6 +827,11 @@ def worker(spec_file: Path) -> int:
                         head = subprocess.run(["git", "-C", spec["repo"], "rev-parse", "HEAD"],
                                               capture_output=True, text=True, timeout=10)
                         additional["commit_sha"] = head.stdout.strip()
+        elif mode == "zgh-node-java-qa":
+            from scripts.harness_zgh_node_java_qa import PROOF, run_verified_qa
+            additional = run_verified_qa(spec, run_dir)
+            rc = 0 if additional["qa_pass"] is True else 126
+            output.write_text((PROOF if rc == 0 else "QA_FAILED") + "\n", encoding="utf-8")
         elif mode == "codex":
             cli = shutil.which("codex")
             if not cli:
@@ -829,7 +867,7 @@ def main() -> None:
     cli.add_argument("--child-goal")
     cli.add_argument("--expected")
     cli.add_argument("--repo")
-    cli.add_argument("--executor", default="codex", choices=["codex", "codex-task", "echo-probe", "sleep-probe"])
+    cli.add_argument("--executor", default="codex", choices=["codex", "codex-task", "zgh-node-java-qa", "echo-probe", "sleep-probe"])
     cli.add_argument("--ttl-seconds", type=int, default=600)
     cli.add_argument("--allowed-files", nargs="*", default=None,
                      help="explicit tracked Python sources permitted for codex-task")
