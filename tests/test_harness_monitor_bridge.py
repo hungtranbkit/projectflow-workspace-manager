@@ -306,3 +306,154 @@ def test_monitor_status_releases_sqlite_fds_after_many_reads(source, wired):
         assert result["count"] == 1
     after = len(os.listdir(fd_path))
     assert after <= before + 8, (before, after)
+
+
+@pytest.fixture
+def reviewed_clone(tmp_path, source):
+    import subprocess
+    parent = tmp_path / "workspace"
+    project = parent / "reviewed"
+    project.mkdir(parents=True)
+    (project / "tests").mkdir()
+    (project / "impl.py").write_text("def value(): return 1\n")
+    (project / "tests/test_impl.py").write_text(
+        "from impl import value\n\ndef test_value(): assert value() == 2\n")
+    subprocess.run(["git", "-C", str(project), "init", "-b", "harness/qa"],
+                   check=True, capture_output=True)
+    ident = active_parent(source)
+    subprocess.run(["git", "-C", str(project), "remote", "add", "origin",
+                    f"https://github.com/{source[ident]['repo']}.git"],check=True)
+    subprocess.run(["git", "-C", str(project), "add", "."],check=True)
+    subprocess.run(["git", "-C", str(project), "-c", "user.name=QA",
+                    "-c", "user.email=qa@localhost", "commit",
+                    "-m", "test baseline"], check=True, capture_output=True)
+    return parent, project
+
+
+def test_direct_managed_dispatch_locked_to_origin_goal_and_readback(
+    source, wired, reviewed_clone
+):
+    root, project = reviewed_clone
+    chosen = active_parent(source)
+
+    class FakeManager:
+        seen = []
+        def __init__(self, db, state):
+            self.db = db
+        def launch(self, **kwargs):
+            self.seen.append(kwargs)
+            return {"state": "DISPATCHED", "task_id": 700,
+                    "unit": "harness-child-700-1234567890.service",
+                    "deadline": "2026-11-17T00:00:00+00:00"}
+
+    out = bridge.launch_managed_child(
+        source, wired, chosen,
+        child_goal="Fix implementation and pass preexisting test",
+        repo_dir=project, test_path="tests/test_impl.py",
+        allowed_files=["impl.py"], ttl_seconds=600,
+        workspace_root=root, manager_type=FakeManager,
+    )
+    assert out["state"] == "DISPATCHED"
+    assert out["durable_origin"] == "HARNESS_SQLITE"
+    assert out["independent_project_DoD"] == "NOT_VERIFIED_BY_DISPATCH"
+    assert out["execution_backend"] == "MANAGED_SYSTEMD"
+    assert FakeManager.seen[0]["main_goal"] == source[chosen]["main_goal"]
+    assert FakeManager.seen[0]["allowed_files"] == ["impl.py"]
+    assert FakeManager.seen[0]["ttl_seconds"] == 600
+
+
+def test_direct_managed_dispatch_refuses_wrong_project_origin(
+    source, wired, reviewed_clone
+):
+    import subprocess
+    root, project = reviewed_clone
+    chosen = active_parent(source)
+    subprocess.run(["git", "-C", str(project), "remote", "set-url",
+                    "origin", "https://github.com/attacker/not-the-project.git"], check=True)
+    with pytest.raises(HarnessError, match="project origin"):
+        bridge.launch_managed_child(
+            source, wired, chosen, child_goal="Unrelated coding work",
+            repo_dir=project, test_path="tests/test_impl.py",
+            allowed_files=["impl.py"], workspace_root=root)
+    assert not HarnessStore(wired).list_tasks()
+
+
+def test_direct_managed_dispatch_refuses_paused_and_maintenance(
+    source, wired, reviewed_clone
+):
+    root, project = reviewed_clone
+    blocked = [key for key, row in source.items()
+               if not row["configured_enabled"] or row["role"] != "parent"]
+    for ident in blocked:
+        with pytest.raises(HarnessError, match="paused/maintenance"):
+            bridge.launch_managed_child(
+                source, wired, ident, child_goal="Prohibited child",
+                repo_dir=project, test_path="tests/test_impl.py",
+                allowed_files=["impl.py"], workspace_root=root)
+    assert not HarnessStore(wired).list_tasks()
+
+
+def test_direct_managed_dispatch_requires_clean_trusted_workspace(
+    source, wired, reviewed_clone
+):
+    root, project = reviewed_clone
+    chosen = active_parent(source)
+    with pytest.raises(HarnessError, match="approved workspace"):
+        bridge.launch_managed_child(
+            source, wired, chosen, child_goal="Outside workspace",
+            repo_dir=project, test_path="tests/test_impl.py",
+            allowed_files=["impl.py"], workspace_root=root / "invalid")
+    with pytest.raises(HarnessError, match="source allowlist"):
+        bridge.launch_managed_child(
+            source, wired, chosen, child_goal="No source approval",
+            repo_dir=project, test_path="tests/test_impl.py",
+            allowed_files=[], workspace_root=root)
+    assert not HarnessStore(wired).list_tasks()
+
+
+def test_readonly_codex_canary_has_durable_id_but_no_business_pass(
+    source, wired, reviewed_clone
+):
+    root, project = reviewed_clone
+    selected = active_parent(source)
+
+    class Stub:
+        seen = []
+        def __init__(self, db, state):
+            pass
+        def launch(self, **kw):
+            self.seen.append(kw)
+            return {"task_id": 903, "state": "DISPATCHED",
+                    "unit": "harness-child-903-abcdef0123.service"}
+
+    result = bridge.launch_managed_child(
+        source, wired, selected,
+        child_goal="CANARY ONLY: prove actual read-only Codex execution",
+        repo_dir=project, executor="codex",
+        proof_token="HARNESS_MONITOR_CODEX_READONLY_PROOF_20261116",
+        ttl_seconds=600, workspace_root=root, manager_type=Stub)
+    assert result["harness_task_id"] == 903
+    assert result["durable_origin"] == "HARNESS_SQLITE"
+    assert result["independent_project_DoD"] == "NOT_TESTED_BY_AGENT_PROBE"
+    assert Stub.seen[0]["executor"] == "codex"
+    assert Stub.seen[0]["allowed_files"] in (None, [])
+    assert Stub.seen[0]["expected"] == "HARNESS_MONITOR_CODEX_READONLY_PROOF_20261116"
+
+
+def test_readonly_codex_cannot_become_unreviewed_generic_agent(
+    source, wired, reviewed_clone
+):
+    root, project = reviewed_clone
+    selected = active_parent(source)
+    for child, marker, files in [
+        ("Delete secrets", "HARNESS_MONITOR_CODEX_READONLY_PROOF_20261116", None),
+        ("CANARY ONLY: unsafe", "anything arbitrary", None),
+        ("CANARY ONLY: unsafe", "HARNESS_MONITOR_CODEX_READONLY_PROOF_20261116", ["impl.py"]),
+    ]:
+        with pytest.raises(HarnessError, match="read-only canary"):
+            bridge.launch_managed_child(
+                source, wired, selected, child_goal=child,
+                repo_dir=project, executor="codex",
+                proof_token=marker, allowed_files=files,
+                workspace_root=root)
+    assert not HarnessStore(wired).list_tasks()

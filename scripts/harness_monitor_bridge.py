@@ -375,6 +375,107 @@ def observe_attested(
             "cleanup": task.cleanup_state}
 
 
+def launch_managed_child(
+    registry: dict[str, dict[str, Any]], db_path: Path, automation_id: str, *,
+    child_goal: str, repo_dir: Path, test_path: str | None = None,
+    allowed_files: list[str] | None = None, ttl_seconds: int = 3600,
+    executor: str = "codex-task", proof_token: str | None = None,
+    workspace_root: Path = Path("/home/dell/workspace"),
+    manager_type: Any = None,
+) -> dict[str, Any]:
+    """Durably dispatch one reviewed coding child under the locked monitor goal.
+
+    With Terminal MCP's durable queue disabled, start can become a send with
+    no task_id. The Harness-owned systemd executor remains the durable source.
+    Terminal MCP only transports a bounded short CLI command.
+    """
+    from scripts.harness_managed_exec import ManagedHarness
+    import subprocess
+
+    if not isinstance(child_goal, str) or not child_goal.strip():
+        raise HarnessError("atomic child goal required")
+    if executor == "codex-task":
+        if not isinstance(allowed_files, list) or not allowed_files:
+            raise HarnessError("explicit source allowlist required")
+        if not isinstance(test_path, str) or not test_path.strip():
+            raise HarnessError("existing independent pytest required")
+    elif executor == "codex":
+        # A read-only agent probe is technical connectivity evidence ONLY.
+        # No arbitrary natural-language goal is accepted in this mode.
+        if (not child_goal.startswith("CANARY ONLY:")
+                or not isinstance(proof_token, str)
+                or not re.fullmatch(r"HARNESS_[A-Z0-9_]{12,72}", proof_token)
+                or allowed_files not in (None, [])
+                or test_path is not None):
+            raise HarnessError("read-only canary requires reviewed marker and no code rights")
+    else:
+        raise HarnessError("unapproved managed executor")
+    if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= 86400:
+        raise HarnessError("child TTL must be between 1s and 24h")
+    with connect(db_path) as db:
+        entry, binding = require_binding(automation_id, registry, db)
+        if (entry["role"] != "parent"
+                or entry["mode"] != "observe_and_register"
+                or not entry["configured_enabled"] or not binding["main_goal"]
+                or entry.get("max_children") not in (1, 2)):
+            raise HarnessError("paused/maintenance monitor cannot dispatch")
+        main_goal = binding["main_goal"]
+        expected_remote = entry["repo"]
+
+    # Only a clean project-owned Git clone under Dell workspace is accepted.
+    try:
+        root = workspace_root.resolve(strict=True)
+        selected = repo_dir.resolve(strict=True)
+    except OSError as exc:
+        raise HarnessError("repo must be inside approved workspace root") from exc
+    if root not in selected.parents or selected == root:
+        raise HarnessError("repo must be inside approved workspace root")
+    if not (selected / ".git").exists():
+        raise HarnessError("isolated local Git repository required")
+    remote = subprocess.run(
+        ["git", "-C", str(selected), "remote", "get-url", "origin"],
+        capture_output=True, text=True, timeout=10)
+    if remote.returncode:
+        raise HarnessError("cannot verify project origin")
+    raw = remote.stdout.strip()
+    prefixes = ("https://github.com/", "git@github.com:", "ssh://git@github.com/")
+    matching = [prefix for prefix in prefixes if raw.startswith(prefix)]
+    if len(matching) != 1:
+        raise HarnessError("origin must use a reviewed github.com remote")
+    actual_remote = raw[len(matching[0]):].removesuffix(".git").strip("/")
+    if actual_remote != expected_remote:
+        raise HarnessError("project origin does not match locked monitor repo")
+    current_branch = subprocess.run(
+        ["git", "-C", str(selected), "branch", "--show-current"],
+        capture_output=True, text=True, timeout=10)
+    if current_branch.returncode or not current_branch.stdout.strip().startswith("harness/"):
+        raise HarnessError("monitor task requires an isolated harness/* branch")
+
+    impl = manager_type or ManagedHarness
+    manager = impl(db_path, db_path.parent)
+    receipt = manager.launch(
+        main_goal=main_goal, child_goal=child_goal,
+        expected=test_path if executor == "codex-task" else proof_token,
+        repo=str(selected), executor=executor,
+        ttl_seconds=ttl_seconds, allowed_files=allowed_files)
+    if receipt.get("state") not in {"DISPATCHED", "FAILED", "EXPIRED"}:
+        raise HarnessError("executor returned no verifiable state")
+    return {
+        "automation_id": automation_id,
+        "main_goal_hash": goal_sha(main_goal),
+        "harness_task_id": receipt["task_id"],
+        "state": receipt["state"],
+        "deadline": receipt.get("deadline"),
+        "unit": receipt.get("unit"),
+        "execution_backend": "MANAGED_SYSTEMD",
+        "durable_origin": "HARNESS_SQLITE",
+        "independent_project_DoD": (
+            "NOT_TESTED_BY_AGENT_PROBE" if executor == "codex"
+            else "NOT_VERIFIED_BY_DISPATCH"),
+        "next": "existing systemd Harness reconciler verifies tests, diff and cleanup",
+    }
+
+
 async def reconcile_external(
     registry: dict[str, dict[str, Any]], db_path: Path,
 ) -> dict[str, Any]:
@@ -464,7 +565,7 @@ async def reconcile_external(
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("action", choices=("bootstrap", "status", "register",
+    p.add_argument("action", choices=("bootstrap", "status", "launch-managed", "register",
                                       "register-attested", "observe-attested", "reconcile"))
     p.add_argument("--registry", default=str(REGISTRY))
     p.add_argument("--db", default=str(STATE_DB))
@@ -475,6 +576,12 @@ def main() -> None:
     p.add_argument("--node")
     p.add_argument("--session")
     p.add_argument("--task-id")
+    p.add_argument("--repo-dir", help="clean isolated harness/* Git project clone")
+    p.add_argument("--test-path", help="preexisting tracked pytest acceptance relative path")
+    p.add_argument("--executor", choices=("codex-task", "codex"), default="codex-task")
+    p.add_argument("--proof-token", help="strict read-only Codex connectivity marker")
+    p.add_argument("--allowed-file", action="append", default=[],
+                   help="one explicitly reviewed tracked source file")
     p.add_argument("--attestation-json", help="Sanitized readback from GLOBAL connected Terminal MCP; not locally verifiable")
     p.add_argument("--ttl-seconds", type=int, default=86400)
     args = p.parse_args()
@@ -486,6 +593,15 @@ def main() -> None:
         output = status(registry, db_path, args.automation_id)
     elif args.action == "reconcile":
         output = asyncio.run(reconcile_external(registry, db_path))
+    elif args.action == "launch-managed":
+        if not all((args.automation_id, args.child_goal, args.repo_dir)):
+            p.error("launch-managed requires monitor ID, atomic child and isolated repo")
+        output = launch_managed_child(
+            registry, db_path, args.automation_id,
+            child_goal=args.child_goal, repo_dir=Path(args.repo_dir),
+            test_path=args.test_path, allowed_files=args.allowed_file,
+            executor=args.executor, proof_token=args.proof_token,
+            ttl_seconds=args.ttl_seconds)
     elif args.action == "observe-attested":
         if not all((args.automation_id, args.task_id, args.attestation_json)):
             p.error("observe-attested needs monitor id, durable task id and central tool readback")

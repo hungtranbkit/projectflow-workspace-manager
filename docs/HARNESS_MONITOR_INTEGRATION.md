@@ -133,3 +133,53 @@ with a new key is refused; a genuinely new scoped goal is required.
 The service does not infer business completion from these canaries. Terminal
 MCP controller task IDs may be invisible to the Dell local MCP endpoint;
 CENTRAL_ATTESTED receipts are never cryptographic RUNNING/DONE proof.
+
+## Durable managed dispatch when Terminal MCP queue is disabled (16/11/2026)
+
+The Terminal MCP implementation maps `start` → `send` when its durable
+queue feature is disabled. A returned `SUBMIT_CONFIRMED` in that mode **does
+not contain a durable task_id**. Do not register it as an external Harness
+child or call it RUNNING. This is expected server behavior, not proof that the
+agent finished. The monitored project goal stays unchanged.
+
+A reviewed enabled parent can now dispatch directly to Harness's durable,
+systemd-owned local executor with a short CLI invocation; Terminal MCP only
+transports this invocation. The Harness SQLite task ID and systemd unit are the
+source of truth. The command refuses paused/maintenance monitors, a project
+origin that differs from the locked registry, paths outside Dell workspace,
+and anything other than a clean isolated harness/* branch. WIP and TTL guards
+are provided by the same HarnessStore as other monitor children.
+
+Safe technical read-only Codex E2E, with NO project business acceptance:
+
+~~~bash
+cd /home/dell/workspace/projectflow-harness-main-20261115
+PF=/home/dell/workspace/projectflow-workspace-manager/.venv/bin/python
+$PF scripts/harness_monitor_bridge.py launch-managed \
+  --automation-id 6af698c9a5308191899c6a7e013cee5f \
+  --child-goal 'CANARY ONLY: verify Screen Remote read-only Codex handoff' \
+  --repo-dir /home/dell/workspace/harness-screen-agentpilot-20261116 \
+  --executor codex \
+  --proof-token HARNESS_SCREEN_REMOTE_CODEX_BRIDGE_20261116 \
+  --ttl-seconds 180
+systemctl --user start projectflow-harness-reconcile-staging.service
+$PF scripts/harness_monitor_bridge.py status \
+  --automation-id 6af698c9a5308191899c6a7e013cee5f
+~~~
+
+Only report DONE_VERIFIED + CLEANED_VERIFIED if the service has verified the
+actual Codex output, unit completion, artifact hashes and cleanup. Even then
+project_DoD remains NOT_TESTED_BY_CANARY: physical iPhone/NEC/Brave video and
+audio acceptance is separate.
+
+For a genuine atomic implementation task on an already-existing pytest
+acceptance, use `--executor codex-task --test-path tests/test_*.py
+--allowed-file existing_implementation.py`; this is restricted to a clean
+harness/* branch of the reviewed monitor's exact GitHub repo and **does not
+push/merge/deploy**. Only use it when a monitor has an explicit specific bug
+and independent DoD. CDTM is primarily TypeScript and cannot use this pytest
+executor directly; do not invent a Python acceptance test to bypass the gate.
+
+At each monitor turn, check existing Harness status and existing agent
+sessions before launching. Do not spawn canaries repeatedly or use a completed
+technical probe as a business milestone.
