@@ -128,6 +128,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--health-file")
+    parser.add_argument("--emit-progress", action="store_true",
+                        help="write private mobile HTML + JSON progress every timer run")
     args = parser.parse_args()
     db = Path(args.db).expanduser().resolve()
     health = (Path(args.health_file).expanduser().resolve()
@@ -138,6 +140,23 @@ def main() -> None:
         print("HARNESS_MONITOR_HEALTH=" + json.dumps({
             "healthy": False, "error": f"{type(exc).__name__}:{str(exc)[:120]}"}))
         raise SystemExit(1) from exc
+    if args.emit_progress:
+        try:
+            from scripts.harness_progress import summarize, write_private_dashboard
+            snapshot = summarize(db)
+            evidence = write_private_dashboard(snapshot, db.parent)
+            receipt["progress_healthy"] = True
+            receipt["progress_at"] = snapshot["observed_at"]
+            receipt["progress_files"] = evidence
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            receipt["progress_healthy"] = False
+            receipt["healthy"] = False
+            receipt.setdefault("errors", []).append(
+                f"progress:{type(exc).__name__}:{str(exc)[:100]}")
+            code = 1
+        # Persist the final combined status instead of leaving health green
+        # if the progress snapshot could not be generated.
+        atomic_json(health, receipt)
     print("HARNESS_MONITOR_HEALTH=" + json.dumps(receipt, sort_keys=True))
     raise SystemExit(code)
 
