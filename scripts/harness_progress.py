@@ -14,9 +14,11 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import sys
 from typing import Any
 from zoneinfo import ZoneInfo
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services.agent_harness_mvp import HarnessStore, HarnessError
 from scripts.harness_monitor_bridge import (
     STATE_DB, REGISTRY, load_registry, connect, require_binding,
