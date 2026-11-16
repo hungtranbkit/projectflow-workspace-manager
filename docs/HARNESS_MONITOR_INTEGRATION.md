@@ -183,3 +183,89 @@ executor directly; do not invent a Python acceptance test to bypass the gate.
 At each monitor turn, check existing Harness status and existing agent
 sessions before launching. Do not spawn canaries repeatedly or use a completed
 technical probe as a business milestone.
+
+## P0 repair: atomic service health + Zalo Hub Node/JDK21 QA (16/11/2026)
+
+**Never rely on a green timer/service alone for business acceptance.** The
+previous user unit used `ExecStartPost=-...harness_monitor_bridge.py reconcile`:
+the leading minus caused systemd to ignore bridge errors. Replace that
+configuration with a **single fail-closed ExecStart**:
+
+```ini
+[Service]
+Type=oneshot
+WorkingDirectory=/home/dell/workspace/projectflow-harness-main-20261115
+ExecStart=/home/dell/workspace/terminal-mcp/.venv/bin/python /home/dell/workspace/projectflow-harness-main-20261115/scripts/harness_monitor_service.py --db /home/dell/.local/state/projectflow-harness/harness-mvp.db
+NoNewPrivileges=true
+UMask=0077
+TimeoutStartSec=60
+```
+
+Do not add an ExecStartPost with an error-ignoring prefix. The entrypoint
+runs the existing ownership-aware expiry/cleanup reconciler and the monitor
+bridge sequentially; it returns nonzero if either stage fails. It writes
+`~/.local/state/projectflow-harness/monitor-health.json` (owner-only)
+with distinct `scheduler_healthy`, `bridge_healthy`, `agent_verified`,
+`dispatch_unverified`, `stalled_children`, `cleanup_pending`,
+`business_accepted` and error counters. The project business gate is NEVER
+inferred from an automated systemd test. Persistent task errors remain
+visible without pretending to cancel unknown controllers.
+
+### Why Node/Java QA is a separate executor
+
+Zalo Hub is Java/Android plus Node and cannot legitimately run under the
+Python-only codex-task/pytest harness. The dedicated **QA-only** executor
+`zgh-node-java-qa` accepts *only* the exact reviewed
+`scripts/v2-source-integration-tests.sh` in an isolated clean `harness/*`
+branch of `hungtranbkit/zalo-group-hub`. It reads a symlink-free snapshot
+made from an immutable Git commit and uses the locally pinned Docker image ID
+`sha256:06a9939e57531807f8d5fd76ce44b53165ffb7d7501d87ab10e285c20b1e971f`.
+The image is never pulled at task time, networking is disabled, the container
+runs as UID 65534, the input snapshot is bind-mounted read-only, and JDK21
+and org.json test dependencies are mounted read-only. No Docker socket,
+Zalo credentials, host home or live project filesystem is exposed.
+
+A QA unit may compile and test inside a **container-only writable tmpfs**;
+it cannot commit code, upload an APK, send a message, manipulate live WAL,
+change owner PIN/grants, or prove device-level delivery. The acceptance
+requires exit=0, immutable tracked source + script SHA, image identity,
+test-output evidence, no worktree drift, stopped unit and verified cleanup.
+
+```sh
+cd /home/dell/workspace/projectflow-harness-main-20261115
+PF=/home/dell/workspace/projectflow-workspace-manager/.venv/bin/python
+$PF scripts/harness_monitor_bridge.py launch-managed \
+  --automation-id Automation_eec08a5752d08191b3de371065c27320 \
+  --child-goal 'QA ONLY: independent Node/JDK21 tests for reviewed ZGH V2 snapshot' \
+  --repo-dir /home/dell/workspace/harness-zgh-nodejava-qa-20261116 \
+  --executor zgh-node-java-qa \
+  --test-path scripts/v2-source-integration-tests.sh \
+  --ttl-seconds 300
+systemctl --user start projectflow-harness-reconcile-staging.service
+$PF scripts/harness_monitor_bridge.py status \
+  --automation-id Automation_eec08a5752d08191b3de371065c27320
+```
+
+A previous test attempt FAIL is not overwritten. Each new run requires a
+**different atomic child goal with a real fix**, not a reset of the old TTL.
+When deploying this executor for the first time, update `main` and reload
+the systemd service **before launching** it: an older reconciler cannot
+verify the new QA task and must not be used concurrently. Unknown executor
+types now fail closed with an actionable error rather than producing fake
+FAILED/cleanup receipts.
+
+### Stall and cleanup discipline
+
+PID heartbeat proves a process exists, not useful progress. Harness now
+persists last observed growth of the child's output log; a process with a
+fresh live heartbeat but no log growth for over 10 minutes becomes `STALLED`
+for investigation. Do not automatically terminate an unknown/dirty session.
+The existing owned systemd unit still has its immutable hard TTL; expiry
+stops only owned units and retains `CLEANUP_PENDING` until safe cleanup is
+independently verified. WIP stays reserved until then. The health JSON
+reports stale, unverified dispatch and pending cleanup for monitor action.
+
+The existing ChatGPT automation schedules and Zalo Hub production runtime
+are separate. Keep the original immutable goal and the A1a/A1b PR audit,
+UI lease, receiver account and rollback acceptance gates. No QA runner test
+is a production GO for missing text/image/video/file.
