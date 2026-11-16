@@ -8,7 +8,7 @@ No network, GitHub writes, task dispatch or process deletion occurs here.
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 import json
 import os
@@ -16,7 +16,6 @@ from pathlib import Path
 import tempfile
 import sys
 from typing import Any
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services.agent_harness_mvp import HarnessStore, HarnessError
@@ -27,7 +26,7 @@ from scripts.harness_managed_exec import atomic_json
 
 HERE = Path(__file__).resolve().parents[1]
 DEFAULT_GATES = HERE / "config/harness_progress_gates.json"
-ICT = ZoneInfo("Asia/Ho_Chi_Minh")
+ICT = timezone(timedelta(hours=7), "ICT")  # Vietnam UTC+07, no tzdata dependency
 FINAL_STATES = {"DONE_VERIFIED", "FAILED", "EXPIRED"}
 GATE_STATES = {"PASSED", "IN_PROGRESS", "BLOCKED", "NOT_STARTED"}
 
