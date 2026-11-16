@@ -49,12 +49,12 @@ def backend(task_id="dt_proof_001", session="harness-demo", agent="codex",
 
 def test_inventories_all_existing_automations_without_enabling(source, wired):
     assert len(source) == 25
-    assert sum(x["configured_enabled"] for x in source.values()) == 3
-    assert sum(not x["configured_enabled"] for x in source.values()) == 22
+    assert sum(x["configured_enabled"] for x in source.values()) == 4
+    assert sum(not x["configured_enabled"] for x in source.values()) == 21
     status = bridge.status(source, wired, None)
     assert status["count"] == 25
-    assert status["active"] == 3
-    assert status["paused"] == 22
+    assert status["active"] == 4
+    assert status["paused"] == 21
     assert all(x["mode"] == "paused" and x["main_goal"] is None
                for x in status["monitors"] if not x["enabled_at_import"])
 
@@ -457,3 +457,58 @@ def test_readonly_codex_cannot_become_unreviewed_generic_agent(
                 proof_token=marker, allowed_files=files,
                 workspace_root=root)
     assert not HarnessStore(wired).list_tasks()
+
+
+
+def test_activate_zgh_v2_existing_paused_binding_with_audit_event(tmp_path, source):
+    zgh = bridge.ZGH_V2_AUTOMATION_ID
+    old = {k: v.copy() for k, v in source.items()}
+    old[zgh].update({
+        "configured_enabled": False,
+        "main_goal": None,
+        "mode": "paused",
+        "role": "paused",
+        "repo": None,
+        "max_children": 0,
+    })
+    db = tmp_path / "previous-harness.db"
+    HarnessStore(db)
+    receipt = bridge.bootstrap(old, db)
+    assert receipt == {"registered": 25, "already": 0, "total": 25}
+    with pytest.raises(HarnessError, match="immutable"):
+        bridge.bootstrap(source, db)
+
+    activated = bridge.activate_zgh_v2(source, db, zgh)
+    assert activated["state"] == "ACTIVE_BINDING"
+    assert activated["already"] is False
+    assert activated["monitor_enabled_by_this_action"] is False
+    repeated = bridge.activate_zgh_v2(source, db, zgh)
+    assert repeated["already"] is True
+    assert bridge.bootstrap(source, db) == {
+        "registered": 0, "already": 25, "total": 25}
+    result = bridge.status(source, db, zgh)["monitors"][0]
+    assert result["mode"] == "observe_and_register"
+    assert result["enabled_at_import"] is True
+    assert result["main_goal"] == source[zgh]["main_goal"]
+    with bridge.connect(db) as conn:
+        events = conn.execute(
+            "SELECT * FROM harness_monitor_activation_events WHERE automation_id=?", (zgh,)
+        ).fetchall()
+    assert len(events) == 1
+    assert events[0]["new_goal_sha256"] == bridge.goal_sha(source[zgh]["main_goal"])
+
+
+def test_activation_refuses_other_automations_and_goal_drift(tmp_path, source):
+    zgh = bridge.ZGH_V2_AUTOMATION_ID
+    db = tmp_path / "activation.db"
+    HarnessStore(db)
+    bridge.bootstrap(source, db)
+    other = next(ident for ident in source if ident != zgh)
+    with pytest.raises(HarnessError, match="not approved"):
+        bridge.activate_zgh_v2(source, db, other)
+    with pytest.raises(HarnessError, match="migration event"):
+        bridge.activate_zgh_v2(source, db, zgh)
+    bad = {k: v.copy() for k, v in source.items()}
+    bad[zgh]["main_goal"] = "new unrelated goal"
+    with pytest.raises(HarnessError, match="goal/authority"):
+        bridge.activate_zgh_v2(bad, db, zgh)

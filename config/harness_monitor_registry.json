@@ -3,7 +3,7 @@
   "created_on": "2026-11-16",
   "owner_repo": "hungtranbkit/projectflow-workspace-manager",
   "applies_to": "ChatGPT scheduled automations; no automatic activation or schedule changes",
-  "active_goal_count": 3,
+  "active_goal_count": 4,
   "automations": [
     {
       "automation_id": "6af65f5c6cdc8191a2ecc2f47085bea6",
@@ -242,15 +242,21 @@
     {
       "automation_id": "Automation_eec08a5752d08191b3de371065c27320",
       "title": "Theo sát Zalo Hub V229",
-      "configured_enabled": false,
+      "configured_enabled": true,
       "frequency": "hourly",
-      "role": "paused",
-      "mode": "paused",
-      "main_goal": null,
-      "repo": null,
-      "max_children": 0,
-      "guardrail": "inactive: do not spawn or enable",
-      "original_prompt_size": 3125
+      "role": "parent",
+      "mode": "observe_and_register",
+      "main_goal": "Chuyển Zalo Hub sang kiến trúc V2 (thiết kế V229 durable sync) để xử lý lỗi bỏ sót tin nhắn text/ảnh/video/file, không gửi trùng; bảo toàn WAL/PIN/grants và nghiệm thu source→Test trên S7 bằng tài khoản nhận độc lập.",
+      "repo": "hungtranbkit/zalo-group-hub",
+      "max_children": 2,
+      "guardrail": "A1a/A1b shadow-only until audited; preserve historical WAL and SUBMITTED_UNCERTAIN; no automatic real sends, S7 production activation or permissions bypass",
+      "original_prompt_size": 3125,
+      "migration_prs": [
+        79,
+        81,
+        82
+      ],
+      "first_child_priority": "A1a PR81 evidence-hash conflict, independent review and re-test; avoid duplicate task if sessions for A1a/A1b already exist"
     },
     {
       "automation_id": "6aead6917514819191bf7aea4cda0bec",
