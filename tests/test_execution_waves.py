@@ -12,6 +12,7 @@ evidence, never fake stand-ins for those."""
 from __future__ import annotations
 import json
 import subprocess
+import sys
 import threading
 import time
 import os
@@ -331,7 +332,7 @@ def test_double_tick_never_launches_same_task_twice(client, git_repo):
     rid = register(client, repo, "demo")
     cid = new_change(client, "Double tick change", project_id=rid)
     a, _ = new_plan_task(client, cid, "A", "A", ["a.py"])
-    fake_launcher(client, "claude")
+    fake_launcher(client, "codex")
 
     results = []
     errors = []
@@ -373,7 +374,7 @@ def test_sibling_failure_does_not_stop_safe_sibling(client, git_repo):
             raise RuntimeError("Builder A failed to start")
         return real_start(ws)
 
-    fake_launcher(client, "claude")
+    fake_launcher(client, "codex")
     client.app.state.autonomous_execution_service._start_builder_session = flaky
     run = _ews(client).run_execution_wave(cid)
     assert run["outcome"] == "LAUNCHED"
@@ -447,14 +448,14 @@ def test_real_two_task_wave_parallel_safe_full_closed_loop(client, git_repo):
     (wt_a / "backend.py").write_text("def backend_value():\n    return 42\n")
     subprocess.run(["git", "add", "backend.py"], cwd=wt_a, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "fix backend_value"], cwd=wt_a, check=True, capture_output=True)
-    r = subprocess.run(["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_backend.py"], cwd=wt_a, capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_backend.py"], cwd=wt_a, capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     assert r.returncode == 0, r.stdout + r.stderr
 
     wt_b = client.app.state.git.validate_worktree(by_task[b]["worktree_path"])
     (wt_b / "frontend.py").write_text("def frontend_label():\n    return 'ready'\n")
     subprocess.run(["git", "add", "frontend.py"], cwd=wt_b, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "fix frontend_label"], cwd=wt_b, check=True, capture_output=True)
-    r = subprocess.run(["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_frontend.py"], cwd=wt_b, capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_frontend.py"], cwd=wt_b, capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     assert r.returncode == 0, r.stdout + r.stderr
 
     # Canonical checkout untouched throughout.

@@ -23,7 +23,9 @@ def test_renamed_repo_breaks_worktree_without_repair(git_repo):
     repo.rename(moved)
     r = subprocess.run(["git", "status", "--porcelain"], cwd=root / "wt1", capture_output=True, text=True)
     assert r.returncode != 0
-    assert "not a git repository" in (r.stderr or "")
+    assert any(message in (r.stderr or "") for message in (
+        "not a git repository", "gitfile does not point to a valid repository"
+    )), r.stderr
     moved.rename(repo)  # restore for any fixture teardown expecting the original path
 
 
