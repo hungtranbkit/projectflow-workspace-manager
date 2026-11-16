@@ -208,6 +208,9 @@ def summarize(
             }
         except (OSError, ValueError, KeyError, TypeError):
             health = {"status": "UNKNOWN", "reason": "malformed health evidence"}
+    from scripts.harness_trajectory import view as trajectory_view
+    for monitor in monitors:
+        monitor["trajectory"] = trajectory_view(db_path, monitor, at)
     return {
         "schema": "harness-progress-v1",
         "observed_at": at.isoformat(),
@@ -237,6 +240,10 @@ def markdown(snapshot: dict[str, Any]) -> str:
         lines.append(f"   WIP {m['wip']}/{m['max_wip']} • "
                      f"đã theo dõi {m['goal_elapsed_label']}; "
                      "dự án không có deadline 24h.")
+        if m.get("trajectory"):
+            from scripts.harness_trajectory import markdown_line
+            lines.append("   ↗ " + markdown_line(m["trajectory"]))
+            lines.append("   🗓 Đường chéo 7 ngày là mốc THAM CHIẾU, chưa phải hạn cam kết.")
         for t in m["active_tasks"]:
             lines.append(
                 f"   ⏱ #{t['id']} {t['time_used_bar']} "
@@ -303,6 +310,40 @@ def html(snapshot: dict[str, Any]) -> str:
                       f'hạn {escape(t["deadline_local"])}</div></div>']
         if not m["active_tasks"]:
             parts.append('<p class="small">Không có task nào đang chiếm WIP.</p>')
+        tr = m.get("trajectory")
+        if tr is not None:
+            from scripts.harness_trajectory import render_svg
+            drift = tr["adjusted_deviation_pp"]
+            gap = "nhanh hơn/đúng kế hoạch" if drift >= 0 else "chậm hơn"
+            parts += [
+                '<div class="task"><div class="small"><strong>Quỹ đạo đến mục tiêu</strong>'
+                ' · đường kế hoạch và tiến độ theo thời gian</div>',
+                render_svg(tr),
+                '<div class="small">🔵 kế hoạch gốc (đường xiên) · '
+                '🟢 thực tế nghiệm thu · 🟠 kế hoạch sau chỉnh hướng</div>',
+                f'<div class="small">Kế hoạch tham chiếu: '
+                f'{tr["adjusted_expected_percent"]:.1f}% · thực tế '
+                f'{tr["current_percent"]}% · <strong>{drift:+.1f} điểm % '
+                f'({escape(gap)})</strong></div>',
+                f'<div class="small">Đã chỉnh hướng {tr["correction_count"]} lần · '
+                f'cần {tr["required_gain_per_day_pp"]:.2f} điểm %/ngày '
+                'theo mốc giả định</div>',
+                '<div class="small">Mốc tham chiếu 7 ngày là giả định '
+                'để quan sát độ lệch, KHÔNG phải deadline được duyệt.</div>',
+            ]
+            if tr["corrections"]:
+                parts.append('<div class="small"><strong>Lịch sử chỉnh hướng:</strong></div>')
+                for c in tr["corrections"][-5:]:
+                    after = ("chưa có quan sát sau chỉnh" if
+                             c["after_adjustment_gap_pp"] is None else
+                             f'{c["after_adjustment_gap_pp"]:+.1f} điểm %')
+                    parts.append(
+                        f'<div class="small">↪ {escape(c["at"][:16])} · '
+                        f'khi chỉnh lệch {c["pre_adjustment_gap_pp"]:+.1f} điểm % · '
+                        f'sau chỉnh lệch {escape(after)} · '
+                        f'{escape(c["reason"] or "")}</div>'
+                    )
+            parts.append('</div>')
         finished = [t for t in m["recent_tasks"] if t["finished"]]
         if finished:
             parts.append('<div class="small"><strong>Task gần nhất — đã kết thúc</strong></div>')
@@ -361,6 +402,11 @@ def main() -> None:
     db_path = Path(args.db).expanduser().resolve()
     snap = summarize(db_path, gate_path=Path(args.gate_policy))
     if args.write:
+        from scripts.harness_trajectory import observe_all, moment
+        at = moment(snap["observed_at"])
+        observe_all(db_path, snap["monitors"], at)
+        # Include the just-persisted checkpoint in both JSON and the SVG.
+        snap = summarize(db_path, gate_path=Path(args.gate_policy), reference=at)
         files = write_private_dashboard(snap, db_path.parent)
         snap["saved_files"] = files
     if args.format == "json":
