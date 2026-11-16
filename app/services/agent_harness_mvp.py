@@ -139,11 +139,14 @@ class HarnessStore:
             db.execute("BEGIN IMMEDIATE")
             # One active task for exactly the same main/child goal; not a hidden
             # way to spawn duplicates with new request keys.
-            dup = db.execute("""SELECT id FROM harness_tasks WHERE main_goal=? AND child_goal=?
-                AND state NOT IN ('DONE_VERIFIED','FAILED','EXPIRED')""",
+            dup = db.execute("""SELECT id,state,cleanup_state FROM harness_tasks
+                WHERE main_goal=? AND child_goal=? ORDER BY id DESC LIMIT 1""",
                 (main_goal, child_goal)).fetchone()
             if dup is not None:
-                raise HarnessError(f"duplicate active child task {dup['id']}")
+                if dup["state"] not in TERMINAL or dup["cleanup_state"] != "CLEANED_VERIFIED":
+                    raise HarnessError(f"duplicate active child task {dup['id']}")
+                raise HarnessError(
+                    f"previously attempted child task {dup['id']}; rescope into a new atomic goal")
             # A completed/expired child with unverified cleanup still owns
             # resources. Do not create a third worker just because a previous
             # agent reported DONE or hit its TTL.
@@ -279,7 +282,9 @@ class HarnessStore:
             # independent artifact + test-exit + runtime readback checks.
             if verifier is None or not verifier(artifact_ref, test_evidence, runtime_readback):
                 raise HarnessError("independent acceptance verifier missing or failed")
-            db.execute("UPDATE harness_tasks SET state='DONE_VERIFIED',verified_at=? WHERE id=?", (_iso(now), task_id))
+            db.execute("""UPDATE harness_tasks SET
+                state='DONE_VERIFIED',verified_at=?,cleanup_state='CLEANUP_PENDING'
+                WHERE id=?""", (_iso(now), task_id))
             self._event(db, task_id, now, "DONE_VERIFIED", {"artifact": artifact_ref,
                          "test": test_evidence, "runtime": runtime_readback})
         return self.get(task_id)
@@ -293,7 +298,9 @@ class HarnessStore:
             return self.get(task_id)
         with self._connect() as db:
             row = self._guard(db, task_id)
-            db.execute("UPDATE harness_tasks SET state='FAILED',verified_at=? WHERE id=?", (_iso(now), task_id))
+            db.execute("""UPDATE harness_tasks SET
+                state='FAILED',verified_at=?,cleanup_state='CLEANUP_PENDING'
+                WHERE id=?""", (_iso(now), task_id))
             self._event(db, task_id, now, "FAILED", {"reason": reason})
         return self.get(task_id)
 
