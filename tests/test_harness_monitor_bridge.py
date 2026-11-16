@@ -409,3 +409,51 @@ def test_direct_managed_dispatch_requires_clean_trusted_workspace(
             repo_dir=project, test_path="tests/test_impl.py",
             allowed_files=[], workspace_root=root)
     assert not HarnessStore(wired).list_tasks()
+
+
+def test_readonly_codex_canary_has_durable_id_but_no_business_pass(
+    source, wired, reviewed_clone
+):
+    root, project = reviewed_clone
+    selected = active_parent(source)
+
+    class Stub:
+        seen = []
+        def __init__(self, db, state):
+            pass
+        def launch(self, **kw):
+            self.seen.append(kw)
+            return {"task_id": 903, "state": "DISPATCHED",
+                    "unit": "harness-child-903-abcdef0123.service"}
+
+    result = bridge.launch_managed_child(
+        source, wired, selected,
+        child_goal="CANARY ONLY: prove actual read-only Codex execution",
+        repo_dir=project, executor="codex",
+        proof_token="HARNESS_MONITOR_CODEX_READONLY_PROOF_20261116",
+        ttl_seconds=600, workspace_root=root, manager_type=Stub)
+    assert result["harness_task_id"] == 903
+    assert result["durable_origin"] == "HARNESS_SQLITE"
+    assert result["independent_project_DoD"] == "NOT_TESTED_BY_AGENT_PROBE"
+    assert Stub.seen[0]["executor"] == "codex"
+    assert Stub.seen[0]["allowed_files"] in (None, [])
+    assert Stub.seen[0]["expected"] == "HARNESS_MONITOR_CODEX_READONLY_PROOF_20261116"
+
+
+def test_readonly_codex_cannot_become_unreviewed_generic_agent(
+    source, wired, reviewed_clone
+):
+    root, project = reviewed_clone
+    selected = active_parent(source)
+    for child, marker, files in [
+        ("Delete secrets", "HARNESS_MONITOR_CODEX_READONLY_PROOF_20261116", None),
+        ("CANARY ONLY: unsafe", "anything arbitrary", None),
+        ("CANARY ONLY: unsafe", "HARNESS_MONITOR_CODEX_READONLY_PROOF_20261116", ["impl.py"]),
+    ]:
+        with pytest.raises(HarnessError, match="read-only canary"):
+            bridge.launch_managed_child(
+                source, wired, selected, child_goal=child,
+                repo_dir=project, executor="codex",
+                proof_token=marker, allowed_files=files,
+                workspace_root=root)
+    assert not HarnessStore(wired).list_tasks()
