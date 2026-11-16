@@ -218,3 +218,27 @@ def test_progress_rejects_non_numeric_and_future_clock(tmp_path):
     verified_log_progress(db, 12, 0, start)
     with pytest.raises(HarnessError, match="historical"):
         verified_log_progress(db, 12, 0, start - timedelta(minutes=2))
+
+
+
+def test_unknown_future_executor_cannot_be_misclassified_as_failed(tmp_path):
+    from datetime import timedelta
+    from app.services.agent_harness_mvp import HarnessStore
+    import sqlite3
+    manager = ManagedHarness(tmp_path / "harness.db", tmp_path / "state")
+    start = datetime.now(timezone.utc)
+    task = manager.store.create(
+        key="future-executor", main_goal="one stable goal",
+        child_goal="newer QA worker", dod="independent test",
+        agent="future", node="dell-linux", created_at=start,
+        ttl=timedelta(minutes=5))
+    with sqlite3.connect(manager.db_path) as db:
+        db.execute("""INSERT INTO harness_managed_units
+            (task_id,unit,run_dir,repo,executor,expected_sha,recorded_at)
+            VALUES (?,?,?,?,?,?,?)""",
+            (task.id, "harness-child-99-1234567890.service",
+             str(tmp_path / "state" / "runs" / "future"), str(tmp_path),
+             "future-qa-v9", "sha256:unknown", start.isoformat()))
+    report = manager.reconcile()
+    assert report[0]["error"].startswith("unknown executor")
+    assert manager.store.get(task.id).state == "NOT_DISPATCHED"
