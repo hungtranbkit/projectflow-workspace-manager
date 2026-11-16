@@ -14,8 +14,8 @@
           "weight": 10,
           "status": "PASSED",
           "proof": "https://github.com/hungtranbkit/zalo-group-hub/pull/79",
-          "accepted_at": "2026-11-14T12:00:00+07:00",
-          "note": "Chỉ xác nhận lựa chọn thiết kế, không phải triển khai hay audit PASS"
+          "note": "Chỉ xác nhận lựa chọn thiết kế, không phải triển khai hay audit PASS",
+          "accepted_on": "2026-11-14"
         },
         {
           "id": "G1",
