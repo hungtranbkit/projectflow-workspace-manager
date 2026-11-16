@@ -155,6 +155,21 @@ def status(
     store = HarnessStore(db_path)
     with connect(db_path) as db:
         init_schema(db)
+        # Differentiate managed systemd jobs from Terminal MCP receipts; both
+        # carry an external_task_id in HarnessStore, but only the latter is a
+        # controller-attested external task.
+        linked = {
+            int(row["task_id"]): row["provenance"]
+            for row in db.execute("SELECT task_id,provenance FROM harness_monitor_receipts")
+        }
+        tables = {row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        owned = (
+            {int(row[0]) for row in db.execute(
+                "SELECT task_id FROM harness_managed_units")}
+            if "harness_managed_units" in tables else set()
+        )
         ids = [ident] if ident else list(registry)
         rows = []
         for target in ids:
@@ -164,7 +179,13 @@ def status(
             tasks_view = [{
                 "id": t.id, "goal": t.child_goal, "state": t.state,
                 "expires_at": t.expires_at.isoformat(), "cleanup": t.cleanup_state,
-                "external_task": bool(t.external_task_id),
+                "execution_backend": (
+                    "MANAGED_SYSTEMD" if t.id in owned else
+                    linked.get(t.id, "UNREGISTERED")),
+                "external_task": t.id in linked,
+                "project_DoD": (
+                    "NOT_TESTED_BY_CANARY" if t.child_goal.startswith("CANARY ONLY:")
+                    else "INDEPENDENT_ACCEPTANCE_REQUIRED"),
             } for t in tasks]
             outstanding = sum(t.state not in TERMINAL or
                               t.cleanup_state == "CLEANUP_PENDING" for t in tasks)
