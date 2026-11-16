@@ -12,7 +12,8 @@ from scripts.harness_monitor_service import reconcile
 
 def _inputs(tmp_path: Path):
     db = tmp_path / "harness.db"
-    db.write_bytes(b"test database")
+    from app.services.agent_harness_mvp import HarnessStore
+    HarnessStore(db)
     py = tmp_path / "python"
     py.write_bytes(b"trusted")
     health = tmp_path / "monitor-health.json"
