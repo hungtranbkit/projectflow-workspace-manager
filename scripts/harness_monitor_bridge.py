@@ -137,6 +137,101 @@ def bootstrap(registry: dict[str, dict[str, Any]], db_path: Path) -> dict[str, i
     return {"registered": inserted, "already": already, "total": len(registry)}
 
 
+# Explicit owner-requested activation: Zalo Hub V2/V229 architecture migration.
+# All other paused automations remain read-only inventory.
+ZGH_V2_AUTOMATION_ID = "Automation_eec08a5752d08191b3de371065c27320"
+ZGH_V2_REPO = "hungtranbkit/zalo-group-hub"
+
+
+def activate_zgh_v2(
+    registry: dict[str, dict[str, Any]], db_path: Path, automation_id: str
+) -> dict[str, Any]:
+    """One-time, auditable migration of ZGH's paused SQLite monitor binding.
+
+    An explicit automation enable still occurs separately in ChatGPT; this
+    function never changes its schedule, owner grants or the S7 runtime.
+    """
+    if automation_id != ZGH_V2_AUTOMATION_ID:
+        raise HarnessError("monitor activation not approved for this automation ID")
+    entry = registry.get(automation_id)
+    if not entry or not (
+        entry.get("configured_enabled") is True
+        and entry.get("role") == "parent"
+        and entry.get("mode") == "observe_and_register"
+        and entry.get("repo") == ZGH_V2_REPO
+        and entry.get("max_children") == 2
+        and isinstance(entry.get("main_goal"), str)
+        and "kiến trúc V2" in entry["main_goal"]
+        and "bỏ sót tin nhắn" in entry["main_goal"]
+        and "WAL/PIN/grants" in entry["main_goal"]
+    ):
+        raise HarnessError("reviewed ZGH V2 goal/authority absent or changed")
+    goal = entry["main_goal"]
+    goal_hash = goal_sha(goal)
+    with connect(db_path) as db:
+        init_schema(db)
+        db.execute("""CREATE TABLE IF NOT EXISTS harness_monitor_activation_events (
+            automation_id TEXT PRIMARY KEY,
+            previous_mode TEXT NOT NULL,
+            target_mode TEXT NOT NULL,
+            old_goal_sha256 TEXT NOT NULL,
+            new_goal_sha256 TEXT NOT NULL,
+            activated_at TEXT NOT NULL,
+            authorization TEXT NOT NULL
+        )""")
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT * FROM harness_monitor_bindings WHERE automation_id=?",
+            (automation_id,)).fetchone()
+        if not row:
+            raise HarnessError("ZGH binding absent; bootstrap paused registry first")
+        already = (
+            row["main_goal"] == goal
+            and row["main_goal_sha256"] == goal_hash
+            and row["integration_mode"] == "observe_and_register"
+            and row["enabled_at_import"] == 1
+        )
+        if already:
+            event = db.execute(
+                "SELECT new_goal_sha256 FROM harness_monitor_activation_events "
+                "WHERE automation_id=?", (automation_id,)
+            ).fetchone()
+            if not event or event["new_goal_sha256"] != goal_hash:
+                raise HarnessError("active binding lacks matching migration event")
+            return {
+                "automation_id": automation_id, "state": "ACTIVE_BINDING",
+                "already": True, "goal_sha256": goal_hash, "monitor_enabled_by_this_action": False,
+            }
+        if not (
+            row["integration_mode"] == "paused"
+            and row["enabled_at_import"] == 0
+            and row["main_goal"] is None
+            and row["main_goal_sha256"] == goal_sha("")
+        ):
+            raise HarnessError("GOAL_DRIFT: unexpected pre-activation binding")
+        audit_exists = db.execute(
+            "SELECT 1 FROM harness_monitor_activation_events WHERE automation_id=?",
+            (automation_id,)).fetchone()
+        if audit_exists:
+            raise HarnessError("activation already recorded against a different binding")
+        db.execute("""UPDATE harness_monitor_bindings
+            SET main_goal=?,main_goal_sha256=?,integration_mode=?,
+                enabled_at_import=?,title=?
+            WHERE automation_id=?""",
+            (goal, goal_hash, entry["mode"], 1, entry["title"], automation_id))
+        db.execute("""INSERT INTO harness_monitor_activation_events (
+            automation_id,previous_mode,target_mode,old_goal_sha256,
+            new_goal_sha256,activated_at,authorization)
+            VALUES (?,?,?,?,?,?,?)""",
+            (automation_id, "paused", entry["mode"], goal_sha(""),
+             goal_hash, now().isoformat(),
+             "owner chat instruction 2026-11-16: enable Harness for Zalo Hub V2 missing-message fix"))
+    return {
+        "automation_id": automation_id, "state": "ACTIVE_BINDING",
+        "already": False, "goal_sha256": goal_hash, "monitor_enabled_by_this_action": False,
+    }
+
+
 def require_binding(
     automation_id: str, registry: dict[str, dict[str, Any]], db: sqlite3.Connection
 ) -> tuple[dict[str, Any], sqlite3.Row]:
@@ -565,7 +660,7 @@ async def reconcile_external(
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("action", choices=("bootstrap", "status", "launch-managed", "register",
+    p.add_argument("action", choices=("bootstrap", "activate-zgh-v2", "status", "launch-managed", "register",
                                       "register-attested", "observe-attested", "reconcile"))
     p.add_argument("--registry", default=str(REGISTRY))
     p.add_argument("--db", default=str(STATE_DB))
@@ -589,6 +684,10 @@ def main() -> None:
     db_path = Path(args.db).expanduser().resolve()
     if args.action == "bootstrap":
         output = bootstrap(registry, db_path)
+    elif args.action == "activate-zgh-v2":
+        if not args.automation_id:
+            p.error("activate-zgh-v2 requires reviewed Zalo Hub automation ID")
+        output = activate_zgh_v2(registry, db_path, args.automation_id)
     elif args.action == "status":
         output = status(registry, db_path, args.automation_id)
     elif args.action == "reconcile":
