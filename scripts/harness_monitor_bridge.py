@@ -377,8 +377,9 @@ def observe_attested(
 
 def launch_managed_child(
     registry: dict[str, dict[str, Any]], db_path: Path, automation_id: str, *,
-    child_goal: str, repo_dir: Path, test_path: str,
-    allowed_files: list[str], ttl_seconds: int = 3600,
+    child_goal: str, repo_dir: Path, test_path: str | None = None,
+    allowed_files: list[str] | None = None, ttl_seconds: int = 3600,
+    executor: str = "codex-task", proof_token: str | None = None,
     workspace_root: Path = Path("/home/dell/workspace"),
     manager_type: Any = None,
 ) -> dict[str, Any]:
@@ -393,10 +394,22 @@ def launch_managed_child(
 
     if not isinstance(child_goal, str) or not child_goal.strip():
         raise HarnessError("atomic child goal required")
-    if not isinstance(allowed_files, list) or not allowed_files:
-        raise HarnessError("explicit source allowlist required")
-    if not isinstance(test_path, str) or not test_path.strip():
-        raise HarnessError("existing independent pytest required")
+    if executor == "codex-task":
+        if not isinstance(allowed_files, list) or not allowed_files:
+            raise HarnessError("explicit source allowlist required")
+        if not isinstance(test_path, str) or not test_path.strip():
+            raise HarnessError("existing independent pytest required")
+    elif executor == "codex":
+        # A read-only agent probe is technical connectivity evidence ONLY.
+        # No arbitrary natural-language goal is accepted in this mode.
+        if (not child_goal.startswith("CANARY ONLY:")
+                or not isinstance(proof_token, str)
+                or not re.fullmatch(r"HARNESS_[A-Z0-9_]{12,72}", proof_token)
+                or allowed_files not in (None, [])
+                or test_path is not None):
+            raise HarnessError("read-only canary requires reviewed marker and no code rights")
+    else:
+        raise HarnessError("unapproved managed executor")
     if type(ttl_seconds) is not int or not 1 <= ttl_seconds <= 86400:
         raise HarnessError("child TTL must be between 1s and 24h")
     with connect(db_path) as db:
@@ -436,8 +449,9 @@ def launch_managed_child(
     impl = manager_type or ManagedHarness
     manager = impl(db_path, db_path.parent)
     receipt = manager.launch(
-        main_goal=main_goal, child_goal=child_goal, expected=test_path,
-        repo=str(selected), executor="codex-task",
+        main_goal=main_goal, child_goal=child_goal,
+        expected=test_path if executor == "codex-task" else proof_token,
+        repo=str(selected), executor=executor,
         ttl_seconds=ttl_seconds, allowed_files=allowed_files)
     if receipt.get("state") not in {"DISPATCHED", "FAILED", "EXPIRED"}:
         raise HarnessError("executor returned no verifiable state")
@@ -450,7 +464,9 @@ def launch_managed_child(
         "unit": receipt.get("unit"),
         "execution_backend": "MANAGED_SYSTEMD",
         "durable_origin": "HARNESS_SQLITE",
-        "independent_project_DoD": "NOT_VERIFIED_BY_DISPATCH",
+        "independent_project_DoD": (
+            "NOT_TESTED_BY_AGENT_PROBE" if executor == "codex"
+            else "NOT_VERIFIED_BY_DISPATCH"),
         "next": "existing systemd Harness reconciler verifies tests, diff and cleanup",
     }
 
@@ -557,6 +573,8 @@ def main() -> None:
     p.add_argument("--task-id")
     p.add_argument("--repo-dir", help="clean isolated harness/* Git project clone")
     p.add_argument("--test-path", help="preexisting tracked pytest acceptance relative path")
+    p.add_argument("--executor", choices=("codex-task", "codex"), default="codex-task")
+    p.add_argument("--proof-token", help="strict read-only Codex connectivity marker")
     p.add_argument("--allowed-file", action="append", default=[],
                    help="one explicitly reviewed tracked source file")
     p.add_argument("--attestation-json", help="Sanitized readback from GLOBAL connected Terminal MCP; not locally verifiable")
@@ -571,13 +589,13 @@ def main() -> None:
     elif args.action == "reconcile":
         output = asyncio.run(reconcile_external(registry, db_path))
     elif args.action == "launch-managed":
-        if not all((args.automation_id, args.child_goal, args.repo_dir,
-                    args.test_path, args.allowed_file)):
-            p.error("launch-managed requires monitor ID, child, repo, pytest and source allowlist")
+        if not all((args.automation_id, args.child_goal, args.repo_dir)):
+            p.error("launch-managed requires monitor ID, atomic child and isolated repo")
         output = launch_managed_child(
             registry, db_path, args.automation_id,
             child_goal=args.child_goal, repo_dir=Path(args.repo_dir),
             test_path=args.test_path, allowed_files=args.allowed_file,
+            executor=args.executor, proof_token=args.proof_token,
             ttl_seconds=args.ttl_seconds)
     elif args.action == "observe-attested":
         if not all((args.automation_id, args.task_id, args.attestation_json)):
