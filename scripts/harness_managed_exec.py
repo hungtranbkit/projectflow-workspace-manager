@@ -461,9 +461,17 @@ class ManagedHarness:
 
     def reconcile(self) -> list[dict[str, Any]]:
         results = []
+        known_executors = {"codex", "codex-task", "echo-probe", "sleep-probe",
+                           "zgh-node-java-qa"}
         for row in self._rows():
             task = self.store.get(row["task_id"])
             if task.cleanup_state == "CLEANED_VERIFIED":
+                continue
+            if row["executor"] not in known_executors:
+                # An older code release must never label a newer executor's
+                # successful result FAILED simply because it cannot verify it.
+                results.append({"task_id": task.id,
+                                "error": "unknown executor: upgrade reconciler; preserve WIP"})
                 continue
             unit = row["unit"]
             folder = Path(row["run_dir"]).resolve()
