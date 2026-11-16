@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "status": "PROVISIONAL_PLANNING_BASELINE",
+  "description": "Illustrative 7-day linear planning reference, NOT a project deadline or SLA. Anchored to first verified progress sample (no fabricated backfill). Each correction is append-only and never resets original baseline.",
+  "default_horizon_hours": 168,
+  "projects": [
+    {
+      "automation_id": "Automation_eec08a5752d08191b3de371065c27320",
+      "horizon_hours": 168,
+      "baseline_id": "ZGH-V229-PLAN-V1",
+      "source": "owner request 2026-11-16: goal progress and direction drift",
+      "provisional": true
+    },
+    {
+      "automation_id": "6af65f5c6cdc8191a2ecc2f47085bea6",
+      "horizon_hours": 168,
+      "baseline_id": "CDTM-PLAN-V1",
+      "source": "owner request 2026-11-16: goal progress and direction drift",
+      "provisional": true
+    },
+    {
+      "automation_id": "6af698c9a5308191899c6a7e013cee5f",
+      "horizon_hours": 168,
+      "baseline_id": "SCREEN-REMOTE-PLAN-V1",
+      "source": "owner request 2026-11-16: goal progress and direction drift",
+      "provisional": true
+    }
+  ]
+}

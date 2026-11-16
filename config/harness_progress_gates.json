@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-11-16",
+  "metric": "Verified gate-weight percent, NOT code completion, time-budget utilization or a success probability",
+  "goals": [
+    {
+      "automation_id": "Automation_eec08a5752d08191b3de371065c27320",
+      "display_name": "Zalo Hub V2/V229",
+      "kind": "project",
+      "gates": [
+        {
+          "id": "G0",
+          "name": "Thiết kế kiến trúc V229 được chủ dự án lựa chọn",
+          "weight": 10,
+          "status": "PASSED",
+          "proof": "https://github.com/hungtranbkit/zalo-group-hub/pull/79",
+          "note": "Chỉ xác nhận lựa chọn thiết kế, không phải triển khai hay audit PASS",
+          "accepted_on": "2026-11-14"
+        },
+        {
+          "id": "G1",
+          "name": "A1a + A1b durable journal và shadow reader đạt QA độc lập",
+          "weight": 25,
+          "status": "IN_PROGRESS",
+          "proof": "https://github.com/hungtranbkit/zalo-group-hub/pull/82",
+          "note": "PR #81/#82 draft, chưa đạt độc lập"
+        },
+        {
+          "id": "G2",
+          "name": "Không bỏ sót text R1/R2, ghi journal trước khi gửi, không replay uncertain",
+          "weight": 20,
+          "status": "IN_PROGRESS",
+          "proof": "https://github.com/hungtranbkit/zalo-group-hub/pull/90",
+          "note": "PR #90 author tests PASS nhưng cần audit"
+        },
+        {
+          "id": "G3",
+          "name": "Một WebView lease + fairness + catch-up 6h/128 và coverage gap",
+          "weight": 15,
+          "status": "IN_PROGRESS",
+          "proof": "https://github.com/hungtranbkit/zalo-group-hub/pull/87",
+          "note": "PR #87/#88 vẫn draft và gặp vấn đề bằng chứng đầy đủ"
+        },
+        {
+          "id": "G4",
+          "name": "Node/JDK21/Android regression + rollback độc lập và đúng SHA",
+          "weight": 15,
+          "status": "BLOCKED",
+          "note": "Chưa đủ device/rollback gate, build author-run không tương đương QA"
+        },
+        {
+          "id": "G5",
+          "name": "S7 Test2→Test text/image/video/file, nhận độc lập, không miss/trùng",
+          "weight": 15,
+          "status": "BLOCKED",
+          "note": "Chưa có receiver verified E2E; không tự gửi tin nhóm thật"
+        }
+      ]
+    },
+    {
+      "automation_id": "6af65f5c6cdc8191a2ecc2f47085bea6",
+      "display_name": "CDTM — nguồn hàng thật",
+      "kind": "project",
+      "gates": [
+        {
+          "id": "C0",
+          "name": "Nguồn thương mại có quyền datafeed/API/media",
+          "weight": 35,
+          "status": "BLOCKED",
+          "note": "Shopee/ACCESSTRADE chưa cấp quyền nguồn thương mại"
+        },
+        {
+          "id": "C1",
+          "name": "20 SKU thật và đủ quyền xác minh trong staging",
+          "weight": 25,
+          "status": "NOT_STARTED"
+        },
+        {
+          "id": "C2",
+          "name": "Quy trình chọn hàng và kiểm tra link hợp lệ, tránh post chết",
+          "weight": 20,
+          "status": "IN_PROGRESS",
+          "proof": "https://github.com/hungtranbkit/chon-do-thong-minh-platform/issues/114"
+        },
+        {
+          "id": "C3",
+          "name": "SKU public hợp lệ mới, Facebook đăng thật có nghiệm thu",
+          "weight": 20,
+          "status": "BLOCKED"
+        }
+      ]
+    },
+    {
+      "automation_id": "6af698c9a5308191899c6a7e013cee5f",
+      "display_name": "Screen Remote P0",
+      "kind": "project",
+      "gates": [
+        {
+          "id": "S0",
+          "name": "Đúng tab Brave đã kết nối trên NEC qua iPhone",
+          "weight": 20,
+          "status": "IN_PROGRESS",
+          "note": "Adapter nối được nhưng thiếu bằng chứng iPhone end-to-end"
+        },
+        {
+          "id": "S1",
+          "name": "Play/Pause/Seek và âm thanh/hình thật được xác nhận",
+          "weight": 25,
+          "status": "BLOCKED"
+        },
+        {
+          "id": "S2",
+          "name": "Search, fullscreen video và restore Brave không lỗi",
+          "weight": 20,
+          "status": "IN_PROGRESS"
+        },
+        {
+          "id": "S3",
+          "name": "QR ghép, revoke và kiểm thử bảo mật độc lập",
+          "weight": 15,
+          "status": "IN_PROGRESS"
+        },
+        {
+          "id": "S4",
+          "name": "20 switch + 20 Play/Pause, đóng gói .deb, reboot/rollback",
+          "weight": 20,
+          "status": "BLOCKED"
+        }
+      ]
+    },
+    {
+      "automation_id": "6af907fc44a0819198d7dc0ddbc9249a",
+      "display_name": "Tự dọn session Terminal MCP",
+      "kind": "maintenance",
+      "gates": []
+    }
+  ]
+}
