@@ -10,6 +10,7 @@ Do not send passwords, API keys, Zalo data or other private content to this CLI.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import asyncio
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -19,7 +20,7 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
-from typing import Any
+from typing import Any, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services.agent_harness_mvp import HarnessStore, HarnessError
@@ -65,13 +66,19 @@ def load_registry(path: Path = REGISTRY) -> dict[str, dict[str, Any]]:
     return mapping
 
 
-def connect(path: Path) -> sqlite3.Connection:
+@contextmanager
+def connect(path: Path) -> Iterator[sqlite3.Connection]:
+    """Always close the connection after each monitor read/write transaction."""
     if not path.is_file():
         raise HarnessError("Harness DB not installed: do not create a new production DB")
     connection = sqlite3.connect(path, timeout=10)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA busy_timeout=10000")
-    return connection
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout=10000")
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def init_schema(db: sqlite3.Connection) -> None:
@@ -155,6 +162,21 @@ def status(
     store = HarnessStore(db_path)
     with connect(db_path) as db:
         init_schema(db)
+        # Differentiate managed systemd jobs from Terminal MCP receipts; both
+        # carry an external_task_id in HarnessStore, but only the latter is a
+        # controller-attested external task.
+        linked = {
+            int(row["task_id"]): row["provenance"]
+            for row in db.execute("SELECT task_id,provenance FROM harness_monitor_receipts")
+        }
+        tables = {row[0] for row in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        owned = (
+            {int(row[0]) for row in db.execute(
+                "SELECT task_id FROM harness_managed_units")}
+            if "harness_managed_units" in tables else set()
+        )
         ids = [ident] if ident else list(registry)
         rows = []
         for target in ids:
@@ -164,7 +186,13 @@ def status(
             tasks_view = [{
                 "id": t.id, "goal": t.child_goal, "state": t.state,
                 "expires_at": t.expires_at.isoformat(), "cleanup": t.cleanup_state,
-                "external_task": bool(t.external_task_id),
+                "execution_backend": (
+                    "MANAGED_SYSTEMD" if t.id in owned else
+                    linked.get(t.id, "UNREGISTERED")),
+                "external_task": t.id in linked,
+                "project_DoD": (
+                    "NOT_TESTED_BY_CANARY" if t.child_goal.startswith("CANARY ONLY:")
+                    else "INDEPENDENT_ACCEPTANCE_REQUIRED"),
             } for t in tasks]
             outstanding = sum(t.state not in TERMINAL or
                               t.cleanup_state == "CLEANUP_PENDING" for t in tasks)

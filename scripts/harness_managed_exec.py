@@ -8,6 +8,7 @@ in the Harness SQLite DB may be inspected/stopped/reset by this module.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -243,7 +244,7 @@ class ManagedHarness:
         self.state_root = Path(state_root).resolve()
         self.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.store = HarnessStore(self.db_path)
-        with sqlite3.connect(self.db_path) as db:
+        with closing(sqlite3.connect(self.db_path)) as db, db:
             db.execute("""CREATE TABLE IF NOT EXISTS harness_managed_units (
                 task_id INTEGER PRIMARY KEY,
                 unit TEXT NOT NULL UNIQUE,
@@ -263,7 +264,7 @@ class ManagedHarness:
                     db.execute(f"ALTER TABLE harness_managed_units ADD COLUMN {column} {spec}")
 
     def _rows(self) -> list[sqlite3.Row]:
-        with sqlite3.connect(self.db_path) as db:
+        with closing(sqlite3.connect(self.db_path)) as db, db:
             db.row_factory = sqlite3.Row
             return db.execute("SELECT * FROM harness_managed_units ORDER BY task_id").fetchall()
 
@@ -349,7 +350,7 @@ class ManagedHarness:
             "base_sha": base_sha, "test_sha": test_sha, "approved_files": approved,
         }
         atomic_json(spec_path, spec)
-        with sqlite3.connect(self.db_path) as db:
+        with closing(sqlite3.connect(self.db_path)) as db, db:
             db.execute("""INSERT INTO harness_managed_units
                 (task_id,unit,run_dir,repo,executor,expected_sha,recorded_at,
                  base_sha,test_sha,approved_files_json)
@@ -381,7 +382,7 @@ class ManagedHarness:
             self.store.fail(task.id, at=utcnow(), reason="systemd dispatch was not confirmed")
             # A failed receipt does not prove a child was never launched.
             # Keep WIP occupied until the owned unit is independently checked.
-            with sqlite3.connect(self.db_path) as db:
+            with closing(sqlite3.connect(self.db_path)) as db, db:
                 db.execute("UPDATE harness_tasks SET cleanup_state='CLEANUP_PENDING' WHERE id=?",
                            (task.id,))
             return {"task_id": task.id, "state": "FAILED", "unit": unit,

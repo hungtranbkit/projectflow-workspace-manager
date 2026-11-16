@@ -254,3 +254,18 @@ def test_cannot_reuse_old_child_goal_after_verified_cleanup(store):
         create(store, key="same-goal-new-key", child="one immutable step")
     # A rescope is a new child with a different, more testable DoD.
     assert create(store, key="rescope-unique", child="one reduced verified step").id > original.id
+
+
+def test_sqlite_reader_does_not_leak_file_descriptors(store):
+    """Regression for sqlite Connection.__exit__ not calling .close()."""
+    from pathlib import Path
+    import os
+    if not Path("/proc/self/fd").exists():
+        pytest.skip("Linux /proc fd inspection not available")
+    count = lambda: len(os.listdir("/proc/self/fd"))
+    before = count()
+    for _ in range(60):
+        store.list_tasks()
+        store.events(999999)
+    after = count()
+    assert after <= before + 8, (before, after)

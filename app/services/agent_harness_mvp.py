@@ -6,12 +6,13 @@ An adapter to Terminal MCP must be separately live-tested before activation.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 MAX_TTL = timedelta(hours=24)
 MAX_ACTIVE_CHILDREN = 2
@@ -61,11 +62,21 @@ class HarnessStore:
         self.path = str(db_path)
         self._init()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Commit/rollback AND close SQLite fds deterministically.
+
+        sqlite3.Connection.__exit__ commits, but does NOT close connections.
+        Long-running monitor loops leaked ~2 descriptors per read before this.
+        """
         db = sqlite3.connect(self.path, timeout=10)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout = 10000")
-        return db
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA busy_timeout = 10000")
+            with db:
+                yield db
+        finally:
+            db.close()
 
     def _init(self) -> None:
         with self._connect() as db:

@@ -90,6 +90,7 @@ def test_external_receipt_is_dispatched_only_and_idempotent(source, wired):
     child = status["monitors"][0]["child_tasks"][0]
     assert child["state"] == "DISPATCHED"
     assert child["external_task"] is True
+    assert child["execution_backend"] == "LOCAL_MCP"
 
 
 def test_wrong_target_and_paused_registration_are_denied(source, wired):
@@ -265,3 +266,43 @@ def test_local_remote_failure_keeps_parent_wip_until_safe_cleanup(source, wired,
     assert report["results"][0]["task_state"] == "FAILED"
     assert task.cleanup_state == "CLEANUP_PENDING"
     assert bridge.status(source, wired, ident)["monitors"][0]["outstanding_children"] == 1
+
+
+def test_status_labels_internal_systemd_canary_separately(source, wired, tmp_path):
+    from datetime import datetime, timezone
+    from scripts.harness_managed_exec import ManagedHarness
+    import sqlite3
+
+    ident = active_parent(source)
+    goal = source[ident]["main_goal"]
+    managed = ManagedHarness(wired, tmp_path)
+    task = HarnessStore(wired).create(
+        key="owned-canary-probe", main_goal=goal,
+        child_goal="CANARY ONLY: verify monitor-to-Harness receipt",
+        dod="one technical echo proof", agent="shell",
+        node="dell-linux", created_at=datetime.now(timezone.utc))
+    with sqlite3.connect(wired) as sql:
+        sql.execute("""INSERT INTO harness_managed_units
+            (task_id,unit,run_dir,repo,executor,expected_sha,recorded_at)
+            VALUES (?,?,?,?,?,?,?)""",
+            (task.id, f"harness-child-{task.id}-1234567890.service",
+             str(tmp_path / "run"), str(tmp_path / "repo"), "echo-probe",
+             "proof", datetime.now(timezone.utc).isoformat()))
+    view = bridge.status(source, wired, ident)["monitors"][0]["child_tasks"][0]
+    assert view["execution_backend"] == "MANAGED_SYSTEMD"
+    assert view["external_task"] is False
+    assert view["project_DoD"] == "NOT_TESTED_BY_CANARY"
+
+
+def test_monitor_status_releases_sqlite_fds_after_many_reads(source, wired):
+    import os
+    fd_path = Path("/proc/self/fd")
+    if not fd_path.is_dir():
+        pytest.skip("requires Linux /proc")
+    before = len(os.listdir(fd_path))
+    ident = active_parent(source)
+    for _ in range(60):
+        result = bridge.status(source, wired, ident)
+        assert result["count"] == 1
+    after = len(os.listdir(fd_path))
+    assert after <= before + 8, (before, after)
