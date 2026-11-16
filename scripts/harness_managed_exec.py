@@ -237,6 +237,46 @@ def verify_coding_commit(row: sqlite3.Row, report: dict[str, Any], folder: Path)
         return False
 
 
+def verified_log_progress(
+    db_path: Path, task_id: int, log_bytes: int, observed_at: datetime,
+) -> datetime:
+    """Durably track actual worker output growth, not periodic heartbeat alone.
+
+    A heartbeat confirms a PID; it does NOT certify useful agent progress.
+    After ten minutes without new output, ManagedHarness marks STALLED while
+    retaining the owned process and original hard deadline for safe review.
+    """
+    if type(log_bytes) is not int or log_bytes < 0 or log_bytes > 500_000_000:
+        raise HarnessError("invalid worker log byte count")
+    if observed_at.tzinfo is None:
+        raise HarnessError("worker progress requires timezone")
+    with closing(sqlite3.connect(db_path)) as db, db:
+        db.execute("""CREATE TABLE IF NOT EXISTS harness_managed_progress (
+            task_id INTEGER PRIMARY KEY,
+            last_log_bytes INTEGER NOT NULL,
+            last_growth_at TEXT NOT NULL
+        )""")
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT last_log_bytes,last_growth_at FROM harness_managed_progress WHERE task_id=?",
+            (task_id,)).fetchone()
+        if row is None:
+            progress = observed_at
+            db.execute("""INSERT INTO harness_managed_progress
+                (task_id,last_log_bytes,last_growth_at) VALUES (?,?,?)""",
+                (task_id, log_bytes, progress.isoformat()))
+        elif log_bytes > row[0]:
+            progress = observed_at
+            db.execute("""UPDATE harness_managed_progress SET
+                last_log_bytes=?,last_growth_at=? WHERE task_id=?""",
+                (log_bytes, progress.isoformat(), task_id))
+        else:
+            progress = datetime.fromisoformat(row[1])
+            if progress.tzinfo is None or progress > observed_at:
+                raise HarnessError("invalid historical worker progress timestamp")
+    return progress
+
+
 class ManagedHarness:
     """Durable one-job ownership and reconciliation; no generic process kill."""
 
@@ -460,10 +500,17 @@ class ManagedHarness:
                             )
                         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
                             backend_verified = False
+                    useful_progress = None
+                    if backend_verified:
+                        size = beat.get("log_bytes")
+                        growth_at = verified_log_progress(
+                            self.db_path, task.id, size, utcnow())
+                        if timedelta(0) <= utcnow() - growth_at <= timedelta(minutes=10):
+                            useful_progress = growth_at
                     self.store.observe(task.id, backend_state="RUNNING",
                                        process_alive=True if backend_verified else None,
-                                       at=utcnow(), progress_at=progress_time if backend_verified else None,
-                                       evidence_ref=f"systemd:{unit}:child-pid-heartbeat")
+                                       at=utcnow(), progress_at=useful_progress,
+                                       evidence_ref=f"systemd:{unit}:pid-and-log-growth")
                 if task.state not in TERMINAL and result_file.is_file() and stopped:
                     report = json.loads(result_file.read_text(encoding="utf-8"))
                     output_file = folder / "agent-output.txt"
