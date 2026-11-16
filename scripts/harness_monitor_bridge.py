@@ -10,6 +10,7 @@ Do not send passwords, API keys, Zalo data or other private content to this CLI.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import asyncio
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -19,7 +20,7 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
-from typing import Any
+from typing import Any, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.services.agent_harness_mvp import HarnessStore, HarnessError
@@ -65,13 +66,19 @@ def load_registry(path: Path = REGISTRY) -> dict[str, dict[str, Any]]:
     return mapping
 
 
-def connect(path: Path) -> sqlite3.Connection:
+@contextmanager
+def connect(path: Path) -> Iterator[sqlite3.Connection]:
+    """Always close the connection after each monitor read/write transaction."""
     if not path.is_file():
         raise HarnessError("Harness DB not installed: do not create a new production DB")
     connection = sqlite3.connect(path, timeout=10)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA busy_timeout=10000")
-    return connection
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout=10000")
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def init_schema(db: sqlite3.Connection) -> None:
