@@ -292,3 +292,17 @@ def test_status_labels_internal_systemd_canary_separately(source, wired, tmp_pat
     assert view["execution_backend"] == "MANAGED_SYSTEMD"
     assert view["external_task"] is False
     assert view["project_DoD"] == "NOT_TESTED_BY_CANARY"
+
+
+def test_monitor_status_releases_sqlite_fds_after_many_reads(source, wired):
+    import os
+    fd_path = Path("/proc/self/fd")
+    if not fd_path.is_dir():
+        pytest.skip("requires Linux /proc")
+    before = len(os.listdir(fd_path))
+    ident = active_parent(source)
+    for _ in range(60):
+        result = bridge.status(source, wired, ident)
+        assert result["count"] == 1
+    after = len(os.listdir(fd_path))
+    assert after <= before + 8, (before, after)
