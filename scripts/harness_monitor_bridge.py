@@ -23,7 +23,7 @@ import sys
 from typing import Any, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app.services.agent_harness_mvp import HarnessStore, HarnessError
+from app.services.agent_harness_mvp import HarnessStore, HarnessError, MAX_ACTIVE_CHILDREN
 
 HERE = Path(__file__).resolve().parents[1]
 REGISTRY = HERE / "config" / "harness_monitor_registry.json"
@@ -101,6 +101,21 @@ def init_schema(db: sqlite3.Connection) -> None:
             backend_node TEXT NOT NULL,
             registered_at TEXT NOT NULL,
             provenance TEXT NOT NULL DEFAULT 'LOCAL_MCP'
+        );
+        -- Issue #118: every monitor dispatch attempt, success or not. A
+        -- DISPATCH_FAILED/ESCALATED row is evidence of NO work; it never
+        -- creates a Harness task and never counts toward progress.
+        CREATE TABLE IF NOT EXISTS harness_dispatch_attempts (
+            id INTEGER PRIMARY KEY,
+            automation_id TEXT NOT NULL REFERENCES harness_monitor_bindings(automation_id),
+            request_key TEXT NOT NULL,
+            attempt INTEGER NOT NULL,
+            attempted_at TEXT NOT NULL,
+            outcome TEXT NOT NULL CHECK (outcome IN ('DISPATCHED','DISPATCH_FAILED','ESCALATED')),
+            external_task_id TEXT,
+            error TEXT,
+            escalation TEXT,
+            UNIQUE (request_key, attempt)
         );
     """)
     cols = {r[1] for r in db.execute("PRAGMA table_info(harness_monitor_receipts)")}
@@ -329,8 +344,8 @@ def decode_mcp(result: Any) -> dict[str, Any]:
     raise HarnessError("no verifiable Terminal MCP response")
 
 
-async def verify_external_task(task_id: str) -> dict[str, Any]:
-    """Ask the authenticated local Terminal MCP, never trust a passed receipt."""
+async def local_mcp_turn(arguments: dict[str, Any]) -> dict[str, Any]:
+    """One `terminal_turn` call on the authenticated LOCAL Terminal MCP only."""
     try:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
@@ -346,9 +361,21 @@ async def verify_external_task(task_id: str) -> dict[str, Any]:
             read, write = streams[0], streams[1]
         async with ClientSession(read, write) as client:
             await client.initialize()
-            response = decode_mcp(await client.call_tool(
-                "terminal_turn", {"action": "task", "task_id": task_id,
-                                  "compact": True}))
+            return decode_mcp(await client.call_tool("terminal_turn", arguments))
+
+
+# Terminal MCP DirectTaskSupervisor states (terminal_mcp/direct_task.py) plus
+# the legacy queue vocabulary. Anything else is not a real durable readback.
+BACKEND_STATES = frozenset({
+    "QUEUED", "PENDING", "DISPATCHED", "RUNNING", "WAITING_INPUT", "BLOCKED", "DONE",
+    "FAILED", "CANCELLED", "EXPIRED", "IDLE",
+    "DISPATCHING", "EXECUTION_ACCEPTED", "STUCK_COMPOSER", "DISPATCH_UNCERTAIN",
+})
+
+
+async def verify_external_task(task_id: str) -> dict[str, Any]:
+    """Ask the authenticated local Terminal MCP, never trust a passed receipt."""
+    response = await local_mcp_turn({"action": "task", "task_id": task_id, "compact": True})
     if response.get("status") != "OK":
         error = (response.get("result") or {}).get("error", "UNKNOWN")
         raise HarnessError(f"external task backend not confirmed: {response.get('status')}/{str(error)[:64]}")
@@ -357,9 +384,7 @@ async def verify_external_task(task_id: str) -> dict[str, Any]:
     if (not isinstance(actual, dict)
             or str(actual.get("task_id")) != task_id
             or actual.get("mode") not in {"agent", "shell"}
-            or actual.get("state") not in
-            {"QUEUED", "PENDING", "DISPATCHED", "RUNNING", "WAITING_INPUT",
-             "BLOCKED", "DONE", "FAILED", "CANCELLED", "EXPIRED", "IDLE"}):
+            or actual.get("state") not in BACKEND_STATES):
         raise HarnessError("missing or mismatched real durable task readback")
     return response
 
@@ -577,6 +602,154 @@ def launch_managed_child(
     }
 
 
+MAX_DISPATCH_ATTEMPTS = 3
+DIRECT_TASK_RE = re.compile(r"^dt_[0-9a-f]{16}$")
+ACCEPTED_START = frozenset({"TASK_ACCEPTED", "TASK_STARTED", "DONE"})
+# Deterministic escalation: the same failure always yields the same repair.
+# `retry` means the identical request (same key, so never a duplicate task)
+# may be attempted again, bounded by MAX_DISPATCH_ATTEMPTS.
+ESCALATIONS: dict[str, tuple[str, bool]] = {
+    "NULL_TASK_ID": ("UPGRADE_CONTROLLER_DURABLE_START: deploy terminal-mcp PR #120 "
+                     "(start must return a dt_ task_id)", False),
+    "DURABLE_SUPERVISOR_UNAVAILABLE": ("RESTORE_DIRECT_TASK_SUPERVISOR on the controller", False),
+    "DIRECT_TARGET_NOT_IDLE": ("WAIT_FOR_IDLE_THEN_RETRY_SAME_KEY", True),
+    "TARGET_HAS_ACTIVE_SUPERVISED_TASK": ("FINISH_OR_CANCEL_ACTIVE_TASK_THEN_RETRY_SAME_KEY", True),
+    "IDEMPOTENCY_CONFLICT": ("RESCOPE_CHILD_GOAL: same key already holds a different prompt", False),
+    "TARGET_NOT_AUTHORIZED": ("OWNER_GRANT_REQUIRED for the target session", False),
+    "SESSION_NOT_FOUND": ("CREATE_OR_REBIND_TARGET_SESSION", False),
+    "IDLE_GUARD_UNSUPPORTED": ("UPGRADE_NODE_AGENT (/send-guarded missing)", False),
+    "IDLE_GUARD_REFUSED": ("WAIT_FOR_IDLE_THEN_RETRY_SAME_KEY", True),
+    "CONTROLLER_UNREACHABLE": ("CHECK_LOCAL_TERMINAL_MCP_THEN_RETRY_SAME_KEY", True),
+    "READBACK_MISMATCH": ("INSPECT_TASK: start receipt not confirmed by readback", False),
+}
+
+
+def dispatch_request_key(ident: str, main_goal: str, child_goal: str, session: str) -> str:
+    """Stable across restarts and retries: one monitor decision = one key."""
+    return "pf-" + goal_sha(json.dumps([ident, main_goal, child_goal, session]))[:40]
+
+
+def classify_start(response: dict[str, Any]) -> tuple[str | None, str | None]:
+    """(dt_ task id, None) for a real durable receipt, else (None, failure code)."""
+    if not isinstance(response, dict):
+        return None, "NULL_TASK_ID"
+    task_id = response.get("task_id")
+    if (response.get("status") in ACCEPTED_START and response.get("mode") == "supervised"
+            and isinstance(task_id, str) and DIRECT_TASK_RE.fullmatch(task_id)):
+        return task_id, None
+    error = str(response.get("error") or "")
+    reason = str(response.get("reason") or "")
+    if error in ESCALATIONS:
+        return None, error
+    if "IDLE_GUARD_UNSUPPORTED" in reason:
+        return None, "IDLE_GUARD_UNSUPPORTED"
+    if response.get("status") == "BLOCKED" and "IDLE_GUARD" in reason:
+        return None, "IDLE_GUARD_REFUSED"
+    # SUBMIT_CONFIRMED / TASK_STARTED without a dt_ id is the pre-#120
+    # controller: something may have been typed, nothing is tracked.
+    return None, "NULL_TASK_ID"
+
+
+async def dispatch_child(
+    registry: dict[str, dict[str, Any]], db_path: Path, ident: str, *,
+    child_goal: str, dod: str, agent: str, node: str, session_name: str,
+    ttl_seconds: int, turn: Any = None, verify: Any = None,
+) -> dict[str, Any]:
+    """Monitor decision -> durable Terminal MCP task -> Harness DISPATCHED.
+
+    Execution-first, fail-closed:
+      * paused/maintenance/unbound monitors and WIP/duplicate refusals are
+        checked BEFORE anything is sent;
+      * one deterministic request key per decision, so a retry or a restart
+        replays the same Terminal MCP task and never creates a duplicate;
+      * a receipt without a `dt_` task id (or any refusal) is recorded as
+        DISPATCH_FAILED with a deterministic escalation, creates no Harness
+        task and never counts as work; retries are bounded;
+      * success is registered only after an independent task readback.
+    RUNNING_VERIFIED / DONE / QA acceptance stay with `reconcile` + DoD.
+    """
+    turn = turn or local_mcp_turn
+    verify = verify or verify_external_task
+    if agent not in VALID_AGENTS or not all(
+            isinstance(x, str) and x.strip() for x in (child_goal, dod, node, session_name)):
+        raise HarnessError("one child goal, DoD, agent, node and session required")
+    if not (0 < ttl_seconds <= 86400):
+        raise HarnessError("external child TTL must be between 1 second and 24 hours")
+    store = HarnessStore(db_path)
+    with connect(db_path) as db:
+        init_schema(db)
+        entry, binding = require_binding(ident, registry, db)
+        if (not entry["configured_enabled"] or entry["mode"] != "observe_and_register"
+                or entry["role"] != "parent"):
+            raise HarnessError("paused/maintenance monitor cannot dispatch child")
+        key = dispatch_request_key(ident, binding["main_goal"], child_goal, session_name)
+        rows = [dict(r) for r in db.execute(
+            "SELECT * FROM harness_dispatch_attempts WHERE request_key=? ORDER BY attempt", (key,))]
+    done = next((r for r in rows if r["outcome"] == "DISPATCHED"), None)
+    if done is not None:
+        # Restart/replay of an already dispatched decision: no MCP call.
+        with connect(db_path) as db:
+            receipt = db.execute("SELECT task_id FROM harness_monitor_receipts WHERE external_task_id=?",
+                                 (done["external_task_id"],)).fetchone()
+        task = store.get(receipt["task_id"])
+        return {"outcome": "DISPATCHED", "idempotent": True, "request_key": key,
+                "external_task_id": done["external_task_id"], "harness_task_id": task.id,
+                "harness_state": task.state, "counts_as_work": False}
+    if len(rows) >= MAX_DISPATCH_ATTEMPTS or any(r["outcome"] == "ESCALATED" for r in rows) or any(
+            r["outcome"] == "DISPATCH_FAILED" and not ESCALATIONS.get(r["error"] or "", ("", False))[1]
+            for r in rows):
+        last = rows[-1]
+        return {"outcome": "ESCALATED", "request_key": key, "attempts": len(rows),
+                "error": last["error"], "escalation": last["escalation"], "counts_as_work": False}
+    attempt = len(rows) + 1
+
+    def record(outcome: str, *, external: str | None = None, error: str | None = None) -> dict[str, Any]:
+        escalation = ESCALATIONS.get(error or "", (None, False))[0] if error else None
+        if outcome == "DISPATCH_FAILED" and attempt >= MAX_DISPATCH_ATTEMPTS:
+            escalation = f"RETRY_BUDGET_EXHAUSTED ({MAX_DISPATCH_ATTEMPTS}): {escalation}"
+        with connect(db_path) as db:
+            db.execute("""INSERT INTO harness_dispatch_attempts
+                (automation_id,request_key,attempt,attempted_at,outcome,external_task_id,error,escalation)
+                VALUES (?,?,?,?,?,?,?,?)""",
+                (ident, key, attempt, now().isoformat(), outcome, external, error, escalation))
+        return {"outcome": outcome, "request_key": key, "attempt": attempt,
+                "external_task_id": external, "error": error, "escalation": escalation,
+                "counts_as_work": False}
+
+    # WIP/duplicate guard before sending: a refused Harness create must never
+    # leave an untracked agent running.
+    with connect(db_path) as db:
+        open_dup = db.execute("""SELECT id FROM harness_tasks WHERE main_goal=? AND child_goal=?""",
+                              (binding["main_goal"], child_goal)).fetchone()
+        outstanding = db.execute("""SELECT COUNT(*) FROM harness_tasks WHERE main_goal=? AND
+            (state NOT IN ('DONE_VERIFIED','FAILED','EXPIRED') OR cleanup_state='CLEANUP_PENDING')""",
+            (binding["main_goal"],)).fetchone()[0]
+    if open_dup is not None:
+        raise HarnessError(f"child goal already has Harness task {open_dup['id']}; no dispatch")
+    if outstanding >= MAX_ACTIVE_CHILDREN:
+        raise HarnessError("parent WIP limit: two outstanding child tasks; no dispatch")
+    prompt = f"{child_goal}\n\nDefinition of done: {dod}"
+    try:
+        response = await turn({"action": "start", "target": session_name, "text": prompt,
+                               "request_key": key, "timeout": 20})
+    except Exception:  # transport failure: nothing confirmed, retry same key
+        return record("DISPATCH_FAILED", error="CONTROLLER_UNREACHABLE")
+    task_id, failure = classify_start(response)
+    if failure is not None:
+        return record("DISPATCH_FAILED", error=failure)
+    try:
+        backend = await verify(task_id)
+        result = register(registry, db_path, ident, child_goal=child_goal, dod=dod, agent=agent,
+                          node=node, session_name=session_name, task_id=task_id,
+                          ttl_seconds=ttl_seconds, backend=backend, provenance="LOCAL_MCP")
+    except HarnessError as exc:
+        out = record("DISPATCH_FAILED", external=task_id, error="READBACK_MISMATCH")
+        return {**out, "detail": str(exc)[:200]}
+    out = record("DISPATCHED", external=task_id)
+    return {**out, "harness_task_id": result["task_id"], "harness_state": result["state"],
+            "RUNNING_VERIFIED": False}
+
+
 async def reconcile_external(
     registry: dict[str, dict[str, Any]], db_path: Path,
 ) -> dict[str, Any]:
@@ -626,7 +799,7 @@ async def reconcile_external(
                         and (backend.get("watcher") or {}).get("alive") is True)
                 if state == "DONE":
                     mapped, live = "FINISHED", False
-                elif state in {"WAITING_INPUT", "BLOCKED"}:
+                elif state in {"WAITING_INPUT", "BLOCKED", "STUCK_COMPOSER", "DISPATCH_UNCERTAIN"}:
                     mapped, live = "BLOCKED", False
                 elif state == "RUNNING":
                     mapped = "RUNNING"
@@ -667,6 +840,7 @@ async def reconcile_external(
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("action", choices=("bootstrap", "activate-zgh-v2", "status", "launch-managed", "register",
+                                      "dispatch",
                                       "register-attested", "observe-attested", "reconcile"))
     p.add_argument("--registry", default=str(REGISTRY))
     p.add_argument("--db", default=str(STATE_DB))
@@ -697,6 +871,13 @@ def main() -> None:
         output = activate_zgh_v2(registry, db_path, args.automation_id)
     elif args.action == "status":
         output = status(registry, db_path, args.automation_id)
+    elif args.action == "dispatch":
+        if not all((args.automation_id, args.child_goal, args.dod, args.agent, args.node, args.session)):
+            p.error("dispatch needs monitor ID, atomic child, DoD, agent, node and session")
+        output = asyncio.run(dispatch_child(
+            registry, db_path, args.automation_id, child_goal=args.child_goal, dod=args.dod,
+            agent=args.agent, node=args.node, session_name=args.session,
+            ttl_seconds=args.ttl_seconds))
     elif args.action == "reconcile":
         output = asyncio.run(reconcile_external(registry, db_path))
     elif args.action == "launch-managed":
