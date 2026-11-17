@@ -269,3 +269,79 @@ The existing ChatGPT automation schedules and Zalo Hub production runtime
 are separate. Keep the original immutable goal and the A1a/A1b PR audit,
 UI lease, receiver account and rollback acceptance gates. No QA runner test
 is a production GO for missing text/image/video/file.
+
+## Monitor Loop V5 — evidence-backed course correction (17/11/2026)
+
+This operator rule applies to the **four existing enabled monitoring automations**
+(Zalo Hub V229, Screen Remote P0, CDTM product sources, safe Terminal MCP session
+cleanup). It operationalizes the existing `monitor-progress-report` and
+`monitor-course-correction` skills; it does not create another monitor,
+change any schedule, resume a paused automation or alter an immutable project
+goal, permission, approval gate or production process.
+
+### Evidence and cycle accounting
+
+For each fresh, independently checked monitor cycle, distinguish:
+
+- **business gate delta**: newly accepted gate(s) with independent runtime/
+  legal-rights/business proof, acceptance date, weight and source. Only this
+  changes the gate completion percentage.
+- **useful execution delta**: independently verified failing/passing test,
+  narrowed blocker, reproduced defect or real delivered artifact directly
+  advancing the current failed gate. This may advance work without increasing
+  gate percentage. Commit/PR alone, agent heartbeat, submitted task receipt,
+  technical canary and repeated status comment do not prove business acceptance.
+- **stagnation count**: consecutive distinct *verified monitoring cycles*
+  with neither business delta nor useful execution delta. A scheduled tick
+  with stale or missing readback does not count as evidence or reset it.
+- **trajectory**: signed percent-point gaps to both the original immutable
+  provisional baseline and current active projection. No invented progress
+  or fabricated before/after gains. The seven-day target is a reference,
+  **not** an owner-approved delivery deadline.
+
+### Mandatory decision policy
+
+| Verified trigger | Required action |
+| --- | --- |
+| A business gate passes | Record evidence and advance accepted percentage |
+| Gate % remains flat but useful execution proof exists | Continue current atomic gate work, keep percentage flat; record next independent acceptance test |
+| Two consecutive fresh cycles without accepted gate movement | Diagnose the lowest failed gate and execute one concrete hypothesis/test, without interrupting genuinely progressing agent work |
+| Three consecutive cycles with neither useful execution nor gate delta, missed gate verification appointment, or a child at 12h with no useful delta | Change the authorized *tactic*, not the goal: record evidence-backed reasoning and one smaller independent testable task; no repeat submission, renaming or creating a new worker just to reset a clock |
+| No authorized alternative or external approval/permission needed | Explicitly enter BLOCKED_EXTERNAL/NO_EXECUTABLE_WORK with exactly one owner action and an event condition for the next check; do not pretend to pivot |
+| Child at 24h or expired | Block new work on that child, reconcile the owned process safely and retain WIP until CLEANED_VERIFIED; never reset TTL or delete uncertain work |
+| Maintenance cleanup monitor with zero eligible sessions | NO_ACTION_REQUIRED; do not count normal quiet operation as project stagnation |
+
+Every actual correction is append-only, retains the original diagonal, cites
+the pre-correction signed gaps, starts the revised line at the **actual
+accepted gate percent**, identifies a specific root-cause test and owner, and
+sets its post-correction gap to UNKNOWN until a subsequent observation.
+Do not record a correction unless the method really changes and independent
+evidence justifies it. A passive status update is not a correction.
+
+### One useful action per monitor turn
+
+Choose exactly one **current failed gate → root-cause hypothesis → next atomic
+step → independent DoD → owner/node → verification deadline → source**. Check
+existing Terminal MCP tasks, sessions, worktrees and cleanup before dispatch.
+Max two outstanding children per project (1 implementation, 1 independent QA);
+their immutable TTL is <=24 hours, and pending cleanup still consumes WIP.
+Never call a receipt RUNNING_VERIFIED, nor an agent canary business DONE.
+Owner approvals, user privacy, dirty worktrees, Zalo data/WAL, native devices,
+advertising permissions and security review all remain protected.
+
+### Minimum mobile checkpoint
+
+Record: goal text; gate pass count and accepted percent; planned-vs-actual
+signed gap; last 3 fresh cycle outcomes and stagnation count; latest justified
+correction and independently measured before/after result; current agent/WIP
+and remaining TTL; **ĐÃ LÀM / ĐANG LÀM / SẼ LÀM** with one next independent
+test; verified blocker and one owner action if needed. Inline report is
+mandatory when a meaningful state transition, critical issue, deadline,
+or user CHECK occurs. No notification spam on unchanged ticks.
+
+The Harness `harness_monitor_report.py` output is only valid with a matching
+automation ID, VERIFIED_READBACK and age <=900 seconds. Otherwise show
+UNKNOWN; never reuse a stale percent or infer all agent sessions are idle from
+HARNESS_ONLY WIP. This is an operational decision rule; it does not claim
+deterministic backend enforcement until an independent executor/test has
+demonstrated that enforcement.
