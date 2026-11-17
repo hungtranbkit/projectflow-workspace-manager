@@ -269,3 +269,26 @@ The existing ChatGPT automation schedules and Zalo Hub production runtime
 are separate. Keep the original immutable goal and the A1a/A1b PR audit,
 UI lease, receiver account and rollback acceptance gates. No QA runner test
 is a production GO for missing text/image/video/file.
+
+## Execution-first dispatch: `harness_monitor_bridge.py dispatch` (issue terminal-mcp #118)
+
+A monitor decision becomes work only through a **durable Terminal MCP task id**:
+
+```
+python scripts/harness_monitor_bridge.py dispatch --automation-id <parent> \
+  --child-goal "<one atomic child>" --dod "<independent acceptance>" \
+  --agent codex --node dell-linux --session <idle agent session>
+```
+
+1. **Refusals before anything is sent.** A paused, maintenance or unbound monitor is refused, as is a duplicate child goal or the parent WIP limit (2).
+2. **One deterministic request key per decision.** `pf-` + sha256(monitor, main goal, child, session). A retry or a restart replays the same Terminal MCP task and never creates a second one.
+3. **The receipt must be durable.** `terminal_turn start` must return `mode=supervised` and a `dt_<16 hex>` id (terminal-mcp PR #120). Then `terminal_turn task <dt_id>` is read back independently, and only after that is the child registered as Harness `DISPATCHED`.
+4. **Anything else is `DISPATCH_FAILED`.** That includes a `SUBMIT_CONFIRMED`/`TASK_STARTED` receipt with `task_id=null` (controller 56ccb14), an idle or guard refusal, an unauthorized target, a transport error, or a readback mismatch. The failure is recorded in `harness_dispatch_attempts` with a deterministic `escalation`. It creates no Harness task and `counts_as_work=false`.
+5. **Retries are bounded.** Only retryable codes (`DIRECT_TARGET_NOT_IDLE`, `TARGET_HAS_ACTIVE_SUPERVISED_TASK`, `IDLE_GUARD_REFUSED`, `CONTROLLER_UNREACHABLE`) are retried, with the same key, up to 3 attempts. Every other code escalates at once (`ESCALATED`, no further send).
+6. **Running and done come from reconcile only.** `reconcile` maps supervisor states:
+   - `RUNNING` with `running_confirmed` and a live watcher → `RUNNING_VERIFIED`;
+   - `DONE` → `NOT_RUNNING` (finished, but **not** accepted);
+   - `EXECUTION_ACCEPTED`/`DISPATCHING` → `UNKNOWN`;
+   - `STUCK_COMPOSER`/`DISPATCH_UNCERTAIN`/`WAITING_INPUT`/`BLOCKED` → `BLOCKED`.
+
+   `DONE_VERIFIED` still requires the independent DoD/QA acceptance.
