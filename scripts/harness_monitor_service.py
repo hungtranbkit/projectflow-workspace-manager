@@ -124,12 +124,37 @@ def reconcile(
     return (0 if record["healthy"] else 1), record
 
 
+def meta_ingest_step(db: Path, snapshot: Path, ledger_path: Path,
+                     now: datetime | None = None) -> dict[str, Any]:
+    """Optional Meta-Monitor evidence ingest (issue #52). OFF unless the unit
+    passes --meta-ingest. Never changes the service exit code: the Harness
+    health contract stays exactly as before; failures are only reported."""
+    try:
+        from scripts import harness_meta_monitor as mm
+        if not snapshot.is_file():
+            raise FileNotFoundError("progress snapshot absent")
+        data = json.loads(snapshot.read_text(encoding="utf-8"))
+        with mm.ledger(ledger_path, create=True) as conn:
+            results = mm.ingest_snapshot(conn, data, db, now or datetime.now(timezone.utc))
+        refused = [k for k, v in results.items() if v.get("status") == "REFUSED"]
+        return {"meta_ingest_healthy": not refused,
+                "meta_ingest_recorded": sum(v.get("status") == "RECORDED"
+                                            for v in results.values()),
+                "meta_ingest_refused": refused}
+    except Exception as exc:  # noqa: BLE001 - optional step must not break health
+        return {"meta_ingest_healthy": False,
+                "meta_ingest_error": f"{type(exc).__name__}:{str(exc)[:100]}"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--health-file")
     parser.add_argument("--emit-progress", action="store_true",
                         help="write private mobile HTML + JSON progress every timer run")
+    parser.add_argument("--meta-ingest", action="store_true",
+                        help="opt-in (owner-approved unit change only): append Meta-Monitor "
+                             "evidence cycles from the fresh progress snapshot")
     args = parser.parse_args()
     db = Path(args.db).expanduser().resolve()
     health = (Path(args.health_file).expanduser().resolve()
@@ -156,6 +181,9 @@ def main() -> None:
             code = 1
         # Persist the final combined status instead of leaving health green
         # if the progress snapshot could not be generated.
+        if args.meta_ingest and receipt.get("progress_healthy"):
+            receipt.update(meta_ingest_step(
+                db, db.parent / "monitor-progress.json", db.parent / "meta-monitor.db"))
         atomic_json(health, receipt)
     print("HARNESS_MONITOR_HEALTH=" + json.dumps(receipt, sort_keys=True))
     raise SystemExit(code)
