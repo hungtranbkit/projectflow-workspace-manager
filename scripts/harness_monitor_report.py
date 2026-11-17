@@ -130,6 +130,7 @@ def terminal_compact(data: dict) -> dict:
         "gates": f'{data["gates_passed"]}/{data["gates_total"]}' if
                  data["gates_total"] is not None else None,
         "wip": f'{data["wip"]}/{data["max_wip"]}',
+        "wip_scope": "HARNESS_ONLY",
         "plan": tr.get("current_expected_percent") if tr else None,
         "gap": tr.get("current_deviation_pp") if tr else None,
         "orig_gap": tr.get("baseline_deviation_pp") if tr else None,
