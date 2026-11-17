@@ -8,6 +8,7 @@ import json
 import subprocess
 
 import pytest
+from tests.planner_double import install_planner_test_double
 
 from tests.test_autonomous_execution import register, new_change, materialize_task
 from tests.test_worktree_manager import _select_and_create_workspace
@@ -26,7 +27,7 @@ def set_fake(client, payload):
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.code_review_service.invoker.runner = runner
+    install_planner_test_double(client.app.state.code_review_service.invoker, runner)
 
 
 PASS = {"verdict": "PASS", "findings": [], "summary": "looks good"}
@@ -181,7 +182,7 @@ def test_code_review_uses_real_diff_not_builder_reasoning(client, git_repo):
             stdout = json.dumps(envelope(PASS))
             stderr = ""
         return R()
-    client.app.state.code_review_service.invoker.runner = runner
+    install_planner_test_double(client.app.state.code_review_service.invoker, runner)
     client.post(f"/api/tasks/{tid}/review/code")
     assert "def feature():" in captured["prompt"]  # the real diff content, verbatim
     assert "feature.py" in captured["prompt"]
@@ -248,7 +249,7 @@ def test_security_review_produces_dedicated_work_product(client, git_repo):
     rid = register(client, repo, "demo")
     cid = new_change(client, "Security WP change", project_id=rid)
     tid, w = _committed_task(client, cid)
-    client.app.state.security_review_service.invoker.runner = client.app.state.code_review_service.invoker.runner
+    install_planner_test_double(client.app.state.security_review_service.invoker, client.app.state.code_review_service.invoker.runner)
     set_fake(client, {"verdict": "PASS", "findings": []})
     body = client.post(f"/api/tasks/{tid}/review/security")
     body = body.json()
@@ -427,8 +428,8 @@ def test_security_critical_finding_blocks(client, git_repo):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.code_review_service.invoker.runner = runner
-    client.app.state.security_review_service.invoker.runner = runner
+    install_planner_test_double(client.app.state.code_review_service.invoker, runner)
+    install_planner_test_double(client.app.state.security_review_service.invoker, runner)
 
     client.app.state.review_fix_orchestrator.tick(tid)  # code review runs
     result = client.app.state.review_fix_orchestrator.tick(tid)  # security review runs

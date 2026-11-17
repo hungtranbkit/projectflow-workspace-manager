@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.planner_double import install_planner_test_double
 import yaml
 
 from app.services.architecture_design_service import (
@@ -70,7 +71,7 @@ def set_fake(client, payload):
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    install_planner_test_double(client.app.state.planner_service.invoker, runner)
 
 
 def arch_payload(**overrides):
@@ -316,7 +317,7 @@ def test_technical_design_incorporates_approved_architecture(client, git_repo, a
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    install_planner_test_double(client.app.state.planner_service.invoker, runner)
     client.post(f"/api/changes/{cid}/design/technical", data={"provider": "claude"})
     assert "architecture_analysis" in captured["prompt"]
 
@@ -451,7 +452,7 @@ def test_bounded_design_refinement_loop_never_infinite(client, git_repo, arch_en
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = cycling_runner
+    install_planner_test_double(client.app.state.planner_service.invoker, cycling_runner)
 
     result = client.app.state.architecture_design_service.run_design(cid, provider="claude")
     assert result["outcome"] == "NEEDS_REFINEMENT"
@@ -595,6 +596,7 @@ def test_production_specs_root_never_touched_by_this_suite():
     assert "feat-thing.yaml" not in names
 
 
+@pytest.mark.live_agent
 def test_real_architecture_design_lifecycle_end_to_end(client, git_repo, arch_env):
     """E6.23: one safe, real, non-fake Architecture & Design Lifecycle
     run against a disposable Change and an isolated tmp_path specs_root

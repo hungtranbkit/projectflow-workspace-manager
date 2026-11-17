@@ -20,7 +20,10 @@ import pytest
 from tests.test_autonomous_execution import register, new_change
 from tests.test_autonomous_execution_real import _trust_claude_dir, _restore_claude_dir
 
-pytestmark = pytest.mark.skipif(shutil.which("claude") is None, reason="real `claude` CLI not installed on this host")
+pytestmark = [
+    pytest.mark.live_agent,
+    pytest.mark.skipif(shutil.which("claude") is None, reason="real `claude` CLI not installed on this host"),
+]
 
 
 def _pytest_passes(cwd) -> bool:
