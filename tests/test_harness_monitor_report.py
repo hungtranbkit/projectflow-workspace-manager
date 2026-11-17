@@ -128,6 +128,7 @@ def test_terminal_mcp_payload_is_bounded_and_parses(snapshot):
     assert compact["pct"] == 10
     assert compact["bar"] == "█" + "░"*11
     assert compact["gates"] == "1/6"
+    assert compact["wip_scope"] == "HARNESS_ONLY"
     assert compact["pivots"] == 0
     assert compact["original"][0][1] == 10
     assert len(compact["actual"]) == 1
