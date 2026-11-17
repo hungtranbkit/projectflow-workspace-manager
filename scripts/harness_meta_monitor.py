@@ -38,6 +38,7 @@ from app.services.secret_redaction import redact  # noqa: E402
 
 DEFAULT_DB = Path.home() / ".local/state/projectflow-harness/meta-monitor.db"
 DEFAULT_SNAPSHOT = Path.home() / ".local/state/projectflow-harness/monitor-progress.json"
+DEFAULT_HARNESS_DB = Path.home() / ".local/state/projectflow-harness/harness-mvp.db"
 REPO = Path(__file__).resolve().parents[1]
 
 ENFORCEMENT = "LEDGER_ONLY_NOT_BACKEND_ENFORCED"
@@ -208,8 +209,23 @@ TABLES = ("meta_cycle_observations", "meta_rule_experiments",
           "meta_defect_events", "meta_guard_runs")
 
 
+# Columns added for GAP_OBSERVABILITY. ALTER keeps older ledgers readable;
+# pre-existing rows default to OPERATOR_ATTESTED and are never upgraded.
+CYCLE_COLUMNS_V2 = {
+    "provenance": "TEXT NOT NULL DEFAULT 'OPERATOR_ATTESTED'",
+    "source_ref": "TEXT",
+    "gate_passed": "TEXT",
+    "content_sha256": "TEXT",
+}
+EVIDENCE_PROVENANCE = "HARNESS_SNAPSHOT"
+
+
 def init_schema(db: sqlite3.Connection) -> None:
     db.executescript(SCHEMA)
+    have = {r[1] for r in db.execute("PRAGMA table_info(meta_cycle_observations)")}
+    for col, decl in CYCLE_COLUMNS_V2.items():
+        if col not in have:
+            db.execute(f"ALTER TABLE meta_cycle_observations ADD COLUMN {col} {decl}")
     for table in TABLES:
         for op in ("UPDATE", "DELETE"):
             db.execute(f"""CREATE TRIGGER IF NOT EXISTS {table}_no_{op.lower()}
@@ -247,7 +263,17 @@ def ledger(path: Path, *, create: bool = False) -> Iterator[sqlite3.Connection]:
 
 # ------------------------------------------------------------- write: cycles
 def record_cycle(db: sqlite3.Connection, obs: dict[str, Any], now: datetime) -> dict:
-    """Append one monitor cycle observation (what the monitor actually saw)."""
+    """Operator/automation-supplied cycle. Kept for audit, EXCLUDED from metrics:
+    narration is not evidence. Real cycles come from ``ingest_snapshot``."""
+    return _insert_cycle(db, obs, now, provenance="OPERATOR_ATTESTED")
+
+
+def _insert_cycle(db: sqlite3.Connection, obs: dict[str, Any], now: datetime, *,
+                  provenance: str, source_ref: str | None = None,
+                  gate_passed: list[str] | None = None) -> dict:
+    """Append one cycle; identical redelivery is idempotent, a conflict is refused."""
+    if provenance not in ("OPERATOR_ATTESTED", EVIDENCE_PROVENANCE):
+        raise MetaMonitorError("unknown provenance")
     now = aware(now)
     monitor = ident(obs.get("monitor_id"), "monitor_id")
     at = aware(obs.get("cycle_at") or "")
@@ -277,9 +303,6 @@ def record_cycle(db: sqlite3.Connection, obs: dict[str, Any], now: datetime) -> 
     duplicate = 0
     if dispatch is not None:
         dispatch = ident(dispatch, "dispatch_key")
-        duplicate = int(db.execute(
-            """SELECT 1 FROM meta_cycle_observations WHERE monitor_id=?
-               AND dispatch_key=? LIMIT 1""", (monitor, dispatch)).fetchone() is not None)
     code = obs.get("blocker_code")
     klass = since = None
     if code is not None:
@@ -293,31 +316,176 @@ def record_cycle(db: sqlite3.Connection, obs: dict[str, Any], now: datetime) -> 
     pending_since = None
     if cleanup == "PENDING":
         pending_since = iso(aware(obs.get("cleanup_pending_since") or ""))
-    try:
-        cur = db.execute(
-            """INSERT INTO meta_cycle_observations
-            (monitor_id,cycle_at,recorded_at,readback_status,readback_age_seconds,
-             execution_delta,gate_delta,delta_source,delta_evidence,dispatch_key,
-             duplicate_dispatch,blocker_code,blocker_class,blocker_since,
-             owner_intervention,cleanup_state,cleanup_pending_since)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (monitor, iso(at), iso(now), status, age, exe, gate, source,
-             evidence, dispatch, duplicate, code, klass, since,
-             tri(obs.get("owner_intervention"), "owner_intervention"),
-             cleanup, pending_since))
-    except sqlite3.IntegrityError as exc:
-        raise MetaMonitorError("cycle already recorded for this monitor/time") from exc
-    return {"id": cur.lastrowid, "duplicate_dispatch": bool(duplicate),
-            "blocker_class": klass}
+    owner = tri(obs.get("owner_intervention"), "owner_intervention")
+    gates_json = json.dumps(sorted(gate_passed)) if gate_passed is not None else None
+    # Content key excludes recorded_at/readback age (they change on redelivery).
+    content = sha256(json.dumps([
+        monitor, iso(at), status, exe, gate, source, evidence, dispatch, code,
+        since, owner, cleanup, pending_since, provenance, source_ref, gates_json,
+    ]).encode()).hexdigest()
+    existing = db.execute(
+        """SELECT id,content_sha256 FROM meta_cycle_observations
+           WHERE monitor_id=? AND cycle_at=?""", (monitor, iso(at))).fetchone()
+    if existing is not None:
+        if existing["content_sha256"] == content:
+            return {"status": "ALREADY_RECORDED", "id": existing["id"]}
+        raise MetaMonitorError("CONFLICT: a different observation exists for this "
+                               "monitor/cycle; append-only ledger keeps the first")
+    if dispatch is not None:
+        duplicate = int(db.execute(
+            """SELECT 1 FROM meta_cycle_observations WHERE monitor_id=?
+               AND dispatch_key=? LIMIT 1""", (monitor, dispatch)).fetchone() is not None)
+    cur = db.execute(
+        """INSERT INTO meta_cycle_observations
+        (monitor_id,cycle_at,recorded_at,readback_status,readback_age_seconds,
+         execution_delta,gate_delta,delta_source,delta_evidence,dispatch_key,
+         duplicate_dispatch,blocker_code,blocker_class,blocker_since,
+         owner_intervention,cleanup_state,cleanup_pending_since,
+         provenance,source_ref,gate_passed,content_sha256)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (monitor, iso(at), iso(now), status, age, exe, gate, source,
+         evidence, dispatch, duplicate, code, klass, since, owner,
+         cleanup, pending_since, provenance, source_ref, gates_json, content))
+    return {"status": "RECORDED", "id": cur.lastrowid,
+            "duplicate_dispatch": bool(duplicate), "blocker_class": klass,
+            "provenance": provenance}
 
 
-def cycles(db: sqlite3.Connection, monitor: str | None = None) -> list[dict]:
-    q = "SELECT * FROM meta_cycle_observations"
-    args: tuple = ()
+def cycles(db: sqlite3.Connection, monitor: str | None = None, *,
+           evidence_only: bool = True) -> list[dict]:
+    """Cycles feeding metrics. Default: Harness-derived evidence only."""
+    q = "SELECT * FROM meta_cycle_observations WHERE 1=1"
+    args: list = []
     if monitor is not None:
-        q += " WHERE monitor_id=?"
-        args = (monitor,)
+        q += " AND monitor_id=?"
+        args.append(monitor)
+    if evidence_only:
+        q += " AND provenance=?"
+        args.append(EVIDENCE_PROVENANCE)
     return [dict(r) for r in db.execute(q + " ORDER BY cycle_at,id", args)]
+
+
+# ------------------------------------------- ingest: Harness record -> cycle
+STALE_BUCKET = timedelta(minutes=5)
+CANARY_PREFIXES = ("CANARY ONLY",)
+
+
+def _harness_tasks_ro(harness_db: Path, main_goal: str) -> list[dict]:
+    """Read the production Harness DB strictly read-only (SQLite mode=ro)."""
+    path = Path(harness_db)
+    if not path.is_file():
+        raise MetaMonitorError("Harness DB absent")
+    conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
+    try:
+        conn.row_factory = sqlite3.Row
+        return [dict(r) for r in conn.execute(
+            """SELECT id,child_goal,state,created_at,verified_at,cleanup_state
+               FROM harness_tasks WHERE main_goal=? ORDER BY id""", (main_goal,))]
+    finally:
+        conn.close()
+
+
+def _in(window: tuple[datetime, datetime], value: str | None) -> bool:
+    return bool(value) and window[0] < aware(value) <= window[1]
+
+
+def ingest_snapshot(db: sqlite3.Connection, snapshot: dict, harness_db: Path,
+                    now: datetime, automation_ids: list[str] | None = None,
+                    *, registry: dict | None = None) -> dict[str, dict]:
+    """One cycle per enabled monitor from the real progress checkpoint.
+
+    Deltas are only computed between two FRESH Harness-derived cycles; the
+    first cycle, stale or unhealthy readbacks, and absent sources stay null.
+    Blockers are not classified: the gate policy has no structured code.
+    """
+    from scripts.harness_monitor_bridge import load_registry
+    from scripts.harness_monitor_report import report
+    now = aware(now)
+    reg = registry if registry is not None else load_registry()
+    enabled = {k for k, v in reg.items() if v.get("configured_enabled")}
+    out: dict[str, dict] = {}
+    for mid in automation_ids or sorted(enabled):
+        if mid not in enabled:
+            out[mid] = {"status": "SKIPPED_NOT_ENABLED"}
+            continue
+        try:
+            r = report(snapshot, mid, now)
+        except (KeyError, ValueError, TypeError) as exc:
+            r = {"status": "HARNESS_UNKNOWN", "reason": type(exc).__name__}
+        try:
+            if r["status"] != "VERIFIED_READBACK":
+                bucket = datetime.fromtimestamp(
+                    (now.timestamp() // STALE_BUCKET.total_seconds())
+                    * STALE_BUCKET.total_seconds(), timezone.utc)
+                res = _insert_cycle(db, {
+                    "monitor_id": mid, "cycle_at": iso(bucket),
+                    "readback_status": "HARNESS_UNKNOWN",
+                    "readback_age_seconds": r.get("age_seconds")
+                    if type(r.get("age_seconds")) is int and r["age_seconds"] >= -30 else None,
+                }, now, provenance=EVIDENCE_PROVENANCE,
+                    source_ref=f"unknown:{r.get('reason')}"[:120])
+                out[mid] = {**res, "readback": "HARNESS_UNKNOWN", "reason": r.get("reason")}
+                continue
+            out[mid] = _ingest_fresh(db, snapshot, mid, r, reg[mid]["main_goal"],
+                                     harness_db, now)
+        except MetaMonitorError as exc:
+            out[mid] = {"status": "REFUSED", "reason": str(exc)[:160]}
+    return out
+
+
+def _ingest_fresh(db, snapshot, mid, r, main_goal, harness_db, now) -> dict:
+    at = aware(snapshot["observed_at"])
+    m = next(x for x in snapshot["monitors"] if x.get("id") == mid)
+    gates = m.get("gates") or []
+    passed = sorted(g["id"] for g in gates if g.get("status") == "PASSED")
+    proven = {g["id"] for g in gates if g.get("status") == "PASSED" and g.get("proof")}
+    prev = [c for c in cycles(db, mid) if _fresh(c) and c["gate_passed"] is not None]
+    if prev and aware(prev[-1]["cycle_at"]) > at:
+        raise MetaMonitorError("OUT_OF_ORDER: snapshot older than the last ingested cycle")
+    prev = [c for c in prev if aware(c["cycle_at"]) < at]
+    tasks = _harness_tasks_ro(harness_db, main_goal)
+    obs: dict[str, Any] = {"monitor_id": mid, "cycle_at": iso(at),
+                           "readback_status": "VERIFIED_READBACK",
+                           "readback_age_seconds": r["age_seconds"]}
+    regressed = False
+    if prev:
+        window = (aware(prev[-1]["cycle_at"]), at)
+        before = set(json.loads(prev[-1]["gate_passed"]))
+        new, regressed = sorted(set(passed) - before), bool(before - set(passed))
+        done = [t for t in tasks if t["state"] == "DONE_VERIFIED"
+                and _in(window, t["verified_at"])]
+        canary = [t for t in done if t["child_goal"].startswith(CANARY_PREFIXES)]
+        real = [t for t in done if t not in canary]
+        obs["gate_delta"], obs["execution_delta"] = bool(new), bool(done)
+        if new:
+            obs["delta_source"] = ("GATE_ACCEPTANCE" if set(new) <= proven
+                                   else "SELF_REPORT")
+            obs["delta_evidence"] = "gates +" + ",".join(new)
+        elif real:
+            obs["delta_source"] = "VERIFIED_TASK_OUTPUT"
+            obs["delta_evidence"] = " ".join(f"ht_{t['id']}" for t in real) + " DONE_VERIFIED"
+        elif canary:
+            obs["delta_source"] = "CANARY"
+            obs["delta_evidence"] = " ".join(f"ht_{t['id']}" for t in canary) + " canary"
+        dispatched = sorted(t["child_goal"] for t in tasks if _in(window, t["created_at"]))
+        if dispatched:
+            obs["dispatch_key"] = "goal-" + sha256(
+                "\n".join(dispatched).encode()).hexdigest()[:16]
+    pending = [t for t in tasks if t["cleanup_state"] == "CLEANUP_PENDING"]
+    if not pending:
+        obs["cleanup_state"] = "NONE"
+    elif all(t["verified_at"] for t in pending):
+        obs["cleanup_state"] = "PENDING"
+        obs["cleanup_pending_since"] = min(pending, key=lambda t: aware(t["verified_at"]))[
+            "verified_at"]
+    res = _insert_cycle(db, obs, now, provenance=EVIDENCE_PROVENANCE,
+                        source_ref=f"snapshot:{snapshot['observed_at']}",
+                        gate_passed=passed)
+    return {**res, "readback": "VERIFIED_READBACK", "cycle_at": iso(at),
+            "gate_delta": obs.get("gate_delta"),
+            "execution_delta": obs.get("execution_delta"),
+            "delta_source": obs.get("delta_source"), "gate_regressed": regressed,
+            "blocked_gates": sum(g.get("status") == "BLOCKED" for g in gates)}
 
 
 # --------------------------------------------------------------- L2 metrics
@@ -730,11 +898,14 @@ def meta_report(db_path: Path, snapshot: dict | None, now: datetime,
     if not Path(db_path).exists():
         return {**base, "status": "UNKNOWN", "reason": "ledger absent: no observations yet"}
     with ledger(db_path) as db:
-        ids = monitors or sorted({c["monitor_id"] for c in cycles(db)})
+        ids = monitors or sorted({c["monitor_id"] for c in cycles(db, evidence_only=False)})
         per = {}
         for m in ids:
-            l2 = l2_metrics(cycles(db, m), now)
-            per[m] = {"l1": l1_outcome(snapshot, m, now), "l2": l2, "next": next_step(l2)}
+            evidence = cycles(db, m)
+            l2 = l2_metrics(evidence, now)
+            per[m] = {"l1": l1_outcome(snapshot, m, now), "l2": l2, "next": next_step(l2),
+                      "attested_cycles_excluded":
+                          len(cycles(db, m, evidence_only=False)) - len(evidence)}
         return {**base, "status": "OK", "monitors": per,
                 "l3": l3_summary(db, now), "convergence": convergence(db, now)}
 
@@ -762,6 +933,10 @@ def main(argv: list[str] | None = None) -> int:
     rb.add_argument("--experiment-id", required=True)
     rb.add_argument("--current-prompt-sha256")
     sub.add_parser("guard-run", help="run the local guard suite and record its exit code")
+    ing = sub.add_parser("ingest", help="Harness progress checkpoint -> evidence cycles")
+    ing.add_argument("--snapshot", default=str(DEFAULT_SNAPSHOT))
+    ing.add_argument("--harness-db", default=str(DEFAULT_HARNESS_DB))
+    ing.add_argument("--automation-id", action="append")
     r = sub.add_parser("report")
     r.add_argument("--snapshot", default=str(DEFAULT_SNAPSHOT))
     r.add_argument("--monitor", action="append")
@@ -773,6 +948,16 @@ def main(argv: list[str] | None = None) -> int:
             snap_path = Path(args.snapshot)
             snap = json.loads(snap_path.read_text(encoding="utf-8")) if snap_path.is_file() else None
             out = meta_report(db_path, snap, now, args.monitor)
+        elif args.cmd == "ingest":
+            snap_path = Path(args.snapshot)
+            if not snap_path.is_file():
+                raise MetaMonitorError("progress checkpoint absent")
+            snap = json.loads(snap_path.read_text(encoding="utf-8"))
+            with ledger(db_path, create=True) as db:
+                results = ingest_snapshot(db, snap, Path(args.harness_db), now,
+                                          args.automation_id)
+            out = {"results": results, "enforcement": ENFORCEMENT,
+                   "runtime_acceptance": "NOT_PROVEN"}
         elif args.cmd == "guard-run":
             proc = subprocess.run([str(REPO / "scripts/ci-test.sh"), "fast",
                                    "tests/test_harness_meta_monitor.py"],

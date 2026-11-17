@@ -78,6 +78,7 @@ evidence → `UNKNOWN`.
 ## CLI (read-only report; append-only writes)
 ~~~bash
 PF=/home/dell/workspace/projectflow-workspace-manager/.venv/bin/python
+$PF scripts/harness_meta_monitor.py ingest                       # real Harness record -> evidence cycles
 $PF scripts/harness_meta_monitor.py report                       # one line META_MONITOR=...
 $PF scripts/harness_meta_monitor.py cycle-record --json '{"monitor_id":"<id>","cycle_at":"<iso+tz>","readback_status":"VERIFIED_READBACK","readback_age_seconds":60,"execution_delta":false,"gate_delta":false,"blocker_code":"OWNER_CONSENT","blocker_since":"<iso+tz>"}'
 $PF scripts/harness_meta_monitor.py experiment-open --json '<spec>'
@@ -88,11 +89,65 @@ $PF scripts/harness_meta_monitor.py guard-run
 ~~~
 Exit 2 + `REFUSED` on invalid input. No HTTP endpoint and no public dashboard.
 
-## Not done (next)
-1. Wire the running Meta-Monitor prompt/cycle to call `cycle-record` once per
-   cycle with its real readback. Until then the ledger is empty and every
-   metric is `UNKNOWN`.
-2. Decide who records `defect-record` events, and whether `guard-run` joins
-   the existing reconcile service (a schedule change needs owner approval).
-3. Runtime acceptance: at least 7 days of real cycles plus one judged
-   experiment, before claiming improvement.
+## Evidence ingest (GAP_OBSERVABILITY)
+`ingest` turns the **real** Harness record into cycles. Pipeline:
+`harness_monitor_service --emit-progress` → `monitor-progress.json` →
+`harness_meta_monitor.py ingest` → ledger → `report`.
+- **Which monitors:** one cycle per *enabled* automation in the versioned
+  registry. Paused or unknown ids are skipped and not recorded.
+- **Freshness:** checked through `harness_monitor_report.report` (≤900 s and
+  health `HEALTHY`). A fresh cycle uses the snapshot's `observed_at` as its
+  `cycle_at`. A stale or unhealthy readback is recorded as `HARNESS_UNKNOWN`
+  in a 5-minute bucket, with every delta null.
+- **Dedupe:** the cycle key is `(monitor, cycle_at)` plus a content sha256.
+  An identical redelivery returns `ALREADY_RECORDED`. A different payload for
+  the same key is refused (`CONFLICT`), and so is a snapshot older than the
+  last ingested one (`OUT_OF_ORDER`).
+- **Delta between two fresh cycles:**
+
+  | Observation | Recorded as |
+  |---|---|
+  | New PASSED gate that has `proof` | `gate_delta`, source `GATE_ACCEPTANCE` |
+  | New PASSED gate without proof | source `SELF_REPORT` (not useful) |
+  | Task reached `DONE_VERIFIED` in the window | `execution_delta`, source `VERIFIED_TASK_OUTPUT` |
+  | `CANARY ONLY` task finished | source `CANARY` (not useful) |
+  | PASSED gate lost | `gate_regressed` flag only |
+
+  The first cycle has no previous cycle to compare against, so both deltas
+  are null (UNKNOWN).
+- **Blockers:** not classified. The gate policy has only free-text `BLOCKED`
+  notes, so `blocker_code` stays null and `blocked_gates` is shown as a count
+  only. Owner interventions are also not observable from Harness and stay null.
+- **Cleanup:** `CLEANUP_PENDING` tasks are reported with their age from
+  `verified_at`. They are surfaced, never freed.
+- **Harness DB access:** read with SQLite `mode=ro`; the content stays
+  byte-identical. Because the DB is in WAL mode, a reader may leave the
+  standard `-shm`/`-wal` sidecar files, which the service's next writer
+  removes.
+- **Narrated cycles:** cycles written by `cycle-record` (the automation's own
+  account) are stored with `provenance=OPERATOR_ATTESTED`. They are EXCLUDED
+  from L2/L3 and convergence, and the report shows them as
+  `attested_cycles_excluded`. Older ledger rows are migrated to that label.
+- **Service flag:** `harness_monitor_service.py --meta-ingest` runs the same
+  ingest after a healthy progress write. It is opt-in and non-fatal: it never
+  changes the service exit code or the Harness health flags.
+
+## Status and owner decision
+- CODE DONE: ingest, its tests and the opt-in service flag.
+- NOT RUNTIME VERIFIED: the production ledger is empty.
+- One real read-only smoke run wrote to a throwaway ledger only; that is not
+  acceptance.
+- **BLOCKED_OWNER:** automatic ingestion needs an owner-approved runtime
+  change. After merging and deploying to the clean main checkout, add
+  `--meta-ingest` to the `ExecStart` of
+  `projectflow-harness-reconcile-staging.service`. That uses the same 5-minute
+  timer, adds no schedule and changes no prompt, goal or gate. Until then it
+  runs only by explicit invocation:
+  `$PF scripts/harness_meta_monitor.py ingest`.
+- Next, after activation:
+  1. Collect at least 7 days of ingested cycles.
+  2. Decide who records `defect-record` events.
+  3. Optionally add structured `blocker_code` values to the gate policy (an
+     owner policy change).
+  4. Judge one experiment (for example ZGH-DISPATCH-GUARD-001) only from
+     ledger evidence.

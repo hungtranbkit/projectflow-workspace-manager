@@ -32,11 +32,13 @@ def db(tmp_path):
 
 def cyc(db, at, *, status="VERIFIED_READBACK", age=60, exe=False, gate=False,
         source=None, evidence=None, monitor=MON, **extra):
-    return mm.record_cycle(db, {
+    # Metric-math fixtures stand in for Harness-derived (ingested) cycles.
+    return mm._insert_cycle(db, {
         "monitor_id": monitor, "cycle_at": at.isoformat(),
         "readback_status": status, "readback_age_seconds": age,
         "execution_delta": exe, "gate_delta": gate, "delta_source": source,
-        "delta_evidence": evidence, **extra}, at + timedelta(minutes=1))
+        "delta_evidence": evidence, **extra}, at + timedelta(minutes=1),
+        provenance="HARNESS_SNAPSHOT")
 
 
 def useful(db, at, **kw):

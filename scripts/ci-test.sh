@@ -15,6 +15,7 @@ case "$tier" in
       tests/test_harness_trajectory.py \
       tests/test_harness_monitor_service.py \
       tests/test_harness_meta_monitor.py \
+      tests/test_harness_meta_ingest.py \
       "$@"
     ;;
   remaining)
