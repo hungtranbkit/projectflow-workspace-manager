@@ -18,7 +18,7 @@
   - A finished remote task is never DONE_VERIFIED without independent DoD.
 - **Dependency.** terminal-mcp PR #120: `start` must return a `dt_` id, and `task_status` must answer `dt_` ids. Without it, dispatch correctly reports `DISPATCH_FAILED/NULL_TASK_ID` → `UPGRADE_CONTROLLER_DURABLE_START`.
 - **Tests.**
-  - `tests/test_harness_monitor_dispatch.py` has 13 tests: success, null task_id ×3, busy with a bounded retry then escalation, retry with the same key, no send on restart replay, transport failure, readback mismatch, paused and WIP refusing before send, and supervisor-state reconcile. All 13 fail on `origin/main` (RED) and pass with the change.
+  - `tests/test_harness_monitor_dispatch.py` has 14 tests: success, null or untracked task_id ×4, busy with a bounded retry then escalation, retry with the same key, no send on restart replay, transport failure, readback mismatch, paused and WIP refusing before send, and supervisor-state reconcile. All fail on `origin/main` (RED) and pass with the change. Mutation: 5/5 guard mutants killed (accept untracked id, unbounded retry, resend on restart, skip readback, send before WIP check).
   - Added to the local-ci `remaining` tier. Results: `scripts/ci-test.sh remaining` 91 passed (rc=0), `fast` 33 passed (rc=0).
 - **Not done.**
   - Not merged, not deployed, no live dispatch.

@@ -63,6 +63,7 @@ def test_durable_receipt_registers_harness_task_dispatched_not_running(source, w
     {"status": "SUBMIT_CONFIRMED", "action": "send", "result": {}},           # 56ccb14 non-Codex
     {"status": "TASK_STARTED", "mode": "direct", "task_id": None},             # 56ccb14 Codex
     {"status": "TASK_ACCEPTED", "mode": "supervised", "task_id": "not-a-dt"},
+    {"status": "TASK_STARTED", "mode": "direct", "task_id": DT},               # id without supervision
 ])
 def test_null_or_untracked_task_id_is_dispatch_failed_never_work(source, wired, response):  # noqa: F811
     mcp = FakeMCP(response)
