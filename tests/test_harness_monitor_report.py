@@ -114,3 +114,52 @@ def test_invalid_percent_or_deadline_fails_closed(snapshot):
     assert percent_bar(100) == "█"*12
     with pytest.raises(ValueError):
         percent_bar(-1)
+
+
+
+def test_terminal_mcp_payload_is_bounded_and_parses(snapshot):
+    from scripts.harness_monitor_report import terminal_compact
+    raw, _ = snapshot
+    full = report(raw, ZGH, NOW)
+    compact = terminal_compact(full)
+    text = "HARNESS_REPORT=" + json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+    assert len(text.encode("utf-8")) < 700
+    assert json.loads(text.split("=", 1)[1])["status"] == "VERIFIED_READBACK"
+    assert compact["pct"] == 10
+    assert compact["bar"] == "█" + "░"*11
+    assert compact["gates"] == "1/6"
+    assert compact["pivots"] == 0
+    assert compact["original"][0][1] == 10
+    assert len(compact["actual"]) == 1
+    assert compact["tasks"] == []
+
+
+def test_terminal_payload_with_two_active_tasks_still_fits_tail(snapshot):
+    from scripts.harness_monitor_report import terminal_compact
+    raw, db = snapshot
+    store = HarnessStore(db)
+    goal = load_registry()[ZGH]["main_goal"]
+    for number in (1,2):
+        store.create(key=f"monitor-tiny-{number}",main_goal=goal,
+                     child_goal=f"atomic task {number}",dod="test",
+                     agent="codex",node="dell-linux",
+                     created_at=NOW-timedelta(hours=number),
+                     ttl=timedelta(hours=24))
+    updated = summarize(db,reference=NOW)
+    updated["health"] = {"status":"HEALTHY"}
+    compact = terminal_compact(report(updated,ZGH,NOW))
+    packed = "HARNESS_REPORT="+json.dumps(compact,ensure_ascii=False,separators=(",",":"))
+    assert len(packed.encode("utf-8")) < 950
+    assert len(compact["tasks"]) == 2
+    assert compact["tasks"][0]["remaining_min"] == 23 * 60
+    assert compact["tasks"][1]["remaining_min"] == 22 * 60
+
+
+def test_compact_failed_readback_does_not_expose_stale_gate_pct(snapshot):
+    from scripts.harness_monitor_report import terminal_compact
+    raw, _ = snapshot
+    compact = terminal_compact(report(raw,ZGH,NOW+timedelta(minutes=30)))
+    assert compact["status"] == "HARNESS_UNKNOWN"
+    assert compact["reason"] == "STALE_OR_UNHEALTHY"
+    assert "pct" not in compact
+    assert "actual" not in compact
