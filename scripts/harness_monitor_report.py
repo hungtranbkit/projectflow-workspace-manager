@@ -106,10 +106,56 @@ def report(snapshot: dict, ident: str, now: datetime,
     }
 
 
+
+def terminal_compact(data: dict) -> dict:
+    """Bound the Terminal MCP readback to one short, complete JSON line.
+
+    Avoid rich long output: Terminal MCP wait.tail can truncate a multi-KB
+    JSON receipt. Retain enough points for an honest inline trajectory.
+    """
+    if data["status"] != "VERIFIED_READBACK":
+        return {"status": data["status"], "id": data.get("automation_id"),
+                "reason": data.get("reason"), "age": data.get("age_seconds")}
+    tr = data.get("chart")
+    def points(source: list[dict] | None) -> list[list[int]] | None:
+        if source is None:
+            return None
+        # Unix minute indices are shorter than ISO datetimes. Clients must
+        # label them as UTC and convert to local when rendering.
+        return [[round(aware(x["at"]).timestamp() / 60), x["percent"]] for x in source]
+    compact = {
+        "status": "VERIFIED_READBACK", "id": data["automation_id"],
+        "age": data["age_seconds"], "pct": data["completion_percent"],
+        "bar": data["completion_bar"],
+        "gates": f'{data["gates_passed"]}/{data["gates_total"]}' if
+                 data["gates_total"] is not None else None,
+        "wip": f'{data["wip"]}/{data["max_wip"]}',
+        "wip_scope": "HARNESS_ONLY",
+        "plan": tr.get("current_expected_percent") if tr else None,
+        "gap": tr.get("current_deviation_pp") if tr else None,
+        "orig_gap": tr.get("baseline_deviation_pp") if tr else None,
+        "pivots": tr.get("pivot_count") if tr else None,
+        "provisional": tr.get("planning_horizon_provisional") if tr else None,
+        "original": points(tr["original_plan"]) if tr else None,
+        "actual": points(tr["actual"]) if tr else None,
+        "revised": points(tr.get("revised_plan")) if tr else None,
+        "tasks": [
+            {"id": t["id"], "s": t["state"], "p": t["time_used_percent"],
+             "used_min": round(t["elapsed_seconds"]/60),
+             "total_min": round(t["ttl_seconds"]/60),
+             "remaining_min": round(t["remaining_seconds"]/60),
+             "deadline": t["deadline_ict"], "overdue": t["overdue"]}
+            for t in data["task_time_budget"]
+        ],
+    }
+    return compact
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Compact per-monitor verified snapshot")
     p.add_argument("--automation-id", required=True)
     p.add_argument("--snapshot", default=str(DEFAULT))
+    p.add_argument("--full", action="store_true",
+                   help="verbose JSON for local inspection; not Terminal MCP tails")
     args = p.parse_args()
     try:
         obj = json.loads(Path(args.snapshot).read_text(encoding="utf-8"))
@@ -118,7 +164,8 @@ def main() -> None:
         result = {"status": "HARNESS_UNKNOWN", "automation_id": args.automation_id,
                   "reason": f"{type(exc).__name__}:{str(exc)[:90]}"}
     # One short, machine-readable line. No sensitive goal text or customer data.
-    print("HARNESS_REPORT=" + json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    output = result if args.full else terminal_compact(result)
+    print("HARNESS_REPORT=" + json.dumps(output, ensure_ascii=False, separators=(",", ":")))
     if result["status"] != "VERIFIED_READBACK":
         raise SystemExit(2)
 
