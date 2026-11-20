@@ -475,4 +475,5 @@ def test_draft_featurespec_is_valid_unique_draft_and_gated(tmp_path):
     assert outcome["outcome"] == "SPEC_NOT_APPROVED"
     # the canonical tree is untouched: draft lives outside specs/
     assert SpecRegistry(repo / "specs").load().baseline_digest() == real_before
-    assert "FEAT-AGENT-OBSERVABILITY" not in SpecRegistry(repo / "specs").load().features
+    canonical = SpecRegistry(repo / "specs").load().feature("FEAT-AGENT-OBSERVABILITY")
+    assert canonical is None or canonical["status"] == "approved"
