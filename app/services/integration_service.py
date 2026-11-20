@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.services.project_contract import load_contract, ContractError
+from app.services.quality_attestation_pilot import quality_merge_blocker
 
 """Integration (Phase E10.1-E10.6). ProjectFlow, never the Builder or
 Reviewer, owns integration -- this is the ONE place a Task's reviewed
@@ -114,6 +115,14 @@ class IntegrationService:
         if not ws:
             return {"outcome": "NO_MANAGED_WORKTREE", "task_id": task_id}
         repo_row = self.db.one("SELECT * FROM repositories WHERE id=?", (ws["repository_id"],))
+        # Local update-ref is also a real merge. Prevent it from bypassing
+        # the same opt-in independent QA receipt enforced for GitHub PRs.
+        # A source code change after review invalidates the signed SHA.
+        reviewed_source_head = self.git.head(ws["worktree_path"])
+        quality = quality_merge_blocker(
+            governing_id, ws["repository_id"], repo_row["repo_name"], reviewed_source_head)
+        if quality:
+            return {"outcome": "BLOCKED", "task_id": task_id, "reasons": [quality]}
 
         # E10.4: repository-scoped lock -- established now even though
         # E13 concurrency isn't enabled yet.
@@ -143,6 +152,11 @@ class IntegrationService:
                 integrated_commit = self.git.head(probe_path)
             finally:
                 self.git.remove_baseline_probe(repo_row["repo_path"], probe_path)
+
+            # Exact-SHA race guard: a Builder cannot advance the source
+            # after the independent QA check but before update-ref.
+            if self.git.head(ws["worktree_path"]) != reviewed_source_head:
+                return {"outcome": "SOURCE_STALE_REQUIRES_REVERIFY", "task_id": task_id}
 
             # E10.3: move the real branch ref only -- never touches the
             # canonical checkout's own working tree/index, so an
