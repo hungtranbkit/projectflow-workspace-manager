@@ -110,7 +110,7 @@ def main() -> int:
         print(json.dumps({"status": "FAIL", "error": str(exc)}, ensure_ascii=False))
         return 2
     print(json.dumps({"status": report["status"], "task_id": report["task_id"],
-                      "tests": report["test_command"][3:],
+                      "tests": report["test_command"][4:],
                       "test_exit_code": report["test_exit_code"],
                       "violations": len(report["lint_violations"]),
                       "report_file": report["report_file"],
