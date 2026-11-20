@@ -217,9 +217,20 @@ class PlannerAgentInvoker:
                 # transient provider failure.
                 raise PlannerAgentError(f"Planner produced a non-JSON envelope: {exc}") from exc
             if envelope.get("is_error") or envelope.get("subtype") != "success":
+                # Never put the raw error envelope in a user-visible error:
+                # it can include provider diagnostics, prompts or credentials.
+                subtype = envelope.get("subtype")
+                if subtype not in {
+                    "error_max_turns", "error_max_structured_output_retries",
+                    "error_during_execution", "error_max_budget_usd",
+                }:
+                    subtype = "unknown"
+                stop_reason = envelope.get("stop_reason")
+                if stop_reason not in {"tool_use", "end_turn", "max_tokens"}:
+                    stop_reason = "unknown"
                 last_error = PlannerAgentError(
                     f"Planner run reported an error (attempt {attempt}/{self.max_attempts}, "
-                    f"stop_reason={envelope.get('stop_reason')!r}): {envelope.get('result') or envelope}")
+                    f"subtype={subtype}, stop_reason={stop_reason!r})")
                 continue
             text = envelope.get("result")
             if not isinstance(text, str):
