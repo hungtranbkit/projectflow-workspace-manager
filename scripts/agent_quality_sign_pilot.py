@@ -18,7 +18,7 @@ SCRIPT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_ROOT))
 from agent_quality_task_gate import load_task_policy, run_task_gate  # noqa: E402
 from app.services.quality_attestation_pilot import (  # noqa: E402
-    PILOT_POLICY_TASK, payload_from_machine_report, sign_receipt,
+    PILOT_POLICY_TASK, payload_from_machine_report, sign_receipt, sign_ed25519_receipt,
 )
 
 TRUSTED_ROOT = SCRIPT_ROOT.parent
@@ -33,7 +33,7 @@ def _git(repo: Path, *argv: str) -> str:
 def independent_attest(*, worktree: Path, exact_sha: str,
                        projectflow_task_id: int, repository_id: int,
                        repository_name: str, destination: Path,
-                       signing_key: str) -> dict:
+                       signing_key: str, private_key_file: Path | None = None) -> dict:
     """Do not sign agent-authored reports or an unclean/moving checkout."""
     worktree = worktree.resolve()
     destination = destination.resolve()
@@ -45,6 +45,18 @@ def independent_attest(*, worktree: Path, exact_sha: str,
         raise ValueError("QA source and target checkout must be isolated")
     if destination.is_relative_to(worktree) or destination.is_relative_to(trusted_source):
         raise ValueError("Receipt must be outside agent worktree and trusted source tree")
+    if bool(signing_key) == bool(private_key_file):
+        raise ValueError("Configure exactly one QA signing mode: legacy HMAC or Ed25519 private key")
+    if private_key_file is not None:
+        # The private key is never copied into the checkout under test.
+        if private_key_file.is_symlink():
+            raise ValueError("QA private key cannot be a symlink")
+        private_key_file = private_key_file.resolve()
+        if (private_key_file.is_relative_to(worktree) or
+            private_key_file.is_relative_to(trusted_source) or
+            not private_key_file.is_file() or private_key_file.stat().st_size > 4096 or
+            private_key_file.stat().st_mode & 0o077):
+            raise ValueError("QA private key must be outside source and owner-readable only")
     if not worktree.is_dir() or not repository_name or projectflow_task_id < 1 or repository_id < 1:
         raise ValueError("Valid QA worktree/task/repository identity required")
     if _git(worktree, "rev-parse", "HEAD") != exact_sha:
@@ -83,7 +95,11 @@ def independent_attest(*, worktree: Path, exact_sha: str,
         payload = payload_from_machine_report(
             report, task_id=projectflow_task_id, repository_id=repository_id,
             repository_name=repository_name)
-        receipt = sign_receipt(payload, signing_key)
+        if private_key_file is not None:
+            # Load only AFTER the test subprocess has terminated.
+            receipt = sign_ed25519_receipt(payload, private_key_file.read_bytes())
+        else:
+            receipt = sign_receipt(payload, signing_key)
         if destination.is_symlink():
             raise ValueError("Receipt directory must not be a symlink")
         destination.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -118,12 +134,13 @@ def main() -> int:
     p.add_argument("--receipt-dir", type=Path, required=True)
     a = p.parse_args()
     key = os.environ.get("PROJECTFLOW_QUALITY_ATTESTATION_KEY", "")
+    keyfile = os.environ.get("PROJECTFLOW_QUALITY_ATTESTATION_PRIVATE_KEY_FILE", "").strip()
     try:
         result = independent_attest(
             worktree=a.worktree, exact_sha=a.commit,
             projectflow_task_id=a.task_id, repository_id=a.repository_id,
             repository_name=a.repository_name, destination=a.receipt_dir,
-            signing_key=key)
+            signing_key=key, private_key_file=Path(keyfile) if keyfile else None)
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         print(json.dumps({"status": "FAIL", "reason": str(exc)}, ensure_ascii=False))
         return 2
