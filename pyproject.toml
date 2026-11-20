@@ -52,4 +52,7 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Plain `pytest` == `python -m pytest`: repo root importable (scripts/, app/)
+# on a clean clone without relying on the invoking cwd.
+pythonpath = ["."]
 addopts = "-q"

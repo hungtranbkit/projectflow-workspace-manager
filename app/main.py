@@ -3594,6 +3594,68 @@ def create_app(settings=None):
     def api_task_evidence(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid); return evidence_store.for_task(tid)
 
+    # ---- Agent observability P0 (specs/001-agent-observability-recovery,
+    # DRAFT, T010/T011 read-only slice). GET only: reads the app DB through a
+    # sqlite mode=ro connection bounded to this one task, normalizes/dedupes
+    # IN MEMORY, and reads the private Harness progress snapshot FILE that
+    # the existing Harness timer already writes (no Harness DB connection,
+    # no second store/scheduler). Completion % / TTL come only from Harness
+    # via an explicit reviewed link file; otherwise UNKNOWN, never 0%.
+    # Operator-only (same read guard as /evidence). Never starts anything.
+    def _observability(tid: int):
+        import os as _os
+        from datetime import datetime as _dt, timezone as _tz
+        from app.services import agent_observability as _obs
+        task_row(tid)
+        at = _dt.now(_tz.utc)
+        raws, meta = _obs.projectflow_task_events(settings.db_path, task_id=tid,
+                                                  node_id="local", project_id="projectflow")
+        view, events, _q = _obs.view_from_raw(
+            raws, at=at, expected={"node_id": "local", "project_id": "projectflow",
+                                   "task_id": f"pf-task-{tid}"})
+        # Current gate truth comes only from TaskDecisionService (commit/
+        # brief-pinned, the single source); raw evidence rows stay history.
+        try:
+            truth = _obs.gate_truth_from_decision(decision.evaluate(tid))
+        except Exception:
+            truth = None  # fail closed: milestones stay unverified, never PASS
+        view = _obs.apply_gate_truth(view, truth)
+        view = _obs.harness_view_for_task(
+            view, task_id=tid, at=at,
+            snapshot_path=_os.environ.get("PROJECTFLOW_HARNESS_PROGRESS_JSON",
+                                          str(_obs.DEFAULT_HARNESS_SNAPSHOT)),
+            links_path=_os.environ.get("PROJECTFLOW_OBS_HARNESS_LINKS") or None,
+            registry_path=_os.environ.get("PROJECTFLOW_HARNESS_REGISTRY",
+                                          str(_obs.DEFAULT_HARNESS_REGISTRY)))
+        view["read_bounds"] = meta
+        view["scope_note"] = ("Single-task view from this ProjectFlow app DB only; "
+                              "not a multi-node fleet monitor, no CLI hook or live Terminal MCP feed.")
+        return view, events
+
+    @app.get("/api/tasks/{tid}/observability")
+    def api_task_observability(tid: int, _authz: None = Depends(require_read_role("task", "tid"))):
+        view, events = _observability(tid)
+        return {"task_id": tid, "schema": "agent-observability-view-v1-draft", **view,
+                "latest_events": events[-5:]}
+
+    @app.get("/api/tasks/{tid}/observability/events")
+    def api_task_observability_events(tid: int, cursor: str | None = None, limit: int = 50,
+                                      _authz: None = Depends(require_read_role("task", "tid"))):
+        from app.services.agent_observability import ObservabilityError, decode_cursor, page_events
+        if cursor is not None:
+            try:
+                decode_cursor(cursor)  # validate before any read work
+            except ObservabilityError:
+                raise HTTPException(400, "malformed cursor")
+        _view, events = _observability(tid)
+        return {"task_id": tid, **page_events(events, cursor=cursor, limit=limit)}
+
+    @app.get("/tasks/{tid}/observability", response_class=HTMLResponse)
+    def task_observability_page(tid: int, _authz: None = Depends(require_read_role("task", "tid"))):
+        from app.services.agent_observability import render_operator_page
+        view, events = _observability(tid)
+        return HTMLResponse(render_operator_page(tid, view, events))
+
     # ---------------------------------------------- Engineering Domain (E1)
     # Change -> Task, Change/Task -> WorkProduct, Task -> input/output
     # WorkProduct. Additive layer above the existing Task model -- see

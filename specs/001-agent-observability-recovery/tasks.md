@@ -37,3 +37,16 @@ T001–T003 → T004 approval → T005–T009 → T010–T011 → T012–T014 �
 
 ## Status reporting
 Report only: đã làm / đang làm / sẽ làm, verified gate %, child TTL % (distinct), blocker, evidence reference, and top three next evidence-producing priorities. QUEUED and DISPATCHED_UNVERIFIED never equal active coding. Unknown source is UNKNOWN rather than an optimistic percentage.
+
+## Implementation log (draft PR, NOT acceptance)
+2026-11-20, branch `feat/agent-observability-p0-nec-20261120` (stacked on this docs branch). Boxes above stay unchecked until independent review.
+- T001 → `source-map.md`; T003 → `review-t003.md` (open blocker: T004 FeatureSpec not approved).
+- T005–T009 → `app/services/agent_observability.py` (schema/provenance, replay-safe bounded store, three dimensions + freshness, Harness % / TTL reuse, read-only adapters).
+- T010/T011 partial → read-only `GET /api/tasks/{tid}/observability[/events]` and `/tasks/{tid}/observability` (mobile HTML), no writes.
+- Tests: `tests/test_agent_observability.py`. Not done: T002, T004, T012–T018, real-node pilot, 375/428 px screenshot smoke, latency p95.
+
+### P0 repair slice (2026-11-20, PR #56 review)
+- Bounded task-scoped SQL reads + migration 38 index; Harness % / TTL via explicit reviewed link + existing snapshot file only (UNKNOWN otherwise); mobile page with two independent meters; T004 draft YAML outside `specs/` (baseline untouched, not approved).
+- Tests: `tests/test_agent_observability.py`, `tests/test_agent_observability_p0_repair.py`.
+- Visual: headless Chromium 375/428 px, no horizontal overflow (evidence kept outside repo on NEC1: `/home/rag/workspace/qa-evidence/agent-observability-p0-20261120/`). T011 still PARTIAL: no real-node pilot, no multi-node/subagent drill-down.
+- Full pytest remains INCONCLUSIVE (not re-run); only targeted groups were run.
