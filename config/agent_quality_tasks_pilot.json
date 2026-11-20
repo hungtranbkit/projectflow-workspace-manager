@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "mode": "opt_in_pilot_no_merge_no_deploy",
+  "tasks": {
+    "PROJECTFLOW-MONITOR-REPORT-PILOT": {
+      "description": "Verify real ProjectFlow harness report module and its regression suite",
+      "code_files": [
+        "scripts/harness_monitor_report.py"
+      ],
+      "test_files": [
+        "tests/test_harness_monitor_report.py"
+      ],
+      "ui_required": false
+    },
+    "PROJECTFLOW-QUALITY-SELFTEST": {
+      "description": "Self-check the independent pilot runner",
+      "code_files": [
+        "scripts/agent_quality_pilot.py"
+      ],
+      "test_files": [
+        "tests/test_agent_quality_pilot.py"
+      ],
+      "ui_required": false
+    },
+    "PROJECTFLOW-UI-NEGATIVE-PILOT": {
+      "description": "Exercise fail-closed UI evidence requirement without changing production UI",
+      "code_files": [
+        "scripts/agent_quality_pilot.py"
+      ],
+      "test_files": [
+        "tests/test_agent_quality_pilot.py"
+      ],
+      "ui_required": true
+    }
+  }
+}

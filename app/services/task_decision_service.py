@@ -1,11 +1,13 @@
 from __future__ import annotations
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 
 from app.services.failure_classifier import fingerprint as fingerprint_of, parse_failures, parse_summary
 from app.services.project_contract import ContractError, load_contract
 from app.services.request_memo import RequestMemo
 from app.services.sandbox_contract import SandboxContractError, load_sandbox_contract
+from app.services.quality_attestation_pilot import quality_merge_blocker
 
 # Task Lifecycle & Gate Model Refactor -- the single authoritative source
 # for Task status/stage/next-action/gate-eligibility. No route or template
@@ -75,6 +77,10 @@ BLOCKER_MESSAGES = {
     "SANDBOX_CREATE_FAILED": ("Could not create the sandbox.", "Check the sandbox's Logs / Operations for the real error."),
     "SANDBOX_CAPACITY_FULL": ("Too many sandboxes are already running.", "Wait for one to finish, or stop one you no longer need."),
     "RUNTIME_DEPENDENCY_UNREACHABLE": ("A runtime dependency this sandbox needs is not reachable.", "Start that dependency's DEV Deployment, then Restart this sandbox."),
+    "QUALITY_ATTESTATION_MISSING": ("An independent QA receipt is missing.", "Run the pinned QA suite on a trusted worker and supply its signed receipt."),
+    "QUALITY_ATTESTATION_STALE": ("Independent QA evidence is out of date for this commit.", "Re-run QA on the exact current source SHA."),
+    "QUALITY_ATTESTATION_INVALID": ("Independent QA receipt failed integrity checks.", "Audit the trusted QA runner and re-run verification."),
+    "QUALITY_ATTESTATION_CONFIG": ("Independent QA gate is not correctly configured.", "Configure the protected signing key and receipt location."),
 }
 
 
@@ -581,6 +587,8 @@ class TaskDecisionService:
         "NOT_READY", "CI_FAIL", "CI_PENDING", "SOURCE_STALE", "REVIEW_STALE", "QA_STALE",
         "INTEGRATION_STALE", "BASELINE_WAIVER_REQUIRED", "PR_CLOSED", "TARGET_BRANCH_CHANGED",
         "UNKNOWN_MERGEABILITY", "CONFLICT", "NO_PR",
+        "QUALITY_ATTESTATION_MISSING", "QUALITY_ATTESTATION_STALE",
+        "QUALITY_ATTESTATION_INVALID", "QUALITY_ATTESTATION_CONFIG",
     )
 
     def effective_source_for_repo(self, d, repository_id):
@@ -656,6 +664,16 @@ class TaskDecisionService:
             return {"eligible": False, "blockers": [], "source_branch": branch, "current_commit": commit, "merged": True}
         branch, commit = self.effective_source_for_repo(d, repository_id)
         blockers: list[str] = []
+        # Opt-in independent QA: display and merge action both consume
+        # this ONE central gate. A machine-signed receipt is bound to
+        # task, repository and exact current SHA; agent prose is ignored.
+        # Disabled-by-default paths incur no database or filesystem I/O.
+        if os.environ.get("PROJECTFLOW_QUALITY_PILOT_TASK_IDS"):
+            selected_repo = self.db.one("SELECT repo_name FROM repositories WHERE id=?", (repository_id,))
+            quality = quality_merge_blocker(
+                d["task"]["id"], repository_id, selected_repo["repo_name"] if selected_repo else "", commit)
+            if quality:
+                blockers.append(quality)
         if not d["ready_for_main"]:
             blockers.append("NOT_READY")
         b = next((x for x in d["builders"] if x["repository_id"] == repository_id), None)

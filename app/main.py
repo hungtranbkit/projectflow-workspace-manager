@@ -94,6 +94,7 @@ from app.services.code_review_service import CodeReviewService
 from app.services.security_review_service import SecurityApplicabilityService, SecurityReviewService
 from app.services.review_fix_orchestrator import ReviewFixOrchestratorService, ReviewFixError
 from app.services.integration_service import IntegrationService, IntegrationError
+from app.services.quality_attestation_pilot import quality_merge_blocker
 from app.services.release_service import ReleaseService, ReleaseError
 from app.services.product_acceptance_service import ProductAcceptanceService, ProductAcceptanceError
 from app.services.incident_service import (
@@ -5100,6 +5101,12 @@ def create_app(settings=None):
         task_row(tid); decision.merge_records(tid)
         row=db.one("SELECT * FROM merge_records WHERE task_id=? AND repository_id=?",(tid,repository_id))
         if not row: raise GitSafetyError("No MergeRecord for this repository on this Task")
+        # Legacy manual DONE is not proof of a real merge. An opt-in
+        # signed-QA task may only advance through the verified merge
+        # flows; never allow this historical shortcut to bypass them.
+        pilot_guard=quality_merge_blocker(tid,repository_id,repo(repository_id)["repo_name"],None)
+        if pilot_guard:
+            raise GitSafetyError("Manual Mark Merged is disabled for this QA-gated Task; use verified PR merge or external-merge confirmation")
         commit=merged_commit.strip()
         if not commit:
             ti=task_integration_row(tid)
@@ -5291,6 +5298,11 @@ def create_app(settings=None):
         if not row: raise GitSafetyError("No MergeRecord for this repository on this Task")
         branch,commit=decision.effective_source_for_repo(d,repository_id)
         if not commit: raise GitSafetyError("No verified source commit for this repository")
+        # External merge is a real Git fact, but a QA-gated Task still
+        # needs a signed exact-source receipt before we call it accepted.
+        pilot_guard=quality_merge_blocker(tid,repository_id,r["repo_name"],commit)
+        if pilot_guard:
+            raise GitSafetyError(f"Independent QA required before confirming external merge: {pilot_guard}")
         base_branch=row["base_branch"] or r["default_branch"] or "main"
         target_head=github_merge.target_head(r["repo_path"],base_branch)
         if not target_head or not github_merge.is_ancestor(r["repo_path"],commit,f"origin/{base_branch}"):
