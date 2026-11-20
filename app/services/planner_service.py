@@ -199,7 +199,7 @@ class PlannerAgentInvoker:
                 subtype = "unknown"
                 try:
                     payload = json.loads(result.stdout or "")
-                    if isinstance(payload, dict) and payload.get("subtype") in {
+                    if isinstance(payload, dict) and isinstance(payload.get("subtype"), str) and payload.get("subtype") in {
                         "error_max_turns", "error_max_structured_output_retries",
                         "error_during_execution", "error_max_budget_usd",
                     }:
@@ -216,17 +216,19 @@ class PlannerAgentInvoker:
                 # genuine invalid-structured-response defect, not a
                 # transient provider failure.
                 raise PlannerAgentError(f"Planner produced a non-JSON envelope: {exc}") from exc
+            if not isinstance(envelope, dict):
+                raise PlannerAgentError("Planner produced a non-object JSON envelope")
             if envelope.get("is_error") or envelope.get("subtype") != "success":
                 # Never put the raw error envelope in a user-visible error:
                 # it can include provider diagnostics, prompts or credentials.
                 subtype = envelope.get("subtype")
-                if subtype not in {
+                if not isinstance(subtype, str) or subtype not in {
                     "error_max_turns", "error_max_structured_output_retries",
                     "error_during_execution", "error_max_budget_usd",
                 }:
                     subtype = "unknown"
                 stop_reason = envelope.get("stop_reason")
-                if stop_reason not in {"tool_use", "end_turn", "max_tokens"}:
+                if not isinstance(stop_reason, str) or stop_reason not in {"tool_use", "end_turn", "max_tokens"}:
                     stop_reason = "unknown"
                 last_error = PlannerAgentError(
                     f"Planner run reported an error (attempt {attempt}/{self.max_attempts}, "
