@@ -230,3 +230,14 @@ def test_trusted_signer_refuses_uncommitted_source_and_wrong_sha(tmp_path):
     f.write_text("value = 2\n")
     with pytest.raises(ValueError, match="not clean"):
         independent_attest(exact_sha=sha, **kwargs)
+
+
+
+def test_signer_rejects_self_attestation_of_the_trusted_checkout(tmp_path):
+    from scripts.agent_quality_sign_pilot import TRUSTED_ROOT, independent_attest
+    with pytest.raises(ValueError, match="must be isolated"):
+        independent_attest(
+            worktree=TRUSTED_ROOT, exact_sha=SHA,
+            projectflow_task_id=TASK, repository_id=REPO,
+            repository_name=NAME, destination=tmp_path / "receipts",
+            signing_key=KEY)
