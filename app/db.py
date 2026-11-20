@@ -1592,6 +1592,14 @@ ALTER TABLE merge_records ADD COLUMN webhook_updated_at TEXT;
     (37, """
 ALTER TABLE repositories ADD COLUMN git_fingerprint TEXT;
 """),
+    # Agent observability P0 (specs/001-agent-observability-recovery,
+    # DRAFT): the read-only per-task observability view bounds its
+    # agent_sessions read by task_id. Every other evidence table it reads
+    # already has a task_id / (workspace_type, workspace_id) index. Index
+    # only -- no data change; rollback is DROP INDEX.
+    (38, """
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_task ON agent_sessions(task_id, id);
+"""),
 ]
 
 

@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
 from app.services.authz_service import ROLE_LEVEL
-from tests.conftest import build_client, run
+from conftest import build_client, run
 
 
 TEST_SECRET_ENCRYPTION_KEY = "M2RXNV3dhIR-lc1WoE8DGxt-kowfK-34xGTIcF1t8m4="  # test-only, never a real deployment key
