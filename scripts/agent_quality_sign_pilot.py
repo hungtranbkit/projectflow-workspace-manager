@@ -37,7 +37,13 @@ def independent_attest(*, worktree: Path, exact_sha: str,
     """Do not sign agent-authored reports or an unclean/moving checkout."""
     worktree = worktree.resolve()
     destination = destination.resolve()
-    if destination.is_relative_to(worktree) or destination.is_relative_to(TRUSTED_ROOT):
+    trusted_source = TRUSTED_ROOT.resolve()
+    # A single checkout is not an independent QA boundary: otherwise
+    # agent-changed policy/tests could become their own trusted reference.
+    if (worktree == trusted_source or worktree.is_relative_to(trusted_source)
+            or trusted_source.is_relative_to(worktree)):
+        raise ValueError("QA source and target checkout must be isolated")
+    if destination.is_relative_to(worktree) or destination.is_relative_to(trusted_source):
         raise ValueError("Receipt must be outside agent worktree and trusted source tree")
     if not worktree.is_dir() or not repository_name or projectflow_task_id < 1 or repository_id < 1:
         raise ValueError("Valid QA worktree/task/repository identity required")
@@ -55,8 +61,21 @@ def independent_attest(*, worktree: Path, exact_sha: str,
         if (TRUSTED_ROOT / name).read_bytes() != (worktree / name).read_bytes():
             raise ValueError(f"QA infrastructure changed; reviewer must re-approve: {name}")
     with tempfile.TemporaryDirectory(prefix="projectflow-qa-pilot-") as temp:
+        # Test subprocesses execute target source code. Never inherit
+        # attestation keys, GitHub tokens, CLI auth or user PYTHONPATH.
+        # Isolate HOME/TMPDIR as well as the subprocess environment.
+        test_env = {
+            name: os.environ[name]
+            for name in ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
+            if name in os.environ
+        }
+        test_env.update({
+            "HOME": temp, "TMPDIR": temp,
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        })
         report = run_task_gate(PILOT_POLICY_TASK, root=worktree,
-                               report_dir=Path(temp))
+                               report_dir=Path(temp), test_env=test_env)
         if report["status"] != "PASS":
             raise ValueError(f"QA did not pass: {report['failure_reasons']}")
         if _git(worktree, "rev-parse", "HEAD") != exact_sha or _git(worktree, "status", "--porcelain"):
