@@ -23,7 +23,7 @@ there is no automatic merge, no auto-deploy, and no change to existing CI.
 
 ## Run locally from the repository root
 
-`````bash
+```bash
 python3 -m pytest -q tests/test_agent_quality_pilot.py
 python3 scripts/agent_quality_pilot.py \
   --task-id QA-PILOT-001 \
@@ -35,7 +35,7 @@ python3 scripts/agent_quality_pilot.py \
   --task-id QA-PILOT-UI-MISSING \
   --file scripts/agent_quality_pilot.py --require-ui
 # Expected: FAIL
-`````
+```
 
 ## Acceptance limits / rollout
 
