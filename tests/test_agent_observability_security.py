@@ -394,3 +394,143 @@ def test_upgrade_is_atomic_on_failure(legacy_db, monkeypatch):
 def test_fresh_store_marks_migration_done_with_no_legacy_counters(tmp_path):
     s = obs.ObservabilityEventStore(tmp_path / "new.db")
     assert not any(k.startswith("legacy_") for k in s.counters())
+
+
+# ---------------------------------------------------------------- QA last-fix 1: conflicting child clocks
+
+RUNNING = {"id": 3, "state": "RUNNING_VERIFIED", "cleanup": "NOT_STARTED", "time_used_percent": 40,
+           "overdue": False, "finished": False}
+EXPIRED = {"id": 3, "state": "EXPIRED", "cleanup": "CLEANUP_PENDING", "time_used_percent": 100,
+           "overdue": False, "finished": True}
+
+
+@pytest.mark.parametrize("active,recent", [
+    ([RUNNING], [EXPIRED]), ([EXPIRED], [RUNNING]),            # across lists, both orders
+    ([RUNNING, EXPIRED], []), ([], [EXPIRED, RUNNING]),        # within one list, both orders
+    ([RUNNING, dict(RUNNING)], []),                            # even identical duplicates are ambiguous
+])
+def test_duplicate_child_id_is_conflict_never_green(active, recent):
+    snap = snapshot()
+    snap["monitors"][0].update(active_tasks=active, recent_tasks=recent)
+    out = attach(snap)
+    assert "HARNESS_CHILD_CONFLICT" in out["blockers"]
+    assert out["time_budget"]["status"] == "UNKNOWN"
+    assert out["execution"] != "RUNNING_VERIFIED"
+    assert "child_conflict_overrides_running" in out["reasons"]
+
+
+def test_identical_copy_in_active_and_recent_is_not_a_conflict():
+    # real harness_progress.summarize() lists an open child in both lists
+    snap = snapshot()
+    snap["monitors"][0].update(active_tasks=[RUNNING], recent_tasks=[dict(RUNNING)])
+    out = attach(snap)
+    assert out["time_budget"]["status"] == "KNOWN" and "HARNESS_CHILD_CONFLICT" not in out["blockers"]
+    assert out["execution"] == "RUNNING_VERIFIED"
+
+
+def test_duplicate_of_unlinked_child_does_not_block_linked_child():
+    snap = snapshot()
+    other = dict(RUNNING, id=9)
+    snap["monitors"][0]["recent_tasks"] = [other, dict(other, state="EXPIRED")]
+    out = attach(snap)
+    assert out["time_budget"]["status"] == "KNOWN" and "HARNESS_CHILD_CONFLICT" not in out["blockers"]
+
+
+# ---------------------------------------------------------------- QA last-fix 3: malformed list elements
+
+@pytest.mark.parametrize("mutate", [
+    lambda m: m.append("junk"),
+    lambda m: m.append(["list"]),
+    lambda m: m.append(None),
+    lambda m: m.append({"no_id": True}),
+    lambda m: m.append({"id": 5}),
+    lambda m: m.append({"id": "has space"}),
+    lambda m: m.append({"id": PRIVATE}),
+    lambda m: m.insert(0, {"id": AID, "kind": "project", "completion_percent": 100,
+                           "gates_passed": 6, "gates_total": 6}),  # duplicate monitor, good-looking
+    lambda m: m.append({"id": "OTHER_MON"}) or m.append({"id": "OTHER_MON"}),
+])
+def test_malformed_or_duplicate_monitor_element_is_unknown(mutate):
+    snap = snapshot()
+    mutate(snap["monitors"])
+    out = attach(snap)
+    assert out["completion_percent"] is None
+    assert "HARNESS_EVIDENCE_MALFORMED" in out["blockers"]
+    assert out["time_budget"]["status"] == "UNKNOWN"
+    assert PRIVATE not in json.dumps(out)
+
+
+@pytest.mark.parametrize("key", ["active_tasks", "recent_tasks"])
+@pytest.mark.parametrize("junk", ["EXPIRED", ["EXPIRED"], 3, None, {"state": "EXPIRED"},
+                                  {"id": "3", "state": "EXPIRED"}, {"id": True}, {"id": 0}, {"id": -3}])
+def test_malformed_child_element_is_unknown_not_partial(key, junk):
+    snap = snapshot()
+    snap["monitors"][0][key] = list(snap["monitors"][0].get(key, [])) + [junk]
+    out = attach(snap)
+    assert out["completion_percent"] is None and out["time_budget"]["status"] == "UNKNOWN"
+    assert "HARNESS_EVIDENCE_MALFORMED" in out["blockers"]
+    assert out["execution"] != "RUNNING_VERIFIED" or out["time_budget"]["status"] == "UNKNOWN"
+
+
+# ---------------------------------------------------------------- QA last-fix 2: proof_ref privacy
+
+@pytest.mark.parametrize("ref", [
+    "ref:/home/alice/private", "pr:/etc/passwd", "issue:/Users/bob/x", "test_runs:1/2",
+    "pr:56\\x", "https://example.com/pr/56", "file:///home/alice", "ssh:git@host",
+    "pr:" + TOKEN, "token:" + TOKEN, "pr:abc", "pr:0", "pr:-1", "pr:56 ", "PR:56",
+    "unknown_type:5", "commit:XYZ", "commit:/home/alice", "pr:56:extra", "",
+])
+def test_unreviewed_or_path_like_proof_ref_fails_whole_link_file(tmp_path, ref):
+    reg = _registry(tmp_path / "cfg" / "registry.json")
+    good = {"pf_task_id": 8, "automation_id": AID, "harness_task_id": 3, "proof_ref": "pr:56",
+            "reviewed_on": "2026-11-20"}
+    bad = dict(good, pf_task_id=7, proof_ref=ref)
+    links = _write(tmp_path / "cfg" / "links.json", {"schema_version": 1, "links": [good, bad]})
+    out, why = obs.load_task_links(links, registry_path=reg)
+    assert out == {} and "proof_ref" in why  # whole file closed, not just the bad entry
+    assert ref == "" or ref not in why
+
+
+@pytest.mark.parametrize("ref", ["pr:56", "issue:12", "test_runs:9", "review_runs:4", "qa_runs:1",
+                                 "merge_records:2", "harness_tasks:3", "commit:86b4899", "commit:" + "a" * 40])
+def test_allowlisted_proof_refs_accepted(tmp_path, ref):
+    reg = _registry(tmp_path / "cfg" / "registry.json")
+    links = _write(tmp_path / "cfg" / "links.json", {"schema_version": 1, "links": [
+        {"pf_task_id": 7, "automation_id": AID, "harness_task_id": 3, "proof_ref": ref,
+         "reviewed_on": "2026-11-20"}]})
+    out, why = obs.load_task_links(links, registry_path=reg)
+    assert why == "ok" and out[7]["proof_ref"] == ref
+
+
+def test_path_proof_ref_never_reaches_api_json(client, tmp_path, monkeypatch):
+    db = sqlite3.connect(tmp_path / "test.db")
+    db.execute("INSERT INTO tasks(id,slug,title) VALUES(7,'t7','t7')")
+    db.commit()
+    db.close()
+    reg = _registry(tmp_path / "cfg" / "registry.json")
+    links = _write(tmp_path / "cfg" / "links.json", {"schema_version": 1, "links": [
+        {"pf_task_id": 7, "automation_id": AID, "harness_task_id": 3,
+         "proof_ref": "ref:/home/alice/private", "reviewed_on": "2026-11-20"}]})
+    monkeypatch.setenv("PROJECTFLOW_HARNESS_PROGRESS_JSON", str(_write(tmp_path / "s" / "snap.json", snapshot())))
+    monkeypatch.setenv("PROJECTFLOW_OBS_HARNESS_LINKS", str(links))
+    monkeypatch.setenv("PROJECTFLOW_HARNESS_REGISTRY", str(reg))
+    r = client.get("/api/tasks/7/observability")
+    assert r.status_code == 200
+    assert "/home/alice" not in r.text and "/home/alice" not in client.get("/tasks/7/observability").text
+    assert r.json()["harness_link"]["automation_id"] is None and r.json()["completion_percent"] is None
+
+
+# ---------------------------------------------------------------- QA last-fix 4: bounded backfill
+
+def test_backfill_is_bounded_by_retention_cap(legacy_db):
+    s = obs.ObservabilityEventStore(legacy_db, max_events=2, max_dedupe=50)
+    c = s.counters()
+    assert c["stored_events"] <= 2 and c["legacy_pruned_over_retention"] == 3
+    db = sqlite3.connect(legacy_db)
+    ledgered = db.execute("SELECT COUNT(*) FROM agent_obs_event_ids").fetchone()[0]
+    stored = {r[0] for r in db.execute("SELECT dedupe_key FROM agent_obs_events")}
+    bound = {r[0] for r in db.execute("SELECT dedupe_key FROM agent_obs_event_ids")}
+    db.close()
+    assert ledgered <= 2 and stored <= bound  # no surviving row left unledgered
+    # exact replay of a pruned historical event is still recognized via the dedupe ledger
+    assert s.ingest(raw("ok1"), observed_at=NOW).status == "DUPLICATE"

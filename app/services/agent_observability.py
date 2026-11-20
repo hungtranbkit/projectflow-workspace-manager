@@ -104,6 +104,13 @@ EVIDENCE_CURRENCY = ("CURRENT", "HISTORIC", "UNKNOWN")
 
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 REF_RE = re.compile(r"^[a-z_]{2,40}:[A-Za-z0-9_.:/-]{1,128}$")
+# Reviewed task->Harness link proof: a strict POSITIVE allowlist of
+# reference types with numeric ids (or a commit hash). No slash/backslash,
+# no URI schemes, no free text -- nothing path- or token-like can pass.
+PROOF_REF_RE = re.compile(
+    r"^(?:(?:pr|issue|test_runs|review_runs|qa_runs|merge_records|deployments|"
+    r"verification_reports|harness_tasks|harness_events):[1-9][0-9]{0,9}"
+    r"|commit:[0-9a-f]{7,40})$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 
 # Values that look like credentials or private locations are never stored.
@@ -405,18 +412,32 @@ class ObservabilityEventStore:
         event_id binds the ledger; if pre-fix data already holds the SAME
         event_id under different dedupe_key/content, NONE of those rows is
         trusted: all are moved to quarantine (legacy_event_id_conflict) and
-        the id stays bound, so it can never be reassigned later. Pruned
-        events whose ids are unknowable are only counted, never guessed."""
+        the id stays bound, so it can never be reassigned later.
+
+        Replay of PRUNED historical events (documented limitation): their
+        event_id was never recorded, so it cannot be backfilled. Their
+        dedupe_key usually still is (agent_obs_dedupe outlives events up to
+        max_dedupe), so an exact replay stays DUPLICATE; a replay under a
+        NEW dedupe_key with the same event_id is indistinguishable from a
+        new event and is accepted once, then bound. Such entries are only
+        counted (legacy_pruned_without_event_id), never guessed."""
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")  # one writer; all-or-nothing
             if db.execute("SELECT 1 FROM agent_obs_meta WHERE key=?",
                           (self.LEDGER_MIGRATION,)).fetchone():
                 return
             now = datetime.now(timezone.utc)
-            # Every legacy row, not just the newest max_events: a store reopened
-            # with a smaller bound must not leave unledgered rows behind.
+            # Bounded work: apply the store's own retention cap FIRST (the same
+            # oldest-first pruning ingest() does), so at most max_events rows
+            # are backfilled and no unledgered row is left behind.
+            over = db.execute("""SELECT COUNT(*) FROM agent_obs_events WHERE seq <=
+                                 (SELECT MAX(seq) FROM agent_obs_events) - ?""",
+                              (self.max_events,)).fetchone()[0]
+            if over:
+                db.execute("""DELETE FROM agent_obs_events WHERE seq <=
+                              (SELECT MAX(seq) FROM agent_obs_events) - ?""", (self.max_events,))
             rows = db.execute("""SELECT seq,dedupe_key,content_hash,event_json FROM agent_obs_events
-                                 ORDER BY seq""").fetchall()
+                                 ORDER BY seq LIMIT ?""", (self.max_events,)).fetchall()
             unknown = db.execute("""SELECT COUNT(*) FROM agent_obs_dedupe d WHERE NOT EXISTS
                                     (SELECT 1 FROM agent_obs_events e WHERE e.dedupe_key=d.dedupe_key)""").fetchone()[0]
             groups: dict[tuple[str, str], list[sqlite3.Row]] = {}
@@ -452,6 +473,7 @@ class ObservabilityEventStore:
                 self._quarantine(db, Quarantine("legacy_malformed", "stored event unreadable", None, None), now)
                 db.execute("DELETE FROM agent_obs_events WHERE seq=?", (seq,))
             for name, value in (("legacy_event_id_conflicts", conflicted), ("legacy_malformed", len(bad)),
+                                ("legacy_pruned_over_retention", over),
                                 ("legacy_pruned_without_event_id", unknown)):
                 if value:
                     db.execute("""INSERT INTO agent_obs_counters(name,value) VALUES(?,?)
@@ -977,8 +999,8 @@ def load_task_links(path: str | Path | None, *,
         if hid is not None and (type(hid) is not int or hid <= 0):
             return {}, "link file invalid: harness_task_id"
         ref = entry.get("proof_ref")
-        if not isinstance(ref, str) or not REF_RE.match(ref) or looks_sensitive(ref):
-            return {}, "link file invalid: proof_ref required (table:id / pr:number style)"
+        if not isinstance(ref, str) or not PROOF_REF_RE.match(ref) or looks_sensitive(ref):
+            return {}, "link file invalid: proof_ref must be an allowlisted reference (e.g. pr:56)"
         try:
             datetime.strptime(str(entry.get("reviewed_on")), "%Y-%m-%d")
         except ValueError:
@@ -999,6 +1021,7 @@ CLEANUP_STATES = {"NOT_STARTED", "CLEANUP_PENDING", "CLEANED_VERIFIED"}
 MAX_GATES = 1000
 MAX_SNAPSHOT_MONITORS = 500
 MAX_MONITOR_TASKS = 500
+_MONITOR_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,90}$")
 # Exact shapes scripts/harness_progress.duration()/task_clock() produce.
 _DURATION_RE = re.compile(r"^(?:\d{1,3}h \d{2}m|\d{1,4}m \d{2}s)$")
 _DEADLINE_RE = re.compile(r"^\d{2}/\d{2} \d{2}:\d{2}$")
@@ -1042,9 +1065,15 @@ def _validated_monitor(snapshot: Any, automation_id: str) -> tuple[str, dict[str
     monitors = snapshot.get("monitors")
     if not isinstance(monitors, list) or len(monitors) > MAX_SNAPSHOT_MONITORS:
         raise _Malformed
-    found = [m for m in monitors if isinstance(m, dict) and m.get("id") == automation_id]
-    if len(found) > 1:
-        raise _Malformed  # ambiguous: never pick one
+    seen_ids: set[str] = set()
+    for item in monitors:
+        # Every element must be a well-formed monitor: a skipped junk/
+        # duplicate element could be hiding conflicting or negative evidence.
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) \
+                or not _MONITOR_ID_RE.match(item["id"]) or item["id"] in seen_ids:
+            raise _Malformed
+        seen_ids.add(item["id"])
+    found = [m for m in monitors if m["id"] == automation_id]
     if not found:
         return health["status"], None
     m = found[0]
@@ -1063,12 +1092,29 @@ def _validated_monitor(snapshot: Any, automation_id: str) -> tuple[str, dict[str
         out["gates_total"] = total
         out["gates_passed"] = _int_in(m.get("gates_passed"), 0, total)
     clocks: list[dict[str, Any]] = []
+    conflicts: set[int] = set()
+    by_id: dict[int, dict[str, Any]] = {}
     for key in ("active_tasks", "recent_tasks"):
         items = m.get(key, [])
         if not isinstance(items, list) or len(items) > MAX_MONITOR_TASKS:
             raise _Malformed
-        clocks += [t for t in items if isinstance(t, dict)]
+        in_list: set[int] = set()
+        for t in items:
+            if not isinstance(t, dict) or type(t.get("id")) is not int or t["id"] <= 0:
+                raise _Malformed  # never "partial evidence" from a list with junk in it
+            cid = t["id"]
+            if cid in in_list:
+                conflicts.add(cid)  # same child twice in ONE list: always ambiguous
+            in_list.add(cid)
+            # harness_progress lists an open child in BOTH active_tasks and
+            # recent_tasks as the same task_clock() dict; only a DIFFERENT
+            # copy (e.g. RUNNING vs EXPIRED) is contradictory.
+            if cid in by_id and by_id[cid] != t:
+                conflicts.add(cid)
+            by_id.setdefault(cid, t)
+            clocks.append(t)
     out["clocks"] = clocks
+    out["conflicting_child_ids"] = conflicts  # never pick one of a conflicting pair
     return health["status"], out
 
 
@@ -1157,7 +1203,15 @@ def attach_harness(view: dict[str, Any], *, snapshot: dict[str, Any] | None,
     if harness_task_id is None:
         out["time_budget"] = _unknown_budget("no Harness child task linked")
         return out
-    matches = [t for t in monitor["clocks"] if type(t.get("id")) is int and t.get("id") == harness_task_id]
+    if harness_task_id in monitor["conflicting_child_ids"]:
+        out["blockers"].append("HARNESS_CHILD_CONFLICT")
+        out["time_budget"] = _unknown_budget("linked Harness child listed more than once with "
+                                             "possibly conflicting state")
+        if out.get("execution") == "RUNNING_VERIFIED":
+            out["execution"] = "UNKNOWN"  # ambiguity could be hiding an expired child
+            out["reasons"].append("child_conflict_overrides_running")
+        return out
+    matches = [t for t in monitor["clocks"] if t["id"] == harness_task_id]
     if not matches:
         out["time_budget"] = _unknown_budget("linked Harness child not in this monitor's snapshot")
         return out
