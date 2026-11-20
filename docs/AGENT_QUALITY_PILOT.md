@@ -53,3 +53,39 @@ python3 scripts/agent_quality_pilot.py \
 Sample report schema: `status`, `task_id`, `generated_at_utc`, `scope_files`,
 `lint_violations`, `test_command`, `test_exit_code`, `test_log`,
 `ui_required`, `ui_evidence`, `git_head`, `failure_reasons`, `limitations`.
+
+
+## Task-scoped rollout test (real ProjectFlow module)
+
+The first runner above is only a self-test. For a **real** repository task,
+the opt-in task runner reads the reviewed, version-controlled policy
+`config/agent_quality_tasks_pilot.json`; the coding agent cannot override
+the test suite, source files or UI requirement with CLI flags. The policy
+pins these example tasks:
+
+- `PROJECTFLOW-MONITOR-REPORT-PILOT`: checks
+  `scripts/harness_monitor_report.py` against the **real**
+  `tests/test_harness_monitor_report.py` regression suite.
+- `PROJECTFLOW-QUALITY-SELFTEST`: checks the original pilot rules and its tests.
+- `PROJECTFLOW-UI-NEGATIVE-PILOT`: intentionally fails without a real
+  screenshot/video, even when the agent does not request UI verification.
+
+Run on a separate Linux worktree or a disposable checkout:
+
+```bash
+python3 -m pytest -q tests/test_agent_quality_pilot.py tests/test_agent_quality_task_gate.py
+python3 scripts/agent_quality_task_gate.py --task-id PROJECTFLOW-MONITOR-REPORT-PILOT
+python3 scripts/agent_quality_task_gate.py --task-id PROJECTFLOW-UI-NEGATIVE-PILOT
+```
+
+A PASS writes a machine-generated JSON/log pair under
+`artifacts/agent-quality-pilot/`, including pinned tests, exit code,
+commit SHA, per-file SHA256 digests, policy hash, worktree dirty flag,
+and failure reasons. **A failed lint rule, failed test, missing test
+file, unknown task, or missing required UI proof must block the gate.**
+
+This is **not** a new approval or merge mechanism. A source proof is
+not equivalent to real-device UI evidence, independent reviewer
+acceptance, or production smoke tests. Do not open a PR while the
+repository's `.github/workflows/ci.yml` still runs GitHub Actions on
+all pull requests; branch-only work avoids this trigger.
