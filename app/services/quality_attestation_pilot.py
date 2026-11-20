@@ -6,6 +6,7 @@ proof; this module only verifies that proof. Disabled by default.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -13,6 +14,10 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 PILOT_POLICY_TASK = "PROJECTFLOW-MONITOR-REPORT-PILOT"
 PILOT_TEST = "tests/test_harness_monitor_report.py"
@@ -50,6 +55,16 @@ def verified_receipt(receipt: dict, key: str, *, task_id: int, repository_id: in
         provided = sign_receipt(payload, key)["hmac_sha256"]
         if not hmac.compare_digest(signature, provided):
             return "QUALITY_ATTESTATION_INVALID"
+        return _validate_payload(payload, task_id=task_id, repository_id=repository_id,
+                                 repository_name=repository_name, expected_sha=expected_sha, now=now)
+    except (ValueError, TypeError, KeyError):
+        return "QUALITY_ATTESTATION_INVALID"
+
+
+def _validate_payload(payload: dict, *, task_id: int, repository_id: int,
+                      repository_name: str, expected_sha: str, now: datetime | None) -> str | None:
+    """Shared semantic check: both HMAC and Ed25519 bind the same exact task and SHA."""
+    try:
         if (payload.get("schema_version") != 1 or
             payload.get("projectflow_task_id") != task_id or
             payload.get("repository_id") != repository_id or
@@ -84,6 +99,46 @@ def verified_receipt(receipt: dict, key: str, *, task_id: int, repository_id: in
     return None
 
 
+
+def sign_ed25519_receipt(payload: dict, private_key_pem: bytes) -> dict:
+    """Sign with an asymmetric private key held only by the independent QA host."""
+    private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+    if not isinstance(private_key, Ed25519PrivateKey):
+        raise ValueError("Expected an Ed25519 private signing key")
+    signature = private_key.sign(_canonical(payload))
+    return {
+        "payload": payload, "signature_algorithm": "Ed25519",
+        "ed25519_signature": base64.b64encode(signature).decode("ascii"),
+    }
+
+
+def verified_ed25519_receipt(receipt: dict, public_key_pem: bytes, *,
+                             task_id: int, repository_id: int,
+                             repository_name: str, expected_sha: str,
+                             now: datetime | None = None) -> str | None:
+    """Verify a detached signature; the verifier never holds the private key."""
+    try:
+        if (not isinstance(receipt, dict) or
+            set(receipt) != {"payload", "signature_algorithm", "ed25519_signature"} or
+            receipt.get("signature_algorithm") != "Ed25519" or
+            not isinstance(receipt.get("payload"), dict)):
+            return "QUALITY_ATTESTATION_INVALID"
+        signature_text = receipt.get("ed25519_signature")
+        if not isinstance(signature_text, str):
+            return "QUALITY_ATTESTATION_INVALID"
+        signature = base64.b64decode(signature_text, validate=True)
+        if len(signature) != 64:
+            return "QUALITY_ATTESTATION_INVALID"
+        public_key = serialization.load_pem_public_key(public_key_pem)
+        if not isinstance(public_key, Ed25519PublicKey):
+            return "QUALITY_ATTESTATION_CONFIG"
+        public_key.verify(signature, _canonical(receipt["payload"]))
+    except (ValueError, TypeError, InvalidSignature, OverflowError):
+        return "QUALITY_ATTESTATION_INVALID"
+    return _validate_payload(receipt["payload"], task_id=task_id, repository_id=repository_id,
+                             repository_name=repository_name, expected_sha=expected_sha, now=now)
+
+
 def quality_merge_blocker(task_id: int, repository_id: int, repository_name: str,
                           expected_sha: str | None, *,
                           environ: dict | None = None,
@@ -108,8 +163,12 @@ def quality_merge_blocker(task_id: int, repository_id: int, repository_name: str
     if selected_repo != repository_name:
         return None
     key = env.get("PROJECTFLOW_QUALITY_ATTESTATION_KEY")
+    public_key_path = env.get("PROJECTFLOW_QUALITY_ATTESTATION_PUBLIC_KEY_FILE", "").strip()
     state_dir = env.get("PROJECTFLOW_QUALITY_ATTESTATION_DIR")
-    if not key or len(key.encode("utf-8")) < 32 or not state_dir:
+    if not state_dir or (bool(key) == bool(public_key_path)):
+        # Exactly one verification method. No silent fallback if public-key mode fails.
+        return "QUALITY_ATTESTATION_CONFIG"
+    if not public_key_path and (not isinstance(key, str) or len(key.encode("utf-8")) < 32):
         return "QUALITY_ATTESTATION_CONFIG"
     if not expected_sha or not SHA_RE.fullmatch(expected_sha):
         return "QUALITY_ATTESTATION_STALE"
@@ -125,6 +184,21 @@ def quality_merge_blocker(task_id: int, repository_id: int, repository_name: str
         return "QUALITY_ATTESTATION_MISSING"
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return "QUALITY_ATTESTATION_INVALID"
+    if public_key_path:
+        pubfile = Path(public_key_path).expanduser()
+        try:
+            if pubfile.is_symlink() or not pubfile.is_file() or pubfile.stat().st_size > 4096:
+                return "QUALITY_ATTESTATION_CONFIG"
+            public_pem = pubfile.read_bytes()
+        except OSError:
+            return "QUALITY_ATTESTATION_CONFIG"
+        try:
+            return verified_ed25519_receipt(receipt, public_pem,
+                                            task_id=task_id, repository_id=repository_id,
+                                            repository_name=repository_name,
+                                            expected_sha=expected_sha, now=now)
+        except (ValueError, TypeError):
+            return "QUALITY_ATTESTATION_INVALID"
     return verified_receipt(receipt, key, task_id=task_id, repository_id=repository_id,
                             repository_name=repository_name, expected_sha=expected_sha,
                             now=now)
