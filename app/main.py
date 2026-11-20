@@ -3594,6 +3594,63 @@ def create_app(settings=None):
     def api_task_evidence(tid:int, _authz: None = Depends(require_read_role("task", "tid"))):
         task_row(tid); return evidence_store.for_task(tid)
 
+    # ---- Agent observability P0 (specs/001-agent-observability-recovery,
+    # DRAFT, T010/T011 read-only slice). GET only: reads app DB through a
+    # sqlite mode=ro connection, normalizes/dedupes IN MEMORY, never writes,
+    # never starts/stops/retries anything. Operator-only (same read guard as
+    # /evidence). Completion % is NOT computed here -- Harness gates own it.
+    def _observability(tid: int):
+        from datetime import datetime as _dt, timezone as _tz
+        from app.services import agent_observability as _obs
+        task_row(tid)
+        raws = _obs.projectflow_session_events(settings.db_path, node_id="local",
+                                               project_id="projectflow", task_id=tid)
+        return _obs.view_from_raw(raws, at=_dt.now(_tz.utc))
+
+    @app.get("/api/tasks/{tid}/observability")
+    def api_task_observability(tid: int, _authz: None = Depends(require_read_role("task", "tid"))):
+        view, events, _q = _observability(tid)
+        return {"task_id": tid, "schema": "agent-observability-view-v1-draft", **view,
+                "latest_events": events[-5:]}
+
+    @app.get("/api/tasks/{tid}/observability/events")
+    def api_task_observability_events(tid: int, cursor: int = 0, limit: int = 50,
+                                      _authz: None = Depends(require_read_role("task", "tid"))):
+        limit = max(1, min(int(limit), 200))
+        _view, events, _q = _observability(tid)
+        page = [e for e in events if e["seq"] > cursor][:limit]
+        nxt = page[-1]["seq"] if len(page) == limit else None
+        return {"task_id": tid, "events": page, "next_cursor": nxt}
+
+    @app.get("/tasks/{tid}/observability", response_class=HTMLResponse)
+    def task_observability_page(tid: int, _authz: None = Depends(require_read_role("task", "tid"))):
+        from html import escape as _e
+        view, events, _q = _observability(tid)
+        fresh = view["freshness"]
+        ms = "".join(f'<li>{"✅ ĐÃ CÓ BẰNG CHỨNG" if ok else "⬜ CHƯA"} — {_e(k)}</li>'
+                     for k, ok in view["milestones"].items())
+        rows = "".join(
+            f'<li><b>{_e(e["kind"])}</b> {_e(e.get("tool_kind") or "")} · {_e(e["occurred_at"][11:19])}Z'
+            f' · <i>{_e(e["provenance_level"])}</i>{" · " + _e(e["result"]) if e.get("result") else ""}</li>'
+            for e in events[-30:][::-1])
+        comp = view["completion_percent"]
+        body = f"""<!doctype html><html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Agent observability</title>
+<style>body{{font:15px/1.45 system-ui,sans-serif;margin:0;padding:12px 16px;max-width:640px;background:#fff;color:#111}}
+.card{{border:1px solid #ccc;border-radius:8px;padding:10px 12px;margin:10px 0;overflow-wrap:anywhere}}
+ul{{padding-left:18px;margin:4px 0}}@media (prefers-color-scheme:dark){{body{{background:#111;color:#eee}}.card{{border-color:#444}}}}</style>
+</head><body><h1 style="font-size:20px">Task #{tid} — agent observability (draft, read-only)</h1>
+<div class="card"><b>Dispatch:</b> {_e(view["dispatch"])}<br><b>Execution:</b> {_e(view["execution"])}<br>
+<b>Delivery stage:</b> {_e(view["delivery_stage"])}<br><b>Lý do:</b> {_e(", ".join(view["reasons"]) or "—")}</div>
+<div class="card"><b>Độ tươi:</b> {"STALE / UNKNOWN" if fresh["stale"] else "fresh"}; bằng chứng xác minh gần nhất:
+{_e(fresh["last_verified_at"] or "không có")}</div>
+<div class="card"><b>% hoàn tất đã nghiệm thu:</b> {"UNKNOWN" if comp is None else f"{int(comp)}%"} — {_e(view["completion_source"])}.
+Hoạt động/token/heartbeat không làm tăng %.</div>
+<div class="card"><b>Mốc giao hàng (độc lập):</b><ul>{ms}</ul></div>
+<div class="card"><b>Timeline ({view["event_count"]} sự kiện, {view["quarantined"]} cách ly)</b><ul>{rows or "<li>chưa có sự kiện</li>"}</ul></div>
+</body></html>"""
+        return HTMLResponse(body)
+
     # ---------------------------------------------- Engineering Domain (E1)
     # Change -> Task, Change/Task -> WorkProduct, Task -> input/output
     # WorkProduct. Additive layer above the existing Task model -- see
