@@ -15,6 +15,9 @@ import sys
 import tempfile
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
+# Invoking python /path/to/scripts/agent_quality_sign_pilot.py from any cwd,
+# including python -I, must load THIS trusted repository's app package.
+sys.path.insert(0, str(SCRIPT_ROOT.parent))
 sys.path.insert(0, str(SCRIPT_ROOT))
 from agent_quality_task_gate import load_task_policy, run_task_gate  # noqa: E402
 from app.services.quality_attestation_pilot import (  # noqa: E402
