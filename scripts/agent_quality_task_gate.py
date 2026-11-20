@@ -59,14 +59,15 @@ def load_task_policy(task_id: str, root: Path = REPO_ROOT) -> tuple[dict, Path]:
 
 
 def run_task_gate(task_id: str, *, root: Path = REPO_ROOT,
-                  report_dir: Path | None = None, ui_evidence: str | None = None) -> dict:
+                  report_dir: Path | None = None, ui_evidence: str | None = None,
+                  test_env: dict[str, str] | None = None) -> dict:
     """Use only the tests pinned in a reviewed, version-controlled policy."""
     root = root.resolve()
     task, policy_path = load_task_policy(task_id, root)
     command = [sys.executable, "-m", "pytest", "-q", *task["test_files"]]
     report = quality_gate(task_id, task["code_files"], root=root,
                           report_dir=report_dir, require_ui=task["ui_required"],
-                          ui_evidence=ui_evidence, test_command=command)
+                          ui_evidence=ui_evidence, test_command=command, test_env=test_env)
     tracked_paths = [*task["code_files"], *task["test_files"], POLICY_RELATIVE_PATH]
     try:
         git_status = subprocess.run(
