@@ -44,3 +44,9 @@ Report only: đã làm / đang làm / sẽ làm, verified gate %, child TTL % (d
 - T005–T009 → `app/services/agent_observability.py` (schema/provenance, replay-safe bounded store, three dimensions + freshness, Harness % / TTL reuse, read-only adapters).
 - T010/T011 partial → read-only `GET /api/tasks/{tid}/observability[/events]` and `/tasks/{tid}/observability` (mobile HTML), no writes.
 - Tests: `tests/test_agent_observability.py`. Not done: T002, T004, T012–T018, real-node pilot, 375/428 px screenshot smoke, latency p95.
+
+### P0 repair slice (2026-11-20, PR #56 review)
+- Bounded task-scoped SQL reads + migration 38 index; Harness % / TTL via explicit reviewed link + existing snapshot file only (UNKNOWN otherwise); mobile page with two independent meters; T004 draft YAML outside `specs/` (baseline untouched, not approved).
+- Tests: `tests/test_agent_observability.py`, `tests/test_agent_observability_p0_repair.py`.
+- Visual: headless Chromium 375/428 px, no horizontal overflow (evidence kept outside repo on NEC1: `/home/rag/workspace/qa-evidence/agent-observability-p0-20261120/`). T011 still PARTIAL: no real-node pilot, no multi-node/subagent drill-down.
+- Full pytest remains INCONCLUSIVE (not re-run); only targeted groups were run.

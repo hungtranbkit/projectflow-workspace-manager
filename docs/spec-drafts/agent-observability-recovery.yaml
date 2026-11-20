@@ -1,0 +1,122 @@
+# DRAFT FeatureSpec for specs/001-agent-observability-recovery (T004).
+#
+# Deliberately stored OUTSIDE specs/: SpecRegistry.baseline_digest() hashes
+# every *.yaml under specs/ (rglob), so placing this file there -- even as
+# status: draft -- would change the canonical baseline digest recorded by
+# deployments.spec_baseline_sha256. Moving it to
+# specs/features/agent-observability-recovery.yaml is a separate, reviewed
+# step (see specs/001-agent-observability-recovery/review-t003.md, T004).
+#
+# status MUST stay "draft". It is NOT approved; SpecGate returns
+# SPEC_NOT_APPROVED for any Task linked to it (tests/test_agent_observability_p0_repair.py).
+# ID prefix "AO" keeps ids unique across the whole specs/ tree.
+schema_version: 1
+id: FEAT-AGENT-OBSERVABILITY
+title: Agent Observability (read-only, P0)
+version: 1
+status: draft
+summary: >
+  A read-only, operator-only view of what an assigned agent actually did for
+  one Task: normalized, provenance-labelled events; separate dispatch /
+  execution / delivery dimensions with freshness; and verified completion
+  and child time budget copied from the existing Harness progress snapshot
+  only when an explicit reviewed link exists. It never starts, stops,
+  retries or schedules an agent and never computes its own completion %.
+scope:
+  includes:
+    - Event normalization, provenance ceilings and redaction
+      (app/services/agent_observability.py normalize())
+    - Replay-safe bounded observation store (agent_obs_* tables)
+    - Task-bounded read-only adapters over agent_sessions and evidence tables
+    - Derived dispatch / execution / delivery view with freshness
+    - Copying Harness completion % and child TTL from the existing snapshot file
+    - GET /api/tasks/{tid}/observability, /observability/events, /tasks/{tid}/observability
+  excludes:
+    - Any write route, retry/resume/recovery action (P1, separate approval)
+    - CLI hook installation or settings changes (T002)
+    - A second scheduler, timer, monitor or task ledger
+    - Multi-node fleet monitoring / live Terminal MCP feed
+    - Public (unauthenticated) dashboards
+    - TaskDecisionService status/stage/READY_FOR_MAIN/DONE computation
+requirements:
+  - id: REQ-AO-001
+    text: >
+      Every ingested event is validated against the allowlisted schema;
+      an event with missing or invalid node/project/task/session/agent
+      identity is quarantined and never assigned by inference.
+  - id: REQ-AO-002
+    text: >
+      Each source has a provenance ceiling; a claimed provenance above the
+      ceiling is downgraded and flagged. Only LOCAL_OBSERVED or stronger
+      evidence can certify RUNNING_VERIFIED; only INDEPENDENT_ACCEPTANCE
+      can mark the accepted milestone.
+  - id: REQ-AO-003
+    text: >
+      Duplicate or replayed events (same dedupe key and content) are
+      stored once; the same key with different content is quarantined and
+      never rewrites history; a session is never relabeled to another task.
+  - id: REQ-AO-004
+    text: >
+      Dispatch, execution and delivery milestones (submitted, running
+      verified, tests, review, QA, merged, deployed, accepted) are reported
+      independently; stale evidence yields UNKNOWN, a heartbeat without
+      progress yields STALLED, never RUNNING_VERIFIED.
+  - id: REQ-AO-005
+    text: >
+      Completion percent and child TTL are copied only from the existing
+      Harness progress snapshot for an explicitly reviewed task link;
+      without a valid link, or with a stale/unhealthy/malformed snapshot,
+      both are UNKNOWN (never 0%). Activity volume never changes them.
+  - id: REQ-AO-006
+    text: >
+      Observability reads are bounded to the requested task (SQL filtered
+      by task_id or its own workspace ids, with LIMIT and indices) and
+      never select prompts, transcripts, cwd, stdout/stderr, findings or
+      notes; GET routes never write any database or start any process.
+  - id: REQ-AO-007
+    text: >
+      Observability routes use the existing per-task read authorization
+      (require_read_role); a caller outside the task's organization gets
+      404 and an unauthenticated caller gets 401 under AUTH_MODE=required.
+acceptance_criteria:
+  - id: AC-AO-001
+    text: >
+      Replaying an out-of-order fixture twice yields exactly one stored
+      event per unique id, and identity-less events are quarantined.
+  - id: AC-AO-002
+    text: >
+      A secret, path, IP or raw prompt in any input field is absent from
+      the stored SQLite file and from every API/HTML response.
+  - id: AC-AO-003
+    text: >
+      A disconnected or stale source shows UNKNOWN/STALE, never
+      RUNNING_VERIFIED or accepted.
+  - id: AC-AO-004
+    text: >
+      A burst of thousands of activity-only events leaves the completion
+      percent identical; a task without a reviewed Harness link shows
+      UNKNOWN for both completion and TTL.
+  - id: AC-AO-005
+    text: >
+      With a large mixed-task database, the task view references only the
+      requested task's rows, every query plan is an index SEARCH, and
+      truncation is reported.
+  - id: AC-AO-006
+    text: >
+      GET requests leave app DB row counts, the Harness DB and the
+      snapshot file byte-identical.
+  - id: AC-AO-007
+    text: >
+      At 375 px and 428 px the operator page has no horizontal overflow
+      and shows both meters (or UNKNOWN text) plus last verified evidence,
+      blockers and provenance.
+invariants:
+  - id: INV-AO-001
+    text: >
+      The observability feature never creates a task scheduler, timer,
+      monitor, or task-status ledger, and never writes Task, Workspace,
+      AgentSession or Harness task rows.
+  - id: INV-AO-002
+    text: >
+      No observability value (event count, tokens, heartbeat, duration)
+      contributes to a completion percentage.

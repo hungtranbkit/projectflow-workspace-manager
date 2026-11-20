@@ -614,50 +614,184 @@ def derive_task_view(events: list[dict[str, Any]], *, at: datetime,
 # T009 — reuse Harness gate completion + immutable child TTL (no new math)
 # --------------------------------------------------------------------------
 
+HARNESS_SNAPSHOT_SCHEMA = "harness-progress-v1"
+MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
+DEFAULT_HARNESS_SNAPSHOT = Path.home() / ".local/state/projectflow-harness/monitor-progress.json"
+DEFAULT_HARNESS_REGISTRY = Path(__file__).resolve().parents[2] / "config/harness_monitor_registry.json"
+AUTOMATION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12,90}$")  # same rule as harness_monitor_bridge.ID_RE
+
+
+def _read_small_json(path: Path, limit: int) -> Any:
+    if path.is_symlink():
+        raise ObservabilityError("symlink refused")
+    if not path.is_file():
+        raise FileNotFoundError(str(path))
+    if path.stat().st_size > limit:
+        raise ObservabilityError("file too large")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_harness_snapshot(path: str | Path | None) -> tuple[dict[str, Any] | None, str]:
+    """Read the private snapshot that the EXISTING Harness timer already
+    writes (scripts/harness_progress.py --write). Read-only: does not call
+    summarize() (which opens HarnessStore and runs CREATE TABLE/WAL)."""
+    if path is None:
+        return None, "Harness progress snapshot path not configured"
+    try:
+        data = _read_small_json(Path(path), MAX_SNAPSHOT_BYTES)
+    except FileNotFoundError:
+        return None, "Harness progress snapshot absent on this node"
+    except (OSError, ValueError, ObservabilityError):
+        return None, "Harness progress snapshot unreadable or malformed"
+    if not isinstance(data, dict) or data.get("schema") != HARNESS_SNAPSHOT_SCHEMA \
+            or not isinstance(data.get("monitors"), list):
+        return None, "Harness progress snapshot has unsupported schema"
+    return data, "ok"
+
+
+def _enabled_automations(registry_path: Path) -> set[str]:
+    data = _read_small_json(registry_path, MAX_SNAPSHOT_BYTES)
+    if not isinstance(data, dict) or data.get("schema_version") != 1 or \
+            not isinstance(data.get("automations"), list):
+        raise ObservabilityError("unsupported Harness registry")
+    return {a["automation_id"] for a in data["automations"]
+            if isinstance(a, dict) and a.get("configured_enabled") is True
+            and isinstance(a.get("automation_id"), str)}
+
+
+def load_task_links(path: str | Path | None, *,
+                    registry_path: str | Path = DEFAULT_HARNESS_REGISTRY) -> tuple[dict[int, dict[str, Any]], str]:
+    """Explicit, operator-reviewed ProjectFlow task -> Harness automation /
+    child links. No such mapping exists elsewhere in the architecture, and
+    it is NEVER inferred (titles, repos, goals). Absent file -> no links.
+    Any invalid entry fails the WHOLE file closed (no partial trust)."""
+    if path is None:
+        return {}, "no reviewed ProjectFlow task -> Harness link file is configured"
+    try:
+        data = _read_small_json(Path(path), 1024 * 1024)
+    except FileNotFoundError:
+        return {}, "reviewed ProjectFlow task -> Harness link file absent"
+    except (OSError, ValueError, ObservabilityError):
+        return {}, "link file unreadable or malformed"
+    try:
+        enabled = _enabled_automations(Path(registry_path))
+    except (OSError, ValueError, ObservabilityError):
+        return {}, "Harness registry unreadable; links refused"
+    if not isinstance(data, dict) or data.get("schema_version") != 1 or \
+            not isinstance(data.get("links"), list):
+        return {}, "link file has unsupported schema"
+    out: dict[int, dict[str, Any]] = {}
+    for entry in data["links"]:
+        if not isinstance(entry, dict):
+            return {}, "link file invalid: entry is not an object"
+        tid, aid, hid = entry.get("pf_task_id"), entry.get("automation_id"), entry.get("harness_task_id")
+        if type(tid) is not int or tid <= 0 or tid in out:
+            return {}, "link file invalid: pf_task_id missing/duplicate"
+        if not isinstance(aid, str) or not AUTOMATION_ID_RE.match(aid) or aid not in enabled:
+            return {}, "link file invalid: automation_id not an enabled Harness monitor"
+        if hid is not None and (type(hid) is not int or hid <= 0):
+            return {}, "link file invalid: harness_task_id"
+        ref = entry.get("proof_ref")
+        if not isinstance(ref, str) or not REF_RE.match(ref) or looks_sensitive(ref):
+            return {}, "link file invalid: proof_ref required (table:id / pr:number style)"
+        try:
+            datetime.strptime(str(entry.get("reviewed_on")), "%Y-%m-%d")
+        except ValueError:
+            return {}, "link file invalid: reviewed_on date required"
+        out[tid] = {"automation_id": aid, "harness_task_id": hid, "proof_ref": ref,
+                    "reviewed_on": entry["reviewed_on"]}
+    return out, "ok"
+
+
+def _unknown_budget(reason: str) -> dict[str, Any]:
+    return {"status": "UNKNOWN", "reason": reason, "time_used_percent": None}
+
+
 def attach_harness(view: dict[str, Any], *, snapshot: dict[str, Any] | None,
                    automation_id: str | None, harness_task_id: int | None = None,
-                   at: datetime | None = None, health_max_age: int = 900) -> dict[str, Any]:
+                   at: datetime | None = None, health_max_age: int = 900,
+                   unknown_reason: str | None = None) -> dict[str, Any]:
     """Copy (never recompute) completion % and child TTL from the existing
-    scripts/harness_progress.summarize() snapshot. Stale/absent snapshot or
-    unhealthy service -> UNKNOWN, never the last green value."""
+    scripts/harness_progress.summarize() snapshot. Stale/absent snapshot,
+    missing link or unhealthy service -> UNKNOWN (never 0%, never the last
+    green value). `time_budget` is always present and independent of %."""
     out = dict(view)
     out["blockers"] = list(view.get("blockers", []))
+    out["reasons"] = list(view.get("reasons", []))
+    out["harness_link"] = {"automation_id": automation_id, "harness_task_id": harness_task_id}
     if snapshot is None or automation_id is None:
+        why = unknown_reason or ("no validated Harness link for this task" if automation_id is None
+                                 else "Harness snapshot unavailable")
         out["completion_percent"] = None
-        out["completion_source"] = "UNKNOWN: Harness snapshot unavailable"
+        out["completion_source"] = f"UNKNOWN: {why}"
+        out["time_budget"] = _unknown_budget(why)
         return out
     health = snapshot.get("health") or {}
     try:
         snap_age = (_aware(at or datetime.now(timezone.utc)) - _aware(snapshot["observed_at"])).total_seconds()
-    except (KeyError, ObservabilityError, ValueError):
+    except (KeyError, ObservabilityError, ValueError, TypeError):
         snap_age = None
-    monitor = next((m for m in snapshot.get("monitors", []) if m.get("id") == automation_id), None)
-    if snap_age is None or snap_age > health_max_age or snap_age < -300 or health.get("status") != "HEALTHY":
+    monitor = next((m for m in snapshot.get("monitors", [])
+                    if isinstance(m, dict) and m.get("id") == automation_id), None)
+    fresh = not (snap_age is None or snap_age > health_max_age or snap_age < -300
+                 or health.get("status") != "HEALTHY")
+    if not fresh:
         out["completion_percent"] = None
         out["completion_source"] = "UNKNOWN: Harness snapshot stale or service not HEALTHY"
         out["blockers"].append("HARNESS_EVIDENCE_STALE")
-    elif monitor is None:
+        out["time_budget"] = _unknown_budget("Harness snapshot stale or service not HEALTHY")
+        return out
+    if monitor is None:
         out["completion_percent"] = None
-        out["completion_source"] = "UNKNOWN: automation not in Harness snapshot"
-    else:
-        out["completion_percent"] = monitor.get("completion_percent")
+        out["completion_source"] = "UNKNOWN: linked automation not in Harness snapshot"
+        out["time_budget"] = _unknown_budget("linked automation not in Harness snapshot")
+        return out
+    pct = monitor.get("completion_percent")
+    if monitor.get("kind") == "maintenance" or pct is None:
+        out["completion_percent"] = None
+        out["completion_source"] = "N/A: maintenance monitor has no completion %"
+    elif type(pct) is int and 0 <= pct <= 100:
+        out["completion_percent"] = pct
         out["completion_source"] = ("harness_progress: PASSED evidence gates only "
-                                    f"({monitor.get('gates_passed')}/{monitor.get('gates_total')})"
-                                    if monitor.get("completion_percent") is not None
-                                    else "N/A: maintenance monitor has no completion %")
-    if monitor is not None and harness_task_id is not None:
-        clock = next((t for t in monitor.get("active_tasks", []) + monitor.get("recent_tasks", [])
-                      if t.get("id") == harness_task_id), None)
-        if clock is not None:
-            out["time_budget"] = {k: clock.get(k) for k in (
-                "state", "cleanup", "time_used_percent", "time_used_label",
-                "time_budget_label", "remaining_label", "deadline_local", "overdue", "finished")}
-            if clock.get("cleanup") == "CLEANUP_PENDING" or clock.get("state") == "EXPIRED" or clock.get("overdue"):
-                out["blockers"].append("CLEANUP_PENDING" if clock.get("cleanup") == "CLEANUP_PENDING"
-                                       else "TTL_EXPIRED")
-                if out.get("execution") == "RUNNING_VERIFIED":
-                    out["execution"] = "UNKNOWN"
-                    out["reasons"] = list(out.get("reasons", [])) + ["ttl_expired_overrides_running"]
+                                    f"({monitor.get('gates_passed')}/{monitor.get('gates_total')})")
+    else:
+        out["completion_percent"] = None
+        out["completion_source"] = "UNKNOWN: malformed Harness completion value"
+    if harness_task_id is None:
+        out["time_budget"] = _unknown_budget("no Harness child task linked")
+        return out
+    clock = next((t for t in list(monitor.get("active_tasks", [])) + list(monitor.get("recent_tasks", []))
+                  if isinstance(t, dict) and t.get("id") == harness_task_id), None)
+    if clock is None:
+        out["time_budget"] = _unknown_budget("linked Harness child not in this monitor's snapshot")
+        return out
+    out["time_budget"] = {"status": "KNOWN", **{k: clock.get(k) for k in (
+        "state", "cleanup", "time_used_percent", "time_used_label",
+        "time_budget_label", "remaining_label", "deadline_local", "overdue", "finished")}}
+    if clock.get("cleanup") == "CLEANUP_PENDING" or clock.get("state") == "EXPIRED" or clock.get("overdue"):
+        out["blockers"].append("CLEANUP_PENDING" if clock.get("cleanup") == "CLEANUP_PENDING"
+                               else "TTL_EXPIRED")
+        if out.get("execution") == "RUNNING_VERIFIED":
+            out["execution"] = "UNKNOWN"
+            out["reasons"].append("ttl_expired_overrides_running")
+    return out
+
+
+def harness_view_for_task(view: dict[str, Any], *, task_id: int, at: datetime,
+                          snapshot_path: str | Path | None, links_path: str | Path | None,
+                          registry_path: str | Path = DEFAULT_HARNESS_REGISTRY) -> dict[str, Any]:
+    """Resolve the explicit link, then attach the existing Harness snapshot.
+    Pure reads; no Harness DB connection at all."""
+    links, why = load_task_links(links_path, registry_path=registry_path)
+    link = links.get(task_id)
+    if link is None:
+        return attach_harness(view, snapshot=None, automation_id=None, at=at,
+                              unknown_reason=why if why != "ok" else "task has no reviewed Harness link")
+    snapshot, swhy = load_harness_snapshot(snapshot_path)
+    out = attach_harness(view, snapshot=snapshot, automation_id=link["automation_id"],
+                         harness_task_id=link["harness_task_id"], at=at,
+                         unknown_reason=None if snapshot else swhy)
+    out["harness_link"]["proof_ref"] = link["proof_ref"]
     return out
 
 
@@ -687,25 +821,63 @@ def _stamp(iso: str) -> str:
     return _aware(iso).strftime("%Y%m%dT%H%M%S%fZ")
 
 
-def projectflow_session_events(db_path: str | Path, *, node_id: str, project_id: str,
-                               limit: int = 500, task_id: int | None = None) -> list[dict[str, Any]]:
-    """Read-only (sqlite mode=ro) projection of agent_sessions + evidence
-    tables into raw events. Never selects cwd, transcript_tail, prompts,
-    stdout/stderr, findings or notes. Event ids are stable so re-reading the
-    same rows is a no-op replay."""
+# (table, kind, columns needed, status column, time column, PASS values, FAIL values)
+_EVIDENCE_TABLES = (
+    ("review_runs", "review_result", "status", "completed_at", {"PASS"}, {"FIX_REQUIRED", "FAIL"}),
+    ("qa_runs", "qa_result", "status", "completed_at", {"PASS"}, {"FAIL"}),
+    ("merge_records", "merge_recorded", "merge_status", "merged_at", {"MERGED"}, {"FAILED"}),
+    ("deployments", "deploy_recorded", "status", "finished_at", {"VERIFIED"}, {"FAILED", "ROLLED_BACK"}),
+)
+MAX_SESSIONS = 50
+MAX_EVIDENCE_ROWS = 200
+MAX_WORKSPACES = 50
+
+
+def _columns(db: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in db.execute(f"PRAGMA table_info({table})")}  # table names are constants
+
+
+def projectflow_task_events(db_path: str | Path, *, task_id: int, node_id: str, project_id: str,
+                            session_limit: int = MAX_SESSIONS,
+                            evidence_limit: int = MAX_EVIDENCE_ROWS) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Read-only (sqlite mode=ro), TASK-BOUNDED projection of agent_sessions
+    and evidence tables into raw events.
+
+    Every SQL statement is filtered by this one task_id (or by the agent
+    workspace ids that belong to it) and has a LIMIT, using existing
+    indices (idx_agent_sessions_task, idx_review_runs_task, idx_qa_runs_task,
+    idx_merge_records_task, idx_deployments_lookup, idx_agent_task,
+    idx_test_entity). Never selects cwd, transcript_tail, prompts,
+    stdout/stderr, findings, notes, URLs or commands. Missing tables/columns
+    (older schema) are skipped and reported in meta, not guessed.
+    Returns (raw_events, meta)."""
+    if type(task_id) is not int or task_id <= 0:
+        raise ObservabilityError("task_id must be a positive int")
+    session_limit = max(1, min(int(session_limit), MAX_SESSIONS))
+    evidence_limit = max(1, min(int(evidence_limit), MAX_EVIDENCE_ROWS))
     out: list[dict[str, Any]] = []
-    base = {"schema_version": SCHEMA_VERSION, "node_id": node_id, "project_id": project_id}
+    meta: dict[str, Any] = {"task_id": task_id, "truncated": [], "skipped_sources": [],
+                            "session_count": 0, "workspace_count": 0}
+    base = {"schema_version": SCHEMA_VERSION, "node_id": node_id, "project_id": project_id,
+            "task_id": f"pf-task-{task_id}"}
     db = _ro_connect(db_path)
     try:
         tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        sessions = db.execute(
-            """SELECT id,task_id,workspace_id,agent,status,started_at,last_activity_at,
-                      exited_at,exit_code FROM agent_sessions
-               WHERE task_id IS NOT NULL AND (? IS NULL OR task_id=?)
-               ORDER BY id DESC LIMIT ?""", (task_id, task_id, limit)).fetchall()
+        sessions = []
+        if "agent_sessions" in tables:
+            sessions = db.execute(
+                """SELECT id,task_id,workspace_id,agent,status,started_at,last_activity_at,
+                          exited_at,exit_code FROM agent_sessions
+                   WHERE task_id=? ORDER BY id DESC LIMIT ?""",
+                (task_id, session_limit + 1)).fetchall()
+            if len(sessions) > session_limit:
+                meta["truncated"].append("agent_sessions")
+                sessions = sessions[:session_limit]
+        else:
+            meta["skipped_sources"].append("agent_sessions")
+        meta["session_count"] = len(sessions)
         for s in sessions:
-            ident = {**base, "task_id": f"pf-task-{s['task_id']}",
-                     "session_id": f"pf-session-{s['id']}",
+            ident = {**base, "session_id": f"pf-session-{s['id']}",
                      "agent_id": f"{s['agent']}-{s['id']}",
                      "worktree_ref": f"pf-workspace-{s['workspace_id']}",
                      "source": "projectflow_agent_session",
@@ -728,48 +900,61 @@ def projectflow_session_events(db_path: str | Path, *, node_id: str, project_id:
                             "kind": "process_failed" if s["status"] == "FAILED" else "process_exited",
                             "result": "FAIL" if failed else "PASS",
                             "occurred_at": _ts(s["exited_at"])})
-        # Evidence rows are bound to the latest session of the same task.
-        latest = {}
-        for s in sessions:
-            latest.setdefault(s["task_id"], s)
+        # Evidence binds to the task's latest session, or to a task-scoped
+        # evidence lane when no session exists (never to another task).
+        lane = ({"session_id": f"pf-session-{sessions[0]['id']}",
+                 "agent_id": f"{sessions[0]['agent']}-{sessions[0]['id']}"} if sessions else
+                {"session_id": f"pf-task-{task_id}-evidence", "agent_id": "projectflow-evidence"})
 
-        def evidence(kind: str, table: str, rid: int, task_id: int, status: str, at: str | None,
+        def evidence(kind: str, table: str, rid: int, status: str, at: str | None,
                      pass_values: set[str], fail_values: set[str]) -> None:
-            s = latest.get(task_id)  # also enforces the optional task filter
-            if s is None or not at:
+            if not at:
                 return
             result = "PASS" if status in pass_values else "FAIL" if status in fail_values else "PENDING"
-            out.append({**base, "task_id": f"pf-task-{task_id}",
-                        "session_id": f"pf-session-{s['id']}", "agent_id": f"{s['agent']}-{s['id']}",
-                        "source": "projectflow_evidence", "provenance_level": "LOCAL_VERIFIED",
+            out.append({**base, **lane, "source": "projectflow_evidence",
+                        "provenance_level": "LOCAL_VERIFIED",
                         "event_id": f"pf-{table}-{rid}-{status}", "kind": kind, "result": result,
                         "sanitized_evidence_ref": f"{table}:{rid}", "occurred_at": _ts(at)})
-        if "review_runs" in tables:
-            for r in db.execute("SELECT id,task_id,status,completed_at FROM review_runs WHERE task_id IS NOT NULL"):
-                evidence("review_result", "review_runs", r["id"], r["task_id"], r["status"],
-                         r["completed_at"], {"PASS"}, {"FIX_REQUIRED", "FAIL"})
-        if "qa_runs" in tables:
-            for r in db.execute("SELECT id,task_id,status,completed_at FROM qa_runs"):
-                evidence("qa_result", "qa_runs", r["id"], r["task_id"], r["status"],
-                         r["completed_at"], {"PASS"}, {"FAIL"})
-        if "merge_records" in tables:
-            for r in db.execute("SELECT id,task_id,merge_status,merged_at FROM merge_records"):
-                evidence("merge_recorded", "merge_records", r["id"], r["task_id"], r["merge_status"],
-                         r["merged_at"], {"MERGED"}, set())
-        if "deployments" in tables:
-            for r in db.execute("SELECT id,task_id,status,finished_at FROM deployments WHERE task_id IS NOT NULL"):
-                evidence("deploy_recorded", "deployments", r["id"], r["task_id"], r["status"],
-                         r["finished_at"], {"VERIFIED"}, {"FAILED", "ROLLED_BACK"})
-        if "test_runs" in tables:
-            ws_task = {s["workspace_id"]: s["task_id"] for s in sessions}
-            for r in db.execute("""SELECT id,workspace_id,status,finished_at FROM test_runs
-                                   WHERE workspace_type='agent'"""):
-                if r["workspace_id"] in ws_task:
-                    evidence("test_result", "test_runs", r["id"], ws_task[r["workspace_id"]],
-                             r["status"], r["finished_at"], {"PASSED", "PASS"}, {"FAILED", "FAIL", "ERROR"})
+
+        for table, kind, status_col, time_col, ok, bad in _EVIDENCE_TABLES:
+            if table not in tables or not {"id", "task_id", status_col, time_col} <= _columns(db, table):
+                meta["skipped_sources"].append(table)
+                continue
+            rows = db.execute(
+                f"SELECT id,{status_col} AS st,{time_col} AS at FROM {table} "
+                "WHERE task_id=? ORDER BY id DESC LIMIT ?", (task_id, evidence_limit + 1)).fetchall()
+            if len(rows) > evidence_limit:
+                meta["truncated"].append(table)
+                rows = rows[:evidence_limit]
+            for r in reversed(rows):
+                evidence(kind, table, r["id"], r["st"], r["at"], ok, bad)
+
+        # test_runs has no task_id: bound by this task's own agent workspaces.
+        ws_ids: set[int] = {s["workspace_id"] for s in sessions if s["workspace_id"] is not None}
+        if "agent_workspaces" in tables and "task_id" in _columns(db, "agent_workspaces"):
+            ws_ids |= {r[0] for r in db.execute(
+                "SELECT id FROM agent_workspaces WHERE task_id=? ORDER BY id DESC LIMIT ?",
+                (task_id, MAX_WORKSPACES))}
+        ws_ids = set(sorted(ws_ids, reverse=True)[:MAX_WORKSPACES])
+        meta["workspace_count"] = len(ws_ids)
+        if "test_runs" not in tables or not {"id", "workspace_type", "workspace_id", "status",
+                                               "finished_at"} <= _columns(db, "test_runs"):
+            meta["skipped_sources"].append("test_runs")
+        elif ws_ids:
+            marks = ",".join("?" * len(ws_ids))
+            rows = db.execute(
+                f"""SELECT id,status,finished_at FROM test_runs
+                    WHERE workspace_type='agent' AND workspace_id IN ({marks})
+                    ORDER BY id DESC LIMIT ?""", (*sorted(ws_ids), evidence_limit + 1)).fetchall()
+            if len(rows) > evidence_limit:
+                meta["truncated"].append("test_runs")
+                rows = rows[:evidence_limit]
+            for r in reversed(rows):
+                evidence("test_result", "test_runs", r["id"], r["status"], r["finished_at"],
+                         {"PASSED", "PASS"}, {"FAILED", "FAIL", "ERROR"})
     finally:
         db.close()
-    return out
+    return out, meta
 
 
 HARNESS_STATE_KIND = {
@@ -845,3 +1030,112 @@ def view_from_raw(raws: Iterable[Any], *, at: datetime,
     view = derive_task_view(events, at=at, policy=policy)
     view["quarantined"] = quarantined
     return view, events, quarantined
+
+
+# --------------------------------------------------------------------------
+# T011 (partial) — mobile operator page. Pure function of the view; every
+# value is HTML-escaped. Two INDEPENDENT meters: verified completion (from
+# Harness only) and child TTL time budget. UNKNOWN is text, never a bar.
+# --------------------------------------------------------------------------
+
+_PAGE_CSS = """
+:root{--bg:#fff;--fg:#14171a;--muted:#5b6470;--line:#d6dae0;--card:#f7f8fa;
+--ok:#1e7b46;--warn:#9a5b00;--bad:#b3261e;--track:#e6e9ee;--done:#2e8b57;--ttl:#c77700}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121417;--fg:#e8eaed;
+--muted:#a0a8b3;--line:#333a42;--card:#1b1f24;--ok:#5cc98a;--warn:#f0b35a;--bad:#ff8a80;
+--track:#2a3037;--done:#4fbf7f;--ttl:#f0a030}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,sans-serif}
+main{max-width:640px;margin:0 auto;padding:12px 16px 32px}
+h1{font-size:18px;margin:4px 0 2px}h2{font-size:15px;margin:0 0 6px}
+.sub{color:var(--muted);font-size:13px;margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;
+overflow-wrap:anywhere;word-break:break-word;min-width:0}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px 10px}
+.k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.03em}.v{font-weight:600}
+.meter{height:12px;border-radius:6px;background:var(--track);overflow:hidden;margin:6px 0 4px}
+.meter>span{display:block;height:100%}
+.m-done>span{background:var(--done)}.m-ttl>span{background:var(--ttl)}
+.unknown{border:1px dashed var(--muted);border-radius:6px;padding:6px 8px;color:var(--muted);font-weight:600}
+.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:0 8px;font-size:12px;margin:2px 4px 2px 0}
+.bad{color:var(--bad)}.ok{color:var(--ok)}.warn{color:var(--warn)}
+ul{padding-left:18px;margin:4px 0}li{margin:3px 0}
+.tl li{list-style:none;margin-left:-18px;border-left:2px solid var(--line);padding-left:8px}
+.small{font-size:12px;color:var(--muted)}
+"""
+
+
+def render_operator_page(task_id: int, view: dict[str, Any], events: list[dict[str, Any]]) -> str:
+    from html import escape as e
+    fresh = view.get("freshness", {})
+    comp = view.get("completion_percent")
+    budget = view.get("time_budget") or _unknown_budget("not computed")
+    exec_state = view.get("execution", "UNKNOWN")
+    exec_cls = {"RUNNING_VERIFIED": "ok", "WAITING_FOR_INPUT": "warn", "STALLED": "warn",
+                "FAILED": "bad", "UNKNOWN": "bad"}.get(exec_state, "")
+
+    if type(comp) is int:
+        comp_html = (f'<div class="v">{comp}% gate đã nghiệm thu (verified)</div>'
+                     f'<div class="meter m-done" role="img" aria-label="verified completion {comp}%">'
+                     f'<span style="width:{comp}%"></span></div>')
+    else:
+        comp_html = '<div class="unknown">UNKNOWN — không hiển thị % khi thiếu chứng cứ</div>'
+    comp_html += f'<div class="small">{e(str(view.get("completion_source", "")))}</div>'
+
+    used = budget.get("time_used_percent")
+    if budget.get("status") == "KNOWN" and type(used) is int and 0 <= used <= 100:
+        ttl_html = (f'<div class="v">{used}% thời hạn TTL đã dùng (không phải % code)</div>'
+                    f'<div class="meter m-ttl" role="img" aria-label="child TTL used {used}%">'
+                    f'<span style="width:{used}%"></span></div>'
+                    f'<div class="small">đã dùng {e(str(budget.get("time_used_label")))} / '
+                    f'{e(str(budget.get("time_budget_label")))} · còn {e(str(budget.get("remaining_label")))}'
+                    f' · hạn {e(str(budget.get("deadline_local")))} · {e(str(budget.get("state")))}'
+                    f'{" · QUÁ HẠN" if budget.get("overdue") else ""}</div>')
+    else:
+        ttl_html = (f'<div class="unknown">UNKNOWN — {e(str(budget.get("reason", "no TTL evidence")))}</div>')
+
+    ms_labels = {"submitted": "Đã gửi (submitted)", "running_verified": "Đang chạy có chứng cứ",
+                 "tests_passed": "Tests PASS", "review_passed": "Review PASS", "qa_passed": "QA PASS",
+                 "merged": "Merged", "deployed": "Deployed", "accepted": "Nghiệm thu độc lập"}
+    ms = "".join(f'<li>{"✅ CÓ" if ok else "⬜ CHƯA"} — {e(ms_labels.get(k, k))}</li>'
+                 for k, ok in view.get("milestones", {}).items())
+    blockers = view.get("blockers", [])
+    reasons = view.get("reasons", [])
+    last_ver = next((x for x in reversed(events) if _RANK.get(x.get("provenance_level"), -1)
+                     >= _RANK["LOCAL_OBSERVED"]), None)
+    last_html = ("không có chứng cứ đã xác minh" if last_ver is None else
+                 f'{e(last_ver["kind"])} · {e(last_ver["occurred_at"])} · '
+                 f'<span class="tag">{e(last_ver["provenance_level"])}</span>'
+                 + (f' <span class="tag">{e(last_ver["sanitized_evidence_ref"])}</span>'
+                    if last_ver.get("sanitized_evidence_ref") else ""))
+    rows = "".join(
+        f'<li><b>{e(x["kind"])}</b>{" · " + e(x["tool_kind"]) if x.get("tool_kind") else ""}'
+        f' · {e(x["occurred_at"][11:19])}Z{" · " + e(x["result"]) if x.get("result") else ""}<br>'
+        f'<span class="tag">{e(x["provenance_level"])}</span>'
+        f'<span class="tag">{e(x["session_id"])}</span></li>'
+        for x in events[-30:][::-1])
+    bounds = view.get("read_bounds") or {}
+    trunc = bounds.get("truncated") or []
+    return f"""<!doctype html><html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent observability</title><style>{_PAGE_CSS}</style></head><body><main>
+<h1>Task #{int(task_id)} · Agent observability</h1>
+<p class="sub">DRAFT · chỉ đọc · operator-only. {e(str(view.get("scope_note", "")))}</p>
+<section class="card"><h2>Trạng thái (3 chiều độc lập)</h2><div class="grid">
+<div><div class="k">Dispatch</div><div class="v">{e(view.get("dispatch", "UNKNOWN"))}</div></div>
+<div><div class="k">Execution</div><div class="v {exec_cls}">{e(exec_state)}</div></div>
+<div><div class="k">Delivery</div><div class="v">{e(view.get("delivery_stage", "NOT_STARTED"))}</div></div>
+<div><div class="k">Độ tươi</div><div class="v {"bad" if fresh.get("stale") else "ok"}">{"STALE → UNKNOWN" if fresh.get("stale") else "FRESH"}</div></div>
+</div></section>
+<section class="card"><h2>① Hoàn tất đã nghiệm thu (Harness gates)</h2>{comp_html}
+<div class="small">Token, heartbeat, số tool call không bao giờ làm tăng %.</div></section>
+<section class="card"><h2>② Thời hạn task con (TTL)</h2>{ttl_html}</section>
+<section class="card"><h2>Chứng cứ xác minh gần nhất</h2><div>{last_html}</div></section>
+<section class="card"><h2>Blockers / lý do</h2>
+<div>{"".join(f'<span class="tag bad">{e(b)}</span>' for b in blockers) or '<span class="small">không có blocker từ Harness</span>'}</div>
+<div class="small">{e(", ".join(reasons)) or "—"}</div></section>
+<section class="card"><h2>Mốc giao hàng</h2><ul>{ms}</ul></section>
+<section class="card"><h2>Timeline ({int(view.get("event_count", 0))} sự kiện · {int(view.get("quarantined", 0))} cách ly)</h2>
+<ul class="tl">{rows or "<li>chưa có sự kiện</li>"}</ul>
+{f'<div class="small warn">Đọc có giới hạn, đã cắt: {e(", ".join(trunc))}</div>' if trunc else ""}</section>
+</main></body></html>"""

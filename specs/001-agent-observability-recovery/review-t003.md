@@ -21,3 +21,11 @@
 - Whether `ObservabilityEventStore` lives in the Harness SQLite (tested coexistence) or elsewhere; who runs ingestion (must be the existing reconcile service, not a new timer).
 - Default stale (15 min) / stall (10 min) thresholds.
 - Whether `delivery_stage` should be folded into TaskDecisionService output.
+
+## P0 repair decisions (2026-11-20, PR #56 review follow-up)
+| # | Topic | Decision |
+| --- | --- | --- |
+| 12 | Unbounded evidence reads | `projectflow_task_events()` filters every SELECT by `task_id` (or the task's own `agent_workspaces.id` for `test_runs`) with LIMIT (50 sessions / 200 rows per table) and reports truncation. New migration 38 adds `idx_agent_sessions_task(task_id,id)` (index only; rollback = DROP INDEX). Every other table already had a task index; query plans are index SEARCH (tested). |
+| 13 | Task → Harness mapping | No ProjectFlow task ↔ Harness automation mapping exists anywhere in the architecture (`harness_monitor_receipts` maps Harness children to Terminal MCP ids only). It is NOT inferred. An optional operator-reviewed link file (`PROJECTFLOW_OBS_HARNESS_LINKS`, schema_version 1, each entry needs an enabled registry automation, `proof_ref`, `reviewed_on`) is read; any invalid entry rejects the whole file. Absent → completion and TTL UNKNOWN, never 0%. **Review item:** who owns/approves this file. |
+| 14 | Harness snapshot source | GET reads the `monitor-progress.json` FILE that the existing timer already writes (`harness_progress.py --write`), path `PROJECTFLOW_HARNESS_PROGRESS_JSON`. It never calls `summarize()` / `HarnessStore` (they would CREATE TABLE / set WAL — a write). Symlink, >4 MiB, wrong schema, stale >900 s or non-HEALTHY → UNKNOWN. |
+| 15 | T004 FeatureSpec | Draft at `docs/spec-drafts/agent-observability-recovery.yaml` (status draft, ids `*-AO-*`). Kept **outside `specs/`** because `baseline_digest()` hashes every `specs/**/*.yaml`. Moving it into `specs/features/` changes the baseline digest and is a separate reviewed step; not approved; SpecGate → SPEC_NOT_APPROVED (tested). |

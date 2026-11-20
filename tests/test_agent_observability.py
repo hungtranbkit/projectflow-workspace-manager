@@ -350,14 +350,15 @@ def test_projectflow_adapter_is_read_only_replay_safe_and_leak_free(tmp_path, st
     src = tmp_path / "pf.db"
     _pf_db(src)
     before = hashlib.sha256(src.read_bytes()).hexdigest()
-    raws = obs.projectflow_session_events(src, node_id="nec1", project_id="projectflow")
+    raws, meta = obs.projectflow_task_events(src, task_id=7, node_id="nec1", project_id="projectflow")
+    assert meta["truncated"] == [] and "review_runs" in meta["skipped_sources"]
     assert hashlib.sha256(src.read_bytes()).hexdigest() == before
     blob = json.dumps(raws)
     for leaked in (SECRET, "/home/rag/wt", "password=x", "secret stdout", "pytest"):
         assert leaked not in blob
     first = store.ingest_many(raws, observed_at=NOW)
-    again = store.ingest_many(obs.projectflow_session_events(src, node_id="nec1",
-                                                             project_id="projectflow"),
+    again = store.ingest_many(obs.projectflow_task_events(src, task_id=7, node_id="nec1",
+                                                          project_id="projectflow")[0],
                               observed_at=NOW)
     assert first["QUARANTINED"] == 0 and again["ACCEPTED"] == 0
     v = view(store)
