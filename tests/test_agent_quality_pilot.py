@@ -77,3 +77,20 @@ def test_protects_path_traversal(tmp_path):
         pass
     else:
         raise AssertionError("outside repository accepted")
+
+
+
+def test_subprocess_uses_explicit_environment_without_signing_key(tmp_path, monkeypatch):
+    import os
+    monkeypatch.setenv("PROJECTFLOW_QUALITY_ATTESTATION_KEY", "secret-must-not-reach-target")
+    (tmp_path / "safe.py").write_text("pass\n", encoding="utf8")
+    command = [sys.executable, "-c", (
+        "import os; assert 'PROJECTFLOW_QUALITY_ATTESTATION_KEY' "
+        "not in os.environ; print('ISOLATED_ENV_PASS')"
+    )]
+    result = pilot.quality_gate(
+        "pilot-secret-isolation", ["safe.py"], root=tmp_path,
+        report_dir=tmp_path / "evidence", test_command=command,
+        test_env={"PATH": os.environ.get("PATH", "")})
+    assert result["status"] == "PASS", result["failure_reasons"]
+    assert "ISOLATED_ENV_PASS" in Path(result["test_log"]).read_text()
