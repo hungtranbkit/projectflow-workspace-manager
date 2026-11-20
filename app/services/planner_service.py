@@ -170,8 +170,11 @@ class PlannerAgentInvoker:
             executable = self.which("claude")
             if not executable:
                 raise PlannerAgentError("claude CLI not found in PATH")
+            # Structured output can require a finalization turn; a one-turn cap
+            # reproducibly returned error_max_turns for the requirements schema.
+            # Keep the call bounded and tool-less, rather than removing limits.
             argv = [executable, "-p", prompt, "--output-format", "json",
-                    "--json-schema", json.dumps(schema), "--tools", "", "--max-turns", "1"]
+                    "--json-schema", json.dumps(schema), "--tools", "", "--max-turns", "3"]
         else:
             # codex's non-interactive structured-output flags are not
             # wired for planning in this phase -- an honest
@@ -190,8 +193,21 @@ class PlannerAgentInvoker:
                 last_error = PlannerAgentError(f"Planner invocation failed: {exc} (attempt {attempt}/{self.max_attempts})")
                 continue
             if result.returncode != 0:
+                # On modern Claude CLI, nonzero structured-output failures are
+                # JSON envelopes on stdout (stderr may be empty). Keep only an
+                # allowlisted subtype: raw payload/errors may contain secrets.
+                subtype = "unknown"
+                try:
+                    payload = json.loads(result.stdout or "")
+                    if isinstance(payload, dict) and payload.get("subtype") in {
+                        "error_max_turns", "error_max_structured_output_retries",
+                        "error_during_execution", "error_max_budget_usd",
+                    }:
+                        subtype = payload["subtype"]
+                except (TypeError, ValueError):
+                    pass
                 last_error = PlannerAgentError(
-                    f"Planner exited {result.returncode} (attempt {attempt}/{self.max_attempts}): {(result.stderr or '')[:2000]}")
+                    f"Planner exited {result.returncode} (attempt {attempt}/{self.max_attempts}): subtype={subtype}")
                 continue
             try:
                 envelope = json.loads(result.stdout)
