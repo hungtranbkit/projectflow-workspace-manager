@@ -27,9 +27,12 @@ from datetime import datetime, timedelta, timezone
 import base64
 import binascii
 import hashlib
+import errno
 import json
+import os
 import re
 import sqlite3
+import stat
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
@@ -387,7 +390,74 @@ class ObservabilityEventStore:
                 CREATE TABLE IF NOT EXISTS agent_obs_counters (
                     name TEXT PRIMARY KEY, value INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS agent_obs_meta (
+                    key TEXT PRIMARY KEY, value TEXT NOT NULL
+                );
             """)
+        self._backfill_event_ids()
+
+    LEDGER_MIGRATION = "event_id_ledger_v1"
+
+    def _backfill_event_ids(self) -> None:
+        """One-time, idempotent, atomic upgrade of a store created before
+        the (source, event_id) ledger existed. Bounded by the store's own
+        retention (the events table is pruned on every ingest). First-seen row of an
+        event_id binds the ledger; if pre-fix data already holds the SAME
+        event_id under different dedupe_key/content, NONE of those rows is
+        trusted: all are moved to quarantine (legacy_event_id_conflict) and
+        the id stays bound, so it can never be reassigned later. Pruned
+        events whose ids are unknowable are only counted, never guessed."""
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")  # one writer; all-or-nothing
+            if db.execute("SELECT 1 FROM agent_obs_meta WHERE key=?",
+                          (self.LEDGER_MIGRATION,)).fetchone():
+                return
+            now = datetime.now(timezone.utc)
+            # Every legacy row, not just the newest max_events: a store reopened
+            # with a smaller bound must not leave unledgered rows behind.
+            rows = db.execute("""SELECT seq,dedupe_key,content_hash,event_json FROM agent_obs_events
+                                 ORDER BY seq""").fetchall()
+            unknown = db.execute("""SELECT COUNT(*) FROM agent_obs_dedupe d WHERE NOT EXISTS
+                                    (SELECT 1 FROM agent_obs_events e WHERE e.dedupe_key=d.dedupe_key)""").fetchone()[0]
+            groups: dict[tuple[str, str], list[sqlite3.Row]] = {}
+            bad: list[int] = []
+            for r in rows:
+                try:
+                    ev = json.loads(r["event_json"])
+                    key = (ev["source"], ev["event_id"])
+                    if not (ev["source"] in SOURCE_CEILING and isinstance(key[1], str)
+                            and ID_RE.match(key[1]) and ev.get("dedupe_key") == r["dedupe_key"]):
+                        raise ValueError
+                except (ValueError, KeyError, TypeError):
+                    bad.append(r["seq"])
+                    continue
+                groups.setdefault(key, []).append(r)
+            conflicted = 0
+            for (source, eid), grp in groups.items():
+                first = grp[0]
+                consistent = all(g["dedupe_key"] == first["dedupe_key"]
+                                 and g["content_hash"] == first["content_hash"] for g in grp)
+                db.execute("""INSERT OR IGNORE INTO agent_obs_event_ids
+                              (source,event_id,dedupe_key,content_hash,first_seq) VALUES(?,?,?,?,?)""",
+                           (source, eid, first["dedupe_key"],
+                            first["content_hash"] if consistent else "LEGACY_CONFLICT", first["seq"]))
+                if not consistent:
+                    for g in grp:
+                        self._quarantine(db, Quarantine("legacy_event_id_conflict",
+                                         "pre-ledger rows reuse event_id with different data",
+                                         eid, source), now)
+                        db.execute("DELETE FROM agent_obs_events WHERE seq=?", (g["seq"],))
+                        conflicted += 1
+            for seq in bad:
+                self._quarantine(db, Quarantine("legacy_malformed", "stored event unreadable", None, None), now)
+                db.execute("DELETE FROM agent_obs_events WHERE seq=?", (seq,))
+            for name, value in (("legacy_event_id_conflicts", conflicted), ("legacy_malformed", len(bad)),
+                                ("legacy_pruned_without_event_id", unknown)):
+                if value:
+                    db.execute("""INSERT INTO agent_obs_counters(name,value) VALUES(?,?)
+                                  ON CONFLICT(name) DO UPDATE SET value=value+excluded.value""", (name, value))
+            db.execute("INSERT INTO agent_obs_meta(key,value) VALUES(?,?)",
+                       (self.LEDGER_MIGRATION, _iso(now)))
 
     @staticmethod
     def _bump(db: sqlite3.Connection, name: str) -> None:
@@ -775,14 +845,75 @@ DEFAULT_HARNESS_REGISTRY = Path(__file__).resolve().parents[2] / "config/harness
 AUTOMATION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12,90}$")  # same rule as harness_monitor_bridge.ID_RE
 
 
-def _read_small_json(path: Path, limit: int) -> Any:
-    if path.is_symlink():
-        raise ObservabilityError("symlink refused")
-    if not path.is_file():
-        raise FileNotFoundError(str(path))
-    if path.stat().st_size > limit:
-        raise ObservabilityError("file too large")
-    return json.loads(path.read_text(encoding="utf-8"))
+def _safe_open_flags() -> tuple[int, int]:
+    """POSIX openat-style flags, or fail CLOSED where the platform cannot
+    refuse symlinks per component (no O_NOFOLLOW/O_DIRECTORY/dir_fd)."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    if not nofollow or not directory or os.open not in os.supports_dir_fd:
+        raise ObservabilityError("secure no-follow file read unsupported on this platform")
+    common = os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0)
+    return common | directory, common | getattr(os, "O_NONBLOCK", 0)
+
+
+def _read_small_bytes(path: str | Path, limit: int, *, root: str | Path = "/") -> bytes:
+    """Read a small operator-configured file with NO symlink anywhere below
+    the trusted `root` (realpath'd once; operator config, never request
+    input). Walks directory by directory with os.open(dir_fd=...,
+    O_DIRECTORY|O_NOFOLLOW), opens the leaf with O_NOFOLLOW, then checks
+    the OPENED fd (fstat: regular file) and reads at most limit+1 bytes --
+    there is no separate check-then-open window to race."""
+    dir_flags, file_flags = _safe_open_flags()
+    raw = os.fspath(path)
+    if not isinstance(raw, str) or not raw or "\x00" in raw or not os.path.isabs(raw):
+        raise ObservabilityError("absolute configured path required")
+    parts = [p for p in raw.split(os.sep) if p not in ("", ".")]
+    if ".." in parts or not parts:
+        raise ObservabilityError("path traversal refused")
+    root_parts = [p for p in os.path.realpath(os.fspath(root)).split(os.sep) if p]
+    # Lexical prefix match against the trusted root; every component
+    # BELOW it is opened no-follow.
+    if parts[:len(root_parts)] != root_parts or len(parts) <= len(root_parts):
+        raise ObservabilityError("path outside trusted root")
+    fds: list[int] = []
+    try:
+        fds.append(os.open(os.sep + os.sep.join(root_parts), dir_flags))
+        for name in parts[len(root_parts):-1]:
+            fds.append(os.open(name, dir_flags, dir_fd=fds[-1]))
+        fd = os.open(parts[-1], file_flags, dir_fd=fds[-1])
+        fds.append(fd)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise ObservabilityError("not a regular file")
+        if st.st_size > limit:
+            raise ObservabilityError("file too large")
+        chunks, total = [], 0
+        while total <= limit:
+            chunk = os.read(fd, min(65536, limit + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        if total > limit:
+            raise ObservabilityError("file too large")
+        return b"".join(chunks)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR, getattr(errno, "EMLINK", -1)):
+            raise ObservabilityError("symlink or non-directory component refused") from None
+        raise ObservabilityError("file unreadable") from None
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+
+
+def _read_small_json(path: str | Path, limit: int, *, root: str | Path = "/") -> Any:
+    data = _read_small_bytes(path, limit, root=root)
+    try:
+        return json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise ObservabilityError("malformed JSON") from None
 
 
 def load_harness_snapshot(path: str | Path | None) -> tuple[dict[str, Any] | None, str]:
@@ -861,6 +992,113 @@ def _unknown_budget(reason: str) -> dict[str, Any]:
     return {"status": "UNKNOWN", "reason": reason, "time_used_percent": None}
 
 
+HEALTH_STATUSES = {"HEALTHY", "FAILED_OR_STALE", "UNKNOWN"}
+HARNESS_TASK_STATES = {"CREATED", "NOT_DISPATCHED", "DISPATCHED", "RUNNING_VERIFIED", "NOT_RUNNING",
+                       "STALLED", "BLOCKED", "UNKNOWN", "DONE_VERIFIED", "FAILED", "EXPIRED"}
+CLEANUP_STATES = {"NOT_STARTED", "CLEANUP_PENDING", "CLEANED_VERIFIED"}
+MAX_GATES = 1000
+MAX_SNAPSHOT_MONITORS = 500
+MAX_MONITOR_TASKS = 500
+# Exact shapes scripts/harness_progress.duration()/task_clock() produce.
+_DURATION_RE = re.compile(r"^(?:\d{1,3}h \d{2}m|\d{1,4}m \d{2}s)$")
+_DEADLINE_RE = re.compile(r"^\d{2}/\d{2} \d{2}:\d{2}$")
+_FINISHED_LABEL = "đã kết thúc"
+
+
+class _Malformed(Exception):
+    pass
+
+
+def _enum(value: Any, allowed: set[str]) -> str:
+    if not isinstance(value, str) or value not in allowed:  # str first: lists are unhashable
+        raise _Malformed
+    return value
+
+
+def _int_in(value: Any, lo: int, hi: int) -> int:
+    if type(value) is not int or not lo <= value <= hi:
+        raise _Malformed
+    return value
+
+
+def _opt_label(value: Any, pattern: re.Pattern[str], *extra: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not (value in extra or pattern.match(value)):
+        raise _Malformed  # never copy an unexpected string (token/path/log) out
+    return value
+
+
+def _validated_monitor(snapshot: Any, automation_id: str) -> tuple[str, dict[str, Any] | None]:
+    """Strict schema check of the parts of a Harness snapshot this view
+    reads. Returns (health_status, sanitized monitor or None). Raises
+    _Malformed for ANY unexpected type/value."""
+    if not isinstance(snapshot, dict):
+        raise _Malformed
+    health = snapshot.get("health")
+    if not isinstance(health, dict):
+        raise _Malformed
+    _enum(health.get("status"), HEALTH_STATUSES)
+    monitors = snapshot.get("monitors")
+    if not isinstance(monitors, list) or len(monitors) > MAX_SNAPSHOT_MONITORS:
+        raise _Malformed
+    found = [m for m in monitors if isinstance(m, dict) and m.get("id") == automation_id]
+    if len(found) > 1:
+        raise _Malformed  # ambiguous: never pick one
+    if not found:
+        return health["status"], None
+    m = found[0]
+    kind = m.get("kind")
+    if kind is not None:
+        _enum(kind, {"project", "maintenance"})
+    pct = m.get("completion_percent")
+    out: dict[str, Any] = {"kind": kind, "completion_percent": None, "gates_passed": None,
+                           "gates_total": None}
+    if kind == "maintenance" or pct is None:
+        if pct is not None:
+            raise _Malformed
+    else:
+        out["completion_percent"] = _int_in(pct, 0, 100)
+        total = _int_in(m.get("gates_total"), 1, MAX_GATES)
+        out["gates_total"] = total
+        out["gates_passed"] = _int_in(m.get("gates_passed"), 0, total)
+    clocks: list[dict[str, Any]] = []
+    for key in ("active_tasks", "recent_tasks"):
+        items = m.get(key, [])
+        if not isinstance(items, list) or len(items) > MAX_MONITOR_TASKS:
+            raise _Malformed
+        clocks += [t for t in items if isinstance(t, dict)]
+    out["clocks"] = clocks
+    return health["status"], out
+
+
+def _validated_clock(clock: dict[str, Any]) -> dict[str, Any]:
+    _enum(clock.get("state"), HARNESS_TASK_STATES)
+    _enum(clock.get("cleanup"), CLEANUP_STATES)
+    for flag in ("overdue", "finished"):
+        if type(clock.get(flag)) is not bool:
+            raise _Malformed
+    return {"state": clock["state"], "cleanup": clock["cleanup"],
+            "time_used_percent": _int_in(clock.get("time_used_percent"), 0, 100),
+            "time_used_label": _opt_label(clock.get("time_used_label"), _DURATION_RE),
+            "time_budget_label": _opt_label(clock.get("time_budget_label"), _DURATION_RE),
+            "remaining_label": _opt_label(clock.get("remaining_label"), _DURATION_RE, _FINISHED_LABEL),
+            "deadline_local": _opt_label(clock.get("deadline_local"), _DEADLINE_RE),
+            "overdue": clock["overdue"], "finished": clock["finished"]}
+
+
+def _malformed(out: dict[str, Any], what: str) -> dict[str, Any]:
+    out["completion_percent"] = None
+    out["completion_source"] = f"UNKNOWN: malformed Harness {what}"
+    if "HARNESS_EVIDENCE_MALFORMED" not in out["blockers"]:
+        out["blockers"].append("HARNESS_EVIDENCE_MALFORMED")
+    out["time_budget"] = _unknown_budget(f"malformed Harness {what}")
+    if out.get("execution") == "RUNNING_VERIFIED" and what == "child clock":
+        out["execution"] = "UNKNOWN"
+        out["reasons"].append("malformed_ttl_overrides_running")
+    return out
+
+
 def attach_harness(view: dict[str, Any], *, snapshot: dict[str, Any] | None,
                    automation_id: str | None, harness_task_id: int | None = None,
                    at: datetime | None = None, health_max_age: int = 900,
@@ -868,7 +1106,11 @@ def attach_harness(view: dict[str, Any], *, snapshot: dict[str, Any] | None,
     """Copy (never recompute) completion % and child TTL from the existing
     scripts/harness_progress.summarize() snapshot. Stale/absent snapshot,
     missing link or unhealthy service -> UNKNOWN (never 0%, never the last
-    green value). `time_budget` is always present and independent of %."""
+    green value). `time_budget` is always present and independent of %.
+    Every copied value is strictly validated (ints in bounds, enums,
+    booleans, labels in the producer's exact shape); ANY malformed input
+    -> UNKNOWN + HARNESS_EVIDENCE_MALFORMED, never an exception and never
+    a raw snapshot string in the output."""
     out = dict(view)
     out["blockers"] = list(view.get("blockers", []))
     out["reasons"] = list(view.get("reasons", []))
@@ -880,15 +1122,19 @@ def attach_harness(view: dict[str, Any], *, snapshot: dict[str, Any] | None,
         out["completion_source"] = f"UNKNOWN: {why}"
         out["time_budget"] = _unknown_budget(why)
         return out
-    health = snapshot.get("health") or {}
     try:
-        snap_age = (_aware(at or datetime.now(timezone.utc)) - _aware(snapshot["observed_at"])).total_seconds()
-    except (KeyError, ObservabilityError, ValueError, TypeError):
+        health, monitor = _validated_monitor(snapshot, automation_id)
+    except _Malformed:
+        return _malformed(out, "snapshot")
+    try:
+        observed = snapshot.get("observed_at")
+        if not isinstance(observed, str) or len(observed) > 64:
+            raise ObservabilityError("observed_at")
+        snap_age = (_aware(at or datetime.now(timezone.utc)) - _aware(observed)).total_seconds()
+    except (ObservabilityError, ValueError, TypeError, OverflowError):
         snap_age = None
-    monitor = next((m for m in snapshot.get("monitors", [])
-                    if isinstance(m, dict) and m.get("id") == automation_id), None)
     fresh = not (snap_age is None or snap_age > health_max_age or snap_age < -300
-                 or health.get("status") != "HEALTHY")
+                 or health != "HEALTHY")
     if not fresh:
         out["completion_percent"] = None
         out["completion_source"] = "UNKNOWN: Harness snapshot stale or service not HEALTHY"
@@ -900,30 +1146,28 @@ def attach_harness(view: dict[str, Any], *, snapshot: dict[str, Any] | None,
         out["completion_source"] = "UNKNOWN: linked automation not in Harness snapshot"
         out["time_budget"] = _unknown_budget("linked automation not in Harness snapshot")
         return out
-    pct = monitor.get("completion_percent")
-    if monitor.get("kind") == "maintenance" or pct is None:
+    pct = monitor["completion_percent"]
+    if pct is None:
         out["completion_percent"] = None
         out["completion_source"] = "N/A: maintenance monitor has no completion %"
-    elif type(pct) is int and 0 <= pct <= 100:
+    else:
         out["completion_percent"] = pct
         out["completion_source"] = ("harness_progress: PASSED evidence gates only "
-                                    f"({monitor.get('gates_passed')}/{monitor.get('gates_total')})")
-    else:
-        out["completion_percent"] = None
-        out["completion_source"] = "UNKNOWN: malformed Harness completion value"
+                                    f"({monitor['gates_passed']}/{monitor['gates_total']})")
     if harness_task_id is None:
         out["time_budget"] = _unknown_budget("no Harness child task linked")
         return out
-    clock = next((t for t in list(monitor.get("active_tasks", [])) + list(monitor.get("recent_tasks", []))
-                  if isinstance(t, dict) and t.get("id") == harness_task_id), None)
-    if clock is None:
+    matches = [t for t in monitor["clocks"] if type(t.get("id")) is int and t.get("id") == harness_task_id]
+    if not matches:
         out["time_budget"] = _unknown_budget("linked Harness child not in this monitor's snapshot")
         return out
-    out["time_budget"] = {"status": "KNOWN", **{k: clock.get(k) for k in (
-        "state", "cleanup", "time_used_percent", "time_used_label",
-        "time_budget_label", "remaining_label", "deadline_local", "overdue", "finished")}}
-    if clock.get("cleanup") == "CLEANUP_PENDING" or clock.get("state") == "EXPIRED" or clock.get("overdue"):
-        out["blockers"].append("CLEANUP_PENDING" if clock.get("cleanup") == "CLEANUP_PENDING"
+    try:
+        clock = _validated_clock(matches[0])
+    except _Malformed:
+        return _malformed(out, "child clock")
+    out["time_budget"] = {"status": "KNOWN", **clock}
+    if clock["cleanup"] == "CLEANUP_PENDING" or clock["state"] == "EXPIRED" or clock["overdue"]:
+        out["blockers"].append("CLEANUP_PENDING" if clock["cleanup"] == "CLEANUP_PENDING"
                                else "TTL_EXPIRED")
         if out.get("execution") == "RUNNING_VERIFIED":
             out["execution"] = "UNKNOWN"
