@@ -363,8 +363,10 @@ def test_projectflow_adapter_is_read_only_replay_safe_and_leak_free(tmp_path, st
     assert first["QUARANTINED"] == 0 and again["ACCEPTED"] == 0
     v = view(store)
     assert v["execution"] == "RUNNING_VERIFIED"
-    assert v["milestones"]["qa_passed"] and v["milestones"]["tests_passed"]
-    assert not v["milestones"]["merged"] and not v["milestones"]["accepted"]
+    # PR #56 fix C: raw rows cannot prove the current commit/brief, so they
+    # are history only; current milestones come from TaskDecisionService.
+    assert not any(v["milestones"][m] for m in ("qa_passed", "tests_passed", "merged", "accepted"))
+    assert {h["ref"] for h in v["historic_evidence"]} == {"qa_runs:1", "test_runs:1"}
 
 
 def test_adapter_refuses_to_write(tmp_path):

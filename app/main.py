@@ -3610,7 +3610,16 @@ def create_app(settings=None):
         at = _dt.now(_tz.utc)
         raws, meta = _obs.projectflow_task_events(settings.db_path, task_id=tid,
                                                   node_id="local", project_id="projectflow")
-        view, events, _q = _obs.view_from_raw(raws, at=at)
+        view, events, _q = _obs.view_from_raw(
+            raws, at=at, expected={"node_id": "local", "project_id": "projectflow",
+                                   "task_id": f"pf-task-{tid}"})
+        # Current gate truth comes only from TaskDecisionService (commit/
+        # brief-pinned, the single source); raw evidence rows stay history.
+        try:
+            truth = _obs.gate_truth_from_decision(decision.evaluate(tid))
+        except Exception:
+            truth = None  # fail closed: milestones stay unverified, never PASS
+        view = _obs.apply_gate_truth(view, truth)
         view = _obs.harness_view_for_task(
             view, task_id=tid, at=at,
             snapshot_path=_os.environ.get("PROJECTFLOW_HARNESS_PROGRESS_JSON",
@@ -3630,13 +3639,16 @@ def create_app(settings=None):
                 "latest_events": events[-5:]}
 
     @app.get("/api/tasks/{tid}/observability/events")
-    def api_task_observability_events(tid: int, cursor: int = 0, limit: int = 50,
+    def api_task_observability_events(tid: int, cursor: str | None = None, limit: int = 50,
                                       _authz: None = Depends(require_read_role("task", "tid"))):
-        limit = max(1, min(int(limit), 200))
+        from app.services.agent_observability import ObservabilityError, decode_cursor, page_events
+        if cursor is not None:
+            try:
+                decode_cursor(cursor)  # validate before any read work
+            except ObservabilityError:
+                raise HTTPException(400, "malformed cursor")
         _view, events = _observability(tid)
-        page = [e for e in events if e["seq"] > cursor][:limit]
-        nxt = page[-1]["seq"] if len(page) == limit else None
-        return {"task_id": tid, "events": page, "next_cursor": nxt}
+        return {"task_id": tid, **page_events(events, cursor=cursor, limit=limit)}
 
     @app.get("/tasks/{tid}/observability", response_class=HTMLResponse)
     def task_observability_page(tid: int, _authz: None = Depends(require_read_role("task", "tid"))):

@@ -156,7 +156,9 @@ def test_evidence_without_session_stays_on_its_own_task(tmp_path):
     raws, _ = obs.projectflow_task_events(path, task_id=3, node_id="n", project_id="pf")
     assert [r["session_id"] for r in raws] == ["pf-task-3-evidence"]
     view, _, _ = obs.view_from_raw(raws, at=NOW)
-    assert view["milestones"]["qa_passed"] and view["execution"] == "UNKNOWN"
+    # PR #56 fix C: a raw PASS row is history, never a current milestone.
+    assert not view["milestones"]["qa_passed"] and view["execution"] == "UNKNOWN"
+    assert [h["ref"] for h in view["historic_evidence"]] == ["qa_runs:1"]
 
 
 def test_older_schema_is_skipped_not_guessed(tmp_path):

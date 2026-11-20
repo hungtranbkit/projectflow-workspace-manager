@@ -24,6 +24,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
+import base64
+import binascii
 import hashlib
 import json
 import re
@@ -90,8 +92,12 @@ REQUIRED = ("event_id", "schema_version", "source", "occurred_at", "node_id",
             "provenance_level")
 OPTIONAL = ("parent_agent_id", "worktree_ref", "branch_ref",
             "sanitized_evidence_ref", "result", "tool_kind", "dedupe_key",
-            "observed_at")
+            "observed_at", "evidence_currency")
 IDENTITY = ("node_id", "project_id", "task_id", "session_id", "agent_id")
+# Whether a delivery-evidence event proves the CURRENT commit/brief. Only
+# CURRENT (or absent, for adapters that only ever emit current evidence)
+# may set milestones.*; HISTORIC/UNKNOWN rows are shown as history only.
+EVIDENCE_CURRENCY = ("CURRENT", "HISTORIC", "UNKNOWN")
 
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 REF_RE = re.compile(r"^[a-z_]{2,40}:[A-Za-z0-9_.:/-]{1,128}$")
@@ -168,9 +174,12 @@ class NormalizedEvent:
     result: str | None = None
     tool_kind: str | None = None
     redaction_flags: tuple[str, ...] = ()
+    evidence_currency: str | None = None
 
     def content_hash(self) -> str:
         body = {k: v for k, v in asdict(self).items() if k not in ("observed_at",)}
+        if body.get("evidence_currency") is None:  # keep pre-existing hashes stable
+            body.pop("evidence_currency", None)
         body["redaction_flags"] = list(body["redaction_flags"])
         return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
 
@@ -279,6 +288,11 @@ def normalize(raw: Any, *, observed_at: datetime | None = None) -> NormalizedEve
     opt["result"] = result if result in RESULTS else None
     if result is not None and opt["result"] is None:
         flags.append("invalid_result")
+    currency = raw.get("evidence_currency")
+    opt["evidence_currency"] = currency if currency in EVIDENCE_CURRENCY else None
+    if currency is not None and opt["evidence_currency"] is None:
+        flags.append("invalid_evidence_currency")  # never echo the value
+        opt["evidence_currency"] = "UNKNOWN"
     tool = raw.get("tool_kind")
     opt["tool_kind"] = tool if tool in TOOL_KINDS else ("other" if tool is not None else None)
 
@@ -353,6 +367,12 @@ class ObservabilityEventStore:
                     content_hash TEXT NOT NULL,
                     first_seq INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS agent_obs_event_ids (
+                    source TEXT NOT NULL, event_id TEXT NOT NULL,
+                    dedupe_key TEXT NOT NULL, content_hash TEXT NOT NULL,
+                    first_seq INTEGER NOT NULL,
+                    PRIMARY KEY (source, event_id)
+                );
                 CREATE TABLE IF NOT EXISTS agent_obs_bindings (
                     session_id TEXT PRIMARY KEY,
                     node_id TEXT NOT NULL, project_id TEXT NOT NULL,
@@ -402,6 +422,17 @@ class ObservabilityEventStore:
                                  "dedupe_key reused with different content",
                                  item.event_id, item.source, item.redaction_flags), at)
                 return IngestResult("QUARANTINED", "replay_conflict")
+            # A stable event_id is bound to exactly one dedupe_key + content
+            # per source: a reused id with another key/data is quarantined,
+            # never stored as a second, reassigned copy of "the same" event.
+            owner = db.execute("""SELECT dedupe_key FROM agent_obs_event_ids
+                                  WHERE source=? AND event_id=?""",
+                               (item.source, item.event_id)).fetchone()
+            if owner is not None:
+                self._quarantine(db, Quarantine("event_id_conflict",
+                                 "event_id already bound to another dedupe_key/content",
+                                 item.event_id, item.source, item.redaction_flags), at)
+                return IngestResult("QUARANTINED", "event_id_conflict")
             bound = db.execute("SELECT * FROM agent_obs_bindings WHERE session_id=?",
                                (item.session_id,)).fetchone()
             if bound is None:
@@ -428,6 +459,8 @@ class ObservabilityEventStore:
             seq = cur.lastrowid
             db.execute("INSERT INTO agent_obs_dedupe(dedupe_key,content_hash,first_seq) VALUES(?,?,?)",
                        (item.dedupe_key, chash, seq))
+            db.execute("""INSERT INTO agent_obs_event_ids(source,event_id,dedupe_key,content_hash,first_seq)
+                          VALUES(?,?,?,?,?)""", (item.source, item.event_id, item.dedupe_key, chash, seq))
             self._bump(db, "accepted")
             if late:
                 self._bump(db, "late_arrivals")
@@ -435,6 +468,7 @@ class ObservabilityEventStore:
             # longer so a replay of a pruned event is still recognized.
             db.execute("DELETE FROM agent_obs_events WHERE seq <= ? - ?", (seq, self.max_events))
             db.execute("DELETE FROM agent_obs_dedupe WHERE first_seq <= ? - ?", (seq, self.max_dedupe))
+            db.execute("DELETE FROM agent_obs_event_ids WHERE first_seq <= ? - ?", (seq, self.max_dedupe))
             return IngestResult("ACCEPTED", seq=seq, late=late)
 
     def ingest_many(self, raws: Iterable[Any], *, observed_at: datetime | None = None) -> dict[str, int]:
@@ -508,28 +542,15 @@ def _key(ev: dict[str, Any]) -> tuple[datetime, int]:
     return (_aware(ev["occurred_at"]), int(ev.get("seq", 0)))
 
 
-def derive_task_view(events: list[dict[str, Any]], *, at: datetime,
-                     policy: FreshnessPolicy = FreshnessPolicy()) -> dict[str, Any]:
-    """Pure function. Activity volume never touches completion; completion is
-    attached separately from Harness (attach_harness)."""
-    at = _aware(at)
-    evs = sorted(events, key=_key)
+def _session_execution(evs: list[dict[str, Any]], at: datetime,
+                       policy: FreshnessPolicy) -> dict[str, Any]:
+    """Execution state of ONE session/agent identity. `evs` is sorted and
+    belongs to a single session_id (identity binding guarantees one
+    node/project/task/agent per session)."""
     reasons: list[str] = []
-
-    # Dispatch dimension
-    dispatch = "QUEUED"
-    if any(e["kind"] in DISPATCH_KINDS - {"task_queued"} for e in evs):
-        dispatch = "DISPATCHED_UNVERIFIED"
-    if any((e["kind"] in LIVENESS_KINDS | PROGRESS_KINDS) and _rank(e) >= _RANK["LOCAL_OBSERVED"]
-           for e in evs):
-        dispatch = "ACKNOWLEDGED"
-
-    # Execution dimension: only LOCAL_OBSERVED+ may certify a live state.
-    # CENTRAL_ATTESTED / self-reports may only push toward UNKNOWN/negative.
     verified = [e for e in evs if e["kind"] in EXEC_KINDS and _rank(e) >= _RANK["LOCAL_OBSERVED"]]
     negative_attested = [e for e in evs if e["kind"] in EXEC_TERMINAL_KINDS | {"waiting_input", "node_disconnected"}
                          and _rank(e) == _RANK["CENTRAL_ATTESTED"]]
-    last_any = max((_key(e)[0] for e in evs), default=None)
     last_verified = max((_key(e)[0] for e in verified), default=None)
     last_progress = max((_key(e)[0] for e in verified if e["kind"] in PROGRESS_KINDS), default=None)
     last_heartbeat = max((_key(e)[0] for e in verified if e["kind"] in LIVENESS_KINDS), default=None)
@@ -569,33 +590,123 @@ def derive_task_view(events: list[dict[str, Any]], *, at: datetime,
             reasons.append("alive_awaiting_first_progress")
     else:
         reasons.append("no_recent_liveness_or_progress")
+    terminal = execution in ("EXITED", "FAILED")
+    # "current" = non-terminal and has fresh locally verified evidence.
+    current = (not terminal and last_verified is not None
+               and at - last_verified <= policy.stale_after
+               and "stale_source" not in reasons)
+    return {"execution": execution, "reasons": reasons, "terminal": terminal, "current": current,
+            "last_verified": last_verified, "last_progress": last_progress,
+            "last_event": max(_key(e)[0] for e in evs)}
 
-    # Delivery milestones: each independent; FAIL never counts; a later FAIL
-    # of the same milestone supersedes an older PASS.
-    milestones = {"submitted": dispatch != "QUEUED",
-                  "running_verified": execution == "RUNNING_VERIFIED"}
-    for kind, (name, minimum) in MILESTONE_KINDS.items():
-        rel = [e for e in evs if e["kind"] == kind and _rank(e) >= _RANK[minimum]
-               and e.get("result") in {"PASS", "FAIL", "ERROR"}]
-        milestones[name] = bool(rel) and rel[-1]["result"] == "PASS"
-        ignored = [e for e in evs if e["kind"] == kind and _rank(e) < _RANK[minimum]]
-        if ignored:
-            reasons.append(f"{name}_claim_below_required_provenance")
+
+# Most attention-needing first. Among CURRENT (live) sessions the task is
+# only as healthy as its least healthy session.
+_LIVE_SEVERITY = ("UNKNOWN", "WAITING_FOR_INPUT", "STALLED", "RUNNING_VERIFIED")
+
+
+def _aggregate_execution(per: dict[str, dict[str, Any]]) -> tuple[str, list[str]]:
+    if not per:
+        return "UNKNOWN", []
+    live = [p for p in per.values() if p["current"]]
+    if live:
+        chosen = min(live, key=lambda p: _LIVE_SEVERITY.index(p["execution"]))
+    else:
+        # Nothing live: the most recently active session decides (a newer
+        # clean retry supersedes an older failure, a newer failure wins
+        # over an older clean exit). Failed siblings stay as blockers.
+        chosen = max(per.values(), key=lambda p: p["last_verified"] or p["last_event"])
+    return chosen["execution"], list(chosen["reasons"])
+
+
+def _stage_for(dispatch: str, milestones: dict[str, bool]) -> str:
     stage = "NOT_STARTED"
     if dispatch == "ACKNOWLEDGED":
         stage = "CODING"
     for st, m in (("TESTING", "tests_passed"), ("REVIEW", "review_passed"),
                   ("QA", "qa_passed"), ("MERGED", "merged"),
                   ("DEPLOYED", "deployed"), ("ACCEPTED", "accepted")):
-        if milestones[m]:
+        if milestones.get(m):
             stage = st
+    return stage
+
+
+MAX_HISTORIC_EVIDENCE = 50
+
+
+def derive_task_view(events: list[dict[str, Any]], *, at: datetime,
+                     policy: FreshnessPolicy = FreshnessPolicy()) -> dict[str, Any]:
+    """Pure function. Activity volume never touches completion; completion is
+    attached separately from Harness (attach_harness). Execution is derived
+    independently PER session, then aggregated conservatively, so one
+    session's events can never override another session's state."""
+    at = _aware(at)
+    evs = sorted(events, key=_key)
+    reasons: list[str] = []
+    blockers: list[str] = []
+
+    # Dispatch dimension
+    dispatch = "QUEUED"
+    if any(e["kind"] in DISPATCH_KINDS - {"task_queued"} for e in evs):
+        dispatch = "DISPATCHED_UNVERIFIED"
+    if any((e["kind"] in LIVENESS_KINDS | PROGRESS_KINDS) and _rank(e) >= _RANK["LOCAL_OBSERVED"]
+           for e in evs):
+        dispatch = "ACKNOWLEDGED"
+
+    # Execution dimension: only LOCAL_OBSERVED+ may certify a live state.
+    # CENTRAL_ATTESTED / self-reports may only push toward UNKNOWN/negative.
+    by_session: dict[str, list[dict[str, Any]]] = {}
+    for e in evs:
+        if e["kind"] in EXEC_KINDS:  # evidence-only lanes carry no execution state
+            by_session.setdefault(e["session_id"], []).append(e)
+    per = {sid: _session_execution(sevs, at, policy) for sid, sevs in by_session.items()}
+    if per:
+        execution, exec_reasons = _aggregate_execution(per)
+        reasons.extend(exec_reasons)
+    else:
+        execution = "UNKNOWN"
+        reasons.append("no_locally_verified_execution_evidence")
+    for sid, p in sorted(per.items()):
+        if p["execution"] == "FAILED":
+            blockers.append(f"SESSION_FAILED:{sid}")
+    verified_times = [p["last_verified"] for p in per.values() if p["last_verified"]]
+    progress_times = [p["last_progress"] for p in per.values() if p["last_progress"]]
+    last_any = max((_key(e)[0] for e in evs), default=None)
+    last_verified = max(verified_times, default=None)
+    last_progress = max(progress_times, default=None)
+
+    # Delivery milestones: each independent; FAIL never counts; a later FAIL
+    # of the same milestone supersedes an older PASS. Evidence whose
+    # currency (exact commit/brief) is HISTORIC/UNKNOWN is history only.
+    milestones = {"submitted": dispatch != "QUEUED",
+                  "running_verified": execution == "RUNNING_VERIFIED"}
+    historic: list[dict[str, Any]] = []
+    for kind, (name, minimum) in MILESTONE_KINDS.items():
+        rel = [e for e in evs if e["kind"] == kind and _rank(e) >= _RANK[minimum]
+               and e.get("result") in {"PASS", "FAIL", "ERROR"}]
+        cur = [e for e in rel if e.get("evidence_currency") in (None, "CURRENT")]
+        milestones[name] = bool(cur) and cur[-1]["result"] == "PASS"
+        historic += [{"ref": e.get("sanitized_evidence_ref"), "kind": kind, "result": e.get("result"),
+                      "currency": e.get("evidence_currency"), "session_id": e["session_id"],
+                      "worktree_ref": e.get("worktree_ref"), "occurred_at": e["occurred_at"]}
+                     for e in rel if e.get("evidence_currency") not in (None, "CURRENT")]
+        ignored = [e for e in evs if e["kind"] == kind and _rank(e) < _RANK[minimum]]
+        if ignored:
+            reasons.append(f"{name}_claim_below_required_provenance")
+    if historic:
+        reasons.append("evidence_currency_unverified")
+    historic.sort(key=lambda h: h["occurred_at"])
     age = (at - last_any).total_seconds() if last_any else None
     return {
         "dispatch": dispatch,
         "execution": execution,
-        "delivery_stage": stage,
+        "delivery_stage": _stage_for(dispatch, milestones),
         "milestones": milestones,
         "reasons": reasons,
+        "blockers": blockers,
+        "sessions": [{"session_id": sid, "execution": p["execution"], "reasons": p["reasons"]}
+                     for sid, p in sorted(per.items())],
+        "historic_evidence": historic[-MAX_HISTORIC_EVIDENCE:],
         "freshness": {
             "last_event_at": _iso(last_any) if last_any else None,
             "last_verified_at": _iso(last_verified) if last_verified else None,
@@ -608,6 +719,49 @@ def derive_task_view(events: list[dict[str, Any]], *, at: datetime,
         "completion_percent": None,
         "completion_source": "UNKNOWN: no reviewed Harness gate plan linked",
     }
+
+
+# --------------------------------------------------------------------------
+# Current gate truth: reuse TaskDecisionService (never a second gate model)
+# --------------------------------------------------------------------------
+
+_GATE_CHECKLIST = (("tests", "AUTOMATED_TESTS", "tests_passed"), ("review", "REVIEW", "review_passed"),
+                   ("qa", "RUNTIME_VERIFICATION", "qa_passed"), ("merge", "MERGE", "merged"))
+_CHECKLIST_GATE = {"done": "PASS", "skipped": "NOT_REQUIRED", "blocked": "BLOCKED"}
+
+
+def gate_truth_from_decision(decision: dict[str, Any]) -> dict[str, Any]:
+    """Project TaskDecisionService.evaluate()'s evidence-based checklist
+    (exact-HEAD tests, commit/brief-pinned review, current QA, required
+    merges) into observability gates. No gate logic is recomputed here;
+    worktree paths are never copied out."""
+    states = {i.get("key"): i.get("state") for i in decision.get("checklist") or [] if isinstance(i, dict)}
+    gates = {name: _CHECKLIST_GATE.get(states.get(key), "NOT_CURRENT") for name, key, _m in _GATE_CHECKLIST}
+    return {"source": "TaskDecisionService.evaluate", "status": "KNOWN",
+            "task_status": decision.get("status"), **gates,
+            "workspaces": [{"workspace_ref": f"pf-workspace-{b.get('id')}",
+                            "review_status": b.get("review_status"),
+                            "head": (b.get("head") or "")[:12] or None}
+                           for b in decision.get("builders") or [] if isinstance(b, dict)]}
+
+
+def apply_gate_truth(view: dict[str, Any], truth: dict[str, Any] | None) -> dict[str, Any]:
+    """Milestones tests/review/qa/merged become PASS only when the current
+    TaskDecisionService gate says PASS. Without gate truth they stay False
+    (UNKNOWN), whatever historic PASS rows exist. Never sets completion."""
+    out = dict(view)
+    out["milestones"] = dict(view.get("milestones", {}))
+    out["reasons"] = list(view.get("reasons", []))
+    if truth is None:
+        out["gates"] = {"source": None, "status": "UNKNOWN",
+                        **{name: "UNKNOWN" for name, _k, _m in _GATE_CHECKLIST}, "workspaces": []}
+        out["reasons"].append("gate_truth_unavailable")
+    else:
+        out["gates"] = truth
+    for name, _key, milestone in _GATE_CHECKLIST:
+        out["milestones"][milestone] = out["gates"].get(name) == "PASS"
+    out["delivery_stage"] = _stage_for(out.get("dispatch", "QUEUED"), out["milestones"])
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -900,36 +1054,9 @@ def projectflow_task_events(db_path: str | Path, *, task_id: int, node_id: str, 
                             "kind": "process_failed" if s["status"] == "FAILED" else "process_exited",
                             "result": "FAIL" if failed else "PASS",
                             "occurred_at": _ts(s["exited_at"])})
-        # Evidence binds to the task's latest session, or to a task-scoped
-        # evidence lane when no session exists (never to another task).
-        lane = ({"session_id": f"pf-session-{sessions[0]['id']}",
-                 "agent_id": f"{sessions[0]['agent']}-{sessions[0]['id']}"} if sessions else
-                {"session_id": f"pf-task-{task_id}-evidence", "agent_id": "projectflow-evidence"})
-
-        def evidence(kind: str, table: str, rid: int, status: str, at: str | None,
-                     pass_values: set[str], fail_values: set[str]) -> None:
-            if not at:
-                return
-            result = "PASS" if status in pass_values else "FAIL" if status in fail_values else "PENDING"
-            out.append({**base, **lane, "source": "projectflow_evidence",
-                        "provenance_level": "LOCAL_VERIFIED",
-                        "event_id": f"pf-{table}-{rid}-{status}", "kind": kind, "result": result,
-                        "sanitized_evidence_ref": f"{table}:{rid}", "occurred_at": _ts(at)})
-
-        for table, kind, status_col, time_col, ok, bad in _EVIDENCE_TABLES:
-            if table not in tables or not {"id", "task_id", status_col, time_col} <= _columns(db, table):
-                meta["skipped_sources"].append(table)
-                continue
-            rows = db.execute(
-                f"SELECT id,{status_col} AS st,{time_col} AS at FROM {table} "
-                "WHERE task_id=? ORDER BY id DESC LIMIT ?", (task_id, evidence_limit + 1)).fetchall()
-            if len(rows) > evidence_limit:
-                meta["truncated"].append(table)
-                rows = rows[:evidence_limit]
-            for r in reversed(rows):
-                evidence(kind, table, r["id"], r["st"], r["at"], ok, bad)
-
-        # test_runs has no task_id: bound by this task's own agent workspaces.
+        # Workspaces that belong to THIS task (bounded). test_runs has no
+        # task_id, so it is filtered by these ids; review/qa rows keep their
+        # own workspace as owner only when it is one of these.
         ws_ids: set[int] = {s["workspace_id"] for s in sessions if s["workspace_id"] is not None}
         if "agent_workspaces" in tables and "task_id" in _columns(db, "agent_workspaces"):
             ws_ids |= {r[0] for r in db.execute(
@@ -937,13 +1064,51 @@ def projectflow_task_events(db_path: str | Path, *, task_id: int, node_id: str, 
                 (task_id, MAX_WORKSPACES))}
         ws_ids = set(sorted(ws_ids, reverse=True)[:MAX_WORKSPACES])
         meta["workspace_count"] = len(ws_ids)
+
+        def lane(wid: Any) -> dict[str, str]:
+            # Evidence is NEVER relabeled onto an agent session (the latest
+            # session did not necessarily produce it). It lives on its own
+            # workspace-owned lane, or a task-scoped lane, never another task.
+            if type(wid) is int and wid in ws_ids:
+                return {"session_id": f"pf-workspace-{wid}-evidence",
+                        "agent_id": f"projectflow-evidence-ws{wid}",
+                        "worktree_ref": f"pf-workspace-{wid}"}
+            return {"session_id": f"pf-task-{task_id}-evidence", "agent_id": "projectflow-evidence"}
+
+        def evidence(kind: str, table: str, rid: int, status: str, at: str | None,
+                     pass_values: set[str], fail_values: set[str], wid: Any = None) -> None:
+            if not at:
+                return
+            result = "PASS" if status in pass_values else "FAIL" if status in fail_values else "PENDING"
+            # A raw row cannot prove it matches the CURRENT commit/brief;
+            # currency is decided only by TaskDecisionService (apply_gate_truth).
+            out.append({**base, **lane(wid), "source": "projectflow_evidence",
+                        "provenance_level": "LOCAL_VERIFIED", "evidence_currency": "UNKNOWN",
+                        "event_id": f"pf-{table}-{rid}-{status}", "kind": kind, "result": result,
+                        "sanitized_evidence_ref": f"{table}:{rid}", "occurred_at": _ts(at)})
+
+        for table, kind, status_col, time_col, ok, bad in _EVIDENCE_TABLES:
+            cols = _columns(db, table) if table in tables else set()
+            if not {"id", "task_id", status_col, time_col} <= cols:
+                meta["skipped_sources"].append(table)
+                continue
+            wcol = "workspace_id" if "workspace_id" in cols else "NULL"
+            rows = db.execute(
+                f"SELECT id,{status_col} AS st,{time_col} AS at,{wcol} AS wid FROM {table} "
+                "WHERE task_id=? ORDER BY id DESC LIMIT ?", (task_id, evidence_limit + 1)).fetchall()
+            if len(rows) > evidence_limit:
+                meta["truncated"].append(table)
+                rows = rows[:evidence_limit]
+            for r in reversed(rows):
+                evidence(kind, table, r["id"], r["st"], r["at"], ok, bad, r["wid"])
+
         if "test_runs" not in tables or not {"id", "workspace_type", "workspace_id", "status",
                                                "finished_at"} <= _columns(db, "test_runs"):
             meta["skipped_sources"].append("test_runs")
         elif ws_ids:
             marks = ",".join("?" * len(ws_ids))
             rows = db.execute(
-                f"""SELECT id,status,finished_at FROM test_runs
+                f"""SELECT id,status,finished_at,workspace_id FROM test_runs
                     WHERE workspace_type='agent' AND workspace_id IN ({marks})
                     ORDER BY id DESC LIMIT ?""", (*sorted(ws_ids), evidence_limit + 1)).fetchall()
             if len(rows) > evidence_limit:
@@ -951,7 +1116,7 @@ def projectflow_task_events(db_path: str | Path, *, task_id: int, node_id: str, 
                 rows = rows[:evidence_limit]
             for r in reversed(rows):
                 evidence("test_result", "test_runs", r["id"], r["status"], r["finished_at"],
-                         {"PASSED", "PASS"}, {"FAILED", "FAIL", "ERROR"})
+                         {"PASSED", "PASS"}, {"FAILED", "FAIL", "ERROR"}, r["workspace_id"])
     finally:
         db.close()
     return out, meta
@@ -1007,29 +1172,108 @@ def harness_task_events(db_path: str | Path, *, project_id: str, limit: int = 50
     return out
 
 
+def _timeline_key(ev: dict[str, Any]) -> tuple[datetime, str]:
+    """Total, input-order-independent timeline order. dedupe_key is unique
+    after dedupe, so equal timestamps are still strictly ordered."""
+    return (_aware(ev["occurred_at"]), str(ev["dedupe_key"]))
+
+
 def view_from_raw(raws: Iterable[Any], *, at: datetime,
-                  policy: FreshnessPolicy = FreshnessPolicy()) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
+                  policy: FreshnessPolicy = FreshnessPolicy(),
+                  expected: dict[str, str] | None = None) -> tuple[dict[str, Any], list[dict[str, Any]], int]:
     """In-memory normalize + dedupe + derive, with NO persistence. Used by
     GET routes so a read never writes (spec plan: no mutation from GET).
-    Returns (view, ordered events, quarantined_count)."""
+    Applies the same conflict rules as ObservabilityEventStore.ingest
+    (dedupe_key/event_id conflicts, session identity binding) and, when
+    `expected` is given, drops events for any other node/project/task.
+    Returns (view, events in stable timeline order, quarantined_count)."""
     seen: dict[str, str] = {}
+    owners: dict[tuple[str, str], tuple[str, str]] = {}
+    bindings: dict[str, tuple[str, ...]] = {}
     events: list[dict[str, Any]] = []
     quarantined = 0
-    for i, raw in enumerate(raws, start=1):
+    for raw in raws:
         item = normalize(raw, observed_at=at)
         if isinstance(item, Quarantine):
             quarantined += 1
+            continue
+        if expected and any(getattr(item, k) != v for k, v in expected.items()):
+            quarantined += 1  # tenant/task binding: never shown on another task
             continue
         h = item.content_hash()
         if item.dedupe_key in seen:
             quarantined += seen[item.dedupe_key] != h
             continue
+        owner = owners.get((item.source, item.event_id))
+        if owner is not None:
+            quarantined += 1  # event_id reused with another dedupe_key
+            continue
+        ident = tuple(getattr(item, k) for k in ("node_id", "project_id", "task_id", "agent_id"))
+        if bindings.setdefault(item.session_id, ident) != ident:
+            quarantined += 1  # identity_conflict: no relabeling
+            continue
         seen[item.dedupe_key] = h
-        events.append({**item.to_public(), "seq": i, "late_arrival": False})
-    events.sort(key=_key)
+        owners[(item.source, item.event_id)] = (item.dedupe_key, h)
+        events.append({**item.to_public(), "late_arrival": False})
+    events.sort(key=_timeline_key)
+    for i, e in enumerate(events, start=1):
+        e["seq"] = i  # display ordinal only; paging uses the opaque cursor
     view = derive_task_view(events, at=at, policy=policy)
     view["quarantined"] = quarantined
     return view, events, quarantined
+
+
+CURSOR_PREFIX = "v1."
+MAX_CURSOR_LEN = 512
+_B64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def encode_cursor(ev: dict[str, Any]) -> str:
+    occurred, key = _timeline_key(ev)
+    body = json.dumps([_iso(occurred), key], separators=(",", ":")).encode()
+    return CURSOR_PREFIX + base64.urlsafe_b64encode(body).decode().rstrip("=")
+
+
+def decode_cursor(cursor: str) -> tuple[datetime, str]:
+    """Opaque (occurred_at, dedupe_key) cursor. Anything malformed raises
+    ObservabilityError (-> HTTP 400), never a silent restart or skip."""
+    if not isinstance(cursor, str) or len(cursor) > MAX_CURSOR_LEN or not cursor.startswith(CURSOR_PREFIX):
+        raise ObservabilityError("malformed cursor")
+    body = cursor[len(CURSOR_PREFIX):]
+    if not _B64URL_RE.match(body):
+        raise ObservabilityError("malformed cursor")
+    try:
+        data = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        raise ObservabilityError("malformed cursor") from None
+    if not (isinstance(data, list) and len(data) == 2 and all(isinstance(x, str) for x in data)):
+        raise ObservabilityError("malformed cursor")
+    try:
+        occurred = _aware(data[0])
+    except (ObservabilityError, ValueError):
+        raise ObservabilityError("malformed cursor") from None
+    if not ID_RE.match(data[1]):
+        raise ObservabilityError("malformed cursor")
+    return occurred, data[1]
+
+
+def page_events(events: list[dict[str, Any]], *, cursor: str | None, limit: int) -> dict[str, Any]:
+    """Keyset page strictly after `cursor` in (occurred_at, dedupe_key)
+    order. Same input + same cursor -> identical page. An event that
+    arrives later with a timestamp before the cursor cannot appear on a
+    forward page; instead `before_cursor_count` grows so a client can
+    detect it and resync from the start (never silently lost)."""
+    limit = max(1, min(int(limit), 200))
+    ordered = sorted(events, key=_timeline_key)
+    if cursor is None:
+        after, before = ordered, 0
+    else:
+        ck = decode_cursor(cursor)
+        after = [e for e in ordered if _timeline_key(e) > ck]
+        before = len(ordered) - len(after)
+    page = after[:limit]
+    return {"events": page, "next_cursor": encode_cursor(page[-1]) if len(page) == limit else None,
+            "before_cursor_count": before, "total": len(ordered)}
 
 
 # --------------------------------------------------------------------------
