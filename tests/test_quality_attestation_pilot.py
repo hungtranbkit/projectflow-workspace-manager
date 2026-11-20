@@ -180,3 +180,27 @@ def test_local_integration_is_blocked_too(tmp_path, monkeypatch):
     result = service.integrate_task(TASK)
     assert result["outcome"] == "BLOCKED"
     assert result["reasons"] == ["QUALITY_ATTESTATION_MISSING"]
+
+
+@pytest.mark.parametrize("route,data", [
+    ("mark-merged", {"pr_ref": "manual"}),
+    ("confirm-external-merge", {"reason": "external merge", "merged_commit": ""}),
+])
+def test_legacy_and_external_merge_routes_cannot_bypass_opt_in_gate(
+        client, git_repo, monkeypatch, route, data):
+    # Same real FastAPI routes used by the UI. The default Task behavior
+    # is unchanged; only one explicitly selected numeric Task is gated.
+    from tests.test_real_merge import ready_low_risk_task
+
+    tid, rid, _workspace = ready_low_risk_task(client, git_repo, f"QA bypass {route}")
+    monkeypatch.setenv("PROJECTFLOW_QUALITY_PILOT_TASK_IDS", str(tid))
+    monkeypatch.setenv("PROJECTFLOW_QUALITY_PILOT_REPO", "demo")
+    monkeypatch.delenv("PROJECTFLOW_QUALITY_ATTESTATION_KEY", raising=False)
+    response = client.post(
+        f"/api/tasks/{tid}/merges/{rid}/{route}",
+        data=data, follow_redirects=False)
+    assert response.status_code == 409, response.text
+    row = client.app.state.db.one(
+        "SELECT merge_status FROM merge_records WHERE task_id=? AND repository_id=?",
+        (tid, rid))
+    assert row["merge_status"] != "MERGED"
