@@ -204,3 +204,29 @@ def test_legacy_and_external_merge_routes_cannot_bypass_opt_in_gate(
         "SELECT merge_status FROM merge_records WHERE task_id=? AND repository_id=?",
         (tid, rid))
     assert row["merge_status"] != "MERGED"
+
+
+def test_trusted_signer_refuses_uncommitted_source_and_wrong_sha(tmp_path):
+    import subprocess
+    from scripts.agent_quality_sign_pilot import independent_attest
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    for command in [
+        ["git", "init", "-b", "main"],
+        ["git", "config", "user.email", "qa@example.invalid"],
+        ["git", "config", "user.name", "Independent QA"],
+    ]:
+        subprocess.run(command, cwd=checkout, check=True, capture_output=True)
+    f = checkout / "example.py"
+    f.write_text("value = 1\n")
+    subprocess.run(["git", "add", "."], cwd=checkout, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "clean"], cwd=checkout, check=True, capture_output=True)
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip()
+    kwargs = dict(worktree=checkout, projectflow_task_id=TASK, repository_id=REPO,
+                  repository_name=NAME, destination=tmp_path / "receipts", signing_key=KEY)
+    with pytest.raises(ValueError, match="exact source commit"):
+        independent_attest(exact_sha=NEXT_SHA, **kwargs)
+    f.write_text("value = 2\n")
+    with pytest.raises(ValueError, match="not clean"):
+        independent_attest(exact_sha=sha, **kwargs)
