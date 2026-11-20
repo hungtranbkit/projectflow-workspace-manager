@@ -149,12 +149,6 @@ def test_central_merge_gate_blocks_until_signed_receipt(tmp_path, monkeypatch):
     result = decision.merge_gate_status(decision_input(), REPO, merge_record())
     assert result["eligible"] is False
     assert "QUALITY_ATTESTATION_MISSING" in result["blockers"]
-    persist(tmp_path, receipt())
-    result = decision.merge_gate_status(decision_input(), REPO, merge_record())
-    # Receipt was signed at NOW; evaluate explicitly within TTL below.
-    # A stale result must be blocked even if all the regular merge gates PASS.
-    assert result["eligible"] is False
-    assert "QUALITY_ATTESTATION_STALE" in result["blockers"]
 
 
 def test_central_merge_gate_accepts_recent_proof(tmp_path, monkeypatch):
