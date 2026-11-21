@@ -92,6 +92,7 @@ def test_signed_isolated_attestation_required_without_hmac_fallback(tmp_path):
         "PROJECTFLOW_QUALITY_ATTESTATION_DIR": str(tmp_path),
         "PROJECTFLOW_QUALITY_ATTESTATION_PUBLIC_KEY_FILE": str(pubfile),
         "PROJECTFLOW_QUALITY_REQUIRE_ISOLATED_QA": "1",
+        "PROJECTFLOW_QUALITY_APPROVED_QA_IMAGE_ID": "sha256:" + "c" * 64,
     }
     host_only = sign_ed25519_receipt(proof(), private)
     receipt_path.write_text(json.dumps(host_only))
@@ -105,3 +106,56 @@ def test_signed_isolated_attestation_required_without_hmac_fallback(tmp_path):
                                  environ=env, now=NOW) is None
     assert quality_merge_blocker(TASK_ID, REPO_ID, NAME, "d" * 40,
                                  environ=env, now=NOW) == "QUALITY_ATTESTATION_STALE"
+
+
+def test_strict_verifier_does_not_trust_unsigned_or_unapproved_image(tmp_path):
+    """An image SHA merely asserted by the signer is not the verifier's pin."""
+    private, public = material()
+    pubfile = tmp_path / "verifier-public.pem"
+    pubfile.write_bytes(public)
+    env = {
+        "PROJECTFLOW_QUALITY_PILOT_TASK_IDS": str(TASK_ID),
+        "PROJECTFLOW_QUALITY_PILOT_REPO": NAME,
+        "PROJECTFLOW_QUALITY_ATTESTATION_DIR": str(tmp_path),
+        "PROJECTFLOW_QUALITY_ATTESTATION_PUBLIC_KEY_FILE": str(pubfile),
+        "PROJECTFLOW_QUALITY_REQUIRE_ISOLATED_QA": "1",
+    }
+    receipt_path = tmp_path / f"task-{TASK_ID}-repo-{REPO_ID}.json"
+    payload = proof()
+    payload["qa_isolation"] = "DOCKER_READ_ONLY_NO_NETWORK"
+    payload["qa_image_id"] = "sha256:" + "a" * 64
+    receipt_path.write_text(json.dumps(sign_ed25519_receipt(payload, private)))
+
+    # Strict verification fails closed without an independently configured
+    # image pin, even for a signature that is otherwise valid.
+    assert quality_merge_blocker(TASK_ID, REPO_ID, NAME, SHA,
+                                 environ=env, now=NOW) == "QUALITY_ATTESTATION_CONFIG"
+    env["PROJECTFLOW_QUALITY_APPROVED_QA_IMAGE_ID"] = "python:latest"
+    assert quality_merge_blocker(TASK_ID, REPO_ID, NAME, SHA,
+                                 environ=env, now=NOW) == "QUALITY_ATTESTATION_CONFIG"
+    env["PROJECTFLOW_QUALITY_APPROVED_QA_IMAGE_ID"] = "sha256:" + "b" * 64
+    assert quality_merge_blocker(TASK_ID, REPO_ID, NAME, SHA,
+                                 environ=env, now=NOW) == "QUALITY_ATTESTATION_STALE"
+    env["PROJECTFLOW_QUALITY_APPROVED_QA_IMAGE_ID"] = payload["qa_image_id"]
+    assert quality_merge_blocker(TASK_ID, REPO_ID, NAME, SHA,
+                                 environ=env, now=NOW) is None
+
+
+def test_strict_isolation_never_falls_back_to_legacy_hmac(tmp_path):
+    from app.services.quality_attestation_pilot import sign_receipt
+    payload = proof()
+    payload["qa_isolation"] = "DOCKER_READ_ONLY_NO_NETWORK"
+    payload["qa_image_id"] = "sha256:" + "a" * 64
+    key = "unit-test-only-hmac-secret-that-is-at-least-32-characters"
+    receipt_path = tmp_path / f"task-{TASK_ID}-repo-{REPO_ID}.json"
+    receipt_path.write_text(json.dumps(sign_receipt(payload, key)))
+    env = {
+        "PROJECTFLOW_QUALITY_PILOT_TASK_IDS": str(TASK_ID),
+        "PROJECTFLOW_QUALITY_PILOT_REPO": NAME,
+        "PROJECTFLOW_QUALITY_ATTESTATION_DIR": str(tmp_path),
+        "PROJECTFLOW_QUALITY_ATTESTATION_KEY": key,
+        "PROJECTFLOW_QUALITY_REQUIRE_ISOLATED_QA": "1",
+        "PROJECTFLOW_QUALITY_APPROVED_QA_IMAGE_ID": payload["qa_image_id"],
+    }
+    assert quality_merge_blocker(TASK_ID, REPO_ID, NAME, SHA,
+                                 environ=env, now=NOW) == "QUALITY_ATTESTATION_CONFIG"
