@@ -67,3 +67,12 @@ def test_execute_rejects_invalid_sha():
 
 def test_fail_status_does_not_convert_to_pass():
     assert poll.should_run(SHA, {"sha": SHA, "status": "FAIL", "attempts": 1, "last_attempt_epoch": time.time()}, time.time())[0] is False
+
+
+def test_operator_retry_bypasses_cooldown_not_attempt_limit():
+    now = 10000
+    previous = {"sha": SHA, "status": "FAIL", "attempts": 1, "last_attempt_epoch": now - 1}
+    assert poll.should_run(SHA, previous, now)[1] == "RETRY_COOLDOWN"
+    assert poll.should_run(SHA, previous, now, force_retry=True) == (True, "RETRY", 2)
+    previous["attempts"] = 3
+    assert poll.should_run(SHA, previous, now, force_retry=True)[1] == "RETRY_LIMIT_REACHED"
