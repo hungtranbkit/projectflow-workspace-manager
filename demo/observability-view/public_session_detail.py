@@ -77,7 +77,11 @@ def classify_public_session(session_name, *, state=None, checkpoint_at=None,
     project = next((p for p, prefixes in _PROJECTS if any(name.startswith(x) for x in prefixes)), None)
     task = next((t for slug, t in _TASK_HINTS if slug in name), None) if project else None
     # Only known project prefixes permit a displayed session slug.
-    shown_session = name if project else None
+    # Publish only known, task-classified session slugs without sensitive tokens.
+    # Unknown/new patterns retain a neutral alias until explicitly reviewed.
+    unsafe_tokens = ("secret", "token", "password", "private", "credential", "apikey", "clientname")
+    shown_session = (name if project and task and not any(x in name for x in unsafe_tokens)
+                     else None)
     clean_commit = last_commit[:12] if isinstance(last_commit, str) and _SAFE_COMMIT.fullmatch(last_commit) else None
     clean_branch = git_branch if isinstance(git_branch, str) and _SAFE_BRANCH.fullmatch(git_branch) else None
     checkpoint = _time(checkpoint_at)
