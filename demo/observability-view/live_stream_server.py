@@ -53,8 +53,11 @@ def _live_fleet_rows(registry_rows, observation, allowed_nodes):
     if not isinstance(observation, dict) or not isinstance(observation.get("sessions"), list):
         return list(registry_rows), None
     coverage = observation.get("covered_nodes")
-    if not isinstance(coverage, list) or not coverage:
-        return list(registry_rows), None
+    if not isinstance(coverage, list):
+        return [], {"covered_nodes": [], "unreachable_nodes": sorted(allowed_nodes)}
+    if not coverage:
+        return [], {"covered_nodes": [], "unreachable_nodes": [
+            x for x in observation.get("unreachable_nodes", []) if x in allowed_nodes]}
     known = {}
     for raw in registry_rows:
         row = dict(raw)
@@ -108,8 +111,9 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
     if callable(source):
         try:
             sr, fleet_coverage = _live_fleet_rows(sr, source(), set(ids))
-        except Exception:  # Unreachable controller must not break the read-only view.
-            fleet_coverage = None
+        except Exception:  # Fail closed; never resurrect stale ACTIVE registry rows.
+            sr, fleet_coverage = [], {
+                "covered_nodes": [], "unreachable_nodes": sorted(ids)}
     # Observations are privately authenticated node readbacks; only their
     # strict public-safe projection is ever merged into the output payload.
     observed = monitor.snapshot(sr, now=now) if monitor is not None else {}
