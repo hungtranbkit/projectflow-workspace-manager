@@ -74,3 +74,28 @@ Expected state fields include `sha`, `status` (`RUNNING`, `FAST_PASS`, `FAIL`, `
 ## Remaining work before replacing GitHub Actions completely
 
 The current `.github/workflows/ci.yml` and GitHub branch protection remain unchanged. To replace GitHub-hosted PR CI safely, provision a separate HTTPS hostname, a real **GitHub OAuth App** for Woodpecker Server, and an **isolated Docker runner** with sufficient capacity, then verify real PR webhook delivery, a full regression run, negative failure gating, queue/retry behavior, and a required GitHub check posted on the exact SHA. Do not equate this locally passing Fast tier with the full test suite or with deployment.
+
+## Timer recovery audit — 2026-11-21 23:24 Asia/Bangkok
+
+Live monitoring found a scheduler defect: the previous `OnUnitInactiveSec=15min`
+unit could be `ActiveState=active` / `SubState=elapsed` while
+`NextElapseUSecMonotonic=infinity`. The last CI poll was over an hour old
+although the timer looked **active**. Merely reporting `Active` would have
+been a misleading health check.
+
+The installer now uses explicit quarter-hour wall-clock `OnCalendar=*:0/15`
+with `Persistent=true`, `RandomizedDelaySec=30s`, and no boot-relative
+trigger. `systemd-analyze calendar '*:0/15'` validated the recurrence.
+On MacBook Linux the updated unit was installed using `--update`, verified
+with `systemd-analyze --user verify`, then restarted. The timer immediately
+performed a recovered poll at **23:24:31**, and the worker correctly logged
+`CI_SKIP: ALREADY_PASSED` at **23:24:32** without rebuilding the same SHA.
+After the worker finished, systemd reported `SubState=waiting` and
+`NextElapseUSecRealtime=Sat 2026-11-21 23:30:08 +07`.
+The new timer check is covered by `test_timer_uses_calendar_not_monotonic_elapsed_schedule`;
+19 poller regression tests passed with the revised installer.
+
+**Monitoring must check both enabled/active AND finite next scheduled run**, plus
+`last_polled_at` and journal evidence. A successful CI result can be stale
+if the timer has stopped scheduling. This update does not confer full CI or
+GitHub PR check capabilities.
