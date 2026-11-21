@@ -369,12 +369,14 @@ def test_live_fleet_replaces_duplicated_stale_registry_and_promotes_remote_runni
     assert [x["execution_state"] for x in s["items"]] == [
         "RUNNING_VERIFIED", "WAITING_INPUT", "IDLE"]
     assert s["items"][0]["node"] == "m910"
+    assert s["items"][0]["session"] is None  # remotely discovered raw identity is private
     assert s["items"][0]["agent_type"] == "codex"
     assert s["observation_source"] == "terminal_mcp_authenticated_fleet"
     assert {i["label"]: i["open_sessions"] for i in d["nodes"]["items"]} == {
         "hp-linux": 1, "m910": 1, "nec1": 1}
     assert s["coverage"]["covered_nodes"] == ["hp-linux", "m910", "nec1"]
     assert "old-stale" not in json.dumps(d)
+    assert "projectflow-observability-remote" not in json.dumps(d)
     assert "PRIVATE_COMMAND_TOKEN" not in json.dumps(d)
 
 
