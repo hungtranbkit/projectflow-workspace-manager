@@ -19,6 +19,22 @@ import time
 _SAFE_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{2,89}$")
 _RUNNING_AGE = 30.0
 _SOURCE_TTL = 20.0
+_FOREGROUND = re.compile(r"current command is '([a-z0-9._-]{1,40})'", re.I)
+# A trusted node sometimes reports UNKNOWN while a real foreground tool is
+# running, because its earlier activity timestamp is stale. Requiring TWO
+# different output samples still verifies execution without trusting heartbeat.
+_ACTIVE_COMMANDS = frozenset({
+    "python", "python3", "pytest", "node", "npm", "pnpm", "npx",
+    "codex", "claude", "java", "go", "cargo", "rustc", "uv",
+    "bash-script", "gcc", "g++", "make", "cmake"
+})
+
+
+def _unknown_but_foreground(status):
+    reason = status.get("reason")
+    match = _FOREGROUND.search(reason) if isinstance(reason, str) else None
+    return bool(match and match.group(1).casefold() in _ACTIVE_COMMANDS)
+
 
 # Fixed, reviewed public labels. Never publish arbitrary user-supplied titles.
 _PUBLIC_TASKS = (
@@ -157,7 +173,7 @@ class TerminalProofMonitor:
                         record = {"state": "IDLE", "evidence": "node_observed", "observed_at": at}
                     elif raw == "BLOCKED":
                         record = {"state": "BLOCKED", "evidence": "node_observed", "observed_at": at}
-                    elif raw == "RUNNING":
+                    elif raw == "RUNNING" or (raw == "UNKNOWN" and _unknown_but_foreground(value)):
                         # The raw pane is not published, even as a preview.
                         output = value.get("last_output")
                         if isinstance(output, str) and output:
