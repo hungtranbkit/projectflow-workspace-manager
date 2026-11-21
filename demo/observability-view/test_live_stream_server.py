@@ -408,3 +408,32 @@ def test_incomplete_fleet_coverage_does_not_claim_old_remote_session_open(tmp_pa
     assert d["sessions"]["coverage"]["unreachable_nodes"] == ["m910"]
     assert "projectflow-observability-old" not in json.dumps(d)
     assert d["sessions"]["recent_activity_signals"] == 0  # heartbeat is not progress
+
+
+def test_fleet_source_unavailable_does_not_count_stale_active_rows(tmp_path):
+    now = datetime(2026, 11, 22, 0, 0, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("hp-linux", "online", ts, "healthy", "EXECUTION_OK", "host", "ref"))
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records (node_id,agent_type,status,deleted_at,"
+                   "last_activity_at,last_seen_at,session_name,launch_command)"
+                   " VALUES(?,?,?,?,?,?,?,?)",
+                   ("local", "codex", "ACTIVE", None, ts, ts,
+                    "projectflow-observability-stale", "old command"))
+    class UnreachableReader:
+        def list_sessions(self):
+            return {"covered_nodes": [], "unreachable_nodes": ["hp-linux"],
+                    "sessions": []}
+    class Monitor:
+        reader = UnreachableReader()
+        def snapshot(self, rows, *, now):
+            assert not rows
+            return {}
+    data = detailed_snapshot(nodes, sessions, now=now, monitor=Monitor())
+    assert data["sessions"]["open"] == 0
+    assert data["sessions"]["coverage"]["unreachable_nodes"] == ["hp-linux"]
+    assert data["sessions"]["proven_running"] == 0
+    assert "projectflow-observability-stale" not in json.dumps(data)
