@@ -9,6 +9,7 @@ class Element {
   setAttribute(k,v){this.attributes[k]=v}
   replaceChildren(...items){this.children=items}
   append(...items){this.children.push(...items)}
+  appendChild(item){this.children.push(item);return item}
   click(){assert.equal(typeof this.events.click,"function","missing click listener for "+this.id);this.events.click()}
 }
 const ids=["workflow","task-name","step-counter","status-code","status-title","status-detail","gate-value","gate-detail","ttl-value","ttl-detail","claude","codex","harness","evidence","flow-bar","gate-bar","ttl-bar","steps","events","observed","next","play","reset","speed"];
