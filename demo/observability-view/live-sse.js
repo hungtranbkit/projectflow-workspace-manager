@@ -58,7 +58,7 @@
     if(!st.events.length)list.appendChild(element("li","", "Chưa thấy biến động tổng hợp từ lúc mở trang."));
   }
   function render(d,source){
-    if(!validate(d))return false;
+    if(!validate(d)){statusUnknown("Nguồn SSE trả dữ liệu không hợp lệ. Không giữ trạng thái LIVE cũ.");return false;}
     const age=(Date.now()-Date.parse(d.observed_at))/1000;
     if(!Number.isFinite(age)||age < -120||age>900){
       statusUnknown("Bản ghi quá cũ hoặc sai thời gian. Không hiển thị số liệu như đang hoạt động.");
