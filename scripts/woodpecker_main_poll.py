@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 REPO = "hungtranbkit/projectflow-workspace-manager"
@@ -30,10 +31,14 @@ SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 ROOT = Path.home() / ".local" / "state" / "projectflow-woodpecker-main-ci"
 APP = Path.home() / ".local" / "share" / "projectflow-woodpecker-main-ci"
 CLI = Path.home() / ".local" / "share" / "projectflow-woodpecker-staging" / "v3.20.1" / "woodpecker-cli"
-PYTHON = sys.executable
+# CI tests must match GitHub Actions setup-python 3.11.
+PROFILE_VERSION = "py311-fastfail-20261121-v2"
+PYTHON311 = APP / "python311"
+VENV = APP / "venv-py311"
 RETRY_SECONDS = 3600
 MAX_ATTEMPTS_SAME_SHA = 3
-JOB_TIMEOUT_SECONDS = 2700
+JOB_TIMEOUT_SECONDS = 900
+MAX_LOG_BYTES = 2_500_000
 
 
 def utc() -> str:
@@ -103,9 +108,9 @@ def child_environment() -> dict[str, str]:
     private_directory(ROOT / "tmp")
     env = {
         "HOME": str(ROOT / "sandbox-home"),
-        "PATH": str(APP / "venv" / "bin") + ":/usr/local/bin:/usr/bin:/bin",
+        "PATH": str(VENV / "bin") + ":/usr/local/bin:/usr/bin:/bin",
         "LANG": "C.UTF-8",
-        "VIRTUAL_ENV": str(APP / "venv"),
+        "VIRTUAL_ENV": str(VENV),
         "XDG_CACHE_HOME": str(ROOT / "cache"),
         "PIP_CACHE_DIR": str(ROOT / "cache" / "pip"),
         "TMPDIR": str(ROOT / "tmp"),
@@ -113,26 +118,61 @@ def child_environment() -> dict[str, str]:
         "CI": "true",
         "PYTHONDONTWRITEBYTECODE": "1",
         "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "PYTEST_ADDOPTS": "--maxfail=1 --tb=short --disable-warnings",
     }
     return env
 
 
 def logged_command(command: list[str], log, *, cwd: Path, env: dict[str, str],
                    timeout: int) -> None:
-    log.write("$ " + " ".join(command[:3]) + " [arguments omitted]\n")
+    """Bounded streaming logs; always drain process output to prevent deadlocks.
+
+    Never print credentials. Errors propagate as failures, never implicit PASS.
+    """
+    log.write("$ " + " ".join(command[:3]) + " [arguments omitted]\\n")
     log.flush()
-    proc = subprocess.Popen(command, cwd=str(cwd), env=env, stdout=log,
-                            stderr=subprocess.STDOUT, start_new_session=True)
-    try:
-        rc = proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        os.killpg(proc.pid, signal.SIGTERM)
+    proc = subprocess.Popen(command, cwd=str(cwd), env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            start_new_session=True)
+    assert proc.stdout is not None
+    remaining = max(0, MAX_LOG_BYTES - log.tell())
+
+    def drain() -> None:
+        nonlocal remaining
+        truncated = False
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
-        raise RuntimeError("COMMAND_TIMEOUT") from exc
+            while True:
+                chunk = os.read(proc.stdout.fileno(), 4096)
+                if not chunk:
+                    break
+                if remaining:
+                    write_chunk = chunk[:remaining]
+                    log.write(write_chunk.decode("utf-8", errors="replace"))
+                    log.flush()
+                    remaining -= len(write_chunk)
+                if len(chunk) > len(chunk[:remaining]) and remaining == 0:
+                    truncated = True
+            if truncated:
+                log.write("\\nCI_LOG_TRUNCATED: remainder discarded after 2.5 MB; worker drained output\\n")
+                log.flush()
+        finally:
+            proc.stdout.close()
+
+    thread = threading.Thread(target=drain, name="ci-log-drain", daemon=True)
+    thread.start()
+    try:
+        try:
+            rc = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+            raise RuntimeError("COMMAND_TIMEOUT") from exc
+    finally:
+        thread.join(timeout=10)
     if rc:
         raise RuntimeError("COMMAND_FAILED_EXIT_" + str(rc))
 
@@ -146,8 +186,17 @@ def execute_sha(sha: str, log) -> None:
     if not pipeline.is_file():
         raise RuntimeError("TRUSTED_PIPELINE_MISSING")
     env = child_environment()
-    python = APP / "venv" / "bin" / "python"
-    with tempfile.TemporaryDirectory(prefix="checkout-", dir=str(ROOT)) as work:
+    python = VENV / "bin" / "python"
+    if not PYTHON311.is_file() or not os.access(PYTHON311, os.X_OK):
+        raise RuntimeError("PYTHON311_NOT_PROVISIONED")
+    if not python.is_file():
+        raise RuntimeError("PYTHON311_VENV_NOT_READY")
+    python_version = run_simple([str(python), "--version"], timeout=10)
+    if not python_version.startswith("Python 3.11."):
+        raise RuntimeError("INCOMPATIBLE_PYTHON_VERSION")
+    with tempfile.TemporaryDirectory(prefix="checkout-", dir=str(ROOT)) as work, \
+         tempfile.TemporaryDirectory(prefix="jobtmp-", dir=str(ROOT / "tmp")) as run_tmp:
+        env["TMPDIR"] = run_tmp
         checkout = Path(work) / "repo"
         logged_command(["git", "clone", "--quiet", "--no-checkout", "--depth", "1",
                         "--single-branch", "--branch", "main", REMOTE, str(checkout)],
@@ -157,9 +206,6 @@ def execute_sha(sha: str, log) -> None:
             raise RuntimeError("REMOTE_ADVANCED_BEFORE_CHECKOUT")
         logged_command(["git", "checkout", "--quiet", "--detach", sha], log,
                        cwd=checkout, env=env, timeout=20)
-        if not python.is_file():
-            logged_command([PYTHON, "-m", "venv", str(APP / "venv")], log,
-                           cwd=checkout, env=env, timeout=180)
         logged_command([str(python), "-m", "pip", "install", "--disable-pip-version-check",
                         "-e", ".[test]"], log, cwd=checkout, env=env, timeout=600)
         # The trusted pipeline is stored OUTSIDE the cloned repository;
@@ -208,6 +254,12 @@ def main() -> int:
             print("REMOTE_CHECK_ERROR:" + type(exc).__name__)
             return 3
         begin = time.time()
+        if previous.get("sha") == sha and previous.get("profile") != PROFILE_VERSION:
+            # A new verified runtime/test policy deserves one fresh bounded attempt.
+            # Preserve evidence of the old run before resetting its retry counter.
+            private_directory(ROOT / "history")
+            write_json(ROOT / "history" / (sha[:12] + "-legacy-status.json"), previous)
+            previous = {}
         go, reason, attempts = should_run(sha, previous, begin, force_retry=force_retry)
         if not go:
             print("CI_SKIP:", reason, sha[:12])
@@ -225,6 +277,9 @@ def main() -> int:
             "last_attempt_epoch": begin,
             "log_path": str(log_path),
             "engine": "woodpecker-cli-local",
+            "profile": PROFILE_VERSION,
+            "test_policy": "python3.11-fail-fast",
+            "log_limit_bytes": MAX_LOG_BYTES,
             "trust_scope": "protected-main-only",
         }
         write_json(state_path, record)
