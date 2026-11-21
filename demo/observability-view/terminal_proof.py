@@ -151,13 +151,23 @@ class TerminalProofMonitor:
             for row in rows[:100]:
                 node, name = str(row["node_id"]), str(row["session_name"])
                 if _SAFE_NAME.fullmatch(node) and _SAFE_NAME.fullmatch(name):
-                    names.append((node, name))
+                    # Never carry a proof across a deleted/recreated session.
+                    # The registry increments generation on a revived session.
+                    available = row.keys()
+                    stable_id = str(row["stable_session_id"] or "") if "stable_session_id" in available else ""
+                    generation = str(row["generation"] or "") if "generation" in available else ""
+                    names.append((node, name, stable_id, generation))
+            active = set(names)
+            self.last_hash = {k: v for k, v in self.last_hash.items() if k in active}
+            self.proof_at = {k: v for k, v in self.proof_at.items() if k in active}
             observed = {}
             with ThreadPoolExecutor(max_workers=8) as executor:
-                futs = {executor.submit(self.reader, node, name): (node, name)
-                        for node, name in names}
+                futs = {executor.submit(self.reader, node, name): (node, name, stable_id, generation)
+                        for node, name, stable_id, generation in names}
                 for fut in as_completed(futs):
-                    key = futs[fut]
+                    node, name, stable_id, generation = futs[fut]
+                    key = (node, name)
+                    history_key = (node, name, stable_id, generation)
                     try:
                         value = fut.result()
                     except Exception:
@@ -178,14 +188,18 @@ class TerminalProofMonitor:
                         output = value.get("last_output")
                         if isinstance(output, str) and output:
                             digest = hashlib.sha256(output[-50000:].encode("utf-8", "replace")).digest()
-                            old = self.last_hash.get(key)
-                            self.last_hash[key] = digest
+                            old = self.last_hash.get(history_key)
+                            self.last_hash[history_key] = digest
                             if old is not None and old != digest:
-                                self.proof_at[key] = now
-                            age = (now - self.proof_at[key]).total_seconds() if key in self.proof_at else 10**9
+                                self.proof_at[history_key] = now
+                            age = (now - self.proof_at[history_key]).total_seconds() if history_key in self.proof_at else 10**9
                             if 0 <= age <= _RUNNING_AGE:
                                 record = {"state": "RUNNING_VERIFIED", "evidence": "terminal_output_delta",
-                                          "observed_at": at, "checkpoint_at": self.proof_at[key].isoformat(timespec="seconds")}
+                                          "observed_at": at, "checkpoint_at": self.proof_at[history_key].isoformat(timespec="seconds")}
+                    if raw in ("IDLE", "WAITING_INPUT", "WAITING", "BLOCKED") or value.get("input_required"):
+                        # An ended turn invalidates proof before the same session's next run.
+                        self.last_hash.pop(history_key, None)
+                        self.proof_at.pop(history_key, None)
                     if record is not None:
                         # An explicit owner title is trusted metadata, not a proof of activity.
                         label = self.task_reader(*key)
