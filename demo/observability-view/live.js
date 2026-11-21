@@ -59,8 +59,8 @@
   }
   async function update(){
     try{
-      // Only same-origin, sanitized static JSON; no Terminal MCP client API.
-      const response=await fetch(new URL("live-status.json",document.baseURI),{cache:"no-store",credentials:"omit"});
+      // Only the fixed public GitHub raw-data branch; no Terminal MCP client API.
+      const response=await fetch("https://raw.githubusercontent.com/hungtranbkit/projectflow-workspace-manager/live-data/live-status.json",{cache:"no-store",credentials:"omit"});
       if(!response.ok)throw Error("No published snapshot");
       const d=await response.json();
       if(!validated(d))throw Error("Invalid snapshot schema");
