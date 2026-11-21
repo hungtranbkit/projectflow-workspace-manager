@@ -138,3 +138,57 @@ Local server/agent handshake and Woodpecker CLI tests are PASSED, while public
 webhooks, full-suite CI, GitHub status checks and safe dedicated runner remain
 **UNVERIFIED**.
 
+
+## Interim automatic trusted-main CI (activated on MacBook, 2026-11-21)
+
+This is an **interim fallback** while the real GitHub OAuth App, separate HTTPS
+hostname, and isolated Docker runner for the normal Woodpecker Server remain
+unavailable. It does not replace required PR checks.
+
+The versioned components are:
+- `scripts/woodpecker_main_poll.py`: SHA-pinned public-GitHub `main` poller,
+  no writable GitHub token or webhook, single-process lock, bounded job time,
+  retry cooldown, explicit PASS/FAIL state and timestamped log evidence.
+- `infra/woodpecker/local-main/trusted-main.yaml`: preflight/build/full-test/smoke
+  via the official `woodpecker-cli exec --backend-engine local` engine.
+- `infra/woodpecker/local-main/install-user-timer.sh`: systemd service and timer
+  installer; the timer can be enabled with the explicit `--enable` flag.
+- `tests/test_woodpecker_main_poll.py`: 9 offline poller behavior tests.
+
+**Actual MacBook installation:** versioned poller and trusted-main YAML copied to
+`~/.local/share/projectflow-woodpecker-main-ci/`, user service/timer units
+created and verified by `systemd-analyze --user verify`. The timer
+`projectflow-woodpecker-main-ci.timer` was **enabled and active**;
+`loginctl show-user mac -p Linger` returned `Linger=yes`. A live first run
+was dispatched at approximately 17:35 Asia/Bangkok on commit prefix
+`072b22bd5ab7`; the state JSON showed RUNNING and the log demonstrated
+real Woodpecker CLI strict lint, preflight PASS, build PASS and entry into
+the complete test suite. **Do not infer the final test outcome from this
+checkpoint**; inspect the latest status file.
+
+To inspect the real evidence:
+```bash
+systemctl --user status projectflow-woodpecker-main-ci.timer
+systemctl --user status projectflow-woodpecker-main-ci.service
+cat ~/.local/state/projectflow-woodpecker-main-ci/status.json
+journalctl --user -u projectflow-woodpecker-main-ci.service -n 80 --no-pager
+```
+Full logs are written as mode-0600 files under
+`~/.local/state/projectflow-woodpecker-main-ci/logs/`. The poller only builds
+the exact Git SHA currently resolved from the **protected main branch**. It
+does not receive or execute code from PR branches or forks, and reports a
+failed test as FAIL rather than faking a green result.
+
+**Security boundary:** Woodpecker's Local backend has no OS/container isolation.
+Even with scrubbed environment variables and resource limits, code executed by
+this job shares the host user's filesystem permissions. Treat this as an
+interim trusted-main-only CI worker, not a safe public PR runner. Never add
+personal tokens, deploy keys, fork PRs or production pipelines to it. The
+systemd service is capped at 125% CPU, 4 GB memory and a bounded runtime.
+
+This automatic trusted-main mode **does not produce GitHub commit statuses**,
+does not evaluate unmerged PRs, does not connect to the Woodpecker web UI,
+and does not justify disabling the existing required GitHub Actions checks.
+The full Woodpecker OAuth/tunnel/isolated-runner conversion remains a separate
+acceptance gate.
+
