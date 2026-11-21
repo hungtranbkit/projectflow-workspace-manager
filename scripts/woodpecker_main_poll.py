@@ -32,7 +32,7 @@ ROOT = Path.home() / ".local" / "state" / "projectflow-woodpecker-main-ci"
 APP = Path.home() / ".local" / "share" / "projectflow-woodpecker-main-ci"
 CLI = Path.home() / ".local" / "share" / "projectflow-woodpecker-staging" / "v3.20.1" / "woodpecker-cli"
 # CI tests must match GitHub Actions setup-python 3.11.
-PROFILE_VERSION = "py311-fastfail-20261121-v2"
+PROFILE_VERSION = "py311-trusted-main-fast-20261121-v3"
 PYTHON311 = APP / "python311"
 VENV = APP / "venv-py311"
 RETRY_SECONDS = 3600
@@ -90,7 +90,7 @@ def write_json(path: Path, record: dict) -> None:
 def should_run(sha: str, previous: dict, now_epoch: float, *, force_retry: bool = False) -> tuple[bool, str, int]:
     if previous.get("sha") != sha:
         return True, "NEW_SHA", 1
-    if previous.get("status") == "PASS":
+    if previous.get("status") in ("PASS", "FAST_PASS"):
         return False, "ALREADY_PASSED", int(previous.get("attempts", 1))
     attempts = int(previous.get("attempts", 0))
     if attempts >= MAX_ATTEMPTS_SAME_SHA:
@@ -278,7 +278,10 @@ def main() -> int:
             "log_path": str(log_path),
             "engine": "woodpecker-cli-local",
             "profile": PROFILE_VERSION,
-            "test_policy": "python3.11-fail-fast",
+            "test_policy": "python3.11-fast-smoke-harness-fail-fast",
+            "gate_level": "FAST",
+            "full_regression": "NOT_RUN_NO_ISOLATED_DOCKER_RUNNER",
+            "github_pr_checks": "NOT_CONNECTED",
             "log_limit_bytes": MAX_LOG_BYTES,
             "trust_scope": "protected-main-only",
         }
@@ -289,7 +292,7 @@ def main() -> int:
             with os.fdopen(fd, "w", encoding="utf-8") as log:
                 log.write("ProjectFlow trusted-main CI " + sha + " started " + utc() + "\n")
                 execute_sha(sha, log)
-            record.update(status="PASS", reason="ALL_GATES_PASSED")
+            record.update(status="FAST_PASS", reason="FAST_GATES_PASSED_FULL_NOT_RUN")
         except Exception as exc:
             # Don't echo arbitrary error strings (they may include shell output).
             record.update(status="FAIL", reason=type(exc).__name__ + ":" +
