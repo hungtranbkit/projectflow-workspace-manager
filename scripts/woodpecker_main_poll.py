@@ -12,6 +12,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -43,6 +44,24 @@ MAX_LOG_BYTES = 2_500_000
 
 def utc() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def policy_identity() -> str:
+    """A changed trusted pipeline cannot reuse an older CI PASS."""
+    pipeline = APP / "trusted-main.yaml"
+    if not pipeline.is_file():
+        return PROFILE_VERSION + "-MISSING"
+    return PROFILE_VERSION + "-" + hashlib.sha256(pipeline.read_bytes()).hexdigest()[:12]
+
+
+def stale_running(previous: dict, now_epoch: float) -> bool:
+    if previous.get("status") != "RUNNING":
+        return False
+    try:
+        age = now_epoch - float(previous.get("last_attempt_epoch", now_epoch))
+    except (TypeError, ValueError):
+        return False
+    return age > JOB_TIMEOUT_SECONDS + 120
 
 
 def private_directory(path: Path) -> None:
