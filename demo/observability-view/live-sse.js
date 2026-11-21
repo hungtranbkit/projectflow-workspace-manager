@@ -147,7 +147,7 @@
           +(s.commit_ref?" @ "+s.commit_ref:"")+
           " · chưa xác minh commit mới"));
         li.appendChild(element("small","session-proof",
-          s.running_verified===true?"Có checkpoint thực thi mới":"Chưa có bằng chứng code mới / chưa xác nhận RUNNING"));
+          s.running_verified===true?"Có checkpoint thực thi mới":"Chưa có bằng chứng code mới / chưa xác minh RUNNING"));
         list.appendChild(li);
       }
       set("live-sessions-note","Đang hiển thị "+showing+"/"+d.sessions.open+
