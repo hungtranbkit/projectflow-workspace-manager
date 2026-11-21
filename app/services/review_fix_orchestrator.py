@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+from pathlib import Path
 
 from app.services.review_service import task_chain_ids
 
@@ -85,35 +86,88 @@ class ReviewFixOrchestratorService:
                 "blockers": [{"id": f["id"], "category": f["category"], "severity": f["severity"], "title": f["title"]} for f in blockers]}
 
     def integration_readiness(self, task_id: int) -> dict:
+        """Read-only readiness, fail-closed for vanished worktrees/repositories.
+
+        A historical Task can retain DB references after an intentional
+        worktree cleanup. Never run Git with a vanished cwd: the API must
+        return a typed blocker, not an uncaught FileNotFoundError/HTTP 500.
+        Already-merged or cancelled Tasks are terminal, not candidates
+        for another local integration.
+        """
         governing = self._governing_task_id(task_id)
+
+        def blocked(reason: str) -> dict:
+            return {"task_id": task_id, "governing_task_id": governing,
+                    "ready": False, "outcome": "BLOCKED", "blockers": [reason]}
+
+        t = self._task(governing)
+        if not t:
+            return blocked("TASK_MISSING")
+        if t["status"] == "CANCELLED":
+            return blocked("TASK_CANCELLED")
+        if t["status"] == "CLOSED":
+            return blocked("TASK_CLOSED")
+        required_merges = [m for m in self.db.all(
+            "SELECT merge_status,required FROM merge_records WHERE task_id=?",
+            (governing,)) if m["required"]]
+        if required_merges and all(m["merge_status"] == "MERGED" for m in required_merges):
+            return blocked("ALREADY_MERGED")
+
         code = self._latest_review(governing, "CODE")
         blockers = []
         if not code or code["verdict"] not in ("PASS", "PASS_WITH_FINDINGS"):
             blockers.append("CODE_REVIEW_NOT_PASS")
         ws = self.worktree_manager.get_task_worktree(governing)
+        usable_ws = False
         if not ws:
             blockers.append("NO_MANAGED_WORKTREE")
+        elif ws.get("abandoned_at"):
+            blockers.append("WORKTREE_ABANDONED")
+        elif not Path(ws["repo_path"]).is_dir():
+            blockers.append("REPOSITORY_MISSING")
+        elif not Path(ws["worktree_path"]).is_dir():
+            blockers.append("WORKTREE_MISSING")
+        elif not (Path(ws["worktree_path"]) / ".git").exists():
+            blockers.append("WORKTREE_INVALID")
         else:
-            head = self.git.head(ws["worktree_path"])
-            if code and code["reviewed_commit"] != head:
-                blockers.append("REVIEW_STALE")
-            if ws["staleness"]["stale"]:
-                blockers.append("WORKTREE_BASE_STALE")
-            integ = self.worktree_manager.check_integration(governing)
-            if integ["result"] != "CLEAN":
-                blockers.append(f"INTEGRATION_{integ['result']}")
-        t = self._task(governing)
-        applicability = self._security_applicability(t, ws) if ws else {"required": False}
+            try:
+                # Both checks are bounded by the configured workspace root.
+                # Validate the repo before any git subprocess with that cwd.
+                self.git.validate_repo(ws["repo_path"])
+                self.git.validate_worktree(ws["worktree_path"])
+                head = self.git.head(ws["worktree_path"])
+                integ = self.worktree_manager.check_integration(governing)
+            except (OSError, ValueError, RuntimeError):
+                blockers.append("INTEGRATION_UNAVAILABLE")
+            else:
+                usable_ws = True
+                if code and code["reviewed_commit"] != head:
+                    blockers.append("REVIEW_STALE")
+                if ws["staleness"]["stale"]:
+                    blockers.append("WORKTREE_BASE_STALE")
+                if integ["result"] != "CLEAN":
+                    blockers.append(f"INTEGRATION_{integ['result']}")
+        # Security applicability may read Git evidence. On missing or
+        # invalid paths this assessment cannot be considered passed.
+        if usable_ws:
+            try:
+                applicability = self._security_applicability(t, ws)
+            except (OSError, ValueError, RuntimeError):
+                blockers.append("SECURITY_APPLICABILITY_UNAVAILABLE")
+                applicability = {"required": False}
+        else:
+            applicability = {"required": False}
         security = self._latest_review(governing, "SECURITY")
         if applicability.get("required"):
             if not security or security["verdict"] not in ("PASS", "PASS_WITH_FINDINGS"):
                 blockers.append("SECURITY_REVIEW_NOT_PASS")
         if self.findings_store.open_blocking(task_chain_ids(self.db, governing)):
             blockers.append("UNRESOLVED_BLOCKING_FINDING")
-        if self.human_decisions.pending_for_change(t["change_id"]) if t and t.get("change_id") else False:
+        if t.get("change_id") and self.human_decisions.pending_for_change(t["change_id"]):
             blockers.append("WAITING_HUMAN")
         return {"task_id": task_id, "governing_task_id": governing,
-                "ready": not blockers, "outcome": "INTEGRATION_READY" if not blockers else "BLOCKED", "blockers": blockers}
+                "ready": not blockers, "outcome": "INTEGRATION_READY" if not blockers else "BLOCKED",
+                "blockers": blockers}
 
     def _security_applicability(self, t, ws):
         run = self.workflow_service.get_workflow(t["change_id"]) if t.get("change_id") else None
