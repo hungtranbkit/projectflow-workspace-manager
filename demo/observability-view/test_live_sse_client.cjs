@@ -72,7 +72,7 @@ assert.ok(els["live-sessions"].children[0].children.some(x=>x.textContent==="S�
 assert.ok(els["live-projects"].children.length>=3);
 assert.ok(els["live-sessions"].children[0].children.some(x=>x.textContent.includes("chưa xác minh RUNNING")));
 assert.ok(els["live-transport"].textContent.includes("SSE"));
-const named=values();
+const named=enrich(values());
 named.nodes.items[0].label="hp-linux";
 named.nodes.items[1].label="m910";
 named.sessions.items[0].node="hp-linux";
