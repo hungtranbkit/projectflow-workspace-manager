@@ -7,6 +7,10 @@
   const $=id=>document.getElementById(id);
   const set=(id,value)=>{const e=$(id);if(e)e.textContent=String(value)};
   const int=x=>Number.isSafeInteger(x)&&x>=0&&x<=100000;
+  const publicNodeNames=new Set(["dell-5530","dell-linux","hp-linux","local","m910",
+    "mac17-macbook-pro","macbook","nec1","win"]);
+  const isNodeLabel=value=>typeof value==="string" &&
+    (/^Node \d{2}$/.test(value)||publicNodeNames.has(value));
   const labels={online:"Online",degraded:"Degraded",offline:"Offline",unknown:"Unknown"};
   const caps={healthy:"Khỏe",overloaded:"Quá tải",draining:"Đang drain",unknown:"Chưa rõ"};
   const agents={claude:"Claude",codex:"Codex",shell:"Shell",other:"Khác"};
@@ -23,9 +27,9 @@
     if(d.sessions.running_verified!==null||d.acceptance.percent!==null||d.acceptance.ttl_percent!==null)return false;
     if(d.schema_version===2&&(!int(d.sessions.recent_last_minute)||!Array.isArray(d.sessions.items)||d.sessions.items.length>24))return false;
     const allowed=["online","offline","unknown","degraded"];
-    if(!d.nodes.items.every(n=>/^Node \d{2}$/.test(n.label)&&allowed.includes(n.status)&&int(n.open_sessions)&&int(n.recent_activity_signals)))return false;
+    if(!d.nodes.items.every(n=>isNodeLabel(n.label)&&allowed.includes(n.status)&&int(n.open_sessions)&&int(n.recent_activity_signals)))return false;
     if(d.schema_version===2){
-      for(const s of d.sessions.items)if(!/^Session \d{2}$/.test(s.label)||!/^Node \d{2}$/.test(s.node)||!Object.hasOwn(agents,s.agent_type)||!Object.hasOwn(activity,s.activity_bucket)||s.running_verified!==null)return false;
+      for(const s of d.sessions.items)if(!/^Session \d{2}$/.test(s.label)||!isNodeLabel(s.node)||!Object.hasOwn(agents,s.agent_type)||!Object.hasOwn(activity,s.activity_bucket)||s.running_verified!==null)return false;
     }
     return true;
   }
