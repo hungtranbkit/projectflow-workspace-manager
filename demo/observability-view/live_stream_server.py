@@ -51,7 +51,7 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
     sr = _read(sessions_db,
                "SELECT node_id,agent_type,last_activity_at,last_seen_at,"
                "session_name,last_known_state,last_checkpoint_at,last_commit,git_branch "
-               "FROM session_records WHERE status='ACTIVE' AND deleted_at IS NULL")
+               "FROM session_records WHERE status='ACTIVE' AND deleted_at IS NULL ORDER BY node_id,session_name")
     ids = {str(x["id"]): i for i, x in enumerate(nr, 1)}
     public_names = {key: public_node_label(key, index) for key, index in ids.items()}
     per_node_types = {}
