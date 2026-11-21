@@ -30,7 +30,7 @@ const context={document:doc,Date,Intl,URL,Number,Object,Array,Error,String,
  }};
 const source=fs.readFileSync(path,"utf8");
 vm.runInNewContext(source,context);
-setImmediate(async()=>{
+(async()=>{await new Promise(setImmediate);
  await Promise.resolve();await Promise.resolve();await Promise.resolve();
  assert.equal(elements["live-nodes"].textContent,"1 / 2");
  assert.equal(elements["live-open"].textContent,"2");
@@ -42,4 +42,4 @@ setImmediate(async()=>{
  assert.ok(fetched>=1);
  assert.ok(source.includes("connect")===false || source.includes("No private API"));
  console.log("LIVE_CLIENT_PASS valid snapshot, no private data, evidence UNKNOWN");
-}).catch(e=>{console.error(e);process.exitCode=1});
+})().catch(e=>{console.error(e);process.exitCode=1});
