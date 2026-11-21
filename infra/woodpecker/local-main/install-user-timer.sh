@@ -74,7 +74,6 @@ cat >"$timer" <<'TIMER'
 Description=Check ProjectFlow protected main every 15 minutes (FAST CI only)
 
 [Timer]
-OnBootSec=3min
 OnCalendar=*:0/15
 # Calendar scheduling is deliberate: OnUnitInactiveSec had an elapsed/infinity
 # next trigger on the real MacBook after a successful oneshot job.
