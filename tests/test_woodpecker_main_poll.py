@@ -126,6 +126,7 @@ def test_profile_upgrade_preserves_prior_logs_and_does_not_fake_full_pass(tmp_pa
     monkeypatch.setattr(poll, "ROOT", tmp_path / "ci")
     monkeypatch.setattr(poll, "remote_sha", lambda: SHA)
     monkeypatch.setattr(poll, "execute_sha", lambda sha, log: log.write("FAST_GATES_OK\\n"))
+    monkeypatch.setattr(poll, "policy_identity", lambda: poll.PROFILE_VERSION + "-test")
     monkeypatch.setattr(poll.sys, "argv", ["woodpecker_main_poll.py"])
     poll.private_directory(poll.ROOT)
     poll.write_json(poll.ROOT / "status.json",
@@ -143,4 +144,44 @@ def test_profile_upgrade_preserves_prior_logs_and_does_not_fake_full_pass(tmp_pa
     assert poll.PROFILE_VERSION in d["log_path"]
     assert Path(d["log_path"]).is_file()
     assert old_log.read_text() == "OLD_EVIDENCE"
-    assert (poll.ROOT / "history" / (SHA[:12] + "-legacy-status.json")).is_file()
+    assert list((poll.ROOT / "history").glob(SHA[:12] + "-*.json"))
+    assert poll.main() == 0
+    after = poll.read_json(poll.ROOT / "status.json")
+    assert after["status"] == "FAST_PASS"
+    assert after["poll_count"] == 1
+    assert after["last_skip_reason"] == "ALREADY_PASSED"
+    assert "last_polled_at" in after
+
+
+
+def test_policy_fingerprint_changes_with_pipeline(tmp_path, monkeypatch):
+    monkeypatch.setattr(poll, "APP", tmp_path / "app")
+    poll.APP.mkdir()
+    path = poll.APP / "trusted-main.yaml"
+    path.write_text("steps: one", encoding="utf-8")
+    first = poll.policy_identity()
+    path.write_text("steps: two", encoding="utf-8")
+    second = poll.policy_identity()
+    assert first != second
+    assert first.startswith(poll.PROFILE_VERSION)
+
+
+def test_stale_running_guard():
+    old = {"status": "RUNNING", "last_attempt_epoch": 100}
+    assert poll.stale_running(old, 100 + poll.JOB_TIMEOUT_SECONDS + 121)
+    assert not poll.stale_running(old, 100 + poll.JOB_TIMEOUT_SECONDS - 1)
+    assert not poll.stale_running({"status": "FAST_PASS"}, 99999)
+
+
+def test_network_outage_preserves_latest_fast_pass(tmp_path, monkeypatch):
+    monkeypatch.setattr(poll, "ROOT", tmp_path / "state")
+    monkeypatch.setattr(poll, "remote_sha", lambda: (_ for _ in ()).throw(ValueError("offline")))
+    monkeypatch.setattr(poll.sys, "argv", ["woodpecker_main_poll.py"])
+    poll.private_directory(poll.ROOT)
+    poll.write_json(poll.ROOT / "status.json",
+                    {"sha": SHA, "status": "FAST_PASS", "attempts": 1})
+    assert poll.main() == 3
+    record = poll.read_json(poll.ROOT / "status.json")
+    assert record["status"] == "FAST_PASS"
+    assert record["last_poll_error"].startswith("REMOTE_CHECK_ERROR:")
+    assert record["last_polled_at"]
