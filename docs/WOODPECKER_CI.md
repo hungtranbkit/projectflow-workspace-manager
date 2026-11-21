@@ -1,5 +1,30 @@
 # Woodpecker CI migration (staging, NOT cut over)
 
+## Verified local checkpoint (2026-11-21, before any live deployment)
+
+- M910q: checked out exact PR branch in a disposable `/tmp` directory. Both Docker Compose specifications passed `docker compose config --quiet` with example placeholders. `./scripts/preflight.sh` and `./scripts/build.sh` returned exit 0. Woodpecker container not found and no local CI listener was observed; no Docker containers were started or changed.
+- MacBook Linux: cloned branch into disposable `/tmp` checkout and ran targeted `pytest` with the existing test environment; **15 targeted tests passed** (Woodpecker API status: 8; readiness guard: 6; ProjectFlow smoke: 1). This is not the entire regression suite.
+- Running `python3 infra/woodpecker/readiness.py` with no local secrets returned `BLOCKED`, exit code 2. It does not claim real OAuth, agent registration, or webhook delivery.
+- The existing `projectflow.mesflow.net` responded HTTP 200 via an HTTPS request from M910q (certificate verification not tested in that probe); it hosts ProjectFlow and MUST NOT be overwritten. A proposed **separate** `ci.mesflow.net` hostname did not resolve/respond during this probe. Do not assume CI DNS, tunnel, or OAuth callback exists.
+- GitHub PR #58 is deliberately a Draft. Do not turn off the existing GitHub Actions workflow or required checks.
+
+### Readiness guard (no runtime changes)
+
+```bash
+python3 infra/woodpecker/readiness.py \
+  --server-env infra/woodpecker/.env \
+  --agent-env infra/woodpecker/.env.agent
+```
+
+The output contains only boolean gate results (never client secrets or shared agent secrets). Missing or placeholder configuration returns exit code 2. A green `local_configuration_ready` only confirms local file consistency; it **never** verifies GitHub OAuth, the public HTTPS callback, the private runner connection, webhook delivery, or CI execution. Do not copy the `.env` files onto public/shared nodes to perform this check; run it only on an authorized operator machine holding these secret files, or verify each environment separately.
+
+### External setup still needed
+
+1. Establish a dedicated HTTPS hostname (e.g. `ci.mesflow.net`, **not currently provisioned**), with Cloudflare Tunnel routing only to Woodpecker's loopback HTTP port on a chosen safe server host. Do not hijack the live ProjectFlow hostname or existing tunnels.
+2. Register a GitHub **OAuth App**, not a GitHub App, using the new verified Woodpecker hostname as Homepage and `https://<ci-host>/authorize` as callback. Place credentials into an untracked, permission-600 server `.env` on the host.
+3. Verify a dedicated, non-production Docker runner and private gRPC connection. Activate only the ProjectFlow repo, run actual PR/push CI, verify status for the exact commit SHA and failure gating; only then plan a separate reviewed GitHub Actions cutover.
+
+
 Keep GitHub as source/PR forge while moving CI execution to self-hosted Woodpecker. **GitHub Actions stays enabled** until real webhook + pipeline evidence passes.
 
 ## Files
