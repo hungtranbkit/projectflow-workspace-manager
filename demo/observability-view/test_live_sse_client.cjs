@@ -99,6 +99,22 @@ assert.equal(els["live-sessions"].children.length,1,"RUNNING filter must hide un
 const allButton=els["live-state-filters"].children.find(b=>b.textContent.startsWith("Tất cả"));
 allButton.events.click();
 assert.equal(els["live-sessions"].children.length,2);
+const observed=enrich(values());
+observed.sessions.items[0].execution_state="IDLE";
+observed.sessions.items[0].evidence="node_observed";
+observed.sessions.items[0].task_source="trusted_task_label";
+observed.sessions.items[0].task_hint="Hoàn thiện giám sát hoạt động agent";
+observed.sessions.items[1].execution_state="RUNNING_VERIFIED";
+observed.sessions.items[1].running_verified=true;
+observed.sessions.items[1].evidence="terminal_output_delta";
+observed.sessions.items[1].last_checkpoint_at=new Date().toISOString();
+observed.sessions.proven_running=1;
+source.emit("status",observed);
+assert.equal(els["live-running-count"].textContent,"1");
+assert.ok(els["live-sessions"].children[0].children.some(x=>
+  x.textContent.includes("Có output mới khi agent đang chạy")));
+assert.ok(els["live-sessions"].children[1].children.some(x=>
+  x.textContent.includes("Task được gắn gần nhất: Hoàn thiện giám sát hoạt động agent")));
 const changed=enrich(values());changed.sessions.open=4;changed.nodes.items[0].open_sessions=3;
 source.emit("status",changed);
 assert.ok(els["live-changes"].children.length>=1);

@@ -45,8 +45,8 @@
         if(!/^Session \d{2}$/.test(s.label)||!isNodeLabel(s.node)||!Object.hasOwn(agents,s.agent_type)||
            !Object.hasOwn(activity,s.activity_bucket)||!Object.hasOwn(execNames,s.execution_state)||
            !projects.has(s.project)||typeof s.task_hint!=="string"||s.task_hint.length>120||
-           !["session_name_hint","unavailable"].includes(s.task_source)||
-           !["registry_only","verified_recent_checkpoint"].includes(s.evidence)||
+           !["session_name_hint","unavailable","trusted_task_label"].includes(s.task_source)||
+           !["registry_only","verified_recent_checkpoint","node_observed","terminal_output_delta"].includes(s.evidence)||
            !(s.running_verified===null||(s.running_verified===true&&s.execution_state==="RUNNING_VERIFIED"))||
            (s.commit_ref!==null&&!/^[a-f0-9]{7,12}$/.test(s.commit_ref))||
            (s.branch_ref!==null&&!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,69}$/.test(s.branch_ref))||
@@ -172,22 +172,27 @@
           execNames[s.execution_state]));
         li.appendChild(line);
         li.appendChild(element("div","session-context",s.project+" · "+s.node+" · "+agents[s.agent_type]));
-        li.appendChild(element("p","session-work",s.task_source==="session_name_hint"
-          ?"Đang làm gì? Gợi ý theo tên phiên: "+s.task_hint
-          :"Đang làm gì? Chưa có task đã xác minh"));
+        li.appendChild(element("p","session-work",s.task_source==="trusted_task_label"
+          ?(s.running_verified===true?"Đang thực thi: ":"Task được gắn gần nhất: ")+s.task_hint
+          :s.task_source==="session_name_hint"
+          ?"Task gợi ý theo tên phiên: "+s.task_hint
+          :"Chưa có task được xác minh"));
         li.appendChild(element("small","session-source",
-          (s.task_source==="session_name_hint"?"Mục tiêu suy ra từ tên session":"Chưa có mô tả task")
+          (s.task_source==="trusted_task_label"?"Nhãn task gắn qua Terminal MCP":s.task_source==="session_name_hint"?"Mục tiêu suy ra từ tên session":"Chưa có mô tả task")
           +" · tín hiệu: "+activity[s.activity_bucket]));
         if(s.commit_ref||s.branch_ref)li.appendChild(element("small","session-code",
           "Git tham chiếu: "+(s.branch_ref||"không rõ nhánh")
           +(s.commit_ref?" @ "+s.commit_ref:"")+
           " · chưa xác minh commit mới"));
         li.appendChild(element("small","session-proof",
+          s.evidence==="terminal_output_delta"?"Có output mới khi agent đang chạy · chưa xác minh thay đổi code":
+          s.execution_state==="IDLE"?"Đã xác minh agent đang chờ lệnh":
+          s.execution_state==="WAITING_INPUT"?"Agent đang chờ nhập liệu":
           s.running_verified===true?"RUNNING được xác minh bằng checkpoint mới":"Chưa có bằng chứng code mới / chưa xác minh RUNNING"));
         if(s.running_verified===true&&typeof s.last_checkpoint_at==="string"&&
            Number.isFinite(Date.parse(s.last_checkpoint_at))){
           li.appendChild(element("small","session-proof-time",
-            "Checkpoint ghi nhận: "+format(s.last_checkpoint_at)+" · không suy diễn giai đoạn code/test/deploy"));
+            "Bằng chứng hoạt động: "+format(s.last_checkpoint_at)+" · chưa suy diễn code/test/deploy"));
         }
         list.appendChild(li);
       }

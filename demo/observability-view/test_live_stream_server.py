@@ -18,7 +18,7 @@ def _dbs(tmp_path):
     with sqlite3.connect(nodes) as db:
         db.execute("CREATE TABLE nodes (id TEXT,last_known_status TEXT,last_heartbeat_at TEXT,capacity_status TEXT,execution_health_state TEXT,hostname TEXT,auth_token_ref TEXT)")
     with sqlite3.connect(sessions) as db:
-        db.execute("CREATE TABLE session_records (node_id TEXT,agent_type TEXT,status TEXT,deleted_at TEXT,last_activity_at TEXT,last_seen_at TEXT,session_name TEXT,launch_command TEXT,last_known_state TEXT,last_checkpoint_at TEXT,last_commit TEXT,git_branch TEXT)")
+        db.execute("CREATE TABLE session_records (node_id TEXT,agent_type TEXT,status TEXT,deleted_at TEXT,last_activity_at TEXT,last_seen_at TEXT,session_name TEXT,launch_command TEXT,last_known_state TEXT,last_checkpoint_at TEXT,last_commit TEXT,git_branch TEXT,stable_session_id TEXT,generation INTEGER DEFAULT 1)")
     return nodes,sessions
 
 
@@ -256,3 +256,64 @@ def test_running_prioritized_across_more_than_24_sessions(tmp_path):
     assert first["label"] == "Session 01"
     assert data["sessions"]["items"][1]["execution_state"] == "OPEN_UNVERIFIED"
     assert "secret command" not in json.dumps(data)
+
+def test_node_readback_and_curated_title_override_unverified_registry(tmp_path):
+    now = datetime(2026, 11, 21, 10, 0, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("hp-linux", "online", ts, "healthy", "EXECUTION_OK", "private", "secret"))
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records("
+                   "node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,"
+                   "session_name,launch_command,last_known_state,last_checkpoint_at,"
+                   "last_commit,git_branch) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                   ("hp-linux", "codex", "ACTIVE", None, ts, ts,
+                    "projectflow-observability-20261121", "SECRET_COMMAND", None, None, None, None))
+    class Witness:
+        def snapshot(self, rows, *, now):
+            assert len(rows) == 1
+            return {("hp-linux", "projectflow-observability-20261121"): {
+                "state": "IDLE", "evidence": "node_observed",
+                "observed_at": ts, "task_hint": "Hoàn thiện giám sát hoạt động agent",
+                "task_source": "trusted_task_label",
+            }}
+    d = detailed_snapshot(nodes, sessions, now=now, monitor=Witness())
+    s = d["sessions"]["items"][0]
+    assert s["execution_state"] == "IDLE"
+    assert s["running_verified"] is None
+    assert s["task_source"] == "trusted_task_label"
+    assert s["task_hint"] == "Hoàn thiện giám sát hoạt động agent"
+    assert d["sessions"]["proven_running"] == 0
+    assert d["sessions"]["observation_source"] == "terminal_mcp_authenticated_status"
+    assert "SECRET_COMMAND" not in json.dumps(d)
+
+
+def test_live_output_delta_can_verify_running_without_registry_checkpoint(tmp_path):
+    now = datetime(2026, 11, 21, 10, 0, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("hp-linux", "online", ts, "healthy", "EXECUTION_OK", "private", "secret"))
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records("
+                   "node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,"
+                   "session_name,launch_command,last_known_state,last_checkpoint_at,"
+                   "last_commit,git_branch) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                   ("hp-linux", "codex", "ACTIVE", None, ts, ts,
+                    "projectflow-observability-20261121", "SECRET_COMMAND", None, None, None, None))
+    class Witness:
+        def snapshot(self, rows, *, now):
+            return {("hp-linux", "projectflow-observability-20261121"): {
+                "state": "RUNNING_VERIFIED", "evidence": "terminal_output_delta",
+                "observed_at": ts, "checkpoint_at": ts,
+            }}
+    d = detailed_snapshot(nodes, sessions, now=now, monitor=Witness())
+    s = d["sessions"]["items"][0]
+    assert s["running_verified"] is True
+    assert s["last_checkpoint_at"] == ts
+    assert s["evidence"] == "terminal_output_delta"
+    assert d["sessions"]["proven_running"] == 1
+    assert "SECRET_COMMAND" not in json.dumps(d)

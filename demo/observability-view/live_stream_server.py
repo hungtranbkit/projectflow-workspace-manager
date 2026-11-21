@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 from export_live_snapshot import snapshot, _read, _instant, _recent, public_node_label
 from public_session_detail import classify_public_session
+from terminal_proof import TerminalProofMonitor, build_terminal_reader
 
 ORIGIN = "https://hungtranbkit.github.io"
 PREFIX = "/projectflow-live/"
@@ -43,15 +44,19 @@ def _agent(value):
     return v if v in AGENT_TYPES[:3] else "other"
 
 
-def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
+def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None):
     now = now or datetime.now(timezone.utc)
     base = snapshot(nodes_db, sessions_db, now=now)
     nr = _read(nodes_db, "SELECT id,last_known_status,last_heartbeat_at,"
                "capacity_status,execution_health_state FROM nodes ORDER BY id")
     sr = _read(sessions_db,
                "SELECT node_id,agent_type,last_activity_at,last_seen_at,"
-               "session_name,last_known_state,last_checkpoint_at,last_commit,git_branch "
+               "session_name,last_known_state,last_checkpoint_at,last_commit,git_branch,"
+               "stable_session_id,generation "
                "FROM session_records WHERE status='ACTIVE' AND deleted_at IS NULL ORDER BY node_id,session_name")
+    # Observations are privately authenticated node readbacks; only their
+    # strict public-safe projection is ever merged into the output payload.
+    observed = monitor.snapshot(sr, now=now) if monitor is not None else {}
     ids = {str(x["id"]): i for i, x in enumerate(nr, 1)}
     public_names = {key: public_node_label(key, index) for key, index in ids.items()}
     per_node_types = {}
@@ -76,6 +81,15 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
             checkpoint_at=row["last_checkpoint_at"],
             last_activity_at=row["last_activity_at"],
             last_commit=row["last_commit"], git_branch=row["git_branch"], now=now)
+        proof = observed.get((key, row["session_name"]))
+        if proof and proof.get("state") in ("IDLE", "WAITING_INPUT", "BLOCKED", "RUNNING_VERIFIED"):
+            summary["execution_state"] = proof["state"]
+            summary["evidence"] = proof["evidence"]
+            summary["running_verified"] = True if proof["state"] == "RUNNING_VERIFIED" else None
+            summary["last_checkpoint_at"] = proof.get("checkpoint_at")
+            if proof.get("task_source") == "trusted_task_label":
+                summary["task_hint"] = proof["task_hint"]
+                summary["task_source"] = "trusted_task_label"
         projects[summary["project"]] += 1
         if key in ids:
             if age is None:
@@ -162,7 +176,8 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
         "projects": [{"name": name, "open_sessions": count}
                      for name, count in sorted(projects.items())],
         "proven_running": proven_running,
-        "running_verification": "checkpoint_only_when_recent",
+        "running_verification": "verified_recent_checkpoint_or_live_output_delta",
+        "observation_source": "terminal_mcp_authenticated_status" if monitor is not None else "registry_only",
     })
     base["fresh_window_seconds"] = 300
     base["transport"] = {"kind": "sse", "poll_seconds": 3, "state": "connected"}
@@ -177,9 +192,10 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, address, nodes_db, sessions_db):
+    def __init__(self, address, nodes_db, sessions_db, monitor=None):
         self.nodes_db = nodes_db
         self.sessions_db = sessions_db
+        self.monitor = monitor
         super().__init__(address, Handler)
 
 
@@ -213,7 +229,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == PREFIX + "snapshot":
             try:
-                data = detailed_snapshot(self.server.nodes_db, self.server.sessions_db)
+                data = detailed_snapshot(self.server.nodes_db, self.server.sessions_db, monitor=self.server.monitor)
                 self._json(200, data)
             except Exception:  # Do not leak filesystem/SQLite details to public.
                 self._json(503, {"kind": "unknown", "error": "source_unavailable"})
@@ -231,7 +247,7 @@ class Handler(BaseHTTPRequestHandler):
             # Bound each connection. EventSource auto-reconnects as needed.
             for _ in range(24):
                 try:
-                    data = detailed_snapshot(self.server.nodes_db, self.server.sessions_db)
+                    data = detailed_snapshot(self.server.nodes_db, self.server.sessions_db, monitor=self.server.monitor)
                     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
                     self.wfile.write(("event: status\ndata: " + payload + "\n\n").encode("utf-8"))
                 except Exception:
@@ -260,10 +276,13 @@ def main():
     ap.add_argument("--nodes-db", type=Path, required=True)
     ap.add_argument("--sessions-db", type=Path, required=True)
     ap.add_argument("--port", type=int, default=18772)
+    ap.add_argument("--enable-terminal-proof", action="store_true",
+                    help="Opt-in authenticated read-only session status sampling")
     args = ap.parse_args()
     if not 1024 <= args.port <= 65535:
         raise SystemExit("invalid port")
-    server = Server(("127.0.0.1", args.port), args.nodes_db, args.sessions_db)
+    monitor = TerminalProofMonitor(build_terminal_reader()) if args.enable_terminal_proof else None
+    server = Server(("127.0.0.1", args.port), args.nodes_db, args.sessions_db, monitor=monitor)
     print("LIVE_AGGREGATE_SERVER_READY port=%d" % args.port, flush=True)
     server.serve_forever(poll_interval=0.2)
 
