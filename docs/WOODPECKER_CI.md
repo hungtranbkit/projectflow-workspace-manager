@@ -115,3 +115,26 @@ This section records **commands actually executed** and separates results from r
 - **SECURITY**: the Local backend executes pipeline code with the user account's privileges and can read local agent secrets. Do **not** connect the disposable Local smoke setup, or its script, to public pull requests. It is intentionally ephemeral.
 - Remaining blocker remains **real GitHub OAuth App + dedicated HTTPS hostname/DNS/tunnel administration + isolated Docker runner**. None was created or enabled. Keep existing GitHub Actions and PR #58 Draft until actual SHA-matched public webhook, fail-closed full test run, status reporting and retry evidence.
 
+
+### Local server credentials staging (2026-11-21)
+
+MacBook now has `/home/mac/.config/projectflow-woodpecker/server.env`, created by
+`python3 infra/woodpecker/native/prepare-secrets.py`, with mode **0600**.
+The file contains two independent randomly generated 64-character hex secrets
+(`WOODPECKER_AGENT_SECRET`, `WOODPECKER_GRPC_SECRET`), OAuth placeholders,
+`WOODPECKER_GITHUB=true`, `WOODPECKER_GITHUB_PUBLIC_ONLY=true`, and
+`WOODPECKER_OPEN=false`. Existing files are never overwritten.
+**Neither secret value is printed nor committed.**
+
+The guarded server entrypoint, when invoked with that environment, returns exit 2
+and reports only three outstanding fields: `HTTPS_HOST`, `GITHUB_CLIENT`,
+`GITHUB_SECRET`. It remains `disabled/inactive`; no external service was
+started. Before activation, use a unique real HTTPS hostname and real owner-created
+GitHub OAuth App, with callback `https://<hostname>/authorize`; protect the
+configured secret file and ensure the dedicated isolated Docker runner is ready.
+
+Do not mistake having locally generated secrets for successful OAuth registration.
+Local server/agent handshake and Woodpecker CLI tests are PASSED, while public
+webhooks, full-suite CI, GitHub status checks and safe dedicated runner remain
+**UNVERIFIED**.
+
