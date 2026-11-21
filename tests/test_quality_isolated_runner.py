@@ -51,6 +51,13 @@ def test_container_argv_snapshot_contains_no_git_or_signing_material(tmp_path, m
             assert "--security-opt=no-new-privileges" in argv
             assert "--pull=never" in argv
             assert "--user=65534:65534" in argv
+            # Importing ProjectFlow's app package creates a SQLite DB
+            # during pytest collection. Keep it on the bounded tmpfs,
+            # never in read-only /work/data.
+            assert "WORKSPACE_MANAGER_ROOT=/tmp" in argv
+            assert "WORKSPACE_MANAGER_DB=/tmp/qg-state/workspace-manager.db" in argv
+            assert "WORKSPACE_MANAGER_STATE_DIR=/tmp/qg-state/runtime" in argv
+            assert "WORKSPACE_MANAGER_WORKTREE_ROOT=/tmp/qg-worktrees" in argv
             assert "-p" in argv and "no:cacheprovider" in argv
             assert "--mount" in argv
             mount = argv[argv.index("--mount") + 1]
