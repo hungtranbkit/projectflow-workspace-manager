@@ -48,6 +48,32 @@ _PUBLIC_TASKS = (
 )
 
 
+def _read_authenticated_task_label(client, session):
+    """Only an explicit owner title from a bearer-authenticated node.
+
+    The node itself verifies session existence/read access/creation age.
+    Old agents lacking the GET route simply yield None; never read remote
+    raw transcripts or infer a task from another session's name.
+    """
+    getter = getattr(client, "get_task_label", None)
+    if not callable(getter) or not isinstance(session, str) or not _SAFE_NAME.fullmatch(session):
+        return None
+    try:
+        response = getter(session, timeout_seconds=1.5)
+    except Exception:
+        return None
+    if not isinstance(response, dict) or response.get("status") != "OK":
+        return None
+    label = response.get("label")
+    if not isinstance(label, dict) or label.get("source") != "title":
+        return None
+    title = _public_title(label.get("summary"))
+    at = label.get("updated_at")
+    if not title or _timestamp(at) is None:
+        return None
+    return {"title": title, "at": at}
+
+
 def _timestamp(value):
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc)
@@ -188,7 +214,30 @@ def build_terminal_reader():
                     "covered_nodes": list(listing["covered_nodes"]),
                     "unreachable_nodes": list(listing["unreachable_nodes"])}
 
+    # An existing node's private task label is never forwarded as-is.
+    # Only the server-owned, fixed public title can leave this process.
+    label_lock = threading.Lock()
+    label_cache = {}
+    def task_label(node_id, session):
+        if node_id == "hp-linux":
+            return read_explicit_task_label(node_id, session)
+        client = remotes.get(node_id)
+        if client is None:
+            return None
+        tick = time.monotonic()
+        key = (node_id, session)
+        with label_lock:
+            previous = label_cache.get(key)
+            if previous and tick - previous[0] < 12.0:
+                return previous[1]
+        result = _read_authenticated_task_label(client, session)
+        with label_lock:
+            if len(label_cache) > 160:
+                label_cache.clear()
+            label_cache[key] = (tick, result)
+        return result
     read.list_sessions = list_sessions
+    read.task_label = task_label
     return read
 
 
@@ -201,7 +250,8 @@ class TerminalProofMonitor:
     """
     def __init__(self, reader, *, interval=8.0, clock=time.monotonic, task_reader=None):
         self.reader = reader
-        self.task_reader = task_reader or read_explicit_task_label
+        self.task_reader = (task_reader or getattr(reader, "task_label", None)
+                            or read_explicit_task_label)
         self.interval = interval
         self.clock = clock
         self.lock = threading.Lock()
