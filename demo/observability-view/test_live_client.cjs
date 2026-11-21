@@ -8,6 +8,7 @@ class Element {
   addEventListener(k,f){this.listeners[k]=f}
   replaceChildren(){this.children=[]}
   append(...items){this.children.push(...items)}
+  appendChild(item){this.children.push(item);return item}
 }
 const elements=Object.fromEntries(ids.map(id=>[id,new Element(id)]));
 const doc={baseURI:"https://hungtranbkit.github.io/projectflow-workspace-manager/",hidden:false,
