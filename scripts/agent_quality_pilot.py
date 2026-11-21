@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEST_COMMAND = [sys.executable, "-m", "pytest", "-q", "tests/test_agent_quality_pilot.py"]
@@ -84,7 +85,8 @@ def git_sha(root: Path) -> str | None:
 def quality_gate(task_id: str, file_names: list[str], *, root: Path = REPO_ROOT,
                  report_dir: Path | None = None, require_ui: bool = False,
                  ui_evidence: str | None = None, test_command: list[str] | None = None,
-                 test_env: dict[str, str] | None = None) -> dict:
+                 test_env: dict[str, str] | None = None,
+                 test_runner: Callable | None = None) -> dict:
     """Run machine-owned checks; output files are never an agent's self-report."""
     if not TASK_RE.fullmatch(task_id):
         raise ValueError("task-id must be 1-80 safe letters/digits/dot/dash/underscore")
@@ -113,8 +115,11 @@ def quality_gate(task_id: str, file_names: list[str], *, root: Path = REPO_ROOT,
     result = None
     if not reasons:
         try:
-            result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=180,
-                                    check=False, env=test_env)
+            if test_runner is not None:
+                result = test_runner(command, root, test_env)
+            else:
+                result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=180,
+                                        check=False, env=test_env)
         except subprocess.TimeoutExpired:
             reasons.append("Test command exceeded 180 seconds")
     output = (result.stdout + "\n" + result.stderr) if result is not None else "Tests not run: earlier gate failed\n"
