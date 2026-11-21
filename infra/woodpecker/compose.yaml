@@ -1,0 +1,51 @@
+# Isolated STAGING stack. This does NOT replace production CI until acceptance.
+# Keep all secrets in an untracked .env file (chmod 600).
+name: projectflow-woodpecker
+services:
+  woodpecker-server:
+    image: woodpeckerci/woodpecker-server:v3.20.1
+    restart: unless-stopped
+    ports:
+      # Only expose locally; terminate HTTPS at a managed reverse proxy or tunnel.
+      - "127.0.0.1:${CI_HTTP_PORT:-8179}:8000"
+    environment:
+      WOODPECKER_HOST: ${WOODPECKER_HOST:?Set external HTTPS URL without trailing slash}
+      WOODPECKER_GITHUB: "true"
+      WOODPECKER_GITHUB_CLIENT: ${WOODPECKER_GITHUB_CLIENT:?Set OAuth Client ID}
+      WOODPECKER_GITHUB_SECRET: ${WOODPECKER_GITHUB_SECRET:?Set OAuth Client Secret}
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:?Set random shared secret}
+      WOODPECKER_ADMIN: ${WOODPECKER_ADMIN:-hungtranbkit}
+      WOODPECKER_REPO_OWNERS: ${WOODPECKER_REPO_OWNERS:-hungtranbkit}
+      # Closed by default. Before first OAuth login provision admin with CLI;
+      # do not enable open signups on an internet-facing CI instance.
+      WOODPECKER_OPEN: ${WOODPECKER_OPEN:-false}
+    volumes:
+      - woodpecker-data:/var/lib/woodpecker
+    networks:
+      - ci-internal
+
+  woodpecker-agent:
+    image: woodpeckerci/woodpecker-agent:v3.20.1
+    command: agent
+    restart: unless-stopped
+    depends_on:
+      - woodpecker-server
+    environment:
+      WOODPECKER_SERVER: woodpecker-server:9000
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:?Set random shared secret}
+      WOODPECKER_MAX_WORKFLOWS: "1"
+    # WARNING: mounting the Docker socket grants host-equivalent privileges
+    # to the runner. Use a dedicated CI worker, NOT a production Docker host.
+    profiles:
+      - dedicated-runner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - ci-internal
+
+volumes:
+  woodpecker-data:
+
+networks:
+  ci-internal:
+    driver: bridge
