@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Read-only live Terminal MCP aggregate via localhost HTTP + SSE.
 
-Public routes are explicitly limited to /projectflow-live/{health,snapshot,events}.
-No prompts, node IDs, hostnames, paths, notes, auth tokens, command lines or
-raw event log data are queried or returned. No agent-control operations exist.
+Public routes are limited to /projectflow-live/{health,snapshot,events}.
+Only owner-approved registered node names may be public; no hostnames,
+IP addresses, raw session IDs, paths, prompts, tokens or command lines.
+No agent-control operations exist.
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from export_live_snapshot import snapshot, _read, _instant, _recent
+from export_live_snapshot import snapshot, _read, _instant, _recent, public_node_label
 
 ORIGIN = "https://hungtranbkit.github.io"
 PREFIX = "/projectflow-live/"
@@ -49,6 +50,7 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
     sr = _read(sessions_db, "SELECT node_id,agent_type,last_activity_at,last_seen_at "
                "FROM session_records WHERE status='ACTIVE' AND deleted_at IS NULL")
     ids = {str(x["id"]): i for i, x in enumerate(nr, 1)}
+    public_names = {key: public_node_label(key, index) for key, index in ids.items()}
     per_node_types = {}
     per_node_fresh60 = Counter()
     session_details = []
@@ -76,7 +78,7 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
                 bucket = "over_5m"
             session_details.append({
                 "label": "Session %02d" % (len(session_details) + 1),
-                "node": "Node %02d" % ids[key],
+                "node": public_names[key],
                 "agent_type": agent,
                 "activity_bucket": bucket,
                 "running_verified": None,  # Registry signals do NOT verify coding.
