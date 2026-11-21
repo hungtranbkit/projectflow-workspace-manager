@@ -11,7 +11,7 @@ class Element{
 const ids=["live-panel","live-health","live-time","live-nodes","live-open","live-signal",
  "live-one-minute","live-acceptance","live-ttl","live-transport","live-message",
  "live-node-list","live-sessions","live-sessions-note","live-projects","live-changes","live-refresh",
- "live-running-count","live-running-note","live-state-filters"];
+ "live-running-count","live-running-note","live-state-filters","live-show-more"];
 const els=Object.fromEntries(ids.map(i=>[i,new Element(i)]));
 const document={hidden:false,listeners:{},getElementById:i=>{assert.ok(els[i],"missing DOM #"+i);return els[i]},
  createElement:type=>new Element(type),addEventListener(k,f){this.listeners[k]=f;}};
@@ -115,6 +115,28 @@ assert.ok(els["live-sessions"].children[0].children.some(x=>
   x.textContent.includes("Có output mới khi agent đang chạy")));
 assert.ok(els["live-sessions"].children[1].children.some(x=>
   x.textContent.includes("Task được gắn gần nhất: Hoàn thiện giám sát hoạt động agent")));
+const many=enrich(values());
+for(let i=3;i<=30;i++){
+  const item={...many.sessions.items[0],label:"Session "+String(i).padStart(2,"0"),
+    session:"zgh-photo-capacity-fix-"+i};
+  many.sessions.items.push(item);
+}
+many.sessions.open=30;
+many.sessions.displayed_count=30;
+many.sessions.hidden_count=0;
+many.sessions.proven_running=0;
+many.sessions.nodes_covered=2;
+many.sessions.coverage={covered_nodes:["hp-linux","m910"],unreachable_nodes:["nec1"]};
+many.nodes.items[0].open_sessions=29;
+many.nodes.items[1].open_sessions=1;
+source.emit("status",many);
+assert.equal(els["live-sessions"].children.length,24,"mobile starts with at most 24 cards");
+assert.equal(els["live-show-more"].hidden,false);
+assert.ok(els["live-show-more"].textContent.includes("6 phiên"));
+assert.ok(els["live-message"].textContent.includes("2 node"));
+els["live-show-more"].onclick();
+assert.equal(els["live-sessions"].children.length,30);
+assert.equal(els["live-show-more"].hidden,true);
 const changed=enrich(values());changed.sessions.open=4;changed.nodes.items[0].open_sessions=3;
 source.emit("status",changed);
 assert.ok(els["live-changes"].children.length>=1);
