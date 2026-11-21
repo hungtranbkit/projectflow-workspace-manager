@@ -20,6 +20,7 @@ SCRIPT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_ROOT.parent))
 sys.path.insert(0, str(SCRIPT_ROOT))
 from agent_quality_task_gate import load_task_policy, run_task_gate  # noqa: E402
+from agent_quality_isolated_runner import make_isolated_test_runner  # noqa: E402
 from app.services.quality_attestation_pilot import (  # noqa: E402
     PILOT_POLICY_TASK, payload_from_machine_report, sign_receipt, sign_ed25519_receipt,
 )
@@ -89,8 +90,17 @@ def independent_attest(*, worktree: Path, exact_sha: str,
             "PYTHONNOUSERSITE": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
         })
+        image_id = os.environ.get("PROJECTFLOW_QUALITY_PILOT_CONTAINER_IMAGE_ID", "").strip()
+        require_isolation = os.environ.get("PROJECTFLOW_QUALITY_REQUIRE_ISOLATED_QA") == "1"
+        if require_isolation and not image_id:
+            raise ValueError("Isolated QA is mandatory but no immutable Docker image ID is configured")
+        isolated_runner = make_isolated_test_runner(image_id) if image_id else None
         report = run_task_gate(PILOT_POLICY_TASK, root=worktree,
-                               report_dir=Path(temp), test_env=test_env)
+                               report_dir=Path(temp), test_env=test_env,
+                               test_runner=isolated_runner)
+        report["qa_isolation"] = ("DOCKER_READ_ONLY_NO_NETWORK" if isolated_runner
+                                  else "HOST_DIRECT")
+        report["qa_image_id"] = image_id or None
         if report["status"] != "PASS":
             raise ValueError(f"QA did not pass: {report['failure_reasons']}")
         if _git(worktree, "rev-parse", "HEAD") != exact_sha or _git(worktree, "status", "--porcelain"):
