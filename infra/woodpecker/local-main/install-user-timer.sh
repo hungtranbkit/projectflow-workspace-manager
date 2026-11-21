@@ -75,7 +75,9 @@ Description=Check ProjectFlow protected main every 15 minutes (FAST CI only)
 
 [Timer]
 OnBootSec=3min
-OnUnitInactiveSec=15min
+OnCalendar=*:0/15
+# Calendar scheduling is deliberate: OnUnitInactiveSec had an elapsed/infinity
+# next trigger on the real MacBook after a successful oneshot job.
 AccuracySec=1min
 RandomizedDelaySec=30s
 Persistent=true
