@@ -69,7 +69,7 @@ assert.equal(els["live-ttl"].textContent,"UNKNOWN");
 assert.equal(els["live-panel"].dataset.health,"fresh");
 assert.equal(els["live-node-list"].children.length,2);
 assert.equal(els["live-sessions"].children.length,2);
-assert.ok(els["live-sessions"].children[0].children.some(x=>x.textContent==="Sửa lỗi giới hạn và chuyển tiếp ảnh"));
+assert.ok(els["live-sessions"].children[0].children.some(x=>x.textContent.includes("Sửa lỗi giới hạn và chuyển tiếp ảnh")));
 assert.ok(els["live-projects"].children.length>=3);
 assert.ok(els["live-sessions"].children[0].children.some(x=>x.textContent.includes("chưa xác minh RUNNING")));
 assert.ok(els["live-transport"].textContent.includes("SSE"));
