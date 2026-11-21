@@ -39,4 +39,6 @@ def test_pinned_monitor_report_runs_inside_real_restricted_docker():
         f"stdout:\n{result.stdout[-3000:]}\n"
         f"stderr:\n{result.stderr[-3000:]}"
     )
-    assert "10 passed" in result.stdout, result.stdout[-3000:]
+    # PROJECT pytest.ini already adds -q; the runner adds -q again.
+    # With -qq, pytest prints ten passing dots without a "10 passed" line.
+    assert re.search(r"^\.{10}\s+\[100%\]$", result.stdout, re.MULTILINE), result.stdout[-3000:]
