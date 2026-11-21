@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "kind": "terminal-mcp-public-aggregate",
+  "observed_at": "2026-11-21T02:01:58+00:00",
+  "expected_refresh_seconds": 300,
+  "fresh_window_seconds": 300,
+  "nodes": {
+    "total": 9,
+    "online": 5,
+    "offline": 3,
+    "unknown": 1,
+    "items": [
+      {
+        "label": "Node 01",
+        "status": "offline",
+        "open_sessions": 0,
+        "recent_activity_signals": 0
+      },
+      {
+        "label": "Node 02",
+        "status": "offline",
+        "open_sessions": 0,
+        "recent_activity_signals": 0
+      },
+      {
+        "label": "Node 03",
+        "status": "online",
+        "open_sessions": 10,
+        "recent_activity_signals": 10
+      },
+      {
+        "label": "Node 04",
+        "status": "unknown",
+        "open_sessions": 10,
+        "recent_activity_signals": 10
+      },
+      {
+        "label": "Node 05",
+        "status": "online",
+        "open_sessions": 0,
+        "recent_activity_signals": 0
+      },
+      {
+        "label": "Node 06",
+        "status": "offline",
+        "open_sessions": 0,
+        "recent_activity_signals": 0
+      },
+      {
+        "label": "Node 07",
+        "status": "online",
+        "open_sessions": 0,
+        "recent_activity_signals": 0
+      },
+      {
+        "label": "Node 08",
+        "status": "online",
+        "open_sessions": 0,
+        "recent_activity_signals": 0
+      },
+      {
+        "label": "Node 09",
+        "status": "online",
+        "open_sessions": 0,
+        "recent_activity_signals": 0
+      }
+    ]
+  },
+  "sessions": {
+    "open": 20,
+    "recent_activity_signals": 20,
+    "running_verified": null
+  },
+  "acceptance": {
+    "percent": null,
+    "ttl_percent": null
+  },
+  "source": "Terminal MCP local read-only registry",
+  "notes": [
+    "Phiên ACTIVE chỉ là phiên còn mở, không chứng minh agent đang code.",
+    "Tín hiệu phiên không phải bằng chứng tiến độ hoặc nghiệm thu.",
+    "Không công bố địa chỉ, tên task, prompt, token, path hay log thô."
+  ]
+}
