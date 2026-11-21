@@ -31,3 +31,54 @@ To rollback, stop/disable only the new SSE service, restore and validate the ori
 - Mobile Chromium 320/390 px: actual SSE data appears, updates twice, no horizontal overflow
 - Only approved registered node names are public; no credentials, unapproved IDs, hostnames, IPs, command lines, prompts, paths or private logs in public JSON
 - CI fast/remaining, feature tests and static smoke pass, evidence attached to PR
+
+## Optional authenticated execution evidence (review required before production)
+
+The separate, draft `specs/features/public-live-proof.yaml` defines a **public**
+safe projection of per-node status. It is intentionally not the approved
+private, task-bounded Agent Observability feature.
+
+After separate scope/privacy review, the existing SSE server may be started
+with `--enable-terminal-proof`. Without that flag its behavior is unchanged.
+The module `terminal_proof.py` uses the already-configured Terminal MCP
+local / authenticated node readers, observes node states and compares only
+SHA-256 hashes of private terminal output **in memory**. No prompt, command,
+terminal output, credential, hostname, path or arbitrary task title is emitted.
+Only explicit owner task titles mapped to fixed reviewed labels can appear.
+A proven RUNNING requires changed output in successive authenticated
+observations while the foreground process is active, with a 30s freshness
+ceiling. An authenticated IDLE / WAITING_INPUT reports that state without
+pretending it is writing code. Source loss falls back to the existing
+`OPEN_UNVERIFIED` display. A new task label is not itself evidence of running,
+test completion, a git change, review or deployment.
+
+The proof monitor samples at most 100 registered sessions with bounded,
+authenticated status reads and a shared eight-second cache across SSE clients.
+It does not start sessions or mutate task/agent data. Keep the flag OFF until
+the separate public security review and local-ci/verify check have passed.
+
+Staging proof (21 Nov 2026): real HP node readback produced eight IDLE
+observations; a running Python foreground probe with output changing across
+polls progressed IDLE -> OPEN_UNVERIFIED -> RUNNING_VERIFIED in the
+isolated staging service, without touching the public deployment.
+
+## Authenticated fleet inventory and mobile list (22 Nov 2026)
+
+When the opt-in public proof source is enabled, inventory comes from each
+reachable node's authenticated `/v1/sessions` readback, not the HP controller's
+legacy `session_records` ACTIVE rows. HP's old `local` alias can duplicate
+`hp-linux` records; those are canonicalized and then joined only to **currently
+listed** sessions. A missing node readback is reported in a bounded coverage
+list, never included as a known-open or RUNNING session. The producer keeps
+up to 100 safe session entries and sorts verified RUNNING, WAITING, blocked,
+IDLE and unverified in that order. The phone view initially renders 24 cards,
+with a Show More control and filters able to operate over the full safe set.
+
+The list refreshes from source at most once per ~12s, and proof polling is
+bounded by a shared cache. SSE delivery may still emit each ~3s: this cadence
+is transport refresh, not a guarantee of new CLI evidence. A single UNKNOWN
+foreground tool with output changes may be verified executing, but the site
+does not imply that source edits or tests have passed. New remote session
+slugs are not exposed; public node labels, finite curated task categories
+and the evidence type remain allowlisted. For the audited privacy boundary,
+see `docs/PUBLIC_AGENT_PROOF_SECURITY_REVIEW.md`.

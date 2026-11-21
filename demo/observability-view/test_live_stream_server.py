@@ -18,7 +18,7 @@ def _dbs(tmp_path):
     with sqlite3.connect(nodes) as db:
         db.execute("CREATE TABLE nodes (id TEXT,last_known_status TEXT,last_heartbeat_at TEXT,capacity_status TEXT,execution_health_state TEXT,hostname TEXT,auth_token_ref TEXT)")
     with sqlite3.connect(sessions) as db:
-        db.execute("CREATE TABLE session_records (node_id TEXT,agent_type TEXT,status TEXT,deleted_at TEXT,last_activity_at TEXT,last_seen_at TEXT,session_name TEXT,launch_command TEXT,last_known_state TEXT,last_checkpoint_at TEXT,last_commit TEXT,git_branch TEXT)")
+        db.execute("CREATE TABLE session_records (node_id TEXT,agent_type TEXT,status TEXT,deleted_at TEXT,last_activity_at TEXT,last_seen_at TEXT,session_name TEXT,launch_command TEXT,last_known_state TEXT,last_checkpoint_at TEXT,last_commit TEXT,git_branch TEXT,stable_session_id TEXT,generation INTEGER DEFAULT 1)")
     return nodes,sessions
 
 
@@ -246,8 +246,8 @@ def test_running_prioritized_across_more_than_24_sessions(tmp_path):
                     "RUNNING_VERIFIED", recent, None, None))
     data = detailed_snapshot(nodes, sessions, now=now)
     assert data["sessions"]["open"] == 31
-    assert data["sessions"]["displayed_count"] == 24
-    assert data["sessions"]["hidden_count"] == 7
+    assert data["sessions"]["displayed_count"] == 31
+    assert data["sessions"]["hidden_count"] == 0
     assert data["sessions"]["proven_running"] == 1
     first = data["sessions"]["items"][0]
     assert first["session"] == "zgh-photo-capacity-fix-zzlast"
@@ -256,3 +256,186 @@ def test_running_prioritized_across_more_than_24_sessions(tmp_path):
     assert first["label"] == "Session 01"
     assert data["sessions"]["items"][1]["execution_state"] == "OPEN_UNVERIFIED"
     assert "secret command" not in json.dumps(data)
+
+def test_node_readback_and_curated_title_override_unverified_registry(tmp_path):
+    now = datetime(2026, 11, 21, 10, 0, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("hp-linux", "online", ts, "healthy", "EXECUTION_OK", "private", "secret"))
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records("
+                   "node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,"
+                   "session_name,launch_command,last_known_state,last_checkpoint_at,"
+                   "last_commit,git_branch) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                   ("hp-linux", "codex", "ACTIVE", None, ts, ts,
+                    "projectflow-observability-20261121", "SECRET_COMMAND", None, None, None, None))
+    class Witness:
+        def snapshot(self, rows, *, now):
+            assert len(rows) == 1
+            return {("hp-linux", "projectflow-observability-20261121"): {
+                "state": "IDLE", "evidence": "node_observed",
+                "observed_at": ts, "task_hint": "Hoàn thiện giám sát hoạt động agent",
+                "task_source": "trusted_task_label",
+            }}
+    d = detailed_snapshot(nodes, sessions, now=now, monitor=Witness())
+    s = d["sessions"]["items"][0]
+    assert s["execution_state"] == "IDLE"
+    assert s["running_verified"] is None
+    assert s["task_source"] == "trusted_task_label"
+    assert s["task_hint"] == "Hoàn thiện giám sát hoạt động agent"
+    assert d["sessions"]["proven_running"] == 0
+    assert d["sessions"]["observation_source"] == "terminal_mcp_authenticated_status"
+    assert "SECRET_COMMAND" not in json.dumps(d)
+
+
+def test_live_output_delta_can_verify_running_without_registry_checkpoint(tmp_path):
+    now = datetime(2026, 11, 21, 10, 0, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("hp-linux", "online", ts, "healthy", "EXECUTION_OK", "private", "secret"))
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records("
+                   "node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,"
+                   "session_name,launch_command,last_known_state,last_checkpoint_at,"
+                   "last_commit,git_branch) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                   ("hp-linux", "codex", "ACTIVE", None, ts, ts,
+                    "projectflow-observability-20261121", "SECRET_COMMAND", None, None, None, None))
+    class Witness:
+        def snapshot(self, rows, *, now):
+            return {("hp-linux", "projectflow-observability-20261121"): {
+                "state": "RUNNING_VERIFIED", "evidence": "terminal_output_delta",
+                "observed_at": ts, "checkpoint_at": ts,
+            }}
+    d = detailed_snapshot(nodes, sessions, now=now, monitor=Witness())
+    s = d["sessions"]["items"][0]
+    assert s["running_verified"] is True
+    assert s["last_checkpoint_at"] == ts
+    assert s["evidence"] == "terminal_output_delta"
+    assert d["sessions"]["proven_running"] == 1
+    assert "SECRET_COMMAND" not in json.dumps(d)
+
+
+def test_live_fleet_replaces_duplicated_stale_registry_and_promotes_remote_running(tmp_path):
+    now = datetime(2026, 11, 22, 0, 0, tzinfo=timezone.utc)
+    recent = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        for node in ("hp-linux", "m910", "nec1"):
+            db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                       (node, "online", recent, "healthy", "EXECUTION_OK", "private", "secret"))
+    with sqlite3.connect(sessions) as db:
+        for node, session in (
+            ("local", "ota-qa-hp-20261121"),
+            ("hp-linux", "ota-qa-hp-20261121"),   # duplicate legacy alias
+            ("hp-linux", "old-stale-20261101"),  # not actually open
+            ("m910", "projectflow-observability-remote"),
+        ):
+            db.execute("INSERT INTO session_records (node_id,agent_type,status,deleted_at,"
+                       "last_activity_at,last_seen_at,session_name,launch_command)"
+                       " VALUES(?,?,?,?,?,?,?,?)",
+                       (node, "shell", "ACTIVE", None, recent, recent, session,
+                        "PRIVATE_COMMAND_TOKEN"))
+    class FleetReader:
+        def list_sessions(self):
+            return {"covered_nodes": ["hp-linux", "m910", "nec1"],
+                    "unreachable_nodes": [],
+                    "sessions": [
+                        {"node_id": "hp-linux", "session_name": "ota-qa-hp-20261121", "instance_hint": "11"},
+                        {"node_id": "m910", "session_name": "projectflow-observability-remote", "instance_hint": "12"},
+                        {"node_id": "nec1", "session_name": "zgh-autoreply-nec-20261122", "instance_hint": "13"},
+                    ]}
+    class Witness:
+        reader = FleetReader()
+        def snapshot(self, rows, *, now):
+            assert len(rows) == 3
+            return {("hp-linux", "ota-qa-hp-20261121"): {
+                        "state": "IDLE", "evidence": "node_observed",
+                        "observed_at": recent, "agent_type": "shell"},
+                    ("m910", "projectflow-observability-remote"): {
+                        "state": "RUNNING_VERIFIED", "evidence": "terminal_output_delta",
+                        "observed_at": recent, "checkpoint_at": recent, "agent_type": "codex"},
+                    ("nec1", "zgh-autoreply-nec-20261122"): {
+                        "state": "WAITING_INPUT", "evidence": "node_observed",
+                        "observed_at": recent, "agent_type": "claude"}}
+    d = detailed_snapshot(nodes, sessions, now=now, monitor=Witness())
+    s = d["sessions"]
+    assert s["open"] == 3 and s["displayed_count"] == 3
+    assert s["hidden_count"] == 0 and s["proven_running"] == 1
+    assert s["recent_activity_signals"] == 1 and s["recent_last_minute"] == 1
+    assert [x["execution_state"] for x in s["items"]] == [
+        "RUNNING_VERIFIED", "WAITING_INPUT", "IDLE"]
+    assert s["items"][0]["node"] == "m910"
+    assert s["items"][0]["session"] is None  # remotely discovered raw identity is private
+    assert s["items"][0]["agent_type"] == "codex"
+    assert s["observation_source"] == "terminal_mcp_authenticated_fleet"
+    assert {i["label"]: i["open_sessions"] for i in d["nodes"]["items"]} == {
+        "hp-linux": 1, "m910": 1, "nec1": 1}
+    assert s["coverage"]["covered_nodes"] == ["hp-linux", "m910", "nec1"]
+    assert "old-stale" not in json.dumps(d)
+    assert "projectflow-observability-remote" not in json.dumps(d)
+    assert "PRIVATE_COMMAND_TOKEN" not in json.dumps(d)
+
+
+def test_incomplete_fleet_coverage_does_not_claim_old_remote_session_open(tmp_path):
+    now = datetime(2026, 11, 22, 0, 0, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        for node in ("hp-linux", "m910"):
+            db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                       (node, "online", ts, "healthy", "EXECUTION_OK", "private", "secret"))
+    with sqlite3.connect(sessions) as db:
+        for node, name in (("local", "ota-qa-hp-20261121"),
+                           ("m910", "projectflow-observability-old")):
+            db.execute("INSERT INTO session_records (node_id,agent_type,status,deleted_at,"
+                       "last_activity_at,last_seen_at,session_name,launch_command)"
+                       " VALUES(?,?,?,?,?,?,?,?)",
+                       (node, "codex", "ACTIVE", None, ts, ts, name, "SECRET"))
+    class Reader:
+        def list_sessions(self):
+            return {"covered_nodes": ["hp-linux"], "unreachable_nodes": ["m910"],
+                    "sessions": [{"node_id": "hp-linux", "session_name": "ota-qa-hp-20261121"}]}
+    class Monitor:
+        reader = Reader()
+        def snapshot(self, rows, *, now):
+            return {("hp-linux", "ota-qa-hp-20261121"):
+                    {"state":"IDLE","evidence":"node_observed","observed_at":ts}}
+    d = detailed_snapshot(nodes, sessions, now=now, monitor=Monitor())
+    assert d["sessions"]["open"] == 1
+    assert d["sessions"]["proven_running"] == 0
+    assert d["sessions"]["coverage"]["unreachable_nodes"] == ["m910"]
+    assert "projectflow-observability-old" not in json.dumps(d)
+    assert d["sessions"]["recent_activity_signals"] == 0  # heartbeat is not progress
+
+
+def test_fleet_source_unavailable_does_not_count_stale_active_rows(tmp_path):
+    now = datetime(2026, 11, 22, 0, 0, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("hp-linux", "online", ts, "healthy", "EXECUTION_OK", "host", "ref"))
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records (node_id,agent_type,status,deleted_at,"
+                   "last_activity_at,last_seen_at,session_name,launch_command)"
+                   " VALUES(?,?,?,?,?,?,?,?)",
+                   ("local", "codex", "ACTIVE", None, ts, ts,
+                    "projectflow-observability-stale", "old command"))
+    class UnreachableReader:
+        def list_sessions(self):
+            return {"covered_nodes": [], "unreachable_nodes": ["hp-linux"],
+                    "sessions": []}
+    class Monitor:
+        reader = UnreachableReader()
+        def snapshot(self, rows, *, now):
+            assert not rows
+            return {}
+    data = detailed_snapshot(nodes, sessions, now=now, monitor=Monitor())
+    assert data["sessions"]["open"] == 0
+    assert data["sessions"]["coverage"]["unreachable_nodes"] == ["hp-linux"]
+    assert data["sessions"]["proven_running"] == 0
+    assert "projectflow-observability-stale" not in json.dumps(data)
