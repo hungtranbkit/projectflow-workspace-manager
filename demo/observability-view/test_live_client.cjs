@@ -25,7 +25,7 @@ let fetched=0;
 const context={document:doc,Date,Intl,URL,Number,Object,Array,Error,String,
  setInterval(){return 1},
  fetch:async function(url,args){
-  assert.ok(String(url).endsWith("/projectflow-workspace-manager/live-status.json"));
+  assert.equal(String(url),"https://raw.githubusercontent.com/hungtranbkit/projectflow-workspace-manager/live-data/live-status.json");
   assert.equal(args.credentials,"omit");fetched++;
   return {ok:true,json:async()=>snapshot};
  }};
