@@ -271,6 +271,12 @@ class TerminalProofMonitor:
                         self.last_hash.pop(history_key, None)
                         self.proof_at.pop(history_key, None)
                     if record is not None:
+                        # Node status is trusted for agent type, but never publish a
+                        # guessed process name or arbitrary executable as an agent.
+                        source_type = value.get("agent_type") or (value.get("resource") or {}).get("agent")
+                        agent_type = str(source_type or "").casefold()
+                        if agent_type in ("claude", "codex", "shell"):
+                            record["agent_type"] = agent_type
                         # An explicit owner title is trusted metadata, not a proof of activity.
                         label = self.task_reader(*key)
                         if label and label.get("title") and _timestamp(label.get("at")):
