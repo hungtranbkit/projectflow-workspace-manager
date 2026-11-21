@@ -18,7 +18,7 @@ def _dbs(tmp_path):
     with sqlite3.connect(nodes) as db:
         db.execute("CREATE TABLE nodes (id TEXT,last_known_status TEXT,last_heartbeat_at TEXT,capacity_status TEXT,execution_health_state TEXT,hostname TEXT,auth_token_ref TEXT)")
     with sqlite3.connect(sessions) as db:
-        db.execute("CREATE TABLE session_records (node_id TEXT,agent_type TEXT,status TEXT,deleted_at TEXT,last_activity_at TEXT,last_seen_at TEXT,session_name TEXT,launch_command TEXT,last_known_state TEXT,last_checkpoint_at TEXT,last_commit TEXT,git_branch TEXT)")
+        db.execute("CREATE TABLE session_records (node_id TEXT,agent_type TEXT,status TEXT,deleted_at TEXT,last_activity_at TEXT,last_seen_at TEXT,session_name TEXT,launch_command TEXT,last_known_state TEXT,last_checkpoint_at TEXT,last_commit TEXT,git_branch TEXT,stable_session_id TEXT,generation INTEGER DEFAULT 1)")
     return nodes,sessions
 
 
