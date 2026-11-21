@@ -185,3 +185,12 @@ def test_network_outage_preserves_latest_fast_pass(tmp_path, monkeypatch):
     assert record["status"] == "FAST_PASS"
     assert record["last_poll_error"].startswith("REMOTE_CHECK_ERROR:")
     assert record["last_polled_at"]
+
+
+def test_timer_uses_calendar_not_monotonic_elapsed_schedule():
+    from pathlib import Path
+    installer = Path(__file__).resolve().parents[1] / "infra/woodpecker/local-main/install-user-timer.sh"
+    content = installer.read_text(encoding="utf-8")
+    assert "OnCalendar=*:0/15" in content
+    assert "OnUnitInactiveSec=15min" not in content
+    assert "Persistent=true" in content
