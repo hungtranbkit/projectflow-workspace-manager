@@ -1,12 +1,12 @@
-<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08121e"><meta name="robots" content="noindex,nofollow,noarchive"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'self';style-src 'self';img-src data:;connect-src https://raw.githubusercontent.com;form-action 'none';base-uri 'none';object-src 'none'"><title>ProjectFlow View — Xem cách agent chạy</title><link rel="stylesheet" href="app.css"><link rel="stylesheet" href="live.css"><script src="app.js" defer></script><script src="live.js" defer></script></head><body>
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08121e"><meta name="robots" content="noindex,nofollow,noarchive"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'self';style-src 'self';img-src data:;connect-src https://terminal-bootstrap.mesflow.net https://raw.githubusercontent.com;form-action 'none';base-uri 'none';object-src 'none'"><title>ProjectFlow View — Xem cách agent chạy</title><link rel="stylesheet" href="app.css"><link rel="stylesheet" href="live.css"><link rel="stylesheet" href="live-detail.css"><script src="app.js" defer></script><script src="live-sse.js" defer></script></head><body>
 <main><header><div class="brand"><span class="logo" aria-hidden="true">P</span>ProjectFlow</div><div class="badge">LIVE · CHỈ XEM</div></header>
 <section aria-labelledby="intro"><div class="eyebrow">AGENT OBSERVABILITY · VIEW MODE</div><h1 class="hero-title" id="intro">Tình trạng ProjectFlow hiện tại.</h1><p class="lead">Dữ liệu tổng hợp thật từ registry Terminal MCP. Bên dưới có mô phỏng riêng để bạn tìm hiểu cách agent chạy, bị kẹt hoặc mất kết nối. Không có quyền điều khiển.</p>
 <section class="live-panel" id="live-panel" data-health="unknown" aria-label="Dữ liệu thật tổng hợp từ Terminal MCP">
-<div class="live-top"><div><div class="live-kicker" id="live-health">Đang lấy dữ liệu thật…</div><div class="live-time" id="live-time">Chưa có thời điểm xác minh</div></div><span class="live-label">LIVE · READ ONLY</span></div>
+<div class="live-top"><div><div class="live-kicker" id="live-health">Đang lấy dữ liệu thật…</div><div class="live-time" id="live-time">Chưa có thời điểm xác minh</div><div class="live-time" id="live-transport">Chưa kết nối</div></div><span class="live-label">LIVE · READ ONLY</span></div>
 <div class="live-metrics">
 <div class="live-metric"><div class="lab">Node online / tổng số</div><div class="v" id="live-nodes">—</div></div>
 <div class="live-metric"><div class="lab">Phiên đang mở</div><div class="v" id="live-open">—</div></div>
-<div class="live-metric"><div class="lab">Phiên có tín hiệu mới trong 5 phút</div><div class="v" id="live-signal">—</div></div>
+<div class="live-metric"><div class="lab">Tín hiệu mới ≤5 phút</div><div class="v" id="live-signal">—</div></div><div class="live-metric"><div class="lab">Tín hiệu mới ≤1 phút</div><div class="v" id="live-one-minute">—</div></div>
 </div>
 <div class="live-evidence">
 <div><small>Tiến độ nghiệm thu đã xác minh</small><strong id="live-acceptance">UNKNOWN</strong></div>
@@ -14,7 +14,7 @@
 </div>
 <p class="live-note" id="live-message">Đang đọc bản ghi tổng hợp. Nếu dữ liệu cũ hoặc không hợp lệ, sẽ hiển thị UNKNOWN.</p>
 <div class="live-split"><h3>Tình trạng các node (đã ẩn tên máy)</h3><button type="button" id="live-refresh" class="live-refresh">Cập nhật trang</button></div>
-<ol class="live-nodes" id="live-node-list"></ol>
+<ol class="live-nodes" id="live-node-list"></ol><div class="live-split"><h3>Phiên agent (đã ẩn định danh)</h3><span class="muted">Không xác nhận đang code</span></div><p class="live-note" id="live-sessions-note">Đang lấy chi tiết phiên an toàn.</p><ol class="live-session-list" id="live-sessions"></ol><div class="live-split"><h3>Biến động quan sát trong lần xem này</h3><span class="muted">Không phải log thô</span></div><ol class="live-change-list" id="live-changes"></ol>
 </section>
 <div class="demo-divider"><div class="demo-heading"><strong>Mô phỏng các bước làm việc</strong><span class="demo-tag">DỮ LIỆU MẪU</span></div><p class="demo-help">Chọn một tình huống để học cách đọc trạng thái. Phần này không phải dữ liệu LIVE ở trên.</p></div>
 <div class="scenario-label">1. Chọn tình huống xem thử</div><div class="scenarios" role="group" aria-label="Tình huống mô phỏng"><button type="button" class="selected" aria-pressed="true" data-scenario="normal">✓ Hoàn thành</button><button type="button" aria-pressed="false" data-scenario="stuck">! Bị kẹt</button><button type="button" aria-pressed="false" data-scenario="offline">○ Mất kết nối</button></div>
