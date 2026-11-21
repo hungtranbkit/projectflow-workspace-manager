@@ -184,6 +184,13 @@ def quality_merge_blocker(task_id: int, repository_id: int, repository_name: str
         return "QUALITY_ATTESTATION_MISSING"
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return "QUALITY_ATTESTATION_INVALID"
+    if env.get("PROJECTFLOW_QUALITY_REQUIRE_ISOLATED_QA", "").strip() == "1":
+        proof = receipt.get("payload") if isinstance(receipt, dict) else None
+        if (not isinstance(proof, dict) or
+            proof.get("qa_isolation") != "DOCKER_READ_ONLY_NO_NETWORK" or
+            not isinstance(proof.get("qa_image_id"), str) or
+            not re.fullmatch(r"sha256:[a-f0-9]{64}", proof["qa_image_id"])):
+            return "QUALITY_ATTESTATION_INVALID"
     if public_key_path:
         pubfile = Path(public_key_path).expanduser()
         try:
@@ -228,4 +235,6 @@ def payload_from_machine_report(report: dict, *, task_id: int, repository_id: in
         "code_sha256": report["code_sha256"],
         "test_sha256": report["test_sha256"],
         "policy_sha256": report["policy_sha256"],
+        "qa_isolation": report.get("qa_isolation", "HOST_DIRECT"),
+        "qa_image_id": report.get("qa_image_id"),
     }
