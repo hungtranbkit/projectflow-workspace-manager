@@ -89,5 +89,5 @@ source.emit("status",bad);
 assert.equal(els["live-panel"].dataset.health,"unknown");
 assert.equal(els["live-acceptance"].textContent,"UNKNOWN");
 assert.equal(els["live-open"].textContent,"—");
-assert.ok(!js.includes("fetch('/dashboard") && !js.includes("session_name"));
+assert.ok(!js.includes("fetch('/dashboard") && !js.includes("launch_command") && !js.includes("auth_token_ref"));
 console.log("LIVE_SSE_CLIENT_PASS stream detail, degraded, UNKNOWN, change history, secret-safe DOM");
