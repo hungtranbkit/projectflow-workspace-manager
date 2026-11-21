@@ -82,7 +82,7 @@ def write_json(path: Path, record: dict) -> None:
     os.replace(tmp, path)
 
 
-def should_run(sha: str, previous: dict, now_epoch: float) -> tuple[bool, str, int]:
+def should_run(sha: str, previous: dict, now_epoch: float, *, force_retry: bool = False) -> tuple[bool, str, int]:
     if previous.get("sha") != sha:
         return True, "NEW_SHA", 1
     if previous.get("status") == "PASS":
@@ -91,7 +91,7 @@ def should_run(sha: str, previous: dict, now_epoch: float) -> tuple[bool, str, i
     if attempts >= MAX_ATTEMPTS_SAME_SHA:
         return False, "RETRY_LIMIT_REACHED", attempts
     last_epoch = float(previous.get("last_attempt_epoch", 0))
-    if now_epoch - last_epoch < RETRY_SECONDS:
+    if not force_retry and now_epoch - last_epoch < RETRY_SECONDS:
         return False, "RETRY_COOLDOWN", attempts
     return True, "RETRY", attempts + 1
 
@@ -190,6 +190,10 @@ def locked():
 
 
 def main() -> int:
+    if len(sys.argv) > 2 or (len(sys.argv) == 2 and sys.argv[1] != '--retry-now'):
+        print('usage: woodpecker_main_poll.py [--retry-now]')
+        return 2
+    force_retry = len(sys.argv) == 2
     private_directory(ROOT)
     with locked() as acquired:
         if not acquired:
@@ -204,7 +208,7 @@ def main() -> int:
             print("REMOTE_CHECK_ERROR:" + type(exc).__name__)
             return 3
         begin = time.time()
-        go, reason, attempts = should_run(sha, previous, begin)
+        go, reason, attempts = should_run(sha, previous, begin, force_retry=force_retry)
         if not go:
             print("CI_SKIP:", reason, sha[:12])
             return 0
