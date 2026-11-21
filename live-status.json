@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "kind": "terminal-mcp-public-aggregate",
-  "observed_at": "2026-11-21T07:46:38+00:00",
+  "observed_at": "2026-11-21T07:51:41+00:00",
   "expected_refresh_seconds": 300,
   "fresh_window_seconds": 300,
   "nodes": {
     "total": 8,
-    "online": 5,
-    "offline": 3,
+    "online": 6,
+    "offline": 2,
     "unknown": 0,
     "items": [
       {
@@ -18,7 +18,7 @@
       },
       {
         "label": "dell-linux",
-        "status": "offline",
+        "status": "online",
         "open_sessions": 0,
         "recent_activity_signals": 0
       },
