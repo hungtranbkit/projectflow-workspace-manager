@@ -38,7 +38,7 @@
     for(const id of ["live-nodes","live-open","live-signal","live-one-minute"])set(id,"—");
     set("live-acceptance","UNKNOWN");set("live-ttl","UNKNOWN");set("live-transport","Chưa kết nối");
     set("live-message",reason||"Không suy diễn dữ liệu nếu nguồn không hợp lệ.");
-    $("live-node-list").replaceChildren();$("live-sessions").replaceChildren();
+    $("live-node-list").replaceChildren();$("live-sessions").replaceChildren();$("live-changes").replaceChildren();set("live-sessions-note","Không có dữ liệu phiên xác minh.");
   }
   function noteChange(d){
     const before=st.previous;
