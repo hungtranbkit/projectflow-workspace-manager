@@ -85,3 +85,19 @@ Official documentation:
 - https://woodpecker-ci.org/docs/administration/installation/docker-compose
 - https://woodpecker-ci.org/docs/administration/configuration/forges/github
 - https://woodpecker-ci.org/docs/usage/security-boundaries
+
+## Native Linux staging verified — 2026-11-21
+
+**Actual result:** Official Woodpecker v3.20.1 linux/amd64 binary downloaded on MacBook Linux from the upstream release and SHA-256 verified against its published checksums. `woodpecker-server --version` returned 3.20.1. `bash scripts/woodpecker_native_smoke.sh` started the real server on loopback `127.0.0.1:8187` and received HTTP **200**, then killed the test process and discarded its temporary SQLite data. This is **not** an OAuth, GitHub webhook, runner or CI pipeline PASS.
+
+MacBook Linux had approximately 373 GB free and 12 GB available RAM, but no Docker/Podman. HP had Docker but its root filesystem was ~96% full and served active workloads; M910q's Docker daemon was unavailable with root filesystem ~88% full. **Do not install a Docker runner on HP or M910q as currently configured.** The native Local backend does not isolate untrusted PR code and is not a safe substitute for a dedicated runner.
+
+A disabled, unloaded-from-autostart **user systemd service** was installed successfully on MacBook Linux using `bash infra/woodpecker/native/install-user-service.sh`. It is `disabled/inactive`, with files:
+- `~/.config/systemd/user/projectflow-woodpecker.service`
+- `~/.local/share/projectflow-woodpecker-staging/native/run-server.sh`
+- `~/.config/projectflow-woodpecker/server.env.example`
+
+No real `server.env` was created; no active service was left behind. The runner/server secrets must be stored on authorized hosts, not in this repository. The entrypoint fails closed without an HTTPS hostname, real GitHub OAuth App credentials, 64-hex agent/GRPC secrets and closed registration. Server HTTP and gRPC bind only to loopback, so a future remote runner also requires private-network routing.
+
+Remaining external requirements: provision a **separate** HTTPS hostname and Cloudflare Tunnel for CI (do not overwrite the existing ProjectFlow domain), create a GitHub **OAuth App** with callback `https://<ci-host>/authorize`, and choose a safe dedicated Docker runner. Cloudflared tunnel administration on M910q was unavailable; HP had no `cert.pem`, so no DNS changes were attempted. Keep GitHub Actions and PR #58 Draft until a real SHA-matched PR/push pipeline, negative test, queue retry and GitHub commit status are verified.
+
