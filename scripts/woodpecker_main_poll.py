@@ -129,7 +129,7 @@ def logged_command(command: list[str], log, *, cwd: Path, env: dict[str, str],
 
     Never print credentials. Errors propagate as failures, never implicit PASS.
     """
-    log.write("$ " + " ".join(command[:3]) + " [arguments omitted]\\n")
+    log.write("$ " + " ".join(command[:3]) + " [arguments omitted]\n")
     log.flush()
     proc = subprocess.Popen(command, cwd=str(cwd), env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -153,7 +153,7 @@ def logged_command(command: list[str], log, *, cwd: Path, env: dict[str, str],
                 if len(write_chunk) != len(chunk):
                     truncated = True
             if truncated:
-                log.write("\\nCI_LOG_TRUNCATED: remainder discarded after 2.5 MB; worker drained output\\n")
+                log.write("\nCI_LOG_TRUNCATED: remainder discarded after 2.5 MB; worker drained output\n")
                 log.flush()
         finally:
             proc.stdout.close()
