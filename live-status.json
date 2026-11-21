@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "kind": "terminal-mcp-public-aggregate",
-  "observed_at": "2026-11-21T08:37:05+00:00",
+  "observed_at": "2026-11-21T08:42:07+00:00",
   "expected_refresh_seconds": 300,
   "fresh_window_seconds": 300,
   "nodes": {
     "total": 9,
-    "online": 6,
-    "offline": 3,
+    "online": 5,
+    "offline": 4,
     "unknown": 0,
     "items": [
       {
@@ -18,15 +18,15 @@
       },
       {
         "label": "dell-linux",
-        "status": "online",
+        "status": "offline",
         "open_sessions": 0,
         "recent_activity_signals": 0
       },
       {
         "label": "hp-linux",
         "status": "online",
-        "open_sessions": 10,
-        "recent_activity_signals": 10
+        "open_sessions": 9,
+        "recent_activity_signals": 9
       },
       {
         "label": "local",
@@ -67,8 +67,8 @@
     ]
   },
   "sessions": {
-    "open": 20,
-    "recent_activity_signals": 10,
+    "open": 19,
+    "recent_activity_signals": 9,
     "running_verified": null
   },
   "acceptance": {
