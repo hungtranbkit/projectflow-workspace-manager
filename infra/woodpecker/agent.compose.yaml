@@ -1,0 +1,14 @@
+# Run only on a dedicated, non-production Docker host.
+name: projectflow-woodpecker-agent
+services:
+  woodpecker-agent:
+    image: woodpeckerci/woodpecker-agent:v3.20.1
+    command: agent
+    restart: unless-stopped
+    environment:
+      WOODPECKER_SERVER: ${WOODPECKER_SERVER:?Set VPN-reachable Woodpecker server IP:9000}
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:?Set same random secret as server}
+      WOODPECKER_MAX_WORKFLOWS: "1"
+    # Docker socket is host-privileged. NEVER deploy on production servers.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
