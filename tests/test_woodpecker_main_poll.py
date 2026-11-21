@@ -119,3 +119,28 @@ def test_timeout_kills_subprocess(tmp_path):
                 [sys.executable, "-c", "import time;time.sleep(9)"],
                 log, cwd=tmp_path, env=os.environ.copy(), timeout=1,
             )
+
+
+def test_profile_upgrade_preserves_prior_logs_and_does_not_fake_full_pass(tmp_path, monkeypatch):
+    from pathlib import Path
+    monkeypatch.setattr(poll, "ROOT", tmp_path / "ci")
+    monkeypatch.setattr(poll, "remote_sha", lambda: SHA)
+    monkeypatch.setattr(poll, "execute_sha", lambda sha, log: log.write("FAST_GATES_OK\\n"))
+    monkeypatch.setattr(poll.sys, "argv", ["woodpecker_main_poll.py"])
+    poll.private_directory(poll.ROOT)
+    poll.write_json(poll.ROOT / "status.json",
+                    {"sha": SHA, "status": "FAIL", "attempts": 3, "reason": "LEGACY",
+                     "profile": "py314-old"})
+    old_log = poll.ROOT / "logs" / (SHA[:12] + "-attempt1.log")
+    poll.private_directory(old_log.parent)
+    old_log.write_text("OLD_EVIDENCE")
+    assert poll.main() == 0
+    d = poll.read_json(poll.ROOT / "status.json")
+    assert d["status"] == "FAST_PASS"
+    assert d["full_regression"] == "NOT_RUN_NO_ISOLATED_DOCKER_RUNNER"
+    assert d["github_pr_checks"] == "NOT_CONNECTED"
+    assert "attempt1" in d["log_path"]
+    assert poll.PROFILE_VERSION in d["log_path"]
+    assert Path(d["log_path"]).is_file()
+    assert old_log.read_text() == "OLD_EVIDENCE"
+    assert (poll.ROOT / "history" / (SHA[:12] + "-legacy-status.json")).is_file()
