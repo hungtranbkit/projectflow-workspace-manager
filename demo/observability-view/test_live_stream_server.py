@@ -79,7 +79,7 @@ def test_session_links_use_only_owner_approved_node_names(tmp_path):
         ])
     d = detailed_snapshot(nodes, sessions, now=now)
     assert [n["label"] for n in d["nodes"]["items"]] == ["hp-linux", "m910", "Node 03"]
-    assert [s["node"] for s in d["sessions"]["items"]] == ["hp-linux", "m910", "Node 03"]
+    assert sorted(s["node"] for s in d["sessions"]["items"]) == sorted(["hp-linux", "m910", "Node 03"])
     raw = json.dumps(d)
     assert "secret-unregistered-node" not in raw
     assert "SECRET_SESSION" not in raw and "SECRET_COMMAND" not in raw
@@ -217,3 +217,42 @@ def test_stale_checkpoint_cannot_fake_verified_running(tmp_path):
     assert stale["running_verified"] is None
     assert recent["execution_state"]=="RUNNING_VERIFIED"
     assert recent["running_verified"] is True
+
+def test_running_prioritized_across_more_than_24_sessions(tmp_path):
+    """The 31st row must be promoted before the public display cap."""
+    now = datetime(2026, 11, 21, 9, 40, tzinfo=timezone.utc)
+    recent = (now - timedelta(seconds=12)).isoformat()
+    stale = (now - timedelta(hours=2)).isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("nec1", "online", recent, "healthy", "EXECUTION_OK", "private", "secret"))
+    with sqlite3.connect(sessions) as db:
+        for i in range(30):
+            db.execute("INSERT INTO session_records("
+                       "node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,"
+                       "session_name,launch_command,last_known_state,last_checkpoint_at,"
+                       "last_commit,git_branch) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                       ("nec1", "codex", "ACTIVE", None, recent, recent,
+                        "projectflow-observability-%02d" % i, "secret command",
+                        "RUNNING_VERIFIED" if i == 0 else None,
+                        stale if i == 0 else None, None, None))
+        db.execute("INSERT INTO session_records("
+                   "node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,"
+                   "session_name,launch_command,last_known_state,last_checkpoint_at,"
+                   "last_commit,git_branch) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                   ("nec1", "codex", "ACTIVE", None, recent, recent,
+                    "zgh-photo-capacity-fix-zzlast", "secret command",
+                    "RUNNING_VERIFIED", recent, None, None))
+    data = detailed_snapshot(nodes, sessions, now=now)
+    assert data["sessions"]["open"] == 31
+    assert data["sessions"]["displayed_count"] == 24
+    assert data["sessions"]["hidden_count"] == 7
+    assert data["sessions"]["proven_running"] == 1
+    first = data["sessions"]["items"][0]
+    assert first["session"] == "zgh-photo-capacity-fix-zzlast"
+    assert first["execution_state"] == "RUNNING_VERIFIED"
+    assert first["running_verified"] is True
+    assert first["label"] == "Session 01"
+    assert data["sessions"]["items"][1]["execution_state"] == "OPEN_UNVERIFIED"
+    assert "secret command" not in json.dumps(data)

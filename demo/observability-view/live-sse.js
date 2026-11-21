@@ -18,6 +18,14 @@
   const execNames={RUNNING_VERIFIED:"RUNNING · có checkpoint",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Bị kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
   const projects=new Set(["Zalo Group Hub","MESFlow","ESP32 Kiosk / OTA","ProjectFlow","Brand Agent","Screen Remote","RemoteOps","Chưa phân loại"]);
   let activeProject="all";
+  let activeState="all";
+  const stateRank={RUNNING_VERIFIED:0,WAITING_INPUT:1,BLOCKED:2,STALLED:3,IDLE:4,OPEN_UNVERIFIED:5,EXITED:6};
+  const stateFilters=[["all","Tất cả"],["running","RUNNING"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","Chưa chạy"]];
+  const stateMatch=(s)=>activeState==="all"||
+    (activeState==="running"&&s.execution_state==="RUNNING_VERIFIED")||
+    (activeState==="waiting"&&s.execution_state==="WAITING_INPUT")||
+    (activeState==="blocked"&&["BLOCKED","STALLED"].includes(s.execution_state))||
+    (activeState==="idle"&&["IDLE","OPEN_UNVERIFIED","EXITED"].includes(s.execution_state));
   const st={last:null,lastStreamAt:0,lastRenderedAt:0,source:"none",archiveBusy:false,stream:null,previous:null,events:[]};
   function validate(d){
     if(!d||![1,2].includes(d.schema_version)||d.kind!=="terminal-mcp-public-aggregate")return false;
@@ -45,6 +53,9 @@
            (s.session!==null&&!(typeof s.session==="string"&&/^[a-z0-9][a-z0-9._-]{2,89}$/.test(s.session))))return false;
       }
       if(!d.sessions.projects.every(p=>projects.has(p.name)&&int(p.open_sessions)))return false;
+      if(d.sessions.proven_running>d.sessions.open)return false;
+      if(d.sessions.displayed_count!==undefined&&d.sessions.displayed_count!==d.sessions.items.length)return false;
+      if(d.sessions.hidden_count!==undefined&&!int(d.sessions.hidden_count))return false;
     }
     return true;
   }
@@ -57,6 +68,8 @@
     for(const id of ["live-nodes","live-open","live-signal","live-one-minute"])set(id,"—");
     set("live-acceptance","UNKNOWN");set("live-ttl","UNKNOWN");set("live-transport","Chưa kết nối");
     set("live-message",reason||"Không suy diễn dữ liệu nếu nguồn không hợp lệ.");
+    set("live-running-count","—");set("live-running-note","Không có dữ liệu được xác minh");
+    const states=$("live-state-filters");if(states)states.replaceChildren();
     $("live-node-list").replaceChildren();$("live-sessions").replaceChildren();$("live-changes").replaceChildren();$("live-projects").replaceChildren();set("live-sessions-note","Không có dữ liệu phiên xác minh.");
   }
   function noteChange(d){
@@ -116,7 +129,27 @@
     const list=$("live-sessions");list.replaceChildren();
     const projectList=$("live-projects");projectList.replaceChildren();
     if(d.schema_version===2){
-      const all=d.sessions.items;
+      const all=[...d.sessions.items].sort((a,b)=>
+        (stateRank[a.execution_state]??9)-(stateRank[b.execution_state]??9)||
+        String(a.label).localeCompare(String(b.label)));
+      set("live-running-count",d.sessions.proven_running);
+      set("live-running-note",d.sessions.proven_running
+        ?"Đã có checkpoint RUNNING mới trong 5 phút":"Chưa có phiên RUNNING được xác minh; tín hiệu mới không đồng nghĩa viết code");
+      const stateList=$("live-state-filters");
+      if(stateList){
+        stateList.replaceChildren();
+        for(const [key,label] of stateFilters){
+          const count=key==="running"?d.sessions.proven_running:
+            all.filter(s=>key==="all"||
+              (key==="waiting"&&s.execution_state==="WAITING_INPUT")||
+              (key==="blocked"&&["BLOCKED","STALLED"].includes(s.execution_state))||
+              (key==="idle"&&["IDLE","OPEN_UNVERIFIED","EXITED"].includes(s.execution_state))).length;
+          const btn=element("button","live-state-filter"+(activeState===key?" selected":""),label+" · "+count);
+          btn.type="button";btn.setAttribute("aria-pressed",String(activeState===key));
+          btn.addEventListener("click",()=>{activeState=key;render(d,source)});
+          stateList.appendChild(btn);
+        }
+      }
       const title=element("span","", "Dự án · "+d.sessions.projects.length+" nhóm");
       projectList.appendChild(title);
       for(const p of d.sessions.projects){
@@ -130,15 +163,18 @@
       let showing=0;
       for(const s of all){
         if(activeProject!=="all"&&activeProject!==s.project)continue;
+        if(!stateMatch(s))continue;
         showing++;
-        const li=element("li","session-card");
+        const li=element("li","session-card"+(s.execution_state==="RUNNING_VERIFIED"?" running-first":""));
         const line=element("div","session-card-heading");
         line.appendChild(element("strong","",s.session||s.label));
         line.appendChild(element("span","session-state "+(s.execution_state==="RUNNING_VERIFIED"?"verified":"unverified"),
           execNames[s.execution_state]));
         li.appendChild(line);
         li.appendChild(element("div","session-context",s.project+" · "+s.node+" · "+agents[s.agent_type]));
-        li.appendChild(element("p","session-work",s.task_hint));
+        li.appendChild(element("p","session-work",s.task_source==="session_name_hint"
+          ?"Đang làm gì? Gợi ý theo tên phiên: "+s.task_hint
+          :"Đang làm gì? Chưa có task đã xác minh"));
         li.appendChild(element("small","session-source",
           (s.task_source==="session_name_hint"?"Mục tiêu suy ra từ tên session":"Chưa có mô tả task")
           +" · tín hiệu: "+activity[s.activity_bucket]));
@@ -147,7 +183,12 @@
           +(s.commit_ref?" @ "+s.commit_ref:"")+
           " · chưa xác minh commit mới"));
         li.appendChild(element("small","session-proof",
-          s.running_verified===true?"Có checkpoint thực thi mới":"Chưa có bằng chứng code mới / chưa xác minh RUNNING"));
+          s.running_verified===true?"RUNNING được xác minh bằng checkpoint mới":"Chưa có bằng chứng code mới / chưa xác minh RUNNING"));
+        if(s.running_verified===true&&typeof s.last_checkpoint_at==="string"&&
+           Number.isFinite(Date.parse(s.last_checkpoint_at))){
+          li.appendChild(element("small","session-proof-time",
+            "Checkpoint ghi nhận: "+format(s.last_checkpoint_at)+" · không suy diễn giai đoạn code/test/deploy"));
+        }
         list.appendChild(li);
       }
       set("live-sessions-note","Đang hiển thị "+showing+"/"+d.sessions.open+
