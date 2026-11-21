@@ -111,15 +111,16 @@ def build_terminal_reader():
 
     cfg = load_config()
     local = TerminalService(cfg, registry_node_id="hp-linux")
+    store = ConnectionStore()
     remotes = {}
     for n in cfg.nodes.remote_nodes:
         token = os.environ.get(n.token_env) if n.token_env else None
         if token:
             remotes[n.node_id] = RemoteNodeClient(n.endpoint, token, timeout=2.0)
-    for saved in ConnectionStore().list():
+    for saved in store.list():
         if saved.node_id in remotes or not saved.token_file:
             continue
-        token = ConnectionStore.read_token(ConnectionStore(), saved.token_file)
+        token = store.read_token(saved.token_file)
         if token:
             remotes[saved.node_id] = RemoteNodeClient(saved.endpoint, token, timeout=2.0)
 
@@ -128,6 +129,66 @@ def build_terminal_reader():
             return local.terminal_status(session)
         client = remotes.get(node_id)
         return client.status(session, timeout_seconds=2.0) if client else {}
+
+    # The fleet's currently open sessions come from authenticated node LIST
+    # responses, not stale/duplicated controller registry rows. Never read
+    # terminal output while listing, and never expose the auth connection.
+    listing = {"sessions": [], "covered_nodes": [], "unreachable_nodes": []}
+    list_lock = threading.Lock()
+    listed_at = [float("-inf")]
+
+    def _list_one(node, client):
+        result = (local.terminal_list_sessions() if node == "hp-linux" else
+                  client.list_sessions(timeout_seconds=2.0))
+        if not isinstance(result, dict) or not isinstance(result.get("sessions"), list):
+            raise ValueError("unexpected live session list")
+        values = []
+        for item in result["sessions"][:60]:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if isinstance(name, str) and _SAFE_NAME.fullmatch(name):
+                # created is only an internal instance discriminator.
+                created = item.get("created")
+                hint = str(created)[:80] if isinstance(created, (int, float, str)) else ""
+                values.append({"node_id": node, "session_name": name, "instance_hint": hint})
+        return values
+
+    def list_sessions():
+        tick = time.monotonic()
+        with list_lock:
+            if tick - listed_at[0] < 12.0:
+                return {"sessions": list(listing["sessions"]),
+                        "covered_nodes": list(listing["covered_nodes"]),
+                        "unreachable_nodes": list(listing["unreachable_nodes"])}
+            nodes = {"hp-linux": None, **remotes}
+            successes = []
+            unavailable = []
+            all_sessions = []
+            with ThreadPoolExecutor(max_workers=min(8, len(nodes))) as pool:
+                futures = {pool.submit(_list_one, node, client): node
+                           for node, client in nodes.items()}
+                for future in as_completed(futures):
+                    node = futures[future]
+                    try:
+                        rows = future.result()
+                    except Exception:
+                        unavailable.append(node)
+                    else:
+                        successes.append(node)
+                        all_sessions.extend(rows)
+            # Deduplicate across readbacks without relying on the registry.
+            distinct = {(r["node_id"], r["session_name"]): r for r in all_sessions}
+            listing.update(sessions=sorted(distinct.values(),
+                                           key=lambda r: (r["node_id"], r["session_name"])),
+                           covered_nodes=sorted(successes),
+                           unreachable_nodes=sorted(unavailable))
+            listed_at[0] = tick
+            return {"sessions": list(listing["sessions"]),
+                    "covered_nodes": list(listing["covered_nodes"]),
+                    "unreachable_nodes": list(listing["unreachable_nodes"])}
+
+    read.list_sessions = list_sessions
     return read
 
 
