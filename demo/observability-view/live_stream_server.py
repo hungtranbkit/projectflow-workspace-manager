@@ -51,7 +51,8 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
                "capacity_status,execution_health_state FROM nodes ORDER BY id")
     sr = _read(sessions_db,
                "SELECT node_id,agent_type,last_activity_at,last_seen_at,"
-               "session_name,last_known_state,last_checkpoint_at,last_commit,git_branch "
+               "session_name,last_known_state,last_checkpoint_at,last_commit,git_branch,"
+               "stable_session_id,generation "
                "FROM session_records WHERE status='ACTIVE' AND deleted_at IS NULL ORDER BY node_id,session_name")
     # Observations are privately authenticated node readbacks; only their
     # strict public-safe projection is ever merged into the output payload.
