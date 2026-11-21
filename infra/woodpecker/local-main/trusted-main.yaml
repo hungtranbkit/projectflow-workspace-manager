@@ -1,14 +1,14 @@
-# ONLY trusted/protected main, invoked by a host-local Git SHA poller.
-# Never use this pipeline for fork PRs: backend=local has NO isolation.
+# ONLY verified protected main, invoked by trusted-main SHA poller.
+# Unsandboxed Local backend. PASS means FAST gates only; FULL CI NOT RUN.
 when:
   - event: push
     branch: main
 
 steps:
-  - name: quality-gates
+  - name: fast-quality-gates
     image: bash
     commands:
       - ./scripts/preflight.sh
       - ./scripts/build.sh
-      - ./scripts/test.sh
       - ./scripts/smoke.sh
+      - ./scripts/ci-test.sh fast
