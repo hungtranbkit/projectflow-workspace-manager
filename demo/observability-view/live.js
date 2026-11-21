@@ -12,7 +12,7 @@
     text("live-nodes","—");
     text("live-open","—");
     text("live-signal","—");
-    text("live-acceptance","UNKNOWN");
+    text("live-acceptance","UNKNOWN");text("live-ttl","UNKNOWN");
     text("live-message", reason || "Không thể xác minh nguồn dữ liệu. Không dùng số liệu mô phỏng để thay thế.");
     $("live-panel").dataset.health="unknown";
     $("live-node-list").replaceChildren();
@@ -42,7 +42,7 @@
     text("live-nodes",d.nodes.online+" / "+d.nodes.total);
     text("live-open",d.sessions.open);
     text("live-signal",d.sessions.recent_activity_signals);
-    text("live-acceptance","UNKNOWN");
+    text("live-acceptance","UNKNOWN");text("live-ttl","UNKNOWN");
     text("live-message",fresh
       ?"Số liệu thật từ registry Terminal MCP, cập nhật khoảng 5 phút/lần. Phiên mở và tín hiệu không chứng minh agent đang viết code hoặc task đã nghiệm thu."
       :"Bản ghi quá 15 phút hoặc sai thời gian. Các số bên trên chỉ là số liệu cũ; không suy diễn trạng thái hiện tại.");
