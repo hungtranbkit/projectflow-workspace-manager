@@ -145,12 +145,12 @@ def logged_command(command: list[str], log, *, cwd: Path, env: dict[str, str],
                 chunk = os.read(proc.stdout.fileno(), 4096)
                 if not chunk:
                     break
-                if remaining:
-                    write_chunk = chunk[:remaining]
+                write_chunk = chunk[:remaining]
+                if write_chunk:
                     log.write(write_chunk.decode("utf-8", errors="replace"))
                     log.flush()
                     remaining -= len(write_chunk)
-                if len(chunk) > len(chunk[:remaining]) and remaining == 0:
+                if len(write_chunk) != len(chunk):
                     truncated = True
             if truncated:
                 log.write("\\nCI_LOG_TRUNCATED: remainder discarded after 2.5 MB; worker drained output\\n")
