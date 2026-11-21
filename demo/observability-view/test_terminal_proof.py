@@ -152,3 +152,18 @@ def test_idle_clears_old_output_baseline():
     step["state"] = "RUNNING"
     clock[0] += 2
     assert monitor.snapshot(row, now=at + timedelta(seconds=6)) == {}
+
+
+def test_remote_node_never_inherits_hp_local_task_label(tmp_path):
+    db_path = tmp_path / "audit.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE session_task_labels "
+                   "(node_id TEXT, session TEXT, summary TEXT, source TEXT, updated_at TEXT)")
+        db.execute("INSERT INTO session_task_labels VALUES(?,?,?,?,?)",
+                   ("local", "projectflow-session", "CrommaCode private client alpha",
+                    "title", "2026-11-21T10:00:00+00:00"))
+    # The node-local mirror belongs to HP; a similarly named remote
+    # session cannot claim that title, even if the task text is curated.
+    assert read_explicit_task_label("m910", "projectflow-session", db_path=db_path) is None
+    owned = read_explicit_task_label("hp-linux", "projectflow-session", db_path=db_path)
+    assert owned["title"] == "Xây dựng nguồn bằng chứng hoạt động agent"
