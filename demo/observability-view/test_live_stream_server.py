@@ -61,6 +61,29 @@ def test_snapshot_details_degraded_agents_and_privacy(tmp_path):
     assert d["transport"]["poll_seconds"] == 3
 
 
+def test_session_links_use_only_owner_approved_node_names(tmp_path):
+    now = datetime(2026, 11, 21, 4, 0, tzinfo=timezone.utc)
+    nodes, sessions = _dbs(tmp_path)
+    ts = now.isoformat()
+    with sqlite3.connect(nodes) as db:
+        db.executemany("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)", [
+            ("hp-linux", "online", ts, "healthy", "EXECUTION_OK", "PRIVATE_HOST", "PRIVATE_TOKEN"),
+            ("m910", "online", ts, "healthy", "EXECUTION_OK", "PRIVATE_HOST", "PRIVATE_TOKEN"),
+            ("secret-unregistered-node", "offline", ts, "healthy", "EXECUTION_DOWN", "PRIVATE_HOST", "PRIVATE_TOKEN"),
+        ])
+    with sqlite3.connect(sessions) as db:
+        db.executemany("INSERT INTO session_records VALUES(?,?,?,?,?,?,?,?)", [
+            ("hp-linux", "claude", "ACTIVE", None, ts, ts, "SECRET_SESSION", "SECRET_COMMAND"),
+            ("m910", "codex", "ACTIVE", None, ts, ts, "SECRET_SESSION", "SECRET_COMMAND"),
+            ("secret-unregistered-node", "shell", "ACTIVE", None, ts, ts, "SECRET_SESSION", "SECRET_COMMAND"),
+        ])
+    d = detailed_snapshot(nodes, sessions, now=now)
+    assert [n["label"] for n in d["nodes"]["items"]] == ["hp-linux", "m910", "Node 03"]
+    assert [s["node"] for s in d["sessions"]["items"]] == ["hp-linux", "m910", "Node 03"]
+    raw = json.dumps(d)
+    assert "secret-unregistered-node" not in raw
+    assert "SECRET_SESSION" not in raw and "SECRET_COMMAND" not in raw
+
 def test_get_snapshot_health_and_mutations_are_readonly(tmp_path):
     now=datetime.now(timezone.utc).isoformat()
     nodes,sessions=_dbs(tmp_path)

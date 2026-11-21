@@ -9,7 +9,7 @@
 
 The stream sends sanitized node and session aggregates approximately every 3 seconds from an HP user service on localhost port 18772. Upstream Terminal MCP registry and heartbeat updates may arrive less frequently; do not call this instant real-time execution tracking.
 
-ACTIVE session, terminal output, and heartbeat are not proof of code progress. Independent acceptance percentage, verified RUNNING and task TTL remain UNKNOWN without trusted Harness evidence. Per-session aliases are anonymized and include only agent type and activity-age bucket. Never publish session names, hostnames, prompts, paths, commands, IDs, tokens, or raw logs.
+ACTIVE session, terminal output, and heartbeat are not proof of code progress. Independent acceptance percentage, verified RUNNING and task TTL remain UNKNOWN without trusted Harness evidence. Per-session aliases are anonymized and include only agent type and activity-age bucket. Registered node names from an explicit owner-approved allowlist (dell-5530, dell-linux, hp-linux, local, m910, mac17-macbook-pro, macbook, nec1, win) are public by request. Unknown/new node IDs retain anonymous Node NN labels. Never publish hostnames, IP addresses, unapproved IDs, session names, prompts, paths, commands, tokens, or raw logs.
 
 Only GET health, snapshot and events routes exist; all writes are denied. The site has a CSP restricting the network to the fixed public read-only endpoint and the archived raw GitHub fallback. No login or agent-control capability is exposed.
 
@@ -29,5 +29,5 @@ To rollback, stop/disable only the new SSE service, restore and validate the ori
 - Public SSE shows multiple frames ~3 seconds apart
 - Existing bootstrap health stays 200, Access-protected dashboard stays protected
 - Mobile Chromium 320/390 px: actual SSE data appears, updates twice, no horizontal overflow
-- No credentials, raw IDs, command lines, prompts, paths or private logs in public JSON
+- Only approved registered node names are public; no credentials, unapproved IDs, hostnames, IPs, command lines, prompts, paths or private logs in public JSON
 - CI fast/remaining, feature tests and static smoke pass, evidence attached to PR

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Public, aggregate-only Terminal MCP snapshot. No prompts, IDs or logs.
+"""Public, read-only Terminal MCP snapshot with approved display node names.
 
-Both SQLite inputs are opened read-only. The output is intended to be
-published on a public static page; never add raw node/session columns.
-An ACTIVE session is an open session, NOT verified running code.
+The public feed intentionally reveals a small, explicit allowlist of registered
+node names, as requested by the owner. Hostnames, IPs, unknown node identities,
+session IDs, prompts, commands, tokens and raw logs remain private. ACTIVE is
+an open session, not proof of code execution.
 """
 from __future__ import annotations
 
@@ -15,6 +16,20 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
+
+
+# User-approved node names only. Never derive public labels from hostname,
+# display_name or arbitrary new IDs without a separate explicit review.
+PUBLIC_NODE_NAMES = frozenset({
+    "dell-5530", "dell-linux", "hp-linux", "local", "m910",
+    "mac17-macbook-pro", "macbook", "nec1", "win",
+})
+
+
+def public_node_label(node_id: str, index: int) -> str:
+    if isinstance(node_id, str) and node_id in PUBLIC_NODE_NAMES:
+        return node_id
+    return "Node %02d" % index
 
 
 def _instant(value: str | None) -> datetime | None:
@@ -58,7 +73,8 @@ def snapshot(nodes_db: Path, sessions_db: Path, *,
     if not 60 <= fresh_seconds <= 3600:
         raise ValueError("fresh_seconds outside bounded range")
 
-    # Explicit allowlist: do not select hostname, endpoint, auth_token_ref,
+    # The node id is looked up only in the owner-approved name allowlist.
+    # Never select hostname, endpoint, auth_token_ref,
     # session_name, launch_command, cwd, notes, prompts, tags or logs.
     nodes = _read(nodes_db,
                   "SELECT id, last_known_status, last_heartbeat_at FROM nodes ORDER BY id")
@@ -84,7 +100,7 @@ def snapshot(nodes_db: Path, sessions_db: Path, *,
         else:
             status = "unknown"
         visible_nodes.append({
-            "label": "Node %02d" % index,  # Stable, anonymous alias.
+            "label": public_node_label(node["id"], index),
             "status": status,
             "open_sessions": open_per_node[node["id"]],
             "recent_activity_signals": fresh_per_node[node["id"]],
