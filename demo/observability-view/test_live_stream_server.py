@@ -210,7 +210,10 @@ def test_stale_checkpoint_cannot_fake_verified_running(tmp_path):
         ])
     d=detailed_snapshot(nodes,sessions,now=now)
     assert d["sessions"]["proven_running"]==1
-    assert d["sessions"]["items"][0]["execution_state"]=="OPEN_UNVERIFIED"
-    assert d["sessions"]["items"][0]["running_verified"] is None
-    assert d["sessions"]["items"][1]["execution_state"]=="RUNNING_VERIFIED"
-    assert d["sessions"]["items"][1]["running_verified"] is True
+    by_session = {item["session"]: item for item in d["sessions"]["items"]}
+    stale = by_session["projectflow-regression-20261121"]
+    recent = by_session["projectflow-observability-20261121"]
+    assert stale["execution_state"]=="OPEN_UNVERIFIED"
+    assert stale["running_verified"] is None
+    assert recent["execution_state"]=="RUNNING_VERIFIED"
+    assert recent["running_verified"] is True
