@@ -100,3 +100,55 @@ def test_unknown_foreground_with_real_output_delta_is_verified():
     state["last_output"] = "one\ntwo\nthree"
     clock[0] += 2
     assert monitor.snapshot(row, now=now + timedelta(seconds=4)) == {}
+
+
+def test_session_recreated_with_same_name_cannot_reuse_execution_proof():
+    step = {"state": "RUNNING", "exists": True, "allowed": True,
+            "last_output": "first"}
+    clock = [0.]
+    monitor = TerminalProofMonitor(lambda *args: step.copy(), interval=1,
+                                   clock=lambda: clock[0], task_reader=lambda *args: None)
+    row = [{"node_id": "hp-linux", "session_name": "projectflow-proof",
+            "stable_session_id": "instance-one", "generation": 1}]
+    at = datetime(2026, 11, 21, 10, tzinfo=timezone.utc)
+    assert monitor.snapshot(row, now=at) == {}
+    clock[0] += 2
+    step["last_output"] = "first-second"
+    assert monitor.snapshot(row, now=at + timedelta(seconds=2))[
+        ("hp-linux", "projectflow-proof")]["state"] == "RUNNING_VERIFIED"
+    # Restart with the SAME output and name but a different instance.
+    row[0]["stable_session_id"] = "instance-two"
+    clock[0] += 2
+    assert monitor.snapshot(row, now=at + timedelta(seconds=4)) == {}
+    # A new output event in instance two is now fresh evidence.
+    step["last_output"] = "first-second-third"
+    clock[0] += 2
+    assert monitor.snapshot(row, now=at + timedelta(seconds=6))[
+        ("hp-linux", "projectflow-proof")]["state"] == "RUNNING_VERIFIED"
+    # A KILLED/reopened registry row can retain a stable ID while
+    # generation changes; old proof must not cross that boundary.
+    row[0]["generation"] = 2
+    clock[0] += 2
+    assert monitor.snapshot(row, now=at + timedelta(seconds=8)) == {}
+
+
+def test_idle_clears_old_output_baseline():
+    step = {"state": "RUNNING", "exists": True, "allowed": True, "last_output": "A"}
+    clock = [0.]
+    monitor = TerminalProofMonitor(lambda *args: step.copy(), interval=1,
+                                   clock=lambda: clock[0], task_reader=lambda *args: None)
+    row = [{"node_id": "hp-linux", "session_name": "projectflow-proof",
+            "stable_session_id": "instance-one", "generation": 1}]
+    at = datetime(2026, 11, 21, 10, tzinfo=timezone.utc)
+    monitor.snapshot(row, now=at)
+    clock[0] += 2
+    step["last_output"] = "AB"
+    assert monitor.snapshot(row, now=at + timedelta(seconds=2))[
+        ("hp-linux", "projectflow-proof")]["state"] == "RUNNING_VERIFIED"
+    step["state"] = "IDLE"
+    clock[0] += 2
+    assert monitor.snapshot(row, now=at + timedelta(seconds=4))[
+        ("hp-linux", "projectflow-proof")]["state"] == "IDLE"
+    step["state"] = "RUNNING"
+    clock[0] += 2
+    assert monitor.snapshot(row, now=at + timedelta(seconds=6)) == {}
