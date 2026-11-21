@@ -1,51 +1,62 @@
-# Woodpecker CI migration (staging, not cut over)
+# Woodpecker CI migration (staging, NOT cut over)
 
-Goal: keep GitHub as source/PR forge while moving CI execution to self-hosted Woodpecker. The current GitHub Actions workflow remains in place until real-world acceptance.
+Keep GitHub as source/PR forge while moving CI execution to self-hosted Woodpecker. **GitHub Actions stays enabled** until real webhook + pipeline evidence passes.
 
-## What is versioned
+## Files
 
-- `.woodpecker/verify.yaml`: on PR, push to `main`, or manual run; installs test dependencies then runs actual `preflight`, `build`, complete `test`, and `smoke` commands, failing closed on any nonzero exit.
-- `infra/woodpecker/compose.yaml`: Woodpecker server with persistent SQLite volume, GitHub OAuth, loopback-only UI port; agent is an explicit profile, disabled until a dedicated CI machine is confirmed.
-- `infra/woodpecker/.env.example`: placeholders only (no secrets).
+- `.woodpecker/verify.yaml`: runs existing preflight/build/full-test/smoke on PR, main push, and manual. No production deployment.
+- `infra/woodpecker/compose.yaml`: **server only** (persistent SQLite; HTTP exposed only on loopback; agent gRPC exposed only on a specific private IP).
+- `infra/woodpecker/agent.compose.yaml`: dedicated Linux CI runner (Docker socket) **on a separate, isolated machine**.
+- `infra/woodpecker/.env.example` and `.env.agent.example`: placeholders only.
 
-## Requirements and security boundary
+## Security / prerequisites
 
-1. Provision a dedicated Linux Docker runner **without production workloads**. A Woodpecker Docker agent mounting `/var/run/docker.sock` has host-equivalent power. Do **not** enable the `dedicated-runner` profile on an HP/M910 machine hosting business-critical containers.
-2. Obtain a real HTTPS hostname and route it to the server host's `127.0.0.1:8179` (for example, through a correctly scoped Cloudflare Tunnel). No public router port forwarding and no exposing port 9000.
-3. Create a **GitHub OAuth App** (not GitHub App) with Homepage `https://<ci-host>` and Authorization callback `https://<ci-host>/authorize`. Woodpecker's GitHub forge driver needs OAuth client ID and client secret; these are an external bootstrap prerequisite.
-4. On the server host, create `infra/woodpecker/.env` from the example, set `WOODPECKER_HOST` to the verified HTTPS URL, and generate an independent random `WOODPECKER_AGENT_SECRET` using `openssl rand -hex 32`. Use file mode `600`. Do not copy credentials to chats/logs/commits.
-5. Registration remains closed by default (`WOODPECKER_OPEN=false`). Provision only the admin account using the official Woodpecker user CLI before first sign-in. If temporary open registration is ever used during a tightly controlled bootstrap, close it again immediately after the owner logs in; do not expose open registration on the public internet.
+1. Reserve a dedicated Linux Docker runner, no production workloads. A Docker socket mount grants host-level privileges; NEVER run the agent on a shared MESFlow, Zalo Hub, or ESP32 business runtime host.
+2. Reserve a real HTTPS hostname for the server. Route hostname through a verified reverse proxy/Cloudflare Tunnel to the server's `127.0.0.1:8179`. Do not publish 8179 or 9000 to the open internet.
+3. Create a **GitHub OAuth App** (not GitHub App) at GitHub Developer Settings: Homepage `https://<ci-host>`; callback `https://<ci-host>/authorize`. Set `WOODPECKER_GITHUB_CLIENT` and `WOODPECKER_GITHUB_SECRET` only in local, untracked `.env`.
+4. Generate `WOODPECKER_AGENT_SECRET` once with `openssl rand -hex 32`; store securely in server `.env` and isolated runner `.env.agent`. Never print credentials to logs/PR/chat.
+5. Keep `WOODPECKER_OPEN=false`; provision the owner account using the documented Woodpecker user CLI before OAuth login. If bootstrap temporarily requires open registration, restrict access to the trusted operator and close registration immediately afterwards.
+6. Establish a **private VPN route** (e.g. Tailscale) between runner and server, then bind `CI_GRPC_BIND_IP` to the actual private VPN IP on the server. Firewall TCP 9000 to the dedicated runner's VPN IP only; no public binding. Runner connects to that same private IP on port 9000.
 
-## Server bootstrap (only after prerequisites)
+## Server bootstrap (after verifying credentials and hostname)
 
 ```bash
 cd infra/woodpecker
-cp .env.example .env
-chmod 600 .env
-# Edit .env locally; use actual secret values and HTTPS hostname.
-docker compose --env-file .env config --quiet
-docker compose --env-file .env up -d woodpecker-server
-docker compose --env-file .env ps
+cp .env.example .env && chmod 600 .env
+# Edit .env locally; do not commit
+docker compose --env-file .env -f compose.yaml config --quiet
+docker compose --env-file .env -f compose.yaml up -d
+docker compose --env-file .env -f compose.yaml ps
 curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8179/
 ```
 
-Once the server and OAuth login are working, activate ONLY `hungtranbkit/projectflow-workspace-manager` in Woodpecker. Enable a dedicated runner on the isolated CI host using the same agent secret and a verified, restricted network connection to the Woodpecker server. The Compose `dedicated-runner` profile is only for that dedicated host, not automatically part of server bootstrap.
+## Dedicated runner bootstrap (different host, only after private network established)
 
-## Acceptance checklist (do not claim complete until evidenced)
+```bash
+cd infra/woodpecker
+cp .env.agent.example .env.agent && chmod 600 .env.agent
+# Set actual private WOODPECKER_SERVER address and matching AGENT_SECRET
+docker compose --env-file .env.agent -f agent.compose.yaml config --quiet
+docker compose --env-file .env.agent -f agent.compose.yaml up -d
+docker compose --env-file .env.agent -f agent.compose.yaml ps
+```
 
-- An actual GitHub PR webhook reaches Woodpecker and creates a single run.
-- Logs have timestamps, correct commit SHA, and clear PASS/FAIL for preflight/build/test/smoke; a failing test blocks success.
-- A push to main is recorded, and Woodpecker reports commit status to GitHub.
-- A failed/queued run is visible and retry works; agent disconnect does not cause fake success.
-- Confirm at least one real full-suite run; failures are reported, not hidden.
-- Confirm the pipeline never has deploy tokens and cannot modify production.
-- Only after real acceptance and required GitHub checks migration, disable `.github/workflows/ci.yml` in a **separate** reviewed change.
+OAuth login → activate ONLY `hungtranbkit/projectflow-workspace-manager` → confirm webhook delivery and agent registration in the Woodpecker UI.
 
-## ProjectFlow visibility
+## Acceptance before retiring GitHub Actions
 
-Keep the existing ProjectFlow monitoring read-only. Until verified Woodpecker status API integration exists, label Woodpecker CI runs as `UNKNOWN/NOT_CONNECTED`, not PASS. In follow-up, correlate GitHub repo + commit SHA + Woodpecker pipeline ID and timestamp; report `QUEUED`, `RUNNING`, `PASS`, `FAIL` distinctly from actual deployment. Do not let a green CI run alone mark a ProjectFlow task DONE or deployed.
+- PR webhook reaches Woodpecker; run references matching GitHub repository and commit SHA.
+- Real preflight, build, full test, smoke execute with timestamped logs and clear results; failure blocks success.
+- A main push reports the correct GitHub commit status; no stale result considered passing.
+- Queue, retry, runner-disconnect and fork-PR approval behave safely.
+- No secrets passed into PR pipelines; no deployment credentials or production Docker sockets exposed.
+- Only after proof and required GitHub status checks are migrated, disable `.github/workflows/ci.yml` through a **separate reviewed change**.
 
-Official references:
+## ProjectFlow monitoring
+
+No verified Woodpecker status API wiring yet: show `UNKNOWN/NOT_CONNECTED`, never PASS. Later map repo + exact SHA + run ID + timestamps to read-only ProjectFlow CI state, separately from QA/merge/deployment. CI PASS does not mean DEPLOYED or business DONE.
+
+Official documentation:
 - https://woodpecker-ci.org/docs/administration/installation/docker-compose
 - https://woodpecker-ci.org/docs/administration/configuration/forges/github
 - https://woodpecker-ci.org/docs/usage/security-boundaries
