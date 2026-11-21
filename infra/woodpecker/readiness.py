@@ -35,10 +35,11 @@ def real(value: str) -> bool:
 def private_bind(ip: str) -> bool:
     try:
         addr = ipaddress.ip_address(ip)
-        # IPv4 RFC1918 or Tailscale's 100.64.0.0/10, never loopback or wildcard.
-        return addr.version == 4 and (
-            addr.is_private and not addr.is_loopback and not addr.is_link_local
-            or addr in ipaddress.ip_network("100.64.0.0/10")
+        # Explicitly allow RFC1918 or Tailscale CGNAT space only. is_private
+        # alone is unsafe here: it includes e.g. 0.0.0.0 on some Python builds.
+        allowed = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
+        return addr.version == 4 and any(
+            addr in ipaddress.ip_network(net) for net in allowed
         )
     except ValueError:
         return False
