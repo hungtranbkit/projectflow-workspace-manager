@@ -18,7 +18,7 @@ def _dbs(tmp_path):
     with sqlite3.connect(nodes) as db:
         db.execute("CREATE TABLE nodes (id TEXT,last_known_status TEXT,last_heartbeat_at TEXT,capacity_status TEXT,execution_health_state TEXT,hostname TEXT,auth_token_ref TEXT)")
     with sqlite3.connect(sessions) as db:
-        db.execute("CREATE TABLE session_records (node_id TEXT,agent_type TEXT,status TEXT,deleted_at TEXT,last_activity_at TEXT,last_seen_at TEXT,session_name TEXT,launch_command TEXT)")
+        db.execute("CREATE TABLE session_records (node_id TEXT,agent_type TEXT,status TEXT,deleted_at TEXT,last_activity_at TEXT,last_seen_at TEXT,session_name TEXT,launch_command TEXT,last_known_state TEXT,last_checkpoint_at TEXT,last_commit TEXT,git_branch TEXT)")
     return nodes,sessions
 
 
@@ -34,7 +34,7 @@ def test_snapshot_details_degraded_agents_and_privacy(tmp_path):
             ("secret-3","offline",stale,"healthy","EXECUTION_DOWN","private","token"),
         ])
     with sqlite3.connect(sessions) as db:
-        db.executemany("INSERT INTO session_records VALUES(?,?,?,?,?,?,?,?)",[
+        db.executemany("INSERT INTO session_records(node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,session_name,launch_command) VALUES(?,?,?,?,?,?,?,?)",[
             ("secret-1","claude","ACTIVE",None,recent,recent,"PRIVATE_CUSTOMER_TASK","claude -p API_TOKEN_SECRET"),
             ("secret-1","codex","ACTIVE",None,stale,stale,"private investigation","codex secret"),
             ("secret-2","shell","ACTIVE",None,recent,recent,"MCP internal private","ssh sensitive"),
@@ -72,7 +72,7 @@ def test_session_links_use_only_owner_approved_node_names(tmp_path):
             ("secret-unregistered-node", "offline", ts, "healthy", "EXECUTION_DOWN", "PRIVATE_HOST", "PRIVATE_TOKEN"),
         ])
     with sqlite3.connect(sessions) as db:
-        db.executemany("INSERT INTO session_records VALUES(?,?,?,?,?,?,?,?)", [
+        db.executemany("INSERT INTO session_records(node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,session_name,launch_command) VALUES(?,?,?,?,?,?,?,?)", [
             ("hp-linux", "claude", "ACTIVE", None, ts, ts, "SECRET_SESSION", "SECRET_COMMAND"),
             ("m910", "codex", "ACTIVE", None, ts, ts, "SECRET_SESSION", "SECRET_COMMAND"),
             ("secret-unregistered-node", "shell", "ACTIVE", None, ts, ts, "SECRET_SESSION", "SECRET_COMMAND"),
@@ -132,3 +132,85 @@ def test_get_snapshot_health_and_mutations_are_readonly(tmp_path):
         server.shutdown()
         server.server_close()
         thr.join(timeout=3)
+
+
+def test_named_session_project_task_and_commit_reference_are_not_fabricated(tmp_path):
+    now = datetime(2026,11,21,4,0,tzinfo=timezone.utc)
+    ts=now.isoformat()
+    nodes,sessions=_dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("hp-linux","online",ts,"healthy","EXECUTION_OK","PRIVATE_HOST","PRIVATE_TOKEN"))
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records("
+                   "node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,"
+                   "session_name,launch_command,last_known_state,last_checkpoint_at,last_commit,git_branch)"
+                   " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                   ("hp-linux","codex","ACTIVE",None,ts,ts,
+                    "zgh-photo-capacity-fix-20261121","secret command",
+                    None,None,"abcdef1234567890","feat/photo-fix"))
+    d=detailed_snapshot(nodes,sessions,now=now)
+    ss=d["sessions"]["items"]
+    assert len(ss)==1
+    x=ss[0]
+    assert x["project"]=="Zalo Group Hub"
+    assert x["session"]=="zgh-photo-capacity-fix-20261121"
+    assert "ảnh" in x["task_hint"]
+    assert x["task_source"]=="session_name_hint"
+    assert x["execution_state"]=="OPEN_UNVERIFIED"
+    assert x["running_verified"] is None
+    assert x["evidence"]=="registry_only"
+    assert x["commit_ref"]=="abcdef123456"
+    assert x["branch_ref"]=="feat/photo-fix"
+    assert d["sessions"]["proven_running"]==0
+    raw=json.dumps(d)
+    assert "secret command" not in raw and "PRIVATE_HOST" not in raw
+
+
+def test_unapproved_session_is_not_published_as_raw_title(tmp_path):
+    now = datetime(2026,11,21,4,0,tzinfo=timezone.utc)
+    ts=now.isoformat()
+    nodes,sessions=_dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("m910","online",ts,"healthy","EXECUTION_OK","PRIVATE_HOST","PRIVATE_TOKEN"))
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records("
+                   "node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,"
+                   "session_name,launch_command,last_known_state,last_checkpoint_at,last_commit,git_branch)"
+                   " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                   ("m910","claude","ACTIVE",None,ts,ts,
+                    "secret-client-private-work","hidden token=secret",
+                    None,None,None,None))
+    d=detailed_snapshot(nodes,sessions,now=now)
+    x=d["sessions"]["items"][0]
+    assert x["session"] is None
+    assert x["project"]=="Chưa phân loại"
+    assert x["execution_state"]=="OPEN_UNVERIFIED"
+    assert "secret-client" not in json.dumps(d)
+
+
+def test_stale_checkpoint_cannot_fake_verified_running(tmp_path):
+    now = datetime(2026,11,21,4,0,tzinfo=timezone.utc)
+    ts=now.isoformat()
+    old=(now-timedelta(hours=2)).isoformat()
+    nodes,sessions=_dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("hp-linux","online",ts,"healthy","EXECUTION_OK","PRIVATE_HOST","PRIVATE_TOKEN"))
+    with sqlite3.connect(sessions) as db:
+        db.executemany("INSERT INTO session_records("
+                       "node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,"
+                       "session_name,launch_command,last_known_state,last_checkpoint_at,last_commit,git_branch)"
+                       " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", [
+            ("hp-linux","codex","ACTIVE",None,ts,ts,
+             "projectflow-regression-20261121","hidden","RUNNING_VERIFIED",old,None,None),
+            ("hp-linux","claude","ACTIVE",None,ts,ts,
+             "projectflow-observability-20261121","hidden","RUNNING_VERIFIED",ts,None,None),
+        ])
+    d=detailed_snapshot(nodes,sessions,now=now)
+    assert d["sessions"]["proven_running"]==1
+    assert d["sessions"]["items"][0]["execution_state"]=="OPEN_UNVERIFIED"
+    assert d["sessions"]["items"][0]["running_verified"] is None
+    assert d["sessions"]["items"][1]["execution_state"]=="RUNNING_VERIFIED"
+    assert d["sessions"]["items"][1]["running_verified"] is True
