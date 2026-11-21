@@ -265,7 +265,11 @@ def main() -> int:
             print("CI_SKIP:", reason, sha[:12])
             return 0
         private_directory(ROOT / "logs")
-        log_path = ROOT / "logs" / (sha[:12] + "-attempt" + str(attempts) + ".log")
+        # New runtime profiles/restarts must not reuse old attempt filenames.
+        # Preserve immutable logs from all previous CI profiles and retries.
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        log_name = sha[:12] + "-" + PROFILE_VERSION + "-attempt" + str(attempts)
+        log_path = ROOT / "logs" / (log_name + "-" + stamp + "-" + str(os.getpid()) + ".log")
         record = {
             "repository": REPO,
             "branch": "main",
