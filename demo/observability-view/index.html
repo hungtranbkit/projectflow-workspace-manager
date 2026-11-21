@@ -1,6 +1,22 @@
-<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08121e"><meta name="robots" content="noindex,nofollow,noarchive"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'self';style-src 'self';img-src data:;connect-src 'none';form-action 'none';base-uri 'none';object-src 'none'"><title>ProjectFlow View — Xem cách agent chạy</title><link rel="stylesheet" href="app.css"><script src="app.js" defer></script></head><body>
-<main><header><div class="brand"><span class="logo" aria-hidden="true">P</span>ProjectFlow</div><div class="badge">CHỈ XEM · DỮ LIỆU MẪU</div></header>
-<section aria-labelledby="intro"><div class="eyebrow">AGENT OBSERVABILITY · VIEW MODE</div><h1 class="hero-title" id="intro">Xem agent chạy thế nào.</h1><p class="lead">Theo dõi từ lúc giao task đến viết code, kiểm thử và nghiệm thu — kể cả khi agent bị kẹt hoặc máy mất kết nối. Chọn tình huống rồi xem diễn biến tự chạy.</p>
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#08121e"><meta name="robots" content="noindex,nofollow,noarchive"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'self';style-src 'self';img-src data:;connect-src https://raw.githubusercontent.com;form-action 'none';base-uri 'none';object-src 'none'"><title>ProjectFlow View — Xem cách agent chạy</title><link rel="stylesheet" href="app.css"><link rel="stylesheet" href="live.css"><script src="app.js" defer></script><script src="live.js" defer></script></head><body>
+<main><header><div class="brand"><span class="logo" aria-hidden="true">P</span>ProjectFlow</div><div class="badge">LIVE · CHỈ XEM</div></header>
+<section aria-labelledby="intro"><div class="eyebrow">AGENT OBSERVABILITY · VIEW MODE</div><h1 class="hero-title" id="intro">Tình trạng ProjectFlow hiện tại.</h1><p class="lead">Dữ liệu tổng hợp thật từ registry Terminal MCP. Bên dưới có mô phỏng riêng để bạn tìm hiểu cách agent chạy, bị kẹt hoặc mất kết nối. Không có quyền điều khiển.</p>
+<section class="live-panel" id="live-panel" data-health="unknown" aria-label="Dữ liệu thật tổng hợp từ Terminal MCP">
+<div class="live-top"><div><div class="live-kicker" id="live-health">Đang lấy dữ liệu thật…</div><div class="live-time" id="live-time">Chưa có thời điểm xác minh</div></div><span class="live-label">LIVE · READ ONLY</span></div>
+<div class="live-metrics">
+<div class="live-metric"><div class="lab">Node online / tổng số</div><div class="v" id="live-nodes">—</div></div>
+<div class="live-metric"><div class="lab">Phiên đang mở</div><div class="v" id="live-open">—</div></div>
+<div class="live-metric"><div class="lab">Phiên có tín hiệu mới trong 5 phút</div><div class="v" id="live-signal">—</div></div>
+</div>
+<div class="live-evidence">
+<div><small>Tiến độ nghiệm thu đã xác minh</small><strong id="live-acceptance">UNKNOWN</strong></div>
+<div><small>TTL task từ Harness</small><strong id="live-ttl">UNKNOWN</strong></div>
+</div>
+<p class="live-note" id="live-message">Đang đọc bản ghi tổng hợp. Nếu dữ liệu cũ hoặc không hợp lệ, sẽ hiển thị UNKNOWN.</p>
+<div class="live-split"><h3>Tình trạng các node (đã ẩn tên máy)</h3><button type="button" id="live-refresh" class="live-refresh">Cập nhật trang</button></div>
+<ol class="live-nodes" id="live-node-list"></ol>
+</section>
+<div class="demo-divider"><div class="demo-heading"><strong>Mô phỏng các bước làm việc</strong><span class="demo-tag">DỮ LIỆU MẪU</span></div><p class="demo-help">Chọn một tình huống để học cách đọc trạng thái. Phần này không phải dữ liệu LIVE ở trên.</p></div>
 <div class="scenario-label">1. Chọn tình huống xem thử</div><div class="scenarios" role="group" aria-label="Tình huống mô phỏng"><button type="button" class="selected" aria-pressed="true" data-scenario="normal">✓ Hoàn thành</button><button type="button" aria-pressed="false" data-scenario="stuck">! Bị kẹt</button><button type="button" aria-pressed="false" data-scenario="offline">○ Mất kết nối</button></div>
 <div class="scenario-label">2. Xem diễn biến</div><div class="controls"><button class="primary" type="button" id="play" aria-pressed="true">❚❚ Tạm dừng</button><button type="button" id="next">Bước tiếp theo</button><button type="button" id="reset">Về đầu</button><button type="button" id="speed">1× tốc độ</button></div>
 <p class="note"><strong>Chế độ DEMO độc lập.</strong> Đây là dữ liệu mô phỏng được tạo sẵn trong trình duyệt, <strong>không phải trạng thái thực tế</strong> của Claude, Codex, NEC1 hay ProjectFlow. Không cần tài khoản. Trang không kết nối API, không chứa log thật và không có quyền chạy/sửa/xóa task.</p></section>
