@@ -19,13 +19,15 @@
   const projects=new Set(["Zalo Group Hub","MESFlow","ESP32 Kiosk / OTA","ProjectFlow","Brand Agent","Screen Remote","RemoteOps","Chưa phân loại"]);
   let activeProject="all";
   let activeState="all";
+  let displayLimit=24;
   const stateRank={RUNNING_VERIFIED:0,WAITING_INPUT:1,BLOCKED:2,STALLED:3,IDLE:4,OPEN_UNVERIFIED:5,EXITED:6};
-  const stateFilters=[["all","Tất cả"],["running","RUNNING"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","Chưa chạy"]];
+  const stateFilters=[["all","Tất cả"],["running","RUNNING"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","IDLE"],["unverified","Chưa xác minh"]];
   const stateMatch=(s)=>activeState==="all"||
     (activeState==="running"&&s.execution_state==="RUNNING_VERIFIED")||
     (activeState==="waiting"&&s.execution_state==="WAITING_INPUT")||
     (activeState==="blocked"&&["BLOCKED","STALLED"].includes(s.execution_state))||
-    (activeState==="idle"&&["IDLE","OPEN_UNVERIFIED","EXITED"].includes(s.execution_state));
+    (activeState==="idle"&&s.execution_state==="IDLE")||
+    (activeState==="unverified"&&["OPEN_UNVERIFIED","EXITED"].includes(s.execution_state));
   const st={last:null,lastStreamAt:0,lastRenderedAt:0,source:"none",archiveBusy:false,stream:null,previous:null,events:[]};
   function validate(d){
     if(!d||![1,2].includes(d.schema_version)||d.kind!=="terminal-mcp-public-aggregate")return false;
@@ -36,17 +38,17 @@
     if(!int(degraded)||d.nodes.total!==d.nodes.online+d.nodes.offline+d.nodes.unknown+degraded||d.nodes.items.length!==d.nodes.total)return false;
     if(!int(d.sessions.open)||!int(d.sessions.recent_activity_signals)||d.sessions.recent_activity_signals>d.sessions.open)return false;
     if(d.sessions.running_verified!==null||d.acceptance.percent!==null||d.acceptance.ttl_percent!==null)return false;
-    if(d.schema_version===2&&(!int(d.sessions.recent_last_minute)||!Array.isArray(d.sessions.items)||d.sessions.items.length>24||
+    if(d.schema_version===2&&(!int(d.sessions.recent_last_minute)||!Array.isArray(d.sessions.items)||d.sessions.items.length>100||
       !Array.isArray(d.sessions.projects)||d.sessions.projects.length>12||!int(d.sessions.proven_running)))return false;
     const allowed=["online","offline","unknown","degraded"];
     if(!d.nodes.items.every(n=>isNodeLabel(n.label)&&allowed.includes(n.status)&&int(n.open_sessions)&&int(n.recent_activity_signals)))return false;
     if(d.schema_version===2){
       for(const s of d.sessions.items){
-        if(!/^Session \d{2}$/.test(s.label)||!isNodeLabel(s.node)||!Object.hasOwn(agents,s.agent_type)||
+        if(!/^Session \d{2,3}$/.test(s.label)||!isNodeLabel(s.node)||!Object.hasOwn(agents,s.agent_type)||
            !Object.hasOwn(activity,s.activity_bucket)||!Object.hasOwn(execNames,s.execution_state)||
            !projects.has(s.project)||typeof s.task_hint!=="string"||s.task_hint.length>120||
-           !["session_name_hint","unavailable"].includes(s.task_source)||
-           !["registry_only","verified_recent_checkpoint"].includes(s.evidence)||
+           !["session_name_hint","unavailable","trusted_task_label"].includes(s.task_source)||
+           !["registry_only","verified_recent_checkpoint","node_observed","terminal_output_delta"].includes(s.evidence)||
            !(s.running_verified===null||(s.running_verified===true&&s.execution_state==="RUNNING_VERIFIED"))||
            (s.commit_ref!==null&&!/^[a-f0-9]{7,12}$/.test(s.commit_ref))||
            (s.branch_ref!==null&&!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,69}$/.test(s.branch_ref))||
@@ -56,6 +58,12 @@
       if(d.sessions.proven_running>d.sessions.open)return false;
       if(d.sessions.displayed_count!==undefined&&d.sessions.displayed_count!==d.sessions.items.length)return false;
       if(d.sessions.hidden_count!==undefined&&!int(d.sessions.hidden_count))return false;
+      if(d.sessions.coverage!==undefined&&d.sessions.coverage!==null){
+        const c=d.sessions.coverage;
+        if(!c||!Array.isArray(c.covered_nodes)||!Array.isArray(c.unreachable_nodes)||
+           c.covered_nodes.length>25||c.unreachable_nodes.length>25||
+           !c.covered_nodes.every(isNodeLabel)||!c.unreachable_nodes.every(isNodeLabel))return false;
+      }
     }
     return true;
   }
@@ -70,6 +78,7 @@
     set("live-message",reason||"Không suy diễn dữ liệu nếu nguồn không hợp lệ.");
     set("live-running-count","—");set("live-running-note","Không có dữ liệu được xác minh");
     const states=$("live-state-filters");if(states)states.replaceChildren();
+    const more=$("live-show-more");if(more)more.hidden=true;
     $("live-node-list").replaceChildren();$("live-sessions").replaceChildren();$("live-changes").replaceChildren();$("live-projects").replaceChildren();set("live-sessions-note","Không có dữ liệu phiên xác minh.");
   }
   function noteChange(d){
@@ -108,8 +117,14 @@
     set("live-one-minute",d.schema_version===2?d.sessions.recent_last_minute:"—");
     set("live-acceptance","UNKNOWN");set("live-ttl","UNKNOWN");
     set("live-transport",stream?"SSE · khoảng 3 giây":fallback?"HTTP · khoảng 15 giây":"GitHub archive · có cache");
+    const coverage=d.sessions.coverage;
+    const coverageText=coverage&&coverage.covered_nodes.length
+      ?" Đang xác minh "+coverage.covered_nodes.length+" node, "+
+       coverage.unreachable_nodes.length+" node chưa liên lạc."
+      :"";
     set("live-message",stream?
-      "Dữ liệu thật đang nhận qua SSE. Trạng thái code của agent vẫn UNKNOWN nếu chỉ có heartbeat hoặc session đang mở.":
+      "Dữ liệu thật đang nhận qua SSE."+coverageText+
+      " Chỉ báo RUNNING khi có output thực thi mới, không suy từ heartbeat.":
       "Luồng trực tiếp chưa được xác minh; đây là bản dự phòng. Không suy diễn RUNNING hay tiến độ nghiệm thu từ hoạt động phiên.");
     const grid=$("live-node-list");grid.replaceChildren();
     for(const n of d.nodes.items){
@@ -134,7 +149,7 @@
         String(a.label).localeCompare(String(b.label)));
       set("live-running-count",d.sessions.proven_running);
       set("live-running-note",d.sessions.proven_running
-        ?"Đã có checkpoint RUNNING mới trong 5 phút":"Chưa có phiên RUNNING được xác minh; tín hiệu mới không đồng nghĩa viết code");
+        ?"Có bằng chứng hoạt động mới; chưa đồng nghĩa đã sửa code":"Chưa có phiên RUNNING được xác minh từ các node đang kết nối");
       const stateList=$("live-state-filters");
       if(stateList){
         stateList.replaceChildren();
@@ -143,10 +158,11 @@
             all.filter(s=>key==="all"||
               (key==="waiting"&&s.execution_state==="WAITING_INPUT")||
               (key==="blocked"&&["BLOCKED","STALLED"].includes(s.execution_state))||
-              (key==="idle"&&["IDLE","OPEN_UNVERIFIED","EXITED"].includes(s.execution_state))).length;
+              (key==="idle"&&s.execution_state==="IDLE")||
+              (key==="unverified"&&["OPEN_UNVERIFIED","EXITED"].includes(s.execution_state))).length;
           const btn=element("button","live-state-filter"+(activeState===key?" selected":""),label+" · "+count);
           btn.type="button";btn.setAttribute("aria-pressed",String(activeState===key));
-          btn.addEventListener("click",()=>{activeState=key;render(d,source)});
+          btn.addEventListener("click",()=>{activeState=key;displayLimit=24;render(d,source)});
           stateList.appendChild(btn);
         }
       }
@@ -157,14 +173,14 @@
           p.name+" · "+p.open_sessions);
         btn.type="button";
         btn.setAttribute("aria-pressed",String(activeProject===p.name));
-        btn.addEventListener("click",()=>{activeProject=activeProject===p.name?"all":p.name;render(d,source)});
+        btn.addEventListener("click",()=>{activeProject=activeProject===p.name?"all":p.name;displayLimit=24;render(d,source)});
         projectList.appendChild(btn);
       }
-      let showing=0;
-      for(const s of all){
-        if(activeProject!=="all"&&activeProject!==s.project)continue;
-        if(!stateMatch(s))continue;
-        showing++;
+      const matches=all.filter(s=>
+        (activeProject==="all"||activeProject===s.project)&&stateMatch(s));
+      const visible=matches.slice(0,displayLimit);
+      const showing=visible.length;
+      for(const s of visible){
         const li=element("li","session-card"+(s.execution_state==="RUNNING_VERIFIED"?" running-first":""));
         const line=element("div","session-card-heading");
         line.appendChild(element("strong","",s.session||s.label));
@@ -172,27 +188,42 @@
           execNames[s.execution_state]));
         li.appendChild(line);
         li.appendChild(element("div","session-context",s.project+" · "+s.node+" · "+agents[s.agent_type]));
-        li.appendChild(element("p","session-work",s.task_source==="session_name_hint"
-          ?"Đang làm gì? Gợi ý theo tên phiên: "+s.task_hint
-          :"Đang làm gì? Chưa có task đã xác minh"));
+        li.appendChild(element("p","session-work",s.task_source==="trusted_task_label"
+          ?(s.running_verified===true?"Đang thực thi: ":"Task được gắn gần nhất: ")+s.task_hint
+          :s.task_source==="session_name_hint"
+          ?"Task gợi ý theo tên phiên: "+s.task_hint
+          :"Chưa có task được xác minh"));
         li.appendChild(element("small","session-source",
-          (s.task_source==="session_name_hint"?"Mục tiêu suy ra từ tên session":"Chưa có mô tả task")
+          (s.task_source==="trusted_task_label"?"Nhãn task gắn qua Terminal MCP":s.task_source==="session_name_hint"?"Mục tiêu suy ra từ tên session":"Chưa có mô tả task")
           +" · tín hiệu: "+activity[s.activity_bucket]));
         if(s.commit_ref||s.branch_ref)li.appendChild(element("small","session-code",
           "Git tham chiếu: "+(s.branch_ref||"không rõ nhánh")
           +(s.commit_ref?" @ "+s.commit_ref:"")+
           " · chưa xác minh commit mới"));
         li.appendChild(element("small","session-proof",
+          s.evidence==="terminal_output_delta"?"Có output mới khi agent đang chạy · chưa xác minh thay đổi code":
+          s.execution_state==="IDLE"?"Đã xác minh agent đang chờ lệnh":
+          s.execution_state==="WAITING_INPUT"?"Agent đang chờ nhập liệu":
           s.running_verified===true?"RUNNING được xác minh bằng checkpoint mới":"Chưa có bằng chứng code mới / chưa xác minh RUNNING"));
         if(s.running_verified===true&&typeof s.last_checkpoint_at==="string"&&
            Number.isFinite(Date.parse(s.last_checkpoint_at))){
           li.appendChild(element("small","session-proof-time",
-            "Checkpoint ghi nhận: "+format(s.last_checkpoint_at)+" · không suy diễn giai đoạn code/test/deploy"));
+            "Bằng chứng hoạt động: "+format(s.last_checkpoint_at)+" · chưa suy diễn code/test/deploy"));
         }
         list.appendChild(li);
       }
-      set("live-sessions-note","Đang hiển thị "+showing+"/"+d.sessions.open+
-        " phiên mở. Mục tiêu theo tên phiên chỉ là gợi ý; phải có checkpoint/commit mới để xác nhận đang code.");
+      const more=$("live-show-more");
+      if(more){
+        more.hidden=showing>=matches.length;
+        more.textContent="Xem thêm "+Math.min(24,matches.length-showing)+" phiên";
+        more.onclick=()=>{displayLimit+=24;render(d,source)};
+      }
+      const scoped=activeProject==="all"&&activeState==="all"
+        ?d.sessions.open+" phiên mở":matches.length+" phiên khớp bộ lọc";
+      const incomplete=coverage&&coverage.unreachable_nodes.length
+        ?" · "+coverage.unreachable_nodes.length+" node chưa kết nối":"";
+      set("live-sessions-note","Đang hiển thị "+showing+"/"+scoped+
+        incomplete+". RUNNING dựa trên output thực thi mới; mục tiêu suy từ tên phiên chỉ là gợi ý.");
     }else{
       projectList.appendChild(element("span","","Bản lưu chưa có tên dự án/task."));
       list.appendChild(element("li","","Bản lưu chưa có chi tiết phiên. Chỉ đang hiển thị tổng hợp."));
