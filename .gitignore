@@ -8,3 +8,6 @@ data/logs/
 # Never commit Woodpecker GitHub OAuth or agent credentials.
 infra/woodpecker/.env
 infra/woodpecker/.env.agent
+
+# Native Woodpecker OAuth secrets must never be committed.
+infra/woodpecker/native/server.env
