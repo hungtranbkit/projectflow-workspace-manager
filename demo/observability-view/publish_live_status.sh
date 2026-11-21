@@ -14,12 +14,12 @@ python3 "$src/export_live_snapshot.py" \
   --output "$out_dir/live-status.json"
 
 # Only the redacted JSON is sent; the SQLite databases remain local.
-sha="$(gh api "repos/$repo/contents/live-status.json?ref=gh-pages" --jq '.sha')"
+sha="$(gh api "repos/$repo/contents/live-status.json?ref=live-data" --jq '.sha')"
 test -n "$sha"
 payload="$(base64 -w0 "$out_dir/live-status.json")"
 gh api --method PUT "repos/$repo/contents/live-status.json" \
-  -f branch=gh-pages \
-  -f message="data(view): refresh sanitized Terminal MCP observation" \
+  -f branch=live-data \
+  -f message="data(view): refresh public aggregate without rebuilding Pages" \
   -f sha="$sha" \
   -f content="$payload" \
   --jq '"PUBLISHED_COMMIT="+.commit.sha'
