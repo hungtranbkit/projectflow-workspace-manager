@@ -7,7 +7,7 @@ def config():
     shared = "a" * 64
     return (
         {
-            "WOODPECKER_HOST": "https://ci.example.net",
+            "WOODPECKER_HOST": "https://ci.projectflow.invalid",
             "WOODPECKER_GITHUB_CLIENT": "abcdef1234567890",
             "WOODPECKER_GITHUB_SECRET": "b" * 40,
             "WOODPECKER_AGENT_SECRET": shared,
