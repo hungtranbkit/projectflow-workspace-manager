@@ -44,6 +44,54 @@ def _agent(value):
     return v if v in AGENT_TYPES[:3] else "other"
 
 
+def _live_fleet_rows(registry_rows, observation, allowed_nodes):
+    """Canonicalize HP's legacy 'local' alias and read only live node lists.
+
+    The registry supplies optional Git/agent metadata; it does NOT claim an
+    ACTIVE row is still open. An unavailable node is tracked as uncovered.
+    """
+    if not isinstance(observation, dict) or not isinstance(observation.get("sessions"), list):
+        return list(registry_rows), None
+    coverage = observation.get("covered_nodes")
+    if not isinstance(coverage, list) or not coverage:
+        return list(registry_rows), None
+    known = {}
+    for raw in registry_rows:
+        row = dict(raw)
+        node = "hp-linux" if row["node_id"] == "local" else row["node_id"]
+        key = (node, row["session_name"])
+        # The canonical HP record wins over a legacy 'local' duplicate.
+        if key not in known or raw["node_id"] != "local":
+            row["node_id"] = node
+            known[key] = row
+    discovered = {}
+    for item in observation["sessions"][:100]:
+        if not isinstance(item, dict):
+            continue
+        node, name = item.get("node_id"), item.get("session_name")
+        if node not in allowed_nodes or not isinstance(name, str) or not (
+                3 <= len(name) <= 90 and name[0].isalnum() and
+                all(ch.isascii() and (ch.isalnum() or ch in "._-") for ch in name)):
+            continue
+        row = dict(known.get((node, name), {}))
+        row.update(node_id=node, session_name=name)
+        for field in ("agent_type", "last_activity_at", "last_seen_at",
+                      "last_known_state", "last_checkpoint_at", "last_commit",
+                      "git_branch", "stable_session_id", "generation"):
+            row.setdefault(field, None)
+        # Tie proof to an actual pane creation epoch as well as registry
+        # stable ID, so a recreated remote session cannot inherit old proof.
+        creation = item.get("instance_hint")
+        if isinstance(creation, str) and creation:
+            row["stable_session_id"] = str(row["stable_session_id"] or "") + "|" + creation
+        discovered[(node, name)] = row
+    return [discovered[key] for key in sorted(discovered)], {
+        "covered_nodes": [x for x in coverage if x in allowed_nodes],
+        "unreachable_nodes": [x for x in observation.get("unreachable_nodes", [])
+                              if x in allowed_nodes],
+    }
+
+
 def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None):
     now = now or datetime.now(timezone.utc)
     base = snapshot(nodes_db, sessions_db, now=now)
@@ -54,28 +102,31 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
                "session_name,last_known_state,last_checkpoint_at,last_commit,git_branch,"
                "stable_session_id,generation "
                "FROM session_records WHERE status='ACTIVE' AND deleted_at IS NULL ORDER BY node_id,session_name")
+    ids = {str(x["id"]): i for i, x in enumerate(nr, 1)}
+    fleet_coverage = None
+    source = getattr(getattr(monitor, "reader", None), "list_sessions", None)
+    if callable(source):
+        try:
+            sr, fleet_coverage = _live_fleet_rows(sr, source(), set(ids))
+        except Exception:  # Unreachable controller must not break the read-only view.
+            fleet_coverage = None
     # Observations are privately authenticated node readbacks; only their
     # strict public-safe projection is ever merged into the output payload.
     observed = monitor.snapshot(sr, now=now) if monitor is not None else {}
-    ids = {str(x["id"]): i for i, x in enumerate(nr, 1)}
     public_names = {key: public_node_label(key, index) for key, index in ids.items()}
     per_node_types = {}
     per_node_fresh60 = Counter()
+    per_node_fresh5 = Counter()
+    per_node_count = Counter()
     session_details = []
     total_types = Counter()
     total_minute = 0
+    total_fresh5 = 0
     projects = Counter()
     for row in sr:
         key = str(row["node_id"])
         agent = _agent(row["agent_type"])
-        age = _age_seconds(row["last_activity_at"], now)
-        recent = age is not None and age <= 300
-        under_minute = age is not None and age <= 60
-        total_types[agent] += 1
-        if under_minute:
-            total_minute += 1
-            per_node_fresh60[key] += 1
-        per_node_types.setdefault(key, Counter())[agent] += 1
+        per_node_count[key] += 1
         summary = classify_public_session(
             row["session_name"], state=row["last_known_state"],
             checkpoint_at=row["last_checkpoint_at"],
@@ -90,6 +141,25 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
             if proof.get("task_source") == "trusted_task_label":
                 summary["task_hint"] = proof["task_hint"]
                 summary["task_source"] = "trusted_task_label"
+        # With authenticated node monitoring, only a new output delta is an
+        # execution activity signal. A registry heartbeat is never progress.
+        if monitor is not None:
+            age = (_age_seconds(proof.get("checkpoint_at"), now)
+                   if proof and proof.get("evidence") == "terminal_output_delta" else None)
+            if proof and proof.get("agent_type") in AGENT_TYPES:
+                agent = proof["agent_type"]
+            if age is not None:
+                summary["last_activity_at"] = proof["checkpoint_at"]
+        else:
+            age = _age_seconds(row["last_activity_at"], now)
+        if age is not None and age <= 300:
+            total_fresh5 += 1
+            per_node_fresh5[key] += 1
+        if age is not None and age <= 60:
+            total_minute += 1
+            per_node_fresh60[key] += 1
+        total_types[agent] += 1
+        per_node_types.setdefault(key, Counter())[agent] += 1
         projects[summary["project"]] += 1
         if key in ids:
             if age is None:
@@ -157,6 +227,8 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
             "capacity": capacity,
             "heartbeat_age_seconds": _age_seconds(node["last_heartbeat_at"], now),
             "signals_last_minute": per_node_fresh60[key],
+            "open_sessions": per_node_count[key],
+            "recent_activity_signals": per_node_fresh5[key],
             "agent_types": {k: per_node_types.get(key, Counter())[k] for k in AGENT_TYPES},
         })
         statuses[status] += 1
@@ -168,6 +240,8 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
         "unknown": statuses["unknown"],
     })
     base["sessions"].update({
+        "open": len(sr),
+        "recent_activity_signals": total_fresh5,
         "recent_last_minute": total_minute,
         "agent_types": {k: total_types[k] for k in AGENT_TYPES},
         "items": visible_sessions,
@@ -177,7 +251,10 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
                      for name, count in sorted(projects.items())],
         "proven_running": proven_running,
         "running_verification": "verified_recent_checkpoint_or_live_output_delta",
-        "observation_source": "terminal_mcp_authenticated_status" if monitor is not None else "registry_only",
+        "observation_source": ("terminal_mcp_authenticated_fleet" if fleet_coverage
+                               else "terminal_mcp_authenticated_status" if monitor is not None
+                               else "registry_only"),
+        "coverage": fleet_coverage,
     })
     base["fresh_window_seconds"] = 300
     base["transport"] = {"kind": "sse", "poll_seconds": 3, "state": "connected"}
