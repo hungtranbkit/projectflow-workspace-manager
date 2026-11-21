@@ -1,0 +1,46 @@
+schema_version: 1
+id: FEAT-PUBLIC-LIVE-PROOF
+title: Public fleet view - safe terminal execution proof (P0)
+version: 1
+status: draft
+summary: >
+  Separate review boundary for public, read-only ProjectFlow fleet telemetry.
+  This is NOT the approved private Task Agent Observability feature; it proposes
+  an opt-in projection of authenticated Terminal MCP observations.
+scope:
+  includes:
+    - Authenticated, bounded read-only Terminal MCP status sampling
+    - Recent output-delta as execution evidence (not task completion)
+    - IDLE, WAITING_INPUT, BLOCKED and UNKNOWN states on freshness rules
+    - Curated, allowlisted public task titles, never raw prompts
+    - An opt-in flag on the existing SSE service, no control API
+  excludes:
+    - Any write, dispatch, retry, permission change or remote command API
+    - Exposing terminal tails, command strings, secrets, paths, or task prompts
+    - Assuming open sessions, heartbeat or old commits prove RUNNING
+    - Computing code-review, QA, deploy, acceptance or completion percent
+requirements:
+  - id: REQ-PLP-001
+    text: Authenticated node observations must match a registered active session.
+  - id: REQ-PLP-002
+    text: RUNNING_VERIFIED requires a new output delta while the pane remains RUNNING, not a send acknowledgment.
+  - id: REQ-PLP-003
+    text: A missing, stale or denied node report fails closed; no stale RUNNING.
+  - id: REQ-PLP-004
+    text: Public output exposes only a fixed allowlist of state, time, proof category, agent and curated title.
+  - id: REQ-PLP-005
+    text: Public GET never starts a process, sends input, or mutates a Task, session, repo or node.
+acceptance_criteria:
+  - id: AC-PLP-001
+    text: First scan and unchanged output never verify RUNNING; a changed output on RUNNING does.
+  - id: AC-PLP-002
+    text: Idle and waiting-for-input override OPEN_UNVERIFIED with a timestamp.
+  - id: AC-PLP-003
+    text: Secret, IP, path, raw command and prompt values never appear in any public JSON or HTML.
+  - id: AC-PLP-004
+    text: Source loss, 30-second progress timeout and failed authorization immediately lose verified status.
+  - id: AC-PLP-005
+    text: Existing SSE, Node client and regression tests pass before any rollout.
+notes: >
+  Human review of this separate public scope and the exact deployment gate
+  is required before turning --enable-terminal-proof on in production.
