@@ -65,6 +65,22 @@ def test_snapshot_live_counts_are_correct_and_no_secret_leaks(tmp_path):
     assert "Node 01" in wire
 
 
+def test_owner_approved_node_names_visible_but_unknown_ids_remain_private(tmp_path):
+    now = datetime(2026, 11, 21, 2, 0, tzinfo=timezone.utc)
+    n, s = _make_dbs(tmp_path)
+    _insert(n, "INSERT INTO nodes VALUES (?,?,?,?,?)", [
+        ("hp-linux", "online", now.isoformat(), "private-hostname", "PRIVATE_TOKEN"),
+        ("m910", "online", now.isoformat(), "hidden", "ANOTHER_TOKEN"),
+        ("private-machine-should-not-leak", "offline", now.isoformat(), "sensitive", "PRIVATE_TOKEN"),
+    ])
+    data = snapshot(n, s, now=now)
+    assert [x["label"] for x in data["nodes"]["items"]] == [
+        "hp-linux", "m910", "Node 03"
+    ]
+    raw = json.dumps(data, ensure_ascii=False)
+    assert "private-machine-should-not-leak" not in raw
+    assert "private-hostname" not in raw and "PRIVATE_TOKEN" not in raw
+
 def test_stale_online_node_is_not_reported_online(tmp_path):
     now = datetime(2026, 11, 21, tzinfo=timezone.utc)
     n, s = _make_dbs(tmp_path)
