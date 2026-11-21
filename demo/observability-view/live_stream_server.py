@@ -20,6 +20,7 @@ import time
 from urllib.parse import urlsplit
 
 from export_live_snapshot import snapshot, _read, _instant, _recent, public_node_label
+from public_session_detail import classify_public_session
 
 ORIGIN = "https://hungtranbkit.github.io"
 PREFIX = "/projectflow-live/"
@@ -47,7 +48,9 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
     base = snapshot(nodes_db, sessions_db, now=now)
     nr = _read(nodes_db, "SELECT id,last_known_status,last_heartbeat_at,"
                "capacity_status,execution_health_state FROM nodes ORDER BY id")
-    sr = _read(sessions_db, "SELECT node_id,agent_type,last_activity_at,last_seen_at "
+    sr = _read(sessions_db,
+               "SELECT node_id,agent_type,last_activity_at,last_seen_at,"
+               "session_name,last_known_state,last_checkpoint_at,last_commit,git_branch "
                "FROM session_records WHERE status='ACTIVE' AND deleted_at IS NULL")
     ids = {str(x["id"]): i for i, x in enumerate(nr, 1)}
     public_names = {key: public_node_label(key, index) for key, index in ids.items()}
@@ -56,6 +59,7 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
     session_details = []
     total_types = Counter()
     total_minute = 0
+    projects = Counter()
     for row in sr:
         key = str(row["node_id"])
         agent = _agent(row["agent_type"])
@@ -67,6 +71,12 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
             total_minute += 1
             per_node_fresh60[key] += 1
         per_node_types.setdefault(key, Counter())[agent] += 1
+        summary = classify_public_session(
+            row["session_name"], state=row["last_known_state"],
+            checkpoint_at=row["last_checkpoint_at"],
+            last_activity_at=row["last_activity_at"],
+            last_commit=row["last_commit"], git_branch=row["git_branch"], now=now)
+        projects[summary["project"]] += 1
         if len(session_details) < 24 and key in ids:
             if age is None:
                 bucket = "unknown"
@@ -81,7 +91,17 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
                 "node": public_names[key],
                 "agent_type": agent,
                 "activity_bucket": bucket,
-                "running_verified": None,  # Registry signals do NOT verify coding.
+                "running_verified": summary["running_verified"],
+                "session": summary["session"],
+                "project": summary["project"],
+                "task_hint": summary["task_hint"],
+                "task_source": summary["task_source"],
+                "execution_state": summary["execution_state"],
+                "evidence": summary["evidence"],
+                "commit_ref": summary["commit_ref"],
+                "branch_ref": summary["branch_ref"],
+                "last_activity_at": summary["last_activity_at"],
+                "last_checkpoint_at": summary["last_checkpoint_at"],
             })
     statuses = Counter()
     for item, node in zip(base["nodes"]["items"], nr):
@@ -121,11 +141,16 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
         "recent_last_minute": total_minute,
         "agent_types": {k: total_types[k] for k in AGENT_TYPES},
         "items": session_details,
+        "projects": [{"name": name, "open_sessions": count}
+                     for name, count in sorted(projects.items())],
+        "proven_running": sum(1 for s in session_details if s["running_verified"] is True),
+        "running_verification": "checkpoint_only_when_recent",
     })
     base["fresh_window_seconds"] = 300
     base["transport"] = {"kind": "sse", "poll_seconds": 3, "state": "connected"}
     base["notes"].append(
-        "Dữ liệu cập nhật mỗi 3 giây, nhưng độ trễ nguồn phụ thuộc heartbeat Terminal MCP."
+        "Dữ liệu cập nhật mỗi 3 giây nhưng heartbeat hoặc phiên mở không chứng minh đang code. "
+        "Tên task lấy từ quy tắc nhận dạng tên session, không phải task đã nghiệm thu."
     )
     return base
 
