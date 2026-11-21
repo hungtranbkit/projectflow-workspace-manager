@@ -77,7 +77,7 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
             last_activity_at=row["last_activity_at"],
             last_commit=row["last_commit"], git_branch=row["git_branch"], now=now)
         projects[summary["project"]] += 1
-        if len(session_details) < 24 and key in ids:
+        if key in ids:
             if age is None:
                 bucket = "unknown"
             elif age <= 60:
@@ -103,6 +103,22 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
                 "last_activity_at": summary["last_activity_at"],
                 "last_checkpoint_at": summary["last_checkpoint_at"],
             })
+    # Rank every registered session BEFORE truncating the public list.
+    # A heartbeat never upgrades OPEN_UNVERIFIED to RUNNING_VERIFIED.
+    rank = {"RUNNING_VERIFIED": 0, "WAITING_INPUT": 1, "BLOCKED": 2,
+            "STALLED": 3, "IDLE": 4, "OPEN_UNVERIFIED": 5, "EXITED": 6}
+    session_details.sort(key=lambda item: (
+        rank.get(item["execution_state"], 7),
+        _age_seconds(item["last_checkpoint_at"], now) if
+            _age_seconds(item["last_checkpoint_at"], now) is not None else 99999999,
+        _age_seconds(item["last_activity_at"], now) if
+            _age_seconds(item["last_activity_at"], now) is not None else 99999999,
+        item["project"], item["node"], item["session"] or "",
+    ))
+    proven_running = sum(item["running_verified"] is True for item in session_details)
+    visible_sessions = session_details[:24]
+    for n, item in enumerate(visible_sessions, 1):
+        item["label"] = "Session %02d" % n
     statuses = Counter()
     for item, node in zip(base["nodes"]["items"], nr):
         key = str(node["id"])
@@ -140,10 +156,12 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None):
     base["sessions"].update({
         "recent_last_minute": total_minute,
         "agent_types": {k: total_types[k] for k in AGENT_TYPES},
-        "items": session_details,
+        "items": visible_sessions,
+        "displayed_count": len(visible_sessions),
+        "hidden_count": len(session_details) - len(visible_sessions),
         "projects": [{"name": name, "open_sessions": count}
                      for name, count in sorted(projects.items())],
-        "proven_running": sum(1 for s in session_details if s["running_verified"] is True),
+        "proven_running": proven_running,
         "running_verification": "checkpoint_only_when_recent",
     })
     base["fresh_window_seconds"] = 300

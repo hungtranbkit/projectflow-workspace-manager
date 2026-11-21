@@ -10,7 +10,8 @@ class Element{
 }
 const ids=["live-panel","live-health","live-time","live-nodes","live-open","live-signal",
  "live-one-minute","live-acceptance","live-ttl","live-transport","live-message",
- "live-node-list","live-sessions","live-sessions-note","live-projects","live-changes","live-refresh"];
+ "live-node-list","live-sessions","live-sessions-note","live-projects","live-changes","live-refresh",
+ "live-running-count","live-running-note","live-state-filters"];
 const els=Object.fromEntries(ids.map(i=>[i,new Element(i)]));
 const document={hidden:false,listeners:{},getElementById:i=>{assert.ok(els[i],"missing DOM #"+i);return els[i]},
  createElement:type=>new Element(type),addEventListener(k,f){this.listeners[k]=f;}};
@@ -81,6 +82,23 @@ source.emit("status",named);
 assert.equal(els["live-node-list"].children[0].children[0].textContent,"hp-linux");
 assert.equal(els["live-node-list"].children[1].children[0].textContent,"m910");
 assert.equal(els["live-sessions"].children[0].children[1].textContent.includes("hp-linux"),true);
+const verified=enrich(values());
+verified.sessions.proven_running=1;
+verified.sessions.items[1].execution_state="RUNNING_VERIFIED";
+verified.sessions.items[1].running_verified=true;
+verified.sessions.items[1].evidence="verified_recent_checkpoint";
+verified.sessions.items[1].last_checkpoint_at=new Date().toISOString();
+source.emit("status",verified);
+assert.equal(els["live-running-count"].textContent,"1");
+assert.equal(els["live-sessions"].children[0].children[0].children[0].textContent,
+  "projectflow-observability-20261120","verified RUNNING must sort first");
+const runningButton=els["live-state-filters"].children.find(b=>b.textContent.startsWith("RUNNING"));
+assert.ok(runningButton);
+runningButton.events.click();
+assert.equal(els["live-sessions"].children.length,1,"RUNNING filter must hide unverified cards");
+const allButton=els["live-state-filters"].children.find(b=>b.textContent.startsWith("Tất cả"));
+allButton.events.click();
+assert.equal(els["live-sessions"].children.length,2);
 const changed=enrich(values());changed.sessions.open=4;changed.nodes.items[0].open_sessions=3;
 source.emit("status",changed);
 assert.ok(els["live-changes"].children.length>=1);
