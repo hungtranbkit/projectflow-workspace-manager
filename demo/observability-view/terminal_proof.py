@@ -93,6 +93,23 @@ def _public_title(raw):
     return next((label for needle, label in _PUBLIC_TASKS if needle in normalized), None)
 
 
+def _label_is_current_instance(label, stable_id):
+    """Never attribute a former tmux session's task to its replacement."""
+    if not isinstance(label, dict) or not label.get("title"):
+        return False
+    observed = _timestamp(label.get("at"))
+    if observed is None:
+        return False
+    if not isinstance(stable_id, str) or "|" not in stable_id:
+        return True  # The authorized node GET already checks its instance.
+    creation = stable_id.rpartition("|")[2]
+    try:
+        created = float(creation)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return observed.timestamp() + 5 >= created
+
+
 def read_explicit_task_label(node_id, session, *, db_path=None):
     """Read only operator-assigned labels; no prompt-derived label is published."""
     if not isinstance(node_id, str) or not isinstance(session, str):
@@ -324,7 +341,7 @@ class TerminalProofMonitor:
                     # UNKNOWN execution can have a verified label without
                     # becoming RUNNING or implying a new code checkpoint.
                     label = self.task_reader(*key)
-                    if label and label.get("title") and _timestamp(label.get("at")):
+                    if _label_is_current_instance(label, stable_id):
                         if record is None:
                             record = {"state": "OPEN_UNVERIFIED", "evidence": "registry_only",
                                       "observed_at": at}
