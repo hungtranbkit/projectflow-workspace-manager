@@ -27,7 +27,7 @@
     if(d.sessions.recent_activity_signals>d.sessions.open || d.sessions.running_verified!==null)return false;
     if(d.acceptance.percent!==null || d.acceptance.ttl_percent!==null)return false;
     if(typeof d.observed_at!=="string" || !Number.isFinite(Date.parse(d.observed_at)))return false;
-    return d.nodes.items.every(n=>typeof n.label==="string" && /^Node \d{2}$/.test(n.label)
+    return d.nodes.items.every(n=>typeof n.label==="string" && (/^(Node \d{2}|dell-5530|dell-linux|hp-linux|local|m910|mac17-macbook-pro|macbook|nec1|win)$/.test(n.label))
       && ["online","offline","unknown"].includes(n.status)
       && validInt(n.open_sessions) && validInt(n.recent_activity_signals)
       && n.recent_activity_signals<=n.open_sessions);
