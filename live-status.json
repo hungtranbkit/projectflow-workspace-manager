@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "terminal-mcp-public-aggregate",
-  "observed_at": "2026-11-21T10:54:17+00:00",
+  "observed_at": "2026-11-21T11:04:31+00:00",
   "expected_refresh_seconds": 300,
   "fresh_window_seconds": 300,
   "nodes": {
@@ -25,14 +25,14 @@
       {
         "label": "hp-linux",
         "status": "online",
-        "open_sessions": 10,
-        "recent_activity_signals": 10
+        "open_sessions": 8,
+        "recent_activity_signals": 8
       },
       {
         "label": "local",
         "status": "offline",
-        "open_sessions": 1,
-        "recent_activity_signals": 0
+        "open_sessions": 8,
+        "recent_activity_signals": 8
       },
       {
         "label": "m910",
@@ -67,8 +67,8 @@
     ]
   },
   "sessions": {
-    "open": 11,
-    "recent_activity_signals": 10,
+    "open": 16,
+    "recent_activity_signals": 16,
     "running_verified": null
   },
   "acceptance": {
