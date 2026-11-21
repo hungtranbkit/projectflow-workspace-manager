@@ -269,25 +269,38 @@ def main() -> int:
         try:
             sha = remote_sha()
         except (OSError, subprocess.SubprocessError, ValueError) as exc:
-            # Network failure never overwrites a previous PASS/FAIL as success.
+            # Keep any previous PASS/FAIL, but expose connectivity failures.
+            previous["last_polled_at"] = utc()
+            previous["last_poll_error"] = "REMOTE_CHECK_ERROR:" + type(exc).__name__
+            write_json(state_path, previous)
             print("REMOTE_CHECK_ERROR:" + type(exc).__name__)
             return 3
         begin = time.time()
-        if previous.get("sha") == sha and previous.get("profile") != PROFILE_VERSION:
-            # A new verified runtime/test policy deserves one fresh bounded attempt.
-            # Preserve evidence of the old run before resetting its retry counter.
+        current_profile = policy_identity()
+        if previous.get("sha") == sha and previous.get("profile") != current_profile:
             private_directory(ROOT / "history")
-            write_json(ROOT / "history" / (sha[:12] + "-legacy-status.json"), previous)
+            old_profile = re.sub(r"[^a-zA-Z0-9_.-]", "_", str(previous.get("profile", "legacy")))[:60]
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            archive_name = sha[:12] + "-" + old_profile + "-" + stamp + "-" + str(os.getpid()) + ".json"
+            write_json(ROOT / "history" / archive_name, previous)
             previous = {}
+        if previous.get("sha") == sha and previous.get("profile") == current_profile and stale_running(previous, begin):
+            previous.update(status="INTERRUPTED", reason="STALE_RUNNING_AFTER_CRASH", finished_at=utc())
+            write_json(state_path, previous)
         go, reason, attempts = should_run(sha, previous, begin, force_retry=force_retry)
         if not go:
+            previous["last_polled_at"] = utc()
+            previous["last_poll_error"] = None
+            previous["last_skip_reason"] = reason
+            previous["poll_count"] = int(previous.get("poll_count", 0)) + 1
+            write_json(state_path, previous)
             print("CI_SKIP:", reason, sha[:12])
             return 0
         private_directory(ROOT / "logs")
         # New runtime profiles/restarts must not reuse old attempt filenames.
         # Preserve immutable logs from all previous CI profiles and retries.
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        log_name = sha[:12] + "-" + PROFILE_VERSION + "-attempt" + str(attempts)
+        log_name = sha[:12] + "-" + current_profile + "-attempt" + str(attempts)
         log_path = ROOT / "logs" / (log_name + "-" + stamp + "-" + str(os.getpid()) + ".log")
         record = {
             "repository": REPO,
@@ -300,7 +313,9 @@ def main() -> int:
             "last_attempt_epoch": begin,
             "log_path": str(log_path),
             "engine": "woodpecker-cli-local",
-            "profile": PROFILE_VERSION,
+            "profile": current_profile,
+            "last_polled_at": utc(),
+            "last_poll_error": None,
             "test_policy": "python3.11-fast-smoke-harness-fail-fast",
             "gate_level": "FAST",
             "full_regression": "NOT_RUN_NO_ISOLATED_DOCKER_RUNNER",
