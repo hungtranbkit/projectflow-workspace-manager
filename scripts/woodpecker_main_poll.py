@@ -304,7 +304,7 @@ def main() -> int:
         record.update(finished_at=utc(), elapsed_seconds=round(time.time()-begin, 1))
         write_json(state_path, record)
         print("CI_FINISHED:", record["status"], sha[:12], record["reason"], flush=True)
-        return 0 if record["status"] == "PASS" else 1
+        return 0 if record["status"] in ("PASS", "FAST_PASS") else 1
 
 
 if __name__ == "__main__":
