@@ -17,3 +17,15 @@
 .live-session-list li .session-source,.live-session-list li .session-code,.live-session-list li .session-proof{display:block;width:100%;white-space:normal;font-size:10px;line-height:1.55;margin-top:5px;color:#9aafbf;overflow-wrap:anywhere}
 .live-session-list li .session-proof{border-top:1px solid #305064;padding-top:7px;color:#f1c892}
 @media(max-width:690px){.live-session-list{grid-template-columns:1fr}.live-session-list li.session-card{padding:12px}}
+
+/* Verified activity has priority even on the narrow phone layout. */
+.live-running-overview{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0;padding:10px 12px;border:1px solid #365b68;border-radius:12px;background:#102b36;color:#d9f9ed}
+.live-running-overview strong{font-size:13px}
+.live-running-overview span{font-size:12px}
+#live-running-note{color:#adccd7;font-size:11px}
+.live-state-filters{display:flex;gap:6px;overflow-x:auto;padding:4px 0 9px;margin-bottom:4px;scrollbar-width:thin}
+.live-state-filter{flex:none;appearance:none;cursor:pointer;font-size:11px;padding:7px 10px;border:1px solid #365466;border-radius:16px;background:#19313f;color:#c7deeb}
+.live-state-filter.selected{border-color:#8bd6c5;background:#235048;color:#d4faed}
+.live-session-list li.session-card.running-first{border-color:#4d9f7d;background:#103529}
+.session-card .session-proof-time{display:block;color:#9cc8d7;font-size:10px;margin:4px 0}
+@media(max-width:690px){.live-running-overview{align-items:flex-start;flex-direction:column}.live-state-filters{margin-right:-8px}}
