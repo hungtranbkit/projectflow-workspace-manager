@@ -192,3 +192,43 @@ and does not justify disabling the existing required GitHub Actions checks.
 The full Woodpecker OAuth/tunnel/isolated-runner conversion remains a separate
 acceptance gate.
 
+
+## Live automatic protected-main CI checkpoint — 2026-11-21 (17:35 ICT)
+
+This is a **real, enabled** user systemd timer on MacBook Linux:
+`projectflow-woodpecker-main-ci.timer`, scheduled every 15 minutes with
+`Linger=yes`. Its worker runs the official `woodpecker-cli exec` Local
+backend against the current protected `main` SHA. It writes a mode-0600
+JSON state file and logs at:
+`~/.local/state/projectflow-woodpecker-main-ci/status.json`
+and `logs/<sha-prefix>-attempt<N>.log`. It uses a non-blocking file
+lock, pins the exact SHA, caps resource consumption to 125% CPU / 4GiB RAM
+and never executes PR/fork code.
+
+The first observed SHA was `072b22bd5ab7`. The first full test attempt
+**FAILED truthfully**, because `tests/test_repository_runtime_sandbox.py`
+invokes `docker info` at module collection time while MacBook lacked the
+Docker CLI, raising `FileNotFoundError: docker`. This is not a passing test
+run. The official Docker **CLI-only** v29.10.0 (11MB) was downloaded from
+`download.docker.com`, SHA-256 checked against its official sidecar file,
+and installed privately into the CI venv without sudo/daemon. It now
+responds to `docker --version`; `docker info` correctly exits 1 because
+there is no Docker daemon. Tests with explicit daemon-unavailable skip
+conditions can now collect. Repeatable installer:
+`bash infra/woodpecker/local-main/install-docker-cli.sh`.
+
+The worker has a bounded one-time operator retry path
+`python3 woodpecker_main_poll.py --retry-now`, still respecting the
+three-attempt limit and the locking guard. Ten unit tests verify the poller,
+including this guard. A second run of the first SHA was dispatched under a
+resource-limited systemd transient service, entering the full test gate.
+**Only the live `status.json` and final log can attest its eventual
+PASS/FAIL**. No claim of a full test PASS is made here.
+
+This is a *trusted-main-only interim solution*, **not** completed replacement
+of GitHub Actions PR checks, production isolation, the Woodpecker dashboard,
+GitHub OAuth or a public webhook receiver. GitHub Actions remains unchanged.
+Stop the interim scheduler if a trusted-main/local-backend security policy
+cannot be maintained:
+`systemctl --user disable --now projectflow-woodpecker-main-ci.timer`.
+
