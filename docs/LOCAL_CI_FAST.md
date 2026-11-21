@@ -10,6 +10,7 @@ This is NOT the same as full Woodpecker Server CI or GitHub Actions PR checks.
 - Use **Woodpecker CLI 3.20.1** in its **Local backend** to run the preflight, build, app smoke, and established harness fast tier.
 - Do not expose a CI HTTP listener, use deploy secrets, or change production services.
 - Worker is a **trusted-main-only interim fallback** and cannot give GitHub a PR required-status check. Woodpecker Local does not isolate code: the tests run with the MacBook user account's filesystem privileges. Never extend it to public/unreviewed PRs. An isolated Docker runner is still required for full CI.
+- **Residual host risk:** the current deployment uses the existing `mac` account on a MacBook that also runs other development sessions. Environment scrubbing is NOT a filesystem sandbox. A malicious or compromised commit on protected `main` could read files accessible to that account. Do not put untrusted PRs, production secrets, deploy keys or third-party code into this worker. Move it to a dedicated low-privilege account/VM before expanding its scope.
 
 ## Real acceptance evidence from 2026-11-21
 
