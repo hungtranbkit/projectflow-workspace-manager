@@ -204,7 +204,9 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
         item["project"], item["node"], item["session"] or "",
     ))
     proven_running = sum(item["running_verified"] is True for item in session_details)
-    visible_sessions = session_details[:24]
+    # Publish up to 100 sanitized items; mobile client progressively reveals
+    # the first 24 and lets project/state filters see every verified row.
+    visible_sessions = session_details[:100]
     for n, item in enumerate(visible_sessions, 1):
         item["label"] = "Session %02d" % n
     statuses = Counter()
