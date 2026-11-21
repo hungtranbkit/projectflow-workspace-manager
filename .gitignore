@@ -5,3 +5,6 @@ __pycache__/
 data/*.db
 data/*.db-*
 data/logs/
+# Never commit Woodpecker GitHub OAuth or agent credentials.
+infra/woodpecker/.env
+infra/woodpecker/.env.agent
