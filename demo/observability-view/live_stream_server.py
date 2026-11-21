@@ -164,6 +164,10 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
             per_node_fresh60[key] += 1
         total_types[agent] += 1
         per_node_types.setdefault(key, Counter())[agent] += 1
+        # Public source expansion must not leak previously unpublished
+        # remote tmux session names, even when a name matches a known task hint.
+        if fleet_coverage is not None and key != "hp-linux":
+            summary["session"] = None
         projects[summary["project"]] += 1
         if key in ids:
             if age is None:
