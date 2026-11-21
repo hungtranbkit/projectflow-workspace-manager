@@ -227,3 +227,33 @@ def test_monitor_uses_authenticated_remote_title_without_inferring_running():
     assert detail["task_source"] == "trusted_task_label"
     assert detail["task_hint"] == "Hoàn thiện giám sát hoạt động agent"
     assert detail.get("checkpoint_at") is None
+
+
+def test_authenticated_assignment_survives_unknown_execution_without_running():
+    from terminal_proof import TerminalProofMonitor
+    class Reader:
+        def __call__(self, *_):
+            return {"exists": True, "allowed": True, "state": "UNKNOWN",
+                    "reason": "no trustworthy execution progress"}
+        def task_label(self, *_):
+            return {"title": "Điều phối công việc ProjectFlow",
+                    "at": "2026-11-22T06:00:05+00:00"}
+    now = datetime(2026, 11, 22, 6, 0, 7, tzinfo=timezone.utc)
+    row = [{"node_id": "m910", "session_name": "projectflow-unknown",
+            "stable_session_id": "unique|1795327200", "generation": 1}]
+    result = TerminalProofMonitor(Reader()).snapshot(row, now=now)
+    obj = result[("m910", "projectflow-unknown")]
+    assert obj["state"] == "OPEN_UNVERIFIED"
+    assert obj["task_source"] == "trusted_task_label"
+    assert obj["task_hint"] == "Điều phối công việc ProjectFlow"
+    assert "checkpoint_at" not in obj
+
+
+def test_previous_instance_title_is_not_reused():
+    from terminal_proof import _label_is_current_instance
+    label = {"title": "Hoàn thiện giám sát hoạt động agent",
+             "at": "2026-11-22T06:00:00+00:00"}
+    now = datetime(2026, 11, 22, 6, tzinfo=timezone.utc).timestamp()
+    assert _label_is_current_instance(label, "unique|" + str(now)) is True
+    assert _label_is_current_instance(label, "unique|" + str(now + 500)) is False
+    assert _label_is_current_instance(label, "unique|not-an-epoch") is False
