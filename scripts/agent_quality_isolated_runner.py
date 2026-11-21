@@ -68,6 +68,14 @@ def make_isolated_test_runner(image_id: str) -> Callable:
                 "--workdir", "/work",
                 "--env", "HOME=/tmp", "--env", "PYTHONDONTWRITEBYTECODE=1",
                 "--env", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+                # Importing app.main bootstraps a SQLite DB. Keep all
+                # runtime state on the bounded /tmp tmpfs, not in the
+                # read-only source checkout (/work/data). This is
+                # essential for real pytest collection with --read-only.
+                "--env", "WORKSPACE_MANAGER_ROOT=/tmp",
+                "--env", "WORKSPACE_MANAGER_DB=/tmp/qg-state/workspace-manager.db",
+                "--env", "WORKSPACE_MANAGER_STATE_DIR=/tmp/qg-state/runtime",
+                "--env", "WORKSPACE_MANAGER_WORKTREE_ROOT=/tmp/qg-worktrees",
                 image_id,
                 "-m", "pytest", "-q", "-p", "no:cacheprovider",
                 *command[4:],
