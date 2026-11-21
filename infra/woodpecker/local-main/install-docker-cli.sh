@@ -6,7 +6,7 @@ version=29.10.0
 base=https://download.docker.com/linux/static/stable/x86_64
 root="$HOME/.local/share/projectflow-woodpecker-main-ci"
 d="$root/docker-cli"
-venv="$root/venv"
+venv="$root/venv-py311"
 [[ -d "$venv/bin" ]] || { echo 'BLOCKED: CI venv not yet initialized' >&2; exit 2; }
 mkdir -p "$d"
 chmod 700 "$d"
