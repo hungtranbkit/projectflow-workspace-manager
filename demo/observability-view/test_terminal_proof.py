@@ -23,7 +23,7 @@ def test_live_output_must_change_to_verify_running():
     info = current[("hp-linux", "projectflow-observability-01")]
     assert info["state"] == "RUNNING_VERIFIED"
     assert info["evidence"] == "terminal_output_delta"
-    assert "last_output" not in json.dumps(current)
+    assert "last_output" not in json.dumps(list(current.values()))
     clock[0] += 50
     assert monitor.snapshot(rows, now=now + timedelta(seconds=60)) == {}
 
@@ -60,7 +60,7 @@ def test_waiting_input_and_failed_authorization_fail_closed():
     result=monitor.snapshot(rows,now=now)
     assert result[("hp-linux","projectflow-one")]["state"]=="WAITING_INPUT"
     assert ("hp-linux","projectflow-two") not in result
-    assert "secret" not in json.dumps(result)
+    assert "secret" not in json.dumps(list(result.values()))
 
 
 def test_task_titles_are_curated_and_prompt_fallback_is_never_public(tmp_path):
