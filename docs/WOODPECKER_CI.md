@@ -101,3 +101,17 @@ No real `server.env` was created; no active service was left behind. The runner/
 
 Remaining external requirements: provision a **separate** HTTPS hostname and Cloudflare Tunnel for CI (do not overwrite the existing ProjectFlow domain), create a GitHub **OAuth App** with callback `https://<ci-host>/authorize`, and choose a safe dedicated Docker runner. Cloudflared tunnel administration on M910q was unavailable; HP had no `cert.pem`, so no DNS changes were attempted. Keep GitHub Actions and PR #58 Draft until a real SHA-matched PR/push pipeline, negative test, queue retry and GitHub commit status are verified.
 
+
+## Additional independent Woodpecker verification (21 November 2026, 13:32–13:45 ICT)
+
+This section records **commands actually executed** and separates results from remaining prerequisites.
+
+- Downloaded the upstream official `woodpecker-cli_linux_amd64.tar.gz` and `woodpecker-agent_linux_amd64.tar.gz`, verified **both SHA-256 hashes against the 3.20.1 upstream release checksums**, and observed CLI/agent versions `3.20.1`.
+- Validated `.woodpecker/verify.yaml` with **`woodpecker-cli lint --strict`**, success exit code 0, not merely YAML parsing.
+- Ran `bash scripts/woodpecker_agent_smoke.sh` on MacBook Linux against an **ephemeral server and agent using the Local backend**, loopback-only ports 8191/9191, randomly generated throwaway credentials, no public OAuth and no registered GitHub repository. Observed **SERVER_HTTP_PASS**, **AGENT_GRPC_REGISTRATION_PASS**, and script exit code 0. Both processes and the temporary SQLite DB were removed. This proves a genuine server/agent gRPC handshake, **not** actual pipeline queue execution by the server.
+- Ran `woodpecker-cli exec --backend-engine local` against a controlled temporary fixture in the disposable ProjectFlow checkout: `./scripts/preflight.sh` PASS, `./scripts/build.sh` PASS, CLI exit 0. A separate negative fixture deliberately failed with `exit 17`; Woodpecker returned failure and did **not** run the next step. Source-controlled reproducible wrapper: `bash scripts/woodpecker_cli_gates_smoke.sh`, exit 0.
+- Previewed merging current `main` (`27164f7`) into the PR checkout using `git merge-tree --write-tree`, **clean**. Created a local non-fast-forward merge and reran strict lint, positive/negative CLI smoke and the 15 targeted pytest tests: all PASS. **The local merge was NOT pushed**: MacBook Git transport does not have working write credentials (`fatal: could not read Username for 'https://github.com'`). The GitHub PR branch is unchanged by that local merge; do not claim the PR is rebased/up-to-date.
+- Runner selection: MacBook had no Docker/Podman/VM tools, no passwordless sudo, and `unshare -Ur` failed; `newuidmap`, `newgidmap`, `rootlesskit`, `slirp4netns` and `fuse-overlayfs` were absent. NEC had Docker but six running containers and only about 12 GB available root disk. HP and M910 remain unsuitable for a privileged Docker socket runner due to existing workloads/space.
+- **SECURITY**: the Local backend executes pipeline code with the user account's privileges and can read local agent secrets. Do **not** connect the disposable Local smoke setup, or its script, to public pull requests. It is intentionally ephemeral.
+- Remaining blocker remains **real GitHub OAuth App + dedicated HTTPS hostname/DNS/tunnel administration + isolated Docker runner**. None was created or enabled. Keep existing GitHub Actions and PR #58 Draft until actual SHA-matched public webhook, fail-closed full test run, status reporting and retry evidence.
+
