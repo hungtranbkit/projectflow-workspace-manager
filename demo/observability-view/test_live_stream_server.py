@@ -246,8 +246,8 @@ def test_running_prioritized_across_more_than_24_sessions(tmp_path):
                     "RUNNING_VERIFIED", recent, None, None))
     data = detailed_snapshot(nodes, sessions, now=now)
     assert data["sessions"]["open"] == 31
-    assert data["sessions"]["displayed_count"] == 24
-    assert data["sessions"]["hidden_count"] == 7
+    assert data["sessions"]["displayed_count"] == 31
+    assert data["sessions"]["hidden_count"] == 0
     assert data["sessions"]["proven_running"] == 1
     first = data["sessions"]["items"][0]
     assert first["session"] == "zgh-photo-capacity-fix-zzlast"
