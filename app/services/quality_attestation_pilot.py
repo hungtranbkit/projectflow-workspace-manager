@@ -165,6 +165,15 @@ def quality_merge_blocker(task_id: int, repository_id: int, repository_name: str
     key = env.get("PROJECTFLOW_QUALITY_ATTESTATION_KEY")
     public_key_path = env.get("PROJECTFLOW_QUALITY_ATTESTATION_PUBLIC_KEY_FILE", "").strip()
     state_dir = env.get("PROJECTFLOW_QUALITY_ATTESTATION_DIR")
+    strict_isolation = env.get("PROJECTFLOW_QUALITY_REQUIRE_ISOLATED_QA", "").strip() == "1"
+    approved_image_id = env.get("PROJECTFLOW_QUALITY_APPROVED_QA_IMAGE_ID", "").strip()
+    # Strict mode has no legacy HMAC downgrade and cannot accept a Docker
+    # image chosen solely by the signer. The verifier pins its own image ID.
+    if strict_isolation and (
+        not public_key_path or bool(key) or
+        not re.fullmatch(r"sha256:[a-f0-9]{64}", approved_image_id)
+    ):
+        return "QUALITY_ATTESTATION_CONFIG"
     if not state_dir or (bool(key) == bool(public_key_path)):
         # Exactly one verification method. No silent fallback if public-key mode fails.
         return "QUALITY_ATTESTATION_CONFIG"
@@ -184,13 +193,15 @@ def quality_merge_blocker(task_id: int, repository_id: int, repository_name: str
         return "QUALITY_ATTESTATION_MISSING"
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return "QUALITY_ATTESTATION_INVALID"
-    if env.get("PROJECTFLOW_QUALITY_REQUIRE_ISOLATED_QA", "").strip() == "1":
+    if strict_isolation:
         proof = receipt.get("payload") if isinstance(receipt, dict) else None
         if (not isinstance(proof, dict) or
             proof.get("qa_isolation") != "DOCKER_READ_ONLY_NO_NETWORK" or
             not isinstance(proof.get("qa_image_id"), str) or
             not re.fullmatch(r"sha256:[a-f0-9]{64}", proof["qa_image_id"])):
             return "QUALITY_ATTESTATION_INVALID"
+        if proof["qa_image_id"] != approved_image_id:
+            return "QUALITY_ATTESTATION_STALE"
     if public_key_path:
         pubfile = Path(public_key_path).expanduser()
         try:
