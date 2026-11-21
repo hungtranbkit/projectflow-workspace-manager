@@ -79,3 +79,24 @@ def test_task_titles_are_curated_and_prompt_fallback_is_never_public(tmp_path):
     assert "private" not in json.dumps(a)
     assert read_explicit_task_label("hp-linux","zgh-private",db_path=db_path) is None
     assert read_explicit_task_label("hp-linux","../invalid",db_path=db_path) is None
+
+
+def test_unknown_foreground_with_real_output_delta_is_verified():
+    state = {"state": "UNKNOWN", "reason": "current command is 'python3'; activity age is old",
+             "exists": True, "allowed": True, "last_output": "one"}
+    clock = [0.]
+    monitor = TerminalProofMonitor(lambda *args: state.copy(), interval=1,
+                                   clock=lambda: clock[0], task_reader=lambda *args: None)
+    row = [{"node_id": "hp-linux", "session_name": "projectflow-active-foreground"}]
+    now = datetime(2026, 11, 21, 10, tzinfo=timezone.utc)
+    assert monitor.snapshot(row, now=now) == {}
+    clock[0] += 2
+    state["last_output"] = "one\ntwo"
+    result = monitor.snapshot(row, now=now + timedelta(seconds=2))
+    assert result[("hp-linux","projectflow-active-foreground")]["state"] == "RUNNING_VERIFIED"
+    # The exact same output pattern does NOT prove a foreground execution
+    # when the trusted node reports a shell prompt/unknown.
+    state["reason"] = "current command is 'bash'; activity age is old"
+    state["last_output"] = "one\ntwo\nthree"
+    clock[0] += 2
+    assert monitor.snapshot(row, now=now + timedelta(seconds=4)) == {}
