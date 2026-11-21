@@ -76,10 +76,19 @@ def read_explicit_task_label(node_id, session, *, db_path=None):
     path = Path(db_path) if db_path else Path.home() / ".local/state/terminal-mcp/audit.db"
     try:
         with sqlite3.connect("file:" + str(path) + "?mode=ro", uri=True, timeout=0.2) as db:
+            # A node-local mirror is valid only for THIS HP collector's
+            # own sessions. Never borrow a local title for a remote node
+            # with an identically named session.
+            if node_id == "hp-linux":
+                where = "node_id IN ('hp-linux', 'local')"
+                params = (session,)
+            else:
+                where = "node_id=?"
+                params = (session, node_id)
             row = db.execute(
                 "SELECT summary,source,updated_at FROM session_task_labels "
-                "WHERE session=? AND node_id IN (?, 'local') "
-                "ORDER BY updated_at DESC LIMIT 1", (session, node_id)
+                "WHERE session=? AND " + where +
+                " ORDER BY updated_at DESC LIMIT 1", params
             ).fetchone()
     except (sqlite3.Error, OSError, ValueError):
         return None
