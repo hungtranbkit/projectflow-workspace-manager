@@ -246,7 +246,7 @@ class Handler(BaseHTTPRequestHandler):
             # Bound each connection. EventSource auto-reconnects as needed.
             for _ in range(24):
                 try:
-                    data = detailed_snapshot(self.server.nodes_db, self.server.sessions_db)
+                    data = detailed_snapshot(self.server.nodes_db, self.server.sessions_db, monitor=self.server.monitor)
                     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
                     self.wfile.write(("event: status\ndata: " + payload + "\n\n").encode("utf-8"))
                 except Exception:
