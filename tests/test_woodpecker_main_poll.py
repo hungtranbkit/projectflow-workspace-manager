@@ -76,3 +76,46 @@ def test_operator_retry_bypasses_cooldown_not_attempt_limit():
     assert poll.should_run(SHA, previous, now, force_retry=True) == (True, "RETRY", 2)
     previous["attempts"] = 3
     assert poll.should_run(SHA, previous, now, force_retry=True)[1] == "RETRY_LIMIT_REACHED"
+
+
+def test_fast_pass_skips_without_claiming_full():
+    out = poll.should_run(SHA, {"sha": SHA, "status": "FAST_PASS", "attempts": 1}, 12345)
+    assert out == (False, "ALREADY_PASSED", 1)
+
+
+def test_child_environment_pins_runtime_and_fail_fast(tmp_path, monkeypatch):
+    monkeypatch.setattr(poll, "ROOT", tmp_path / "state")
+    monkeypatch.setattr(poll, "APP", tmp_path / "app")
+    monkeypatch.setattr(poll, "VENV", tmp_path / "app" / "venv-py311")
+    env = poll.child_environment()
+    assert env["VIRTUAL_ENV"].endswith("/venv-py311")
+    assert env["PATH"].startswith(env["VIRTUAL_ENV"] + "/bin:")
+    assert "--maxfail=1" in env["PYTEST_ADDOPTS"]
+    assert "--tb=short" in env["PYTEST_ADDOPTS"]
+
+
+def test_output_is_capped_but_subprocess_drained(tmp_path, monkeypatch):
+    import os
+    import sys
+    monkeypatch.setattr(poll, "MAX_LOG_BYTES", 1024)
+    path = tmp_path / "log.txt"
+    with path.open("w", encoding="utf-8") as log:
+        poll.logged_command(
+            [sys.executable, "-c", "import sys;sys.stdout.write('X'*50000)"],
+            log, cwd=tmp_path, env=os.environ.copy(), timeout=5,
+        )
+    data = path.read_text()
+    assert "CI_LOG_TRUNCATED" in data
+    assert len(data) <= 1500
+
+
+def test_timeout_kills_subprocess(tmp_path):
+    import os
+    import sys
+    path = tmp_path / "slow.log"
+    with path.open("w", encoding="utf-8") as log:
+        with pytest.raises(RuntimeError, match="COMMAND_TIMEOUT"):
+            poll.logged_command(
+                [sys.executable, "-c", "import time;time.sleep(9)"],
+                log, cwd=tmp_path, env=os.environ.copy(), timeout=1,
+            )
