@@ -320,6 +320,16 @@ class TerminalProofMonitor:
                         # An ended turn invalidates proof before the same session's next run.
                         self.last_hash.pop(history_key, None)
                         self.proof_at.pop(history_key, None)
+                    # An explicitly assigned task is independent of liveness.
+                    # UNKNOWN execution can have a verified label without
+                    # becoming RUNNING or implying a new code checkpoint.
+                    label = self.task_reader(*key)
+                    if label and label.get("title") and _timestamp(label.get("at")):
+                        if record is None:
+                            record = {"state": "OPEN_UNVERIFIED", "evidence": "registry_only",
+                                      "observed_at": at}
+                        record["task_hint"] = label["title"]
+                        record["task_source"] = "trusted_task_label"
                     if record is not None:
                         # Node status is trusted for agent type, but never publish a
                         # guessed process name or arbitrary executable as an agent.
@@ -327,11 +337,7 @@ class TerminalProofMonitor:
                         agent_type = str(source_type or "").casefold()
                         if agent_type in ("claude", "codex", "shell"):
                             record["agent_type"] = agent_type
-                        # An explicit owner title is trusted metadata, not a proof of activity.
-                        label = self.task_reader(*key)
-                        if label and label.get("title") and _timestamp(label.get("at")):
-                            record["task_hint"] = label["title"]
-                            record["task_source"] = "trusted_task_label"
+                        # Task metadata cannot substitute for execution evidence.
                         observed[key] = record
             self.last_result = observed
             return self._fresh(now)
