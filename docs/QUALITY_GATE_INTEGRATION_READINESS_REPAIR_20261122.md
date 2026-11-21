@@ -136,3 +136,58 @@ post-cutover writes reconciled.
 
 Release acceptance: **integration-readiness P1 FIXED**, production
 Quality Gate's mandatory signed-merge protection **NOT COMPLETE**.
+
+
+## Same-day Docker network remediation — completed after first audit
+
+The two previously failing Docker sandbox tests were investigated further.
+In the disposable pytest SQLite record, both sandbox provisioning operations
+had `COMPOSE_UP_FAILED` and the Docker daemon reported:
+
+```
+all predefined address pools have been fully subnetted
+```
+
+This failure occurred on the OLD release as well, confirming an infrastructure
+baseline failure rather than a regression caused by the Quality Gate change.
+
+Read-only Docker audit showed 33 networks, including ten with no attached
+containers. Five explicit **unused CI/test networks** (zero attached
+containers each) were removed; no Docker volumes, running containers, active
+production networks or daemon process were changed:
+
+- `cdtm-issue109-test`
+- `mesflow-app-chatbot-ci_default`
+- `mesflow-ci-stabilization-41359202744_default`
+- `mesflow-test_default`
+- `repoport-prod-smoke_default`
+
+A new isolated test network could then be created successfully with allocated
+subnet `172.20.0.0/16`; the temporary proof network was removed afterward.
+
+**Retest evidence:**
+- Two previously failing tests: **2/2 PASS**, 34 warnings, 6.98 seconds.
+- Full targeted release/merge/integration/attestation/orphan-regression suite:
+  **65/65 PASS**, 727 warnings, 123.08 seconds; exit code 0.
+- Test environment: disposable Git/SQLite fixtures on Dell; no production
+  repository or database modified.
+- Remaining test resources: **0 `wm-*` containers and 0 `wm-*` networks**.
+- Live Dell `workspace-manager.service` and `/health` remain active/OK.
+
+The original 63 PASS / 2 FAIL result remains in the chronology above, but
+the **final same-day qualification is 65 PASS / 0 FAIL** after correcting
+the Docker host's exhausted network-address pool. This does not prove the
+unexecuted remainder of the repository-wide 1,614 tests passes.
+
+## Progress adjustment
+
+Relative to the 59/100 acceptance-point audit snapshot, the safe handling
+of 7/7 real task readiness APIs, lifecycle/closure repair, and baseline
+Docker recovery justify an estimated **64/100** end-to-end readiness
+(acceptance-rubric estimate, not a measured productivity improvement).
+
+Critical remaining release blockers are unchanged:
+- Production signed QA policy is still opt-out; 0 real protected tasks.
+- No independently restricted production Ed25519 signing identity and
+  authenticated receipt delivery proven.
+- GitHub `main` is not governed by a required Quality Gate check.
