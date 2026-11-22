@@ -310,3 +310,11 @@ def test_slow_task_readbacks_do_not_serialize_across_node_sessions():
     observed = TerminalProofMonitor(state, task_reader=task).snapshot(rows, now=now)
     assert len(observed) == 2
     assert all(v["task_source"] == "trusted_task_label" for v in observed.values())
+
+
+def test_iso_created_timestamp_is_accepted_for_current_task():
+    from terminal_proof import _label_is_current_instance
+    label = {"title": "Hoàn thiện giám sát hoạt động agent",
+             "at": "2026-11-22T05:55:00+00:00"}
+    assert _label_is_current_instance(label, "uuid|2026-11-22T05:45:00+00:00")
+    assert not _label_is_current_instance(label, "uuid|2026-11-22T06:10:00+00:00")
