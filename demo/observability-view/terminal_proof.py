@@ -316,15 +316,28 @@ class TerminalProofMonitor:
             self.last_hash = {k: v for k, v in self.last_hash.items() if k in active}
             self.proof_at = {k: v for k, v in self.proof_at.items() if k in active}
             observed = {}
+            def read_one(node, name):
+                value = self.reader(node, name)
+                if not isinstance(value, dict) or value.get("error") or value.get("exists") is False or value.get("allowed") is False:
+                    return value, None
+                try:
+                    label = self.task_reader(node, name)
+                except Exception:
+                    label = None  # Title failure must not conceal a valid node state.
+                return value, label
+
+            # Both private HTTP reads run inside the same bounded worker.
+            # A slow node label route can no longer serially block all other
+            # node status observations or the public SSE response.
             with ThreadPoolExecutor(max_workers=8) as executor:
-                futs = {executor.submit(self.reader, node, name): (node, name, stable_id, generation)
+                futs = {executor.submit(read_one, node, name): (node, name, stable_id, generation)
                         for node, name, stable_id, generation in names}
                 for fut in as_completed(futs):
                     node, name, stable_id, generation = futs[fut]
                     key = (node, name)
                     history_key = (node, name, stable_id, generation)
                     try:
-                        value = fut.result()
+                        value, label = fut.result()
                     except Exception:
                         continue
                     if not isinstance(value, dict) or value.get("error") or value.get("exists") is False or value.get("allowed") is False:
@@ -358,7 +371,6 @@ class TerminalProofMonitor:
                     # An explicitly assigned task is independent of liveness.
                     # UNKNOWN execution can have a verified label without
                     # becoming RUNNING or implying a new code checkpoint.
-                    label = self.task_reader(*key)
                     if _label_is_current_instance(label, stable_id):
                         if record is None:
                             record = {"state": "OPEN_UNVERIFIED", "evidence": "registry_only",
