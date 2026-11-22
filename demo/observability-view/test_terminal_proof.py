@@ -356,3 +356,83 @@ def test_busy_footer_requires_matching_actual_agent_and_not_a_dialog():
     assert _agent_ui_busy({**valid, "reason": "current command is 'claude'; tmux activity age is 3s"}) is False
     assert _agent_ui_busy({**valid, "reason": "claude adapter reports a turn in flight; current command is 'claude'"}) is True
     assert _agent_ui_busy({**valid, "reason": "Claude is thinking about a task; current command is 'claude'"}) is False
+
+
+def test_full_terminal_screen_delta_detects_active_foreground_above_bottom_rows():
+    """The old last-20-lines hash misses changes elsewhere on the same pane."""
+    import hashlib
+    from terminal_proof import TerminalProofMonitor
+    state = {"state": "UNKNOWN", "exists": True, "allowed": True,
+             "reason": "current command is 'node'; activity age is 420s",
+             "last_output": "identical static 20-line footer"}
+    screen = ["full upper pane output initially"]
+    class Reader:
+        def __call__(self, *_a):
+            return state.copy()
+        def screen_digest(self, *_a):
+            return hashlib.sha256(screen[0].encode()).digest()
+    tick = [0.]
+    monitor = TerminalProofMonitor(Reader(), interval=1,
+                                   clock=lambda: tick[0],
+                                   task_reader=lambda *_a: None)
+    rows = [{"node_id":"m910", "session_name":"projectflow-foreground-node"}]
+    now = datetime(2026, 11, 22, 8, 30, tzinfo=timezone.utc)
+    assert monitor.snapshot(rows, now=now) == {}
+    tick[0] += 2
+    screen[0] = "full upper pane changed, footer identical"
+    evidence = monitor.snapshot(rows, now=now + timedelta(seconds=2))
+    entry = evidence[("m910", "projectflow-foreground-node")]
+    assert entry["state"] == "RUNNING_VERIFIED"
+    assert entry["evidence"] == "terminal_screen_delta"
+    assert "full upper pane" not in json.dumps(list(evidence.values()))
+    tick[0] += 2
+    state["state"], state["reason"] = "IDLE", "shell prompt is back"
+    finished = monitor.snapshot(rows, now=now+timedelta(seconds=4))
+    assert finished[("m910", "projectflow-foreground-node")]["state"] == "IDLE"
+
+
+def test_screen_digest_source_change_does_not_manufacture_progress():
+    """Full-screen read failures must not turn into a false output delta."""
+    import hashlib
+    from terminal_proof import TerminalProofMonitor
+    state = {"state":"RUNNING", "exists":True, "allowed":True,
+             "agent_type":"shell", "reason":"current command is 'python3'; tmux activity age is 1s",
+             "last_output":"tail stayed stable"}
+    digest = [hashlib.sha256(b"upper pane static").digest()]
+    class Reader:
+        def __call__(self,*_a): return state.copy()
+        def screen_digest(self,*_a): return digest[0]
+    tick=[0.]
+    monitor=TerminalProofMonitor(Reader(),interval=1,clock=lambda:tick[0],
+                                  task_reader=lambda *_a: None)
+    rows=[{"node_id":"hp-linux","session_name":"projectflow-source-switch"}]
+    now=datetime(2026,11,22,8,30,tzinfo=timezone.utc)
+    assert monitor.snapshot(rows,now=now)=={}
+    tick[0]+=2
+    digest[0]=None
+    assert monitor.snapshot(rows,now=now+timedelta(seconds=2))=={}
+    tick[0]+=2
+    assert monitor.snapshot(rows,now=now+timedelta(seconds=4))=={}
+    tick[0]+=2
+    digest[0]=hashlib.sha256(b"upper pane static").digest()
+    assert monitor.snapshot(rows,now=now+timedelta(seconds=6))=={}
+
+
+def test_idle_redrawing_screen_never_counts_as_running():
+    import hashlib
+    from terminal_proof import TerminalProofMonitor
+    state = {"state":"IDLE", "exists":True, "allowed":True,
+             "reason":"codex is back at its composer; the turn has finished",
+             "agent_type":"codex", "last_output":"progress spinner"}
+    class Reader:
+        def __call__(self,*_a): return state.copy()
+        def screen_digest(self,*_a):
+            raise AssertionError("idle screen must never trigger extra sampling")
+    tick=[0.]
+    monitor=TerminalProofMonitor(Reader(),interval=1,clock=lambda:tick[0],
+                                  task_reader=lambda *_a:None)
+    rows=[{"node_id":"nec1","session_name":"projectflow-idle-redraw"}]
+    for i in (0,2,4):
+        tick[0]=i
+        result=monitor.snapshot(rows,now=datetime(2026,11,22,8,30,tzinfo=timezone.utc)+timedelta(seconds=i))
+        assert result[("nec1","projectflow-idle-redraw")]["state"]=="IDLE"
