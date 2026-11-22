@@ -468,3 +468,47 @@ def test_known_assignment_does_not_promote_unverified_execution(tmp_path):
     assert row["running_verified"] is None
     assert d["sessions"]["proven_running"] == 0
     assert "internal command" not in json.dumps(d)
+
+
+def test_public_running_activity_hints_are_allowlisted_and_removed_on_idle(tmp_path):
+    now = datetime(2026, 11, 22, 8, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("hp-linux", "online", ts, "healthy", "EXECUTION_OK", "private", "secret"))
+    with sqlite3.connect(sessions) as db:
+        for name in ("projectflow-running-proof", "projectflow-idle-proof"):
+            db.execute("INSERT INTO session_records (node_id,agent_type,status,deleted_at,"
+                       "last_activity_at,last_seen_at,session_name,launch_command)"
+                       " VALUES(?,?,?,?,?,?,?,?)",
+                       ("hp-linux", "codex", "ACTIVE", None, ts, ts, name,
+                        "PRIVATE_COMMAND_TOKEN"))
+    class Witness:
+        def snapshot(self, rows, *, now):
+            return {
+                ("hp-linux", "projectflow-running-proof"): {
+                    "state": "RUNNING_VERIFIED", "evidence": "agent_ui_busy",
+                    "observed_at": ts, "checkpoint_at": ts,
+                    "recent_actions": [
+                        "Có dòng báo đang chạy kiểm thử",
+                        "SECRET_PRIVATE_PASSWORD",
+                        "Có dòng báo build hoặc biên dịch",
+                    ]},
+                ("hp-linux", "projectflow-idle-proof"): {
+                    "state": "IDLE", "evidence": "node_observed",
+                    "observed_at": ts, "recent_actions": [
+                        "Có dòng báo đang chạy kiểm thử"
+                    ]},
+            }
+    data = detailed_snapshot(nodes, sessions, now=now, monitor=Witness())
+    rows = {x["session"]: x for x in data["sessions"]["items"]}
+    run = rows["projectflow-running-proof"]
+    idle = rows["projectflow-idle-proof"]
+    assert run["recent_actions"] == [
+        "Có dòng báo đang chạy kiểm thử", "Có dòng báo build hoặc biên dịch"
+    ]
+    assert idle["recent_actions"] == []
+    assert data["sessions"]["proven_running"] == 1
+    assert "SECRET_PRIVATE_PASSWORD" not in json.dumps(data)
+    assert "PRIVATE_COMMAND_TOKEN" not in json.dumps(data)
