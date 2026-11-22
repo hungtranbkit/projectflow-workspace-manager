@@ -34,7 +34,7 @@ SHA256_IMAGE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
 def _safe_receipt_metadata(directory: str, task_id: int, repository_id: int,
-                           now: datetime) -> dict:
+                           now: datetime, approved_image_id: str) -> dict:
     """Metadata only; never emit raw receipt, signature or claimed identity."""
     result = {"present": False, "fresh": False, "age_hours": None,
               "expires_at_utc": None, "isolation_claim": None,
@@ -61,6 +61,9 @@ def _safe_receipt_metadata(directory: str, task_id: int, repository_id: int,
         result["isolation_claim"] = (
             "DOCKER_READ_ONLY_NO_NETWORK" if claim.get("qa_isolation") == "DOCKER_READ_ONLY_NO_NETWORK"
             else "OTHER_OR_MISSING"
+        )
+        result["image_claim_matches_pin"] = (
+            claim.get("qa_image_id") == approved_image_id if approved_image_id else None
         )
     except (OSError, UnicodeError, ValueError, TypeError, KeyError, json.JSONDecodeError):
         # Do not log untrusted receipt content or private path details.
@@ -152,13 +155,8 @@ def evaluate(environ: dict[str, str], *, task_id: int | None = None,
                 # A successful probe is NOT a live merge, and does not
                 # authenticate the independent source of the signing key.
                 "live_merge_authorized": False,
-                "receipt": _safe_receipt_metadata(receipt_dir, task_id, repository_id, now),
+                "receipt": _safe_receipt_metadata(receipt_dir, task_id, repository_id, now, approved),
             }
-            snapshot["probe"]["receipt"]["image_claim_matches_pin"] = (
-                None if not strict or not snapshot["probe"]["receipt"]["present"]
-                else result not in ("QUALITY_ATTESTATION_STALE", "QUALITY_ATTESTATION_INVALID",
-                                   "QUALITY_ATTESTATION_MISSING", "QUALITY_ATTESTATION_CONFIG")
-            )
     return snapshot
 
 
