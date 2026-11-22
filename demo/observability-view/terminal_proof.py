@@ -120,10 +120,14 @@ def _label_is_current_instance(label, stable_id):
     if not isinstance(stable_id, str) or "|" not in stable_id:
         return True  # The authorized node GET already checks its instance.
     creation = stable_id.rpartition("|")[2]
-    try:
-        created = float(creation)
-    except (TypeError, ValueError, OverflowError):
-        return False
+    born = _timestamp(creation)
+    if born is not None:
+        created = born.timestamp()
+    else:
+        try:
+            created = float(creation)
+        except (TypeError, ValueError, OverflowError):
+            return False
     return observed.timestamp() + 5 >= created
 
 
