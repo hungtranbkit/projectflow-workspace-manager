@@ -111,3 +111,30 @@ The node extension is opt-in and backward compatible: the ProjectFlow
 collector uses only read-only remote calls and a short cache, and ignores
 an older node that does not implement the endpoint. No node upgrade is
 required merely to keep the current RUNNING/IDLE feed working.
+
+## Verified CLI screen evidence (22 Nov 2026)
+
+The `terminal_mcp.terminal_status` API already captures up to 80 tmux rows
+and classifies the actual Claude/Codex UI's busy footer or adapter state.
+Previously, ProjectFlow still required **last-20-line output changes** to
+confirm RUNNING, causing false negatives when the CLI showed a live busy
+footer with no changed text, or only the upper screen changed.
+
+A trusted Claude/Codex busy footer is now a separate
+`evidence=agent_ui_busy` proof, requiring a matched agent type and actual
+foreground command (no bash scrollback/prose or recent tmux activity alone).
+For candidate foreground processes, the collector also takes one optional,
+bounded, authenticated read-only 80-line tail per poll and retains only a
+SHA-256 digest **in memory**. A witnessed full-screen fingerprint change is
+`evidence=terminal_screen_delta`; changing between full-screen and old-tail
+read methods cannot itself generate a false change. The current 20-line
+redacted status tail remains the fallback if the optional screen read fails.
+
+Explicit IDLE, permission prompts, and WAITING_INPUT always take precedence
+over a changing screen. This proves a foreground turn or a terminal process
+making visible progress; it **does not** prove file modifications, test
+passage, merge/deploy, task completion or accepted results. The frontend
+distinguishes the evidence categories without publishing raw terminal lines,
+commands, exact task bodies, paths, tokens or user content. No node-agent
+upgrade is required; these use existing authenticated GET status and tail
+routes. Verification still expires if the node cannot be read.

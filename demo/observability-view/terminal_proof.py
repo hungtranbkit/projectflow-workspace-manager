@@ -35,6 +35,28 @@ def _unknown_but_foreground(status):
     match = _FOREGROUND.search(reason) if isinstance(reason, str) else None
     return bool(match and match.group(1).casefold() in _ACTIVE_COMMANDS)
 
+def _agent_ui_busy(status):
+    """Trust an actual Claude/Codex in-flight UI marker, not tmux activity.
+
+    Terminal MCP classifies the current CLI's *footer* or agent adapter.
+    We additionally require the foreground command and agent type to match:
+    an old 'esc to interrupt' line in a bash scrollback is not proof.
+    A UI-busy report proves only an executing turn, never a code edit.
+    """
+    if not isinstance(status, dict) or str(status.get("state") or "").upper() != "RUNNING":
+        return False
+    if status.get("input_required") is True:
+        return False
+    agent = str(status.get("agent_type") or "").casefold()
+    reason = status.get("reason")
+    if agent not in ("claude", "codex") or not isinstance(reason, str):
+        return False
+    command = _FOREGROUND.search(reason)
+    if not command or command.group(1).casefold() != agent:
+        return False
+    return (reason.startswith("agent CLI busy footer matched ")
+            or reason.startswith(agent + " adapter reports a turn in flight"))
+
 
 # Fixed, reviewed public labels. Never publish arbitrary user-supplied titles.
 _PUBLIC_TASKS = (
@@ -194,6 +216,27 @@ def build_terminal_reader():
         client = remotes.get(node_id)
         return client.status(session, timeout_seconds=2.0) if client else {}
 
+    def screen_digest(node_id, session):
+        """Privately fingerprint the bounded FULL tmux screen, not last 20 rows.
+
+        The node's authenticated read-only tail API returns an already
+        redacted, capped view. Only an opaque SHA-256 digest is retained by
+        this collector. Never return, log or export the screen contents.
+        Called only for a potential RUNNING foreground command.
+        """
+        if node_id == "hp-linux":
+            result = local.terminal_tail(session, lines=80)
+        else:
+            client = remotes.get(node_id)
+            result = client.tail(session, lines=80) if client else None
+        if not isinstance(result, dict) or result.get("error"):
+            return None
+        output = result.get("output")
+        if not isinstance(output, str) or not output:
+            return None
+        return hashlib.sha256(output[-65536:].encode("utf-8", "replace")).digest()
+    read.screen_digest = screen_digest
+
     # The fleet's currently open sessions come from authenticated node LIST
     # responses, not stale/duplicated controller registry rows. Never read
     # terminal output while listing, and never expose the auth connection.
@@ -323,12 +366,21 @@ class TerminalProofMonitor:
             def read_one(node, name):
                 value = self.reader(node, name)
                 if not isinstance(value, dict) or value.get("error") or value.get("exists") is False or value.get("allowed") is False:
-                    return value, None
+                    return value, None, None
+                raw = str(value.get("state") or "").upper()
+                screen_hash = None
+                if raw == "RUNNING" or (raw == "UNKNOWN" and _unknown_but_foreground(value)):
+                    screen = getattr(self.reader, "screen_digest", None)
+                    if callable(screen):
+                        try:
+                            screen_hash = screen(node, name)
+                        except Exception:
+                            screen_hash = None
                 try:
                     label = self.task_reader(node, name)
                 except Exception:
                     label = None  # Title failure must not conceal a valid node state.
-                return value, label
+                return value, label, screen_hash
 
             # Both private HTTP reads run inside the same bounded worker.
             # A slow node label route can no longer serially block all other
@@ -341,7 +393,7 @@ class TerminalProofMonitor:
                     key = (node, name)
                     history_key = (node, name, stable_id, generation)
                     try:
-                        value, label = fut.result()
+                        value, label, screen_hash = fut.result()
                     except Exception:
                         continue
                     if not isinstance(value, dict) or value.get("error") or value.get("exists") is False or value.get("allowed") is False:
@@ -358,16 +410,34 @@ class TerminalProofMonitor:
                     elif raw == "RUNNING" or (raw == "UNKNOWN" and _unknown_but_foreground(value)):
                         # The raw pane is not published, even as a preview.
                         output = value.get("last_output")
-                        if isinstance(output, str) and output:
+                        if isinstance(screen_hash, bytes) and len(screen_hash) == 32:
+                            kind, digest = "terminal_screen_delta", screen_hash
+                        elif isinstance(output, str) and output:
+                            kind = "terminal_output_delta"
                             digest = hashlib.sha256(output[-50000:].encode("utf-8", "replace")).digest()
+                        else:
+                            kind, digest = None, None
+                        if digest is not None:
                             old = self.last_hash.get(history_key)
-                            self.last_hash[history_key] = digest
-                            if old is not None and old != digest:
-                                self.proof_at[history_key] = now
-                            age = (now - self.proof_at[history_key]).total_seconds() if history_key in self.proof_at else 10**9
-                            if 0 <= age <= _RUNNING_AGE:
-                                record = {"state": "RUNNING_VERIFIED", "evidence": "terminal_output_delta",
-                                          "observed_at": at, "checkpoint_at": self.proof_at[history_key].isoformat(timespec="seconds")}
+                            self.last_hash[history_key] = (kind, digest)
+                            # A transition between full-screen and tail-only
+                            # observations is not a witnessed screen change.
+                            if old is not None and old[0] == kind and old[1] != digest:
+                                self.proof_at[history_key] = (now, kind)
+                            elif old is not None and old[0] != kind:
+                                self.proof_at.pop(history_key, None)
+                            proof = self.proof_at.get(history_key)
+                            age = (now - proof[0]).total_seconds() if proof else 10**9
+                            if proof and proof[1] == kind and 0 <= age <= _RUNNING_AGE:
+                                record = {"state": "RUNNING_VERIFIED", "evidence": kind,
+                                          "observed_at": at, "checkpoint_at": proof[0].isoformat(timespec="seconds")}
+                        # An agent may make no TEXT change in the last 20
+                        # terminal rows while the trusted CLI's busy footer
+                        # explicitly says a turn is in flight. Classify
+                        # that separately from a witnessed screen delta.
+                        if record is None and _agent_ui_busy(value):
+                            record = {"state": "RUNNING_VERIFIED", "evidence": "agent_ui_busy",
+                                      "observed_at": at, "checkpoint_at": at}
                     if raw in ("IDLE", "WAITING_INPUT", "WAITING", "BLOCKED") or value.get("input_required"):
                         # An ended turn invalidates proof before the same session's next run.
                         self.last_hash.pop(history_key, None)

@@ -15,7 +15,7 @@
   const caps={healthy:"Khỏe",overloaded:"Quá tải",draining:"Đang drain",unknown:"Chưa rõ"};
   const agents={claude:"Claude",codex:"Codex",shell:"Shell",other:"Khác"};
   const activity={under_1m:"Mới trong 1 phút", "1_to_5m":"1–5 phút trước",over_5m:"Trên 5 phút",unknown:"Chưa có thời điểm"};
-  const execNames={RUNNING_VERIFIED:"RUNNING · có checkpoint",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Bị kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
+  const execNames={RUNNING_VERIFIED:"RUNNING · có bằng chứng",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Bị kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
   const projects=new Set(["Zalo Group Hub","MESFlow","ESP32 Kiosk / OTA","ProjectFlow","Brand Agent","Screen Remote","RemoteOps","Chưa phân loại"]);
   let activeProject="all";
   let activeState="all";
@@ -48,7 +48,7 @@
            !Object.hasOwn(activity,s.activity_bucket)||!Object.hasOwn(execNames,s.execution_state)||
            !projects.has(s.project)||typeof s.task_hint!=="string"||s.task_hint.length>120||
            !["session_name_hint","unavailable","trusted_task_label"].includes(s.task_source)||
-           !["registry_only","verified_recent_checkpoint","node_observed","terminal_output_delta"].includes(s.evidence)||
+           !["registry_only","verified_recent_checkpoint","node_observed","terminal_output_delta","terminal_screen_delta","agent_ui_busy"].includes(s.evidence)||
            !(s.running_verified===null||(s.running_verified===true&&s.execution_state==="RUNNING_VERIFIED"))||
            (s.commit_ref!==null&&!/^[a-f0-9]{7,12}$/.test(s.commit_ref))||
            (s.branch_ref!==null&&!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,69}$/.test(s.branch_ref))||
@@ -209,7 +209,9 @@
           +(s.commit_ref?" @ "+s.commit_ref:"")+
           " · chưa xác minh commit mới"));
         li.appendChild(element("small","session-proof",
-          s.evidence==="terminal_output_delta"?"Có output mới khi agent đang chạy · chưa xác minh thay đổi code":
+          s.evidence==="terminal_output_delta"?"Đã quan sát nội dung terminal thay đổi khi tiến trình chạy · chưa xác minh sửa code":
+          s.evidence==="terminal_screen_delta"?"Toàn màn hình terminal thay đổi khi tiến trình foreground chạy · không đồng nghĩa sửa code":
+          s.evidence==="agent_ui_busy"?"Claude/Codex hiển thị đang xử lý · chưa xác minh thay đổi code":
           s.execution_state==="IDLE"?"Đã xác minh agent đang chờ lệnh":
           s.execution_state==="WAITING_INPUT"?"Agent đang chờ nhập liệu":
           s.running_verified===true?"RUNNING được xác minh bằng checkpoint mới":"Chưa có bằng chứng code mới / chưa xác minh RUNNING"));

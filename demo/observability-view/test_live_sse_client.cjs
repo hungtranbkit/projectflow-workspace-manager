@@ -116,9 +116,28 @@ observed.sessions.proven_running=1;
 source.emit("status",observed);
 assert.equal(els["live-running-count"].textContent,"1");
 assert.ok(els["live-sessions"].children[0].children.some(x=>
-  x.textContent.includes("Có output mới khi agent đang chạy")));
+  x.textContent.includes("Đã quan sát nội dung terminal thay đổi")));
 assert.ok(els["live-sessions"].children[1].children.some(x=>
   x.textContent.includes("Task được gắn gần nhất: Hoàn thiện giám sát hoạt động agent")));
+const uiProof=enrich(values());
+uiProof.sessions.items[1].execution_state="RUNNING_VERIFIED";
+uiProof.sessions.items[1].running_verified=true;
+uiProof.sessions.items[1].evidence="agent_ui_busy";
+uiProof.sessions.items[1].last_checkpoint_at=new Date().toISOString();
+uiProof.sessions.proven_running=1;
+source.emit("status",uiProof);
+assert.equal(els["live-running-count"].textContent,"1");
+assert.ok(els["live-sessions"].children[0].children.some(x=>
+  x.textContent.includes("Claude/Codex hiển thị đang xử lý")));
+const fullScreen=enrich(values());
+fullScreen.sessions.items[1].execution_state="RUNNING_VERIFIED";
+fullScreen.sessions.items[1].running_verified=true;
+fullScreen.sessions.items[1].evidence="terminal_screen_delta";
+fullScreen.sessions.items[1].last_checkpoint_at=new Date().toISOString();
+fullScreen.sessions.proven_running=1;
+source.emit("status",fullScreen);
+assert.ok(els["live-sessions"].children[0].children.some(x=>
+  x.textContent.includes("Toàn màn hình terminal thay đổi")));
 const many=enrich(values());
 for(let i=3;i<=30;i++){
   const item={...many.sessions.items[0],label:"Session "+String(i).padStart(2,"0"),
