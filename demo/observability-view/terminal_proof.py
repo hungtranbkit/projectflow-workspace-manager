@@ -30,6 +30,62 @@ _ACTIVE_COMMANDS = frozenset({
 })
 
 
+# Public values are fixed strings, NEVER excerpts of arbitrary terminal data.
+# These indicate patterns visible in recent CLI output, not proof that a test
+# passed, a file was changed or the assignment has been completed.
+_SAFE_ACTIVITY_RULES = (
+    (re.compile(r"^(?:running|starting|executing)\s+(?:(?:unit|integration|smoke|e2e)\s+)?tests?\b", re.I),
+     "Có dòng báo đang chạy kiểm thử"),
+    (re.compile(r"^(?:pytest|python(?:3(?:\.\d+)?)?\s+-m\s+pytest)\b", re.I),
+     "Có dòng lệnh kiểm thử Python"),
+    (re.compile(r"^(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:test|check|lint)\b", re.I),
+     "Có dòng lệnh kiểm thử JavaScript"),
+    (re.compile(r"^(?:collecting\b|collected\s+\d{1,6}\s+items?\b)", re.I),
+     "Có dòng báo thu thập bài kiểm thử"),
+    (re.compile(r"^\d{1,6}\s+passed\b", re.I),
+     "Có dòng báo kết quả kiểm thử PASS"),
+    (re.compile(r"^\d{1,6}\s+failed\b", re.I),
+     "Có dòng báo kiểm thử thất bại"),
+    (re.compile(r"^(?:building|compiling|starting build|running build|npm\s+run\s+build|pnpm\s+build|yarn\s+build)\b", re.I),
+     "Có dòng báo build hoặc biên dịch"),
+    (re.compile(r"^(?:applying patch|applied patch|editing file|edited file|updated file|modified file)\b", re.I),
+     "Có dòng báo thao tác chỉnh sửa file"),
+    (re.compile(r"^(?:reading source|reading code|inspecting source|analyzing code|searching code)\b", re.I),
+     "Có dòng báo đọc hoặc phân tích mã nguồn"),
+    (re.compile(r"^(?:running command|executing command|running tool|executing tool)\b", re.I),
+     "Có dòng báo thực thi công cụ"),
+    (re.compile(r"^(?:error:|traceback \(most recent call last\):)", re.I),
+     "Có dòng thông báo lỗi cần kiểm tra"),
+)
+PUBLIC_ACTIVITY_LABELS = frozenset(label for _, label in _SAFE_ACTIVITY_RULES)
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def safe_recent_activity(output):
+    """Map at most the last eight terminal lines to <=3 *fixed* public hints.
+
+    No terminal source text, paths, commands, secrets, file names, task
+    prompts or arbitrary identifiers survive. An empty list is an honest
+    result when the output contains no approved, meaningful work signals.
+    """
+    if not isinstance(output, str):
+        return []
+    recent = [x.strip() for x in _ANSI_ESCAPE.sub("", output[-4096:]).splitlines()
+              if x.strip()][-8:]
+    result = []
+    for line in reversed(recent):
+        if not line or len(line) > 280:
+            continue
+        for pattern, safe_label in _SAFE_ACTIVITY_RULES:
+            if pattern.search(line):
+                if safe_label not in result:
+                    result.append(safe_label)
+                break
+        if len(result) >= 3:
+            break
+    return result
+
+
 def _unknown_but_foreground(status):
     reason = status.get("reason")
     match = _FOREGROUND.search(reason) if isinstance(reason, str) else None
@@ -452,6 +508,8 @@ class TerminalProofMonitor:
                         record["task_hint"] = label["title"]
                         record["task_source"] = "trusted_task_label"
                     if record is not None:
+                        if record["state"] == "RUNNING_VERIFIED":
+                            record["recent_actions"] = safe_recent_activity(value.get("last_output"))
                         # Node status is trusted for agent type, but never publish a
                         # guessed process name or arbitrary executable as an agent.
                         source_type = value.get("agent_type") or (value.get("resource") or {}).get("agent")

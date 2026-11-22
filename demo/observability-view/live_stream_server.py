@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 
 from export_live_snapshot import snapshot, _read, _instant, _recent, public_node_label
 from public_session_detail import classify_public_session
-from terminal_proof import TerminalProofMonitor, build_terminal_reader
+from terminal_proof import TerminalProofMonitor, build_terminal_reader, PUBLIC_ACTIVITY_LABELS
 
 ORIGIN = "https://hungtranbkit.github.io"
 PREFIX = "/projectflow-live/"
@@ -195,6 +195,13 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
                 "branch_ref": summary["branch_ref"],
                 "last_activity_at": summary["last_activity_at"],
                 "last_checkpoint_at": summary["last_checkpoint_at"],
+                # Never publish raw/private terminal snippets or arbitrary
+                # monitor-provided metadata, even if a future source changes.
+                "recent_actions": [
+                    x for x in (proof.get("recent_actions") or [])[:3]
+                    if isinstance(x, str) and x in PUBLIC_ACTIVITY_LABELS
+                ] if (summary["running_verified"] is True and isinstance(proof, dict)
+                      and isinstance(proof.get("recent_actions"), list)) else [],
             })
     # Rank every registered session BEFORE truncating the public list.
     # A heartbeat never upgrades OPEN_UNVERIFIED to RUNNING_VERIFIED.

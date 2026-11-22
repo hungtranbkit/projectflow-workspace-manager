@@ -138,6 +138,36 @@ fullScreen.sessions.proven_running=1;
 source.emit("status",fullScreen);
 assert.ok(els["live-sessions"].children[0].children.some(x=>
   x.textContent.includes("Toàn màn hình terminal thay đổi")));
+const safeWork=enrich(values());
+safeWork.sessions.items[1].execution_state="RUNNING_VERIFIED";
+safeWork.sessions.items[1].running_verified=true;
+safeWork.sessions.items[1].evidence="agent_ui_busy";
+safeWork.sessions.items[1].last_checkpoint_at=new Date().toISOString();
+safeWork.sessions.items[1].recent_actions=[
+  "Có dòng báo đang chạy kiểm thử", "Có dòng báo build hoặc biên dịch"
+];
+safeWork.sessions.proven_running=1;
+source.emit("status",safeWork);
+const safeCard=els["live-sessions"].children[0];
+const safeRows=safeCard.children.find(x=>x.className==="session-activity-hints");
+assert.ok(safeRows,"Running card must show filtered activity hints");
+assert.equal(safeRows.children.length,3,"Heading + two safe action labels");
+assert.ok(safeRows.children[0].textContent.includes("8 dòng cuối"));
+assert.ok(safeRows.children[1].textContent.includes("đang chạy kiểm thử"));
+const unsafeWork=enrich(values());
+unsafeWork.sessions.items[1].execution_state="RUNNING_VERIFIED";
+unsafeWork.sessions.items[1].running_verified=true;
+unsafeWork.sessions.items[1].evidence="agent_ui_busy";
+unsafeWork.sessions.items[1].recent_actions=["api_key=private-token"];
+unsafeWork.sessions.proven_running=1;
+source.emit("status",unsafeWork);
+assert.equal(els["live-panel"].dataset.health,"unknown",
+  "Client must reject arbitrary terminal text in a public hint");
+const idleWork=enrich(values());
+idleWork.sessions.items[0].recent_actions=["Có dòng báo build hoặc biên dịch"];
+source.emit("status",idleWork);
+assert.equal(els["live-panel"].dataset.health,"unknown",
+  "IDLE may not carry previous RUNNING action hints");
 const many=enrich(values());
 for(let i=3;i<=30;i++){
   const item={...many.sessions.items[0],label:"Session "+String(i).padStart(2,"0"),
