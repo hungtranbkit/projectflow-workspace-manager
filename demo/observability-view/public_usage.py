@@ -62,7 +62,9 @@ def public_usage_projection(raw: Any, *, now: datetime | None = None) -> dict[st
     if sampled is None:
         return default
     age = (now - sampled).total_seconds()
-    if age < -60 or age > _MAX_AGE_SECONDS:
+    if age < -60:
+        return default  # Future timestamps are invalid, not merely old.
+    if age > _MAX_AGE_SECONDS:
         default["status"] = "stale"
         default["sampled_at"] = sampled.isoformat(timespec="seconds")
         return default
