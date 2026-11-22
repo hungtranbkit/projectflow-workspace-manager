@@ -35,6 +35,28 @@ def _unknown_but_foreground(status):
     match = _FOREGROUND.search(reason) if isinstance(reason, str) else None
     return bool(match and match.group(1).casefold() in _ACTIVE_COMMANDS)
 
+def _agent_ui_busy(status):
+    """Trust an actual Claude/Codex in-flight UI marker, not tmux activity.
+
+    Terminal MCP classifies the current CLI's *footer* or agent adapter.
+    We additionally require the foreground command and agent type to match:
+    an old 'esc to interrupt' line in a bash scrollback is not proof.
+    A UI-busy report proves only an executing turn, never a code edit.
+    """
+    if not isinstance(status, dict) or str(status.get("state") or "").upper() != "RUNNING":
+        return False
+    if status.get("input_required") is True:
+        return False
+    agent = str(status.get("agent_type") or "").casefold()
+    reason = status.get("reason")
+    if agent not in ("claude", "codex") or not isinstance(reason, str):
+        return False
+    command = _FOREGROUND.search(reason)
+    if not command or command.group(1).casefold() != agent:
+        return False
+    return (reason.startswith("agent CLI busy footer matched ")
+            or reason.startswith(agent + " adapter reports a turn in flight"))
+
 
 # Fixed, reviewed public labels. Never publish arbitrary user-supplied titles.
 _PUBLIC_TASKS = (
@@ -368,6 +390,13 @@ class TerminalProofMonitor:
                             if 0 <= age <= _RUNNING_AGE:
                                 record = {"state": "RUNNING_VERIFIED", "evidence": "terminal_output_delta",
                                           "observed_at": at, "checkpoint_at": self.proof_at[history_key].isoformat(timespec="seconds")}
+                        # An agent may make no TEXT change in the last 20
+                        # terminal rows while the trusted CLI's busy footer
+                        # explicitly says a turn is in flight. Classify
+                        # that separately from a witnessed screen delta.
+                        if record is None and _agent_ui_busy(value):
+                            record = {"state": "RUNNING_VERIFIED", "evidence": "agent_ui_busy",
+                                      "observed_at": at, "checkpoint_at": at}
                     if raw in ("IDLE", "WAITING_INPUT", "WAITING", "BLOCKED") or value.get("input_required"):
                         # An ended turn invalidates proof before the same session's next run.
                         self.last_hash.pop(history_key, None)
