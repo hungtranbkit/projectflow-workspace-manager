@@ -374,8 +374,43 @@ def build_terminal_reader():
                 label_cache.clear()
             label_cache[key] = (tick, result)
         return result
+    # A bounded, cached authenticated GET of the Dell node's safe usage
+    # summary. Never call its local 8787 monitor from HP, and never publish
+    # the raw node payload without a separate server-side schema projection.
+    # Refresh occurs in a daemon worker so HTTP/SSE/session polling cannot
+    # be held up by Dell's cold provider refresh or an offline node.
+    usage_lock = threading.Lock()
+    usage_cache = {"value": None, "last_at": float("-inf"), "fetching": False}
+
+    def _refresh_usage():
+        raw = None
+        client = remotes.get("dell-linux")
+        if client is not None:
+            try:
+                raw = client._request("GET", "/v1/ai-usage/summary", timeout_seconds=2.0)
+            except Exception:
+                raw = None
+        with usage_lock:
+            usage_cache["value"] = raw
+            usage_cache["last_at"] = time.monotonic()
+            usage_cache["fetching"] = False
+
+    def usage_summary():
+        now_tick = time.monotonic()
+        with usage_lock:
+            age = now_tick - usage_cache["last_at"]
+            # Retry unavailable sources more frequently, but never hammer
+            # an older node missing the optional usage route.
+            period = 60.0 if isinstance(usage_cache["value"], dict) else 20.0
+            if age >= period and not usage_cache["fetching"]:
+                usage_cache["fetching"] = True
+                threading.Thread(target=_refresh_usage, name="public-usage-read",
+                                 daemon=True).start()
+            return usage_cache["value"]
+
     read.list_sessions = list_sessions
     read.task_label = task_label
+    read.usage_summary = usage_summary
     return read
 
 
