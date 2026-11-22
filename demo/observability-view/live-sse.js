@@ -15,6 +15,19 @@
   const caps={healthy:"Khỏe",overloaded:"Quá tải",draining:"Đang drain",unknown:"Chưa rõ"};
   const agents={claude:"Claude",codex:"Codex",shell:"Shell",other:"Khác"};
   const activity={under_1m:"Mới trong 1 phút", "1_to_5m":"1–5 phút trước",over_5m:"Trên 5 phút",unknown:"Chưa có thời điểm"};
+  const publicActivityLabels=new Set([
+    "Có dòng báo đang chạy kiểm thử",
+    "Có dòng lệnh kiểm thử Python",
+    "Có dòng lệnh kiểm thử JavaScript",
+    "Có dòng báo thu thập bài kiểm thử",
+    "Có dòng báo kết quả kiểm thử PASS",
+    "Có dòng báo kiểm thử thất bại",
+    "Có dòng báo build hoặc biên dịch",
+    "Có dòng báo thao tác chỉnh sửa file",
+    "Có dòng báo đọc hoặc phân tích mã nguồn",
+    "Có dòng báo thực thi công cụ",
+    "Có dòng thông báo lỗi cần kiểm tra"
+  ]);
   const execNames={RUNNING_VERIFIED:"RUNNING · có bằng chứng",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Bị kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
   const projects=new Set(["Zalo Group Hub","MESFlow","ESP32 Kiosk / OTA","ProjectFlow","Brand Agent","Screen Remote","RemoteOps","Chưa phân loại"]);
   let activeProject="all";
@@ -52,7 +65,11 @@
            !(s.running_verified===null||(s.running_verified===true&&s.execution_state==="RUNNING_VERIFIED"))||
            (s.commit_ref!==null&&!/^[a-f0-9]{7,12}$/.test(s.commit_ref))||
            (s.branch_ref!==null&&!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,69}$/.test(s.branch_ref))||
-           (s.session!==null&&!(typeof s.session==="string"&&/^[a-z0-9][a-z0-9._-]{2,89}$/.test(s.session))))return false;
+           (s.session!==null&&!(typeof s.session==="string"&&/^[a-z0-9][a-z0-9._-]{2,89}$/.test(s.session)))||
+           (s.recent_actions!==undefined&&(!Array.isArray(s.recent_actions)||
+             s.recent_actions.length>3||
+             !s.recent_actions.every(x=>typeof x==="string"&&publicActivityLabels.has(x))||
+             (s.running_verified!==true&&s.recent_actions.length>0))))return false;
       }
       if(!d.sessions.projects.every(p=>projects.has(p.name)&&int(p.open_sessions)))return false;
       if(d.sessions.proven_running>d.sessions.open)return false;
@@ -215,6 +232,15 @@
           s.execution_state==="IDLE"?"Đã xác minh agent đang chờ lệnh":
           s.execution_state==="WAITING_INPUT"?"Agent đang chờ nhập liệu":
           s.running_verified===true?"RUNNING được xác minh bằng checkpoint mới":"Chưa có bằng chứng code mới / chưa xác minh RUNNING"));
+        if(s.running_verified===true&&Array.isArray(s.recent_actions)&&s.recent_actions.length){
+          const hints=element("div","session-activity-hints");
+          hints.appendChild(element("small","session-activity-title",
+            "Tín hiệu trong 8 dòng cuối · đã lọc, chưa xác minh kết quả"));
+          for(const hint of s.recent_actions){
+            hints.appendChild(element("small","session-activity-line","• "+hint));
+          }
+          li.appendChild(hints);
+        }
         if(s.running_verified===true&&typeof s.last_checkpoint_at==="string"&&
            Number.isFinite(Date.parse(s.last_checkpoint_at))){
           li.appendChild(element("small","session-proof-time",
