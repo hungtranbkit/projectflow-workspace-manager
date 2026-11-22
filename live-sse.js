@@ -56,6 +56,10 @@
       }
       if(!d.sessions.projects.every(p=>projects.has(p.name)&&int(p.open_sessions)))return false;
       if(d.sessions.proven_running>d.sessions.open)return false;
+      if(d.sessions.task_label_verified!==undefined&&
+         (!int(d.sessions.task_label_verified)||d.sessions.task_label_verified>d.sessions.open))return false;
+      if(d.sessions.agent_identified!==undefined&&
+         (!int(d.sessions.agent_identified)||d.sessions.agent_identified>d.sessions.open))return false;
       if(d.sessions.displayed_count!==undefined&&d.sessions.displayed_count!==d.sessions.items.length)return false;
       if(d.sessions.hidden_count!==undefined&&!int(d.sessions.hidden_count))return false;
       if(d.sessions.coverage!==undefined&&d.sessions.coverage!==null){
@@ -76,7 +80,7 @@
     for(const id of ["live-nodes","live-open","live-signal","live-one-minute"])set(id,"—");
     set("live-acceptance","UNKNOWN");set("live-ttl","UNKNOWN");set("live-transport","Chưa kết nối");
     set("live-message",reason||"Không suy diễn dữ liệu nếu nguồn không hợp lệ.");
-    set("live-running-count","—");set("live-running-note","Không có dữ liệu được xác minh");
+    set("live-running-count","—");set("live-running-note","Không có dữ liệu được xác minh");set("live-task-coverage","Nhãn task và agent chưa xác minh.");
     const states=$("live-state-filters");if(states)states.replaceChildren();
     const more=$("live-show-more");if(more)more.hidden=true;
     $("live-node-list").replaceChildren();$("live-sessions").replaceChildren();$("live-changes").replaceChildren();$("live-projects").replaceChildren();set("live-sessions-note","Không có dữ liệu phiên xác minh.");
@@ -148,6 +152,10 @@
         (stateRank[a.execution_state]??9)-(stateRank[b.execution_state]??9)||
         String(a.label).localeCompare(String(b.label)));
       set("live-running-count",d.sessions.proven_running);
+      set("live-task-coverage",int(d.sessions.task_label_verified)&&int(d.sessions.agent_identified)
+        ?"Task có nhãn chính thức: "+d.sessions.task_label_verified+"/"+d.sessions.open+
+         " · Loại agent xác định: "+d.sessions.agent_identified+"/"+d.sessions.open
+        :"Đang chờ số liệu xác minh nguồn task và agent.");
       set("live-running-note",d.sessions.proven_running
         ?"Có bằng chứng hoạt động mới; chưa đồng nghĩa đã sửa code":"Chưa có phiên RUNNING được xác minh từ các node đang kết nối");
       const stateList=$("live-state-filters");

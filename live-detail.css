@@ -29,3 +29,6 @@
 .live-session-list li.session-card.running-first{border-color:#4d9f7d;background:#103529}
 .session-card .session-proof-time{display:block;color:#9cc8d7;font-size:10px;margin:4px 0}
 @media(max-width:690px){.live-running-overview{align-items:flex-start;flex-direction:column}.live-state-filters{margin-right:-8px}}
+
+/* Identity confidence is separate from runtime activity and acceptance. */
+.live-metadata-coverage{font-size:11px;line-height:1.45;color:#afcbd4;margin:5px 0 10px;overflow-wrap:anywhere}
