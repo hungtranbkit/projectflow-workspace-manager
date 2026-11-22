@@ -32,3 +32,9 @@
 
 /* Identity confidence is separate from runtime activity and acceptance. */
 .live-metadata-coverage{font-size:11px;line-height:1.45;color:#afcbd4;margin:5px 0 10px;overflow-wrap:anywhere}
+
+/* These lines are fixed-label hints, never terminal excerpts. Only RUNNING
+   cards get them; keep legible without making the full list taller. */
+.session-activity-hints{display:flex;flex-direction:column;gap:3px;margin:8px 0 5px;padding:8px 10px;border-left:2px solid #65b6a1;background:#142c38;border-radius:5px}
+.session-activity-title{color:#a9cfdd;font-size:10px;font-weight:600}
+.session-activity-line{color:#e0f1eb;font-size:11px;line-height:1.35;overflow-wrap:anywhere}
