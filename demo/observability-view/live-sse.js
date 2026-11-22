@@ -92,6 +92,78 @@
   function element(tag,cl,content){
     const e=document.createElement(tag);if(cl)e.className=cl;if(content!==undefined)e.textContent=String(content);return e;
   }
+  const usageProviders=[["codex","Codex"],["claude","Claude"],["gemini","Gemini"],["antigravity","Antigravity"]];
+  const usageWindows=[["five_hour","5 giờ"],["weekly","7 ngày"]];
+  const safePct=v=>typeof v==="number"&&Number.isFinite(v)&&v>=0&&v<=100;
+  function validUsage(u){
+    if(!u||u.schema_version!==1||u.source_node!=="dell-linux"||
+       !["ok","unavailable","stale"].includes(u.status)||
+       !(u.sampled_at===null||(typeof u.sampled_at==="string"&&
+         Number.isFinite(Date.parse(u.sampled_at))))||
+       !Array.isArray(u.providers)||u.providers.length!==4)return false;
+    for(let i=0;i<usageProviders.length;i++){
+      const p=u.providers[i];
+      if(!p||p.provider!==usageProviders[i][0]||
+         !["available","unavailable","not_observed"].includes(p.state)||
+         !p.windows||typeof p.windows!=="object"||Array.isArray(p.windows)||
+         Object.keys(p.windows).some(k=>!usageWindows.some(item=>item[0]===k)))return false;
+      for(const win of Object.values(p.windows)){
+        if(!win||!safePct(win.used_percent)||!safePct(win.remaining_percent)||
+           Math.abs(win.used_percent+win.remaining_percent-100)>0.25||
+           !(win.reset_at===null||(Number.isSafeInteger(win.reset_at)&&
+             win.reset_at>=946684800&&win.reset_at<=4102444800)))return false;
+      }
+      if(p.state!=="available"&&Object.keys(p.windows).length>0)return false;
+    }
+    return true;
+  }
+  function renderUsage(value){
+    const list=$("live-usage-providers");
+    if(!list)return;
+    list.replaceChildren();
+    if(!validUsage(value)||value.status!=="ok"){
+      set("live-usage-status",value&&value.status==="stale"?"Nguồn đã cũ":"Chưa có nguồn");
+      set("live-usage-time","Nguồn Dell Linux chưa có số liệu quota hợp lệ.");
+      list.appendChild(element("p","usage-unavailable","— Không có dữ liệu usage mới. Không suy diễn là 0%."));
+      return;
+    }
+    set("live-usage-status","Đọc từ Dell · chỉ xem");
+    set("live-usage-time","Dữ liệu Dell lúc "+format(value.sampled_at)+
+        " · Hạn mức tài khoản, không phải token trong session.");
+    for(let i=0;i<usageProviders.length;i++){
+      const p=value.providers[i];
+      const card=element("div","usage-provider");
+      card.appendChild(element("strong","usage-provider-name",usageProviders[i][1]));
+      let populated=0;
+      for(const [key,label] of usageWindows){
+        const win=p.windows[key];
+        if(!win)continue;
+        populated++;
+        const item=element("div","usage-window");
+        const head=element("div","usage-window-head");
+        head.appendChild(element("span","",label));
+        head.appendChild(element("strong","",win.used_percent.toFixed(1)+"% đã dùng"));
+        item.appendChild(head);
+        const track=element("div","usage-track");
+        const fill=element("div","usage-fill");
+        fill.style.width=win.used_percent+"%";
+        fill.setAttribute("role","progressbar");
+        fill.setAttribute("aria-valuemin","0");
+        fill.setAttribute("aria-valuemax","100");
+        fill.setAttribute("aria-valuenow",String(win.used_percent));
+        fill.setAttribute("aria-label",usageProviders[i][1]+" "+label);
+        track.appendChild(fill);
+        item.appendChild(track);
+        item.appendChild(element("small","usage-remaining",
+          "Còn "+win.remaining_percent.toFixed(1)+"%"+
+          (win.reset_at!==null?" · Reset "+format(new Date(win.reset_at*1000).toISOString()):"")));
+        card.appendChild(item);
+      }
+      if(!populated)card.appendChild(element("small","usage-unavailable",
+        p.state==="unavailable"?"Nguồn đang không khả dụng":"Chưa ghi nhận hạn mức"));
+      list.appendChild(card);
+    }
+  }
   function statusUnknown(reason){
     $("live-panel").dataset.health="unknown";set("live-health","UNKNOWN · Chưa xác minh");set("live-time","Không có bản ghi hợp lệ");
     for(const id of ["live-nodes","live-open","live-signal","live-one-minute"])set(id,"—");
@@ -101,6 +173,7 @@
     const states=$("live-state-filters");if(states)states.replaceChildren();
     const more=$("live-show-more");if(more)more.hidden=true;
     $("live-node-list").replaceChildren();$("live-sessions").replaceChildren();$("live-changes").replaceChildren();$("live-projects").replaceChildren();set("live-sessions-note","Không có dữ liệu phiên xác minh.");
+    renderUsage(null);
   }
   function noteChange(d){
     const before=st.previous;
@@ -132,6 +205,7 @@
     $("live-panel").dataset.health=stream?"fresh":"stale";
     set("live-health",stream?"LIVE · Có luồng cập nhật trực tiếp":fallback?"DỮ LIỆU NHANH · Đang dự phòng":"BẢN LƯU · Không realtime");
     set("live-time","Xác minh lúc "+format(d.observed_at));
+    renderUsage(d.usage);
     set("live-nodes",d.nodes.online+" / "+d.nodes.total);
     set("live-open",d.sessions.open);
     set("live-signal",d.sessions.recent_activity_signals);
