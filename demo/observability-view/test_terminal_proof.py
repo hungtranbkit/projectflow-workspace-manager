@@ -257,3 +257,36 @@ def test_previous_instance_title_is_not_reused():
     assert _label_is_current_instance(label, "unique|" + str(now)) is True
     assert _label_is_current_instance(label, "unique|" + str(now + 500)) is False
     assert _label_is_current_instance(label, "unique|not-an-epoch") is False
+
+
+def test_legacy_node_falls_back_only_when_task_label_endpoint_unsupported():
+    from terminal_proof import _read_authenticated_task_label
+    fallback_calls = []
+    def fallback():
+        fallback_calls.append(1)
+        return {"title": "Hoàn thiện giám sát hoạt động agent",
+                "at": "2026-11-22T05:00:00+00:00"}
+    class Old:
+        pass
+    assert _read_authenticated_task_label(Old(), "projectflow-safe",
+                                          on_unsupported=fallback)["title"] == "Hoàn thiện giám sát hoạt động agent"
+    class Unsupported:
+        def get_task_label(self, *_a, **_k):
+            class Http404(Exception):
+                http_status = 404
+            raise Http404()
+    assert _read_authenticated_task_label(Unsupported(), "projectflow-safe",
+                                          on_unsupported=fallback)["title"] == "Hoàn thiện giám sát hoạt động agent"
+    class Denied:
+        def get_task_label(self, *_a, **_k):
+            class Http403(Exception):
+                http_status = 403
+            raise Http403()
+    assert _read_authenticated_task_label(Denied(), "projectflow-safe",
+                                          on_unsupported=fallback) is None
+    class UnknownTask:
+        def get_task_label(self, *_a, **_k):
+            return {"status": "OK", "label": None}
+    assert _read_authenticated_task_label(UnknownTask(), "projectflow-safe",
+                                          on_unsupported=fallback) is None
+    assert len(fallback_calls) == 2
