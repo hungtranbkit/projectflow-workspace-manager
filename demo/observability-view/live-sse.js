@@ -108,7 +108,8 @@
          !p.windows||typeof p.windows!=="object"||Array.isArray(p.windows)||
          Object.keys(p.windows).some(k=>!usageWindows.some(item=>item[0]===k)))return false;
       for(const win of Object.values(p.windows)){
-        if(!win||!safePct(win.used_percent)||!safePct(win.remaining_percent)||
+        if(!win||Object.keys(win).some(k=>!["used_percent","remaining_percent","reset_at"].includes(k))||
+           !safePct(win.used_percent)||!safePct(win.remaining_percent)||
            Math.abs(win.used_percent+win.remaining_percent-100)>0.25||
            !(win.reset_at===null||(Number.isSafeInteger(win.reset_at)&&
              win.reset_at>=946684800&&win.reset_at<=4102444800)))return false;
