@@ -440,21 +440,21 @@ def test_idle_redrawing_screen_never_counts_as_running():
 
 def test_safe_activity_preview_only_uses_fixed_labels_from_last_eight_lines():
     from terminal_proof import safe_recent_activity, PUBLIC_ACTIVITY_LABELS
-    raw = ("PRIVATE_PASSWORD=abc01234\\n"
-           "Running tests for /private/client-a.csv token=sk-secret-123\\n"
-           "Reading code at /home/user/private-repo\\n"
-           "27 passed in 3.50s\\n"
-           "Building client-ui with /home/user/token.txt\\n"
-           "Error: secret path /home/user/private-data\\n")
+    raw = ("PRIVATE_PASSWORD=abc01234\n"
+           "Running tests for /private/client-a.csv token=sk-secret-123\n"
+           "Reading code at /home/user/private-repo\n"
+           "27 passed in 3.50s\n"
+           "Building client-ui with /home/user/token.txt\n"
+           "Error: secret path /home/user/private-data\n")
     hints = safe_recent_activity(raw)
     assert 1 <= len(hints) <= 3
     assert set(hints).issubset(PUBLIC_ACTIVITY_LABELS)
     assert "Có dòng thông báo lỗi cần kiểm tra" in hints
     assert all("secret" not in x and "private" not in x and "sk-" not in x for x in hints)
     assert "PRIVATE_PASSWORD" not in str(hints)
-    assert safe_recent_activity("SECRET=sk-test-123\\nCUSTOMER=private") == []
+    assert safe_recent_activity("SECRET=sk-test-123\nCUSTOMER=private") == []
     assert safe_recent_activity(None) == []
-    assert safe_recent_activity("Running tests\\n" + "ignored output\\n" * 9) == []
+    assert safe_recent_activity("Running tests\n" + "ignored output\n" * 9) == []
 
 
 def test_running_activity_hints_disappear_when_agent_becomes_idle():
@@ -463,7 +463,7 @@ def test_running_activity_hints_disappear_when_agent_becomes_idle():
     observed = {"state": "RUNNING", "exists": True, "allowed": True,
                 "agent_type": "claude",
                 "reason": "agent CLI busy footer matched 'esc to interrupt' at bottom offset 1; current command is 'claude'",
-                "last_output": "Reading code in /private/path\\nRunning tests\\n8 passed in 2.0s"}
+                "last_output": "Reading code in /private/path\nRunning tests\n8 passed in 2.0s"}
     tick = [0.]
     monitor = TerminalProofMonitor(lambda *_: observed.copy(), interval=1,
                                    clock=lambda: tick[0], task_reader=lambda *_: None)
@@ -486,7 +486,7 @@ def test_running_without_safe_activity_text_returns_empty_list_not_raw_excerpt()
     now = datetime(2026, 11, 22, 8, tzinfo=timezone.utc)
     status = {"state": "RUNNING", "agent_type": "codex", "exists": True, "allowed": True,
               "reason": "agent CLI busy footer matched 'esc to interrupt' at bottom offset 1; current command is 'codex'",
-              "last_output": "API_TOKEN=my-secret-value\\nProcessed invoice-0034\\n/Users/private"}
+              "last_output": "API_TOKEN=my-secret-value\nProcessed invoice-0034\n/Users/private"}
     monitor = TerminalProofMonitor(lambda *_: status, task_reader=lambda *_: None)
     result = monitor.snapshot([{"node_id":"macbook","session_name":"projectflow-sensitive-cli"}],now=now)
     record = result[("macbook","projectflow-sensitive-cli")]
