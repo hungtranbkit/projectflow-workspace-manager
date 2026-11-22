@@ -57,6 +57,7 @@ _SAFE_ACTIVITY_RULES = (
     (re.compile(r"^(?:error:|traceback \(most recent call last\):)", re.I),
      "Có dòng thông báo lỗi cần kiểm tra"),
 )
+PUBLIC_ACTIVITY_LABELS = frozenset(label for _, label in _SAFE_ACTIVITY_RULES)
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
