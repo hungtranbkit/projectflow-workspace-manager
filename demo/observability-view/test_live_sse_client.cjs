@@ -90,7 +90,7 @@ assert.ok(els["live-usage-status"].textContent.includes("Dell"));
 assert.equal(els["live-usage-providers"].children.length,4);
 const codexBar=els["live-usage-providers"].children[0].children[1].children[1].children[0];
 assert.equal(codexBar.style.width,"13%");
-assert.ok(els["live-usage-providers"].children[1].children[1].children[0].textContent.includes("5 giờ"));
+assert.ok(els["live-usage-providers"].children[1].children[1].children[0].children[0].textContent.includes("5 giờ"));
 const invalidUsage=enrich(values());
 invalidUsage.usage={...aiUsage.usage,providers:aiUsage.usage.providers.map(x=>({...x}))};
 invalidUsage.usage.providers[0].windows={weekly:{
@@ -98,8 +98,9 @@ invalidUsage.usage.providers[0].windows={weekly:{
 source.emit("status",invalidUsage);
 assert.equal(els["live-panel"].dataset.health,"fresh",
   "Malformed usage must not break session RUNNING/IDLE view");
-assert.equal(els["live-usage-providers"].children.length,4,
-  "Only safe provider fields may be rendered");
+assert.equal(els["live-usage-providers"].children.length,1,
+  "Malicious quota extras must fail closed in the usage widget");
+assert.ok(els["live-usage-status"].textContent.includes("nguồn"));
 assert.ok(!els["live-usage-providers"].children.some(p=>p.textContent.includes("SECRET")));
 const unavailableUsage=enrich(values());
 unavailableUsage.usage={...aiUsage.usage,status:"stale"};
