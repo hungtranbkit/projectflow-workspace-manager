@@ -318,3 +318,41 @@ def test_iso_created_timestamp_is_accepted_for_current_task():
              "at": "2026-11-22T05:55:00+00:00"}
     assert _label_is_current_instance(label, "uuid|2026-11-22T05:45:00+00:00")
     assert not _label_is_current_instance(label, "uuid|2026-11-22T06:10:00+00:00")
+
+
+def test_verified_agent_busy_footer_without_last_20_line_delta():
+    """CLI busy chrome beats a static terminal tail: an executing silent turn."""
+    from terminal_proof import TerminalProofMonitor
+    status = {"state": "RUNNING", "agent_type": "claude", "exists": True, "allowed": True,
+              "reason": "agent CLI busy footer matched 'esc to interrupt' at bottom offset 1; current command is 'claude'",
+              "last_output": "no content changed"}
+    reader = lambda *args: status.copy()
+    monitor = TerminalProofMonitor(reader, interval=1, task_reader=lambda *a: None)
+    row = [{"node_id": "hp-linux", "session_name": "projectflow-claude-ui"}]
+    now = datetime(2026, 11, 22, 2, tzinfo=timezone.utc)
+    result = monitor.snapshot(row, now=now)
+    state = result[("hp-linux", "projectflow-claude-ui")]
+    assert state["state"] == "RUNNING_VERIFIED"
+    assert state["evidence"] == "agent_ui_busy"
+    assert state["checkpoint_at"] == now.isoformat(timespec="seconds")
+    status["state"], status["reason"] = "IDLE", "claude is back at its composer; the turn has finished"
+    monitor.clock = lambda: 42
+    monitor.last_poll = 0
+    state = monitor.snapshot(row, now=now + timedelta(seconds=3))[("hp-linux", "projectflow-claude-ui")]
+    assert state["state"] == "IDLE"
+    assert state["evidence"] == "node_observed"
+
+
+def test_busy_footer_requires_matching_actual_agent_and_not_a_dialog():
+    from terminal_proof import _agent_ui_busy
+    text = "agent CLI busy footer matched 'esc to interrupt' at bottom offset 1; current command is 'claude'"
+    valid = {"state": "RUNNING", "agent_type": "claude",
+             "reason": text, "input_required": False}
+    assert _agent_ui_busy(valid) is True
+    assert _agent_ui_busy({**valid, "agent_type": "shell"}) is False
+    assert _agent_ui_busy({**valid, "input_required": True}) is False
+    assert _agent_ui_busy({**valid, "state": "IDLE"}) is False
+    assert _agent_ui_busy({**valid, "reason": text.replace("'claude'", "'bash'")}) is False
+    assert _agent_ui_busy({**valid, "reason": "current command is 'claude'; tmux activity age is 3s"}) is False
+    assert _agent_ui_busy({**valid, "reason": "claude adapter reports a turn in flight; current command is 'claude'"}) is True
+    assert _agent_ui_busy({**valid, "reason": "Claude is thinking about a task; current command is 'claude'"}) is False
