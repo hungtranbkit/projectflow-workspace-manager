@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 from export_live_snapshot import snapshot, _read, _instant, _recent, public_node_label
 from public_session_detail import classify_public_session
 from terminal_proof import TerminalProofMonitor, build_terminal_reader, PUBLIC_ACTIVITY_LABELS
+from public_usage import public_usage_projection, unavailable_usage
 
 ORIGIN = "https://hungtranbkit.github.io"
 PREFIX = "/projectflow-live/"
@@ -117,6 +118,15 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
     # Observations are privately authenticated node readbacks; only their
     # strict public-safe projection is ever merged into the output payload.
     observed = monitor.snapshot(sr, now=now) if monitor is not None else {}
+    # Quota usage is sourced from Dell's already-sanitized authenticated
+    # node endpoint. Validate AGAIN here before any byte enters public SSE.
+    # A provider error or missing endpoint never becomes a fabricated 0%.
+    source_usage = getattr(getattr(monitor, "reader", None), "usage_summary", None)
+    try:
+        usage_raw = source_usage() if callable(source_usage) else None
+        base["usage"] = public_usage_projection(usage_raw, now=now)
+    except Exception:
+        base["usage"] = unavailable_usage()
     public_names = {key: public_node_label(key, index) for key, index in ids.items()}
     per_node_types = {}
     per_node_fresh60 = Counter()
