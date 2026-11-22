@@ -55,6 +55,8 @@ def public_usage_projection(raw: Any, *, now: datetime | None = None) -> dict[st
         return default
     if raw.get("schema_version") != 1 or raw.get("source") != "dell-local-ai-usage-monitor":
         return default
+    if raw.get("source_status") != "ok":
+        return default
     sampled = _iso(raw.get("sampled_at"))
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if sampled is None:
@@ -65,8 +67,6 @@ def public_usage_projection(raw: Any, *, now: datetime | None = None) -> dict[st
         default["sampled_at"] = sampled.isoformat(timespec="seconds")
         return default
     default["sampled_at"] = sampled.isoformat(timespec="seconds")
-    if raw.get("source_status") != "ok":
-        return default
     items = raw.get("providers")
     if not isinstance(items, list) or len(items) > len(PROVIDERS):
         return default
