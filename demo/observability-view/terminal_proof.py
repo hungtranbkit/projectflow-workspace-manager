@@ -34,30 +34,30 @@ _ACTIVE_COMMANDS = frozenset({
 # These indicate patterns visible in recent CLI output, not proof that a test
 # passed, a file was changed or the assignment has been completed.
 _SAFE_ACTIVITY_RULES = (
-    (re.compile(r"^(?:running|starting|executing)\\s+(?:(?:unit|integration|smoke|e2e)\\s+)?tests?\\b", re.I),
+    (re.compile(r"^(?:running|starting|executing)\s+(?:(?:unit|integration|smoke|e2e)\s+)?tests?\b", re.I),
      "Có dòng báo đang chạy kiểm thử"),
-    (re.compile(r"^(?:pytest|python(?:3(?:\\.\\d+)?)?\\s+-m\\s+pytest)\\b", re.I),
+    (re.compile(r"^(?:pytest|python(?:3(?:\.\d+)?)?\s+-m\s+pytest)\b", re.I),
      "Có dòng lệnh kiểm thử Python"),
-    (re.compile(r"^(?:npm|pnpm|yarn)\\s+(?:run\\s+)?(?:test|check|lint)\\b", re.I),
+    (re.compile(r"^(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:test|check|lint)\b", re.I),
      "Có dòng lệnh kiểm thử JavaScript"),
-    (re.compile(r"^(?:collecting\\b|collected\\s+\\d{1,6}\\s+items?\\b)", re.I),
+    (re.compile(r"^(?:collecting\b|collected\s+\d{1,6}\s+items?\b)", re.I),
      "Có dòng báo thu thập bài kiểm thử"),
-    (re.compile(r"^\\d{1,6}\\s+passed\\b", re.I),
+    (re.compile(r"^\d{1,6}\s+passed\b", re.I),
      "Có dòng báo kết quả kiểm thử PASS"),
-    (re.compile(r"^\\d{1,6}\\s+failed\\b", re.I),
+    (re.compile(r"^\d{1,6}\s+failed\b", re.I),
      "Có dòng báo kiểm thử thất bại"),
-    (re.compile(r"^(?:building|compiling|starting build|running build|npm\\s+run\\s+build|pnpm\\s+build|yarn\\s+build)\\b", re.I),
+    (re.compile(r"^(?:building|compiling|starting build|running build|npm\s+run\s+build|pnpm\s+build|yarn\s+build)\b", re.I),
      "Có dòng báo build hoặc biên dịch"),
-    (re.compile(r"^(?:applying patch|applied patch|editing file|edited file|updated file|modified file)\\b", re.I),
+    (re.compile(r"^(?:applying patch|applied patch|editing file|edited file|updated file|modified file)\b", re.I),
      "Có dòng báo thao tác chỉnh sửa file"),
-    (re.compile(r"^(?:reading source|reading code|inspecting source|analyzing code|searching code)\\b", re.I),
+    (re.compile(r"^(?:reading source|reading code|inspecting source|analyzing code|searching code)\b", re.I),
      "Có dòng báo đọc hoặc phân tích mã nguồn"),
-    (re.compile(r"^(?:running command|executing command|running tool|executing tool)\\b", re.I),
+    (re.compile(r"^(?:running command|executing command|running tool|executing tool)\b", re.I),
      "Có dòng báo thực thi công cụ"),
-    (re.compile(r"^(?:error:|traceback \\(most recent call last\\):)", re.I),
+    (re.compile(r"^(?:error:|traceback \(most recent call last\):)", re.I),
      "Có dòng thông báo lỗi cần kiểm tra"),
 )
-_ANSI_ESCAPE = re.compile(r"\\x1b\\[[0-?]*[ -/]*[@-~]")
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def safe_recent_activity(output):
