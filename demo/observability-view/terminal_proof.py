@@ -41,11 +41,54 @@ _PUBLIC_TASKS = (
     ("crommacode", "Xây dựng nguồn bằng chứng hoạt động agent"),
     ("observability", "Hoàn thiện giám sát hoạt động agent"),
     ("woodpecker", "Kiểm thử hệ thống CI nội bộ"),
+    ("qualitygate", "Kiểm soát chất lượng mã nguồn"),
+    ("quality gate", "Kiểm soát chất lượng mã nguồn"),
     ("autoreply", "Kiểm thử trả lời tự động Zalo"),
     ("zalo", "Hoàn thiện chuyển tiếp tin nhắn Zalo"),
     ("ota", "Kiểm thử OTA ESP32"),
+    ("esp32", "Kiểm thử thiết bị ESP32"),
     ("mesflow", "Kiểm thử quy trình MESFlow"),
+    ("brandagent", "Triển khai Brand Agent"),
+    ("brand agent", "Triển khai Brand Agent"),
+    ("screen remote", "Kiểm thử Screen Remote"),
+    ("screenremote", "Kiểm thử Screen Remote"),
+    ("remoteops", "Kiểm thử RemoteOps"),
+    ("novaretail", "Kiểm thử NovaRetail"),
+    ("projectflow", "Điều phối công việc ProjectFlow"),
 )
+
+
+def _read_authenticated_task_label(client, session, *, on_unsupported=None):
+    """Only an explicit owner title from a bearer-authenticated node.
+
+    The node itself verifies session existence/read access/creation age.
+    Old agents lacking the GET route simply yield None; never read remote
+    raw transcripts or infer a task from another session's name.
+    """
+    getter = getattr(client, "get_task_label", None)
+    if not isinstance(session, str) or not _SAFE_NAME.fullmatch(session):
+        return None
+    if not callable(getter):
+        return on_unsupported() if callable(on_unsupported) else None
+    try:
+        response = getter(session, timeout_seconds=1.5)
+    except Exception as exc:
+        # HTTP 404 is the exact backward-compatibility signal of a node
+        # without this optional route. Auth refusal/transport failure are
+        # NEVER reasons to expose an older cached controller label.
+        if getattr(exc, "http_status", None) == 404 and callable(on_unsupported):
+            return on_unsupported()
+        return None
+    if not isinstance(response, dict) or response.get("status") != "OK":
+        return None
+    label = response.get("label")
+    if not isinstance(label, dict) or label.get("source") != "title":
+        return None
+    title = _public_title(label.get("summary"))
+    at = label.get("updated_at")
+    if not title or _timestamp(at) is None:
+        return None
+    return {"title": title, "at": at}
 
 
 def _timestamp(value):
@@ -65,6 +108,23 @@ def _public_title(raw):
         return None
     normalized = raw.casefold()
     return next((label for needle, label in _PUBLIC_TASKS if needle in normalized), None)
+
+
+def _label_is_current_instance(label, stable_id):
+    """Never attribute a former tmux session's task to its replacement."""
+    if not isinstance(label, dict) or not label.get("title"):
+        return False
+    observed = _timestamp(label.get("at"))
+    if observed is None:
+        return False
+    if not isinstance(stable_id, str) or "|" not in stable_id:
+        return True  # The authorized node GET already checks its instance.
+    creation = stable_id.rpartition("|")[2]
+    try:
+        created = float(creation)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return observed.timestamp() + 5 >= created
 
 
 def read_explicit_task_label(node_id, session, *, db_path=None):
@@ -188,7 +248,31 @@ def build_terminal_reader():
                     "covered_nodes": list(listing["covered_nodes"]),
                     "unreachable_nodes": list(listing["unreachable_nodes"])}
 
+    # An existing node's private task label is never forwarded as-is.
+    # Only the server-owned, fixed public title can leave this process.
+    label_lock = threading.Lock()
+    label_cache = {}
+    def task_label(node_id, session):
+        if node_id == "hp-linux":
+            return read_explicit_task_label(node_id, session)
+        client = remotes.get(node_id)
+        if client is None:
+            return None
+        tick = time.monotonic()
+        key = (node_id, session)
+        with label_lock:
+            previous = label_cache.get(key)
+            if previous and tick - previous[0] < 12.0:
+                return previous[1]
+        result = _read_authenticated_task_label(
+            client, session, on_unsupported=lambda: read_explicit_task_label(node_id, session))
+        with label_lock:
+            if len(label_cache) > 160:
+                label_cache.clear()
+            label_cache[key] = (tick, result)
+        return result
     read.list_sessions = list_sessions
+    read.task_label = task_label
     return read
 
 
@@ -201,7 +285,8 @@ class TerminalProofMonitor:
     """
     def __init__(self, reader, *, interval=8.0, clock=time.monotonic, task_reader=None):
         self.reader = reader
-        self.task_reader = task_reader or read_explicit_task_label
+        self.task_reader = (task_reader or getattr(reader, "task_label", None)
+                            or read_explicit_task_label)
         self.interval = interval
         self.clock = clock
         self.lock = threading.Lock()
@@ -231,15 +316,28 @@ class TerminalProofMonitor:
             self.last_hash = {k: v for k, v in self.last_hash.items() if k in active}
             self.proof_at = {k: v for k, v in self.proof_at.items() if k in active}
             observed = {}
+            def read_one(node, name):
+                value = self.reader(node, name)
+                if not isinstance(value, dict) or value.get("error") or value.get("exists") is False or value.get("allowed") is False:
+                    return value, None
+                try:
+                    label = self.task_reader(node, name)
+                except Exception:
+                    label = None  # Title failure must not conceal a valid node state.
+                return value, label
+
+            # Both private HTTP reads run inside the same bounded worker.
+            # A slow node label route can no longer serially block all other
+            # node status observations or the public SSE response.
             with ThreadPoolExecutor(max_workers=8) as executor:
-                futs = {executor.submit(self.reader, node, name): (node, name, stable_id, generation)
+                futs = {executor.submit(read_one, node, name): (node, name, stable_id, generation)
                         for node, name, stable_id, generation in names}
                 for fut in as_completed(futs):
                     node, name, stable_id, generation = futs[fut]
                     key = (node, name)
                     history_key = (node, name, stable_id, generation)
                     try:
-                        value = fut.result()
+                        value, label = fut.result()
                     except Exception:
                         continue
                     if not isinstance(value, dict) or value.get("error") or value.get("exists") is False or value.get("allowed") is False:
@@ -270,6 +368,15 @@ class TerminalProofMonitor:
                         # An ended turn invalidates proof before the same session's next run.
                         self.last_hash.pop(history_key, None)
                         self.proof_at.pop(history_key, None)
+                    # An explicitly assigned task is independent of liveness.
+                    # UNKNOWN execution can have a verified label without
+                    # becoming RUNNING or implying a new code checkpoint.
+                    if _label_is_current_instance(label, stable_id):
+                        if record is None:
+                            record = {"state": "OPEN_UNVERIFIED", "evidence": "registry_only",
+                                      "observed_at": at}
+                        record["task_hint"] = label["title"]
+                        record["task_source"] = "trusted_task_label"
                     if record is not None:
                         # Node status is trusted for agent type, but never publish a
                         # guessed process name or arbitrary executable as an agent.
@@ -277,11 +384,7 @@ class TerminalProofMonitor:
                         agent_type = str(source_type or "").casefold()
                         if agent_type in ("claude", "codex", "shell"):
                             record["agent_type"] = agent_type
-                        # An explicit owner title is trusted metadata, not a proof of activity.
-                        label = self.task_reader(*key)
-                        if label and label.get("title") and _timestamp(label.get("at")):
-                            record["task_hint"] = label["title"]
-                            record["task_source"] = "trusted_task_label"
+                        # Task metadata cannot substitute for execution evidence.
                         observed[key] = record
             self.last_result = observed
             return self._fresh(now)

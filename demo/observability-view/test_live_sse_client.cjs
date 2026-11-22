@@ -11,7 +11,7 @@ class Element{
 const ids=["live-panel","live-health","live-time","live-nodes","live-open","live-signal",
  "live-one-minute","live-acceptance","live-ttl","live-transport","live-message",
  "live-node-list","live-sessions","live-sessions-note","live-projects","live-changes","live-refresh",
- "live-running-count","live-running-note","live-state-filters","live-show-more"];
+ "live-running-count","live-running-note","live-task-coverage","live-state-filters","live-show-more"];
 const els=Object.fromEntries(ids.map(i=>[i,new Element(i)]));
 const document={hidden:false,listeners:{},getElementById:i=>{assert.ok(els[i],"missing DOM #"+i);return els[i]},
  createElement:type=>new Element(type),addEventListener(k,f){this.listeners[k]=f;}};
@@ -78,7 +78,11 @@ named.nodes.items[0].label="hp-linux";
 named.nodes.items[1].label="m910";
 named.sessions.items[0].node="hp-linux";
 named.sessions.items[1].node="m910";
+named.sessions.task_label_verified=1;
+named.sessions.agent_identified=2;
 source.emit("status",named);
+assert.ok(els["live-task-coverage"].textContent.includes("1/3"));
+assert.ok(els["live-task-coverage"].textContent.includes("2/3"));
 assert.equal(els["live-node-list"].children[0].children[0].textContent,"hp-linux");
 assert.equal(els["live-node-list"].children[1].children[0].textContent,"m910");
 assert.equal(els["live-sessions"].children[0].children[1].textContent.includes("hp-linux"),true);

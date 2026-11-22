@@ -439,3 +439,32 @@ def test_fleet_source_unavailable_does_not_count_stale_active_rows(tmp_path):
     assert data["sessions"]["coverage"]["unreachable_nodes"] == ["hp-linux"]
     assert data["sessions"]["proven_running"] == 0
     assert "projectflow-observability-stale" not in json.dumps(data)
+
+
+def test_known_assignment_does_not_promote_unverified_execution(tmp_path):
+    now = datetime(2026, 11, 22, 6, 0, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("m910", "online", ts, "healthy", "EXECUTION_OK", "host", "ref"))
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records (node_id,agent_type,status,deleted_at,"
+                   "last_activity_at,last_seen_at,session_name,launch_command)"
+                   " VALUES(?,?,?,?,?,?,?,?)",
+                   ("m910", "codex", "ACTIVE", None, ts, ts, "projectflow-remote",
+                    "internal command"))
+    class Witness:
+        def snapshot(self, rows, *, now):
+            return {("m910", "projectflow-remote"): {
+                "state": "OPEN_UNVERIFIED", "evidence": "registry_only",
+                "observed_at": ts, "task_hint": "Hoàn thiện giám sát hoạt động agent",
+                "task_source": "trusted_task_label"}}
+    d = detailed_snapshot(nodes, sessions, now=now, monitor=Witness())
+    row = d["sessions"]["items"][0]
+    assert row["task_hint"] == "Hoàn thiện giám sát hoạt động agent"
+    assert row["task_source"] == "trusted_task_label"
+    assert row["execution_state"] == "OPEN_UNVERIFIED"
+    assert row["running_verified"] is None
+    assert d["sessions"]["proven_running"] == 0
+    assert "internal command" not in json.dumps(d)

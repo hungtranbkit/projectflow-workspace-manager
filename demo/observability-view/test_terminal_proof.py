@@ -167,3 +167,146 @@ def test_remote_node_never_inherits_hp_local_task_label(tmp_path):
     assert read_explicit_task_label("m910", "projectflow-session", db_path=db_path) is None
     owned = read_explicit_task_label("hp-linux", "projectflow-session", db_path=db_path)
     assert owned["title"] == "Xây dựng nguồn bằng chứng hoạt động agent"
+
+
+def test_remote_node_explicit_task_returns_only_public_curated_title():
+    from terminal_proof import _read_authenticated_task_label
+    seen = []
+    class Remote:
+        def get_task_label(self, session, *, timeout_seconds=None):
+            seen.append((session, timeout_seconds))
+            return {"status": "OK", "label": {
+                "source": "title", "updated_at": "2026-11-22T05:00:00+00:00",
+                "summary": "CrommaCode internal customer invoice password=hidden",
+                "task_id": "internal-task-123", "request_key": "private-receipt",
+            }}
+    projected = _read_authenticated_task_label(Remote(), "projectflow-proof")
+    assert projected == {
+        "title": "Xây dựng nguồn bằng chứng hoạt động agent",
+        "at": "2026-11-22T05:00:00+00:00",
+    }
+    assert seen == [("projectflow-proof", 1.5)]
+    assert "hidden" not in json.dumps(projected)
+    assert "task-123" not in json.dumps(projected)
+
+
+def test_remote_task_label_denials_unsupported_and_non_explicit_fail_closed():
+    from terminal_proof import _read_authenticated_task_label
+    class Old:  # older authenticated node without GET task-label
+        pass
+    assert _read_authenticated_task_label(Old(), "projectflow-proof") is None
+    class Denied:
+        def get_task_label(self, *_a, **_k):
+            raise PermissionError("not authorized")
+    assert _read_authenticated_task_label(Denied(), "projectflow-proof") is None
+    class Prompt:
+        def get_task_label(self, *_a, **_k):
+            return {"status": "OK", "label": {
+                "source": "prompt_fallback", "summary": "CrommaCode private prompt",
+                "updated_at": "2026-11-22T05:00:00+00:00",
+            }}
+    assert _read_authenticated_task_label(Prompt(), "projectflow-proof") is None
+    assert _read_authenticated_task_label(Prompt(), "../private") is None
+
+
+def test_monitor_uses_authenticated_remote_title_without_inferring_running():
+    from terminal_proof import TerminalProofMonitor
+    class Readable:
+        def __call__(self, _node, _name):
+            return {"exists": True, "allowed": True, "state": "IDLE"}
+        def task_label(self, _node, _name):
+            return {"title": "Hoàn thiện giám sát hoạt động agent",
+                    "at": "2026-11-22T05:00:00+00:00"}
+    rows = [{"node_id": "m910", "session_name": "projectflow-observability-test",
+             "stable_session_id": "unique", "generation": 1}]
+    now = datetime(2026, 11, 22, 5, tzinfo=timezone.utc)
+    monitor = TerminalProofMonitor(Readable())
+    data = monitor.snapshot(rows, now=now)
+    detail = data[("m910", "projectflow-observability-test")]
+    assert detail["state"] == "IDLE"
+    assert detail["task_source"] == "trusted_task_label"
+    assert detail["task_hint"] == "Hoàn thiện giám sát hoạt động agent"
+    assert detail.get("checkpoint_at") is None
+
+
+def test_authenticated_assignment_survives_unknown_execution_without_running():
+    from terminal_proof import TerminalProofMonitor
+    class Reader:
+        def __call__(self, *_):
+            return {"exists": True, "allowed": True, "state": "UNKNOWN",
+                    "reason": "no trustworthy execution progress"}
+        def task_label(self, *_):
+            return {"title": "Điều phối công việc ProjectFlow",
+                    "at": "2026-11-22T06:00:05+00:00"}
+    now = datetime(2026, 11, 22, 6, 0, 7, tzinfo=timezone.utc)
+    row = [{"node_id": "m910", "session_name": "projectflow-unknown",
+            "stable_session_id": "unique|1795327200", "generation": 1}]
+    result = TerminalProofMonitor(Reader()).snapshot(row, now=now)
+    obj = result[("m910", "projectflow-unknown")]
+    assert obj["state"] == "OPEN_UNVERIFIED"
+    assert obj["task_source"] == "trusted_task_label"
+    assert obj["task_hint"] == "Điều phối công việc ProjectFlow"
+    assert "checkpoint_at" not in obj
+
+
+def test_previous_instance_title_is_not_reused():
+    from terminal_proof import _label_is_current_instance
+    label = {"title": "Hoàn thiện giám sát hoạt động agent",
+             "at": "2026-11-22T06:00:00+00:00"}
+    now = datetime(2026, 11, 22, 6, tzinfo=timezone.utc).timestamp()
+    assert _label_is_current_instance(label, "unique|" + str(now)) is True
+    assert _label_is_current_instance(label, "unique|" + str(now + 500)) is False
+    assert _label_is_current_instance(label, "unique|not-an-epoch") is False
+
+
+def test_legacy_node_falls_back_only_when_task_label_endpoint_unsupported():
+    from terminal_proof import _read_authenticated_task_label
+    fallback_calls = []
+    def fallback():
+        fallback_calls.append(1)
+        return {"title": "Hoàn thiện giám sát hoạt động agent",
+                "at": "2026-11-22T05:00:00+00:00"}
+    class Old:
+        pass
+    assert _read_authenticated_task_label(Old(), "projectflow-safe",
+                                          on_unsupported=fallback)["title"] == "Hoàn thiện giám sát hoạt động agent"
+    class Unsupported:
+        def get_task_label(self, *_a, **_k):
+            class Http404(Exception):
+                http_status = 404
+            raise Http404()
+    assert _read_authenticated_task_label(Unsupported(), "projectflow-safe",
+                                          on_unsupported=fallback)["title"] == "Hoàn thiện giám sát hoạt động agent"
+    class Denied:
+        def get_task_label(self, *_a, **_k):
+            class Http403(Exception):
+                http_status = 403
+            raise Http403()
+    assert _read_authenticated_task_label(Denied(), "projectflow-safe",
+                                          on_unsupported=fallback) is None
+    class UnknownTask:
+        def get_task_label(self, *_a, **_k):
+            return {"status": "OK", "label": None}
+    assert _read_authenticated_task_label(UnknownTask(), "projectflow-safe",
+                                          on_unsupported=fallback) is None
+    assert len(fallback_calls) == 2
+
+
+def test_slow_task_readbacks_do_not_serialize_across_node_sessions():
+    import threading
+    from terminal_proof import TerminalProofMonitor
+    meeting = threading.Barrier(2)
+    rows = [
+        {"node_id": "hp-linux", "session_name": "projectflow-first"},
+        {"node_id": "m910", "session_name": "projectflow-second"},
+    ]
+    def state(_node, _session):
+        return {"exists": True, "allowed": True, "state": "IDLE"}
+    def task(_node, _session):
+        meeting.wait(timeout=4)
+        return {"title": "Hoàn thiện giám sát hoạt động agent",
+                "at": "2026-11-22T06:00:00+00:00"}
+    now = datetime(2026, 11, 22, 6, tzinfo=timezone.utc)
+    observed = TerminalProofMonitor(state, task_reader=task).snapshot(rows, now=now)
+    assert len(observed) == 2
+    assert all(v["task_source"] == "trusted_task_label" for v in observed.values())

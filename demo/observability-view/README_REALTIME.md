@@ -82,3 +82,32 @@ does not imply that source edits or tests have passed. New remote session
 slugs are not exposed; public node labels, finite curated task categories
 and the evidence type remain allowlisted. For the audited privacy boundary,
 see `docs/PUBLIC_AGENT_PROOF_SECURITY_REVIEW.md`.
+
+## Task identity from remote node ownership (P0 extension)
+
+A Terminal MCP node with the optional authenticated
+`GET /v1/sessions/{name}/task-label` endpoint can return the explicit
+owner-assigned title of the **current** session instance and its assignment
+time. Only the owning node can confirm it; the HP view no longer treats HP's
+audit DB as authoritative for unrelated remote nodes. When a node lacks the
+new read-only endpoint, denies access, or the task label was derived from a
+prompt rather than an explicit title, the collector reports no trusted title
+and keeps any existing name-based guess clearly labeled as a guess.
+
+Before any title enters the public SSE projection, the server maps it onto a
+fixed, reviewed list of broad project/task categories and drops the original
+text and private task ID. No raw task title, prompt, request key or file path
+is sent to the public client. Assignment confidence and execution liveness
+are separate: an authenticated task may remain OPEN_UNVERIFIED or IDLE.
+
+The UI now reports aggregate counts of sessions with explicit task labels
+and sessions whose agent type has been identified, so incomplete coverage
+is visible. Proof of a file edit or a successful test is **not** derived
+from terminal output growth. Exact file lists/test reports require the
+separate, authorization-controlled Task observability view, not an
+unauthenticated public feed.
+
+The node extension is opt-in and backward compatible: the ProjectFlow
+collector uses only read-only remote calls and a short cache, and ignores
+an older node that does not implement the endpoint. No node upgrade is
+required merely to keep the current RUNNING/IDLE feed working.
