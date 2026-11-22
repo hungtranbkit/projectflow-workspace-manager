@@ -58,7 +58,7 @@ _PUBLIC_TASKS = (
 )
 
 
-def _read_authenticated_task_label(client, session):
+def _read_authenticated_task_label(client, session, *, on_unsupported=None):
     """Only an explicit owner title from a bearer-authenticated node.
 
     The node itself verifies session existence/read access/creation age.
@@ -66,11 +66,18 @@ def _read_authenticated_task_label(client, session):
     raw transcripts or infer a task from another session's name.
     """
     getter = getattr(client, "get_task_label", None)
-    if not callable(getter) or not isinstance(session, str) or not _SAFE_NAME.fullmatch(session):
+    if not isinstance(session, str) or not _SAFE_NAME.fullmatch(session):
         return None
+    if not callable(getter):
+        return on_unsupported() if callable(on_unsupported) else None
     try:
         response = getter(session, timeout_seconds=1.5)
-    except Exception:
+    except Exception as exc:
+        # HTTP 404 is the exact backward-compatibility signal of a node
+        # without this optional route. Auth refusal/transport failure are
+        # NEVER reasons to expose an older cached controller label.
+        if getattr(exc, "http_status", None) == 404 and callable(on_unsupported):
+            return on_unsupported()
         return None
     if not isinstance(response, dict) or response.get("status") != "OK":
         return None
@@ -257,7 +264,8 @@ def build_terminal_reader():
             previous = label_cache.get(key)
             if previous and tick - previous[0] < 12.0:
                 return previous[1]
-        result = _read_authenticated_task_label(client, session)
+        result = _read_authenticated_task_label(
+            client, session, on_unsupported=lambda: read_explicit_task_label(node_id, session))
         with label_lock:
             if len(label_cache) > 160:
                 label_cache.clear()
