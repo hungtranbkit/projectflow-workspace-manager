@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "terminal-mcp-public-aggregate",
-  "observed_at": "2026-11-22T17:05:16+00:00",
+  "observed_at": "2026-11-22T17:10:18+00:00",
   "expected_refresh_seconds": 300,
   "fresh_window_seconds": 300,
   "nodes": {
@@ -32,7 +32,7 @@
         "label": "local",
         "status": "offline",
         "open_sessions": 10,
-        "recent_activity_signals": 10
+        "recent_activity_signals": 0
       },
       {
         "label": "m910",
@@ -68,7 +68,7 @@
   },
   "sessions": {
     "open": 20,
-    "recent_activity_signals": 20,
+    "recent_activity_signals": 10,
     "running_verified": null
   },
   "acceptance": {
