@@ -162,3 +162,30 @@ that the task's current run succeeded, and not that the agent changed any
 source files or was accepted. Only an access-controlled internal task detail
 view should show actual raw terminal lines, filenames, command arguments or
 full test logs. Public read-only CrommaCode never publishes those details.
+
+## Dell AI Usage (optional authenticated quota summary)
+
+The public overview displays **Dell Linux** subscription quota usage from
+the existing Dell AI Usage Monitor, not token usage from individual tmux
+sessions and not a fleet-wide account total. No raw account name, API key,
+OAuth credential, prompt, path, model cost or terminal output is published.
+
+Dell's node-agent opt-in `GET /v1/ai-usage/summary` is authenticated by
+its existing bearer token and reads only Dell's loopback
+`127.0.0.1:8787/api/usage`. The HP ProjectFlow SSE collector asks that
+already-authorized node endpoint in a daemon thread with a short cache.
+The public backend applies a **second** strict schema projector and
+publishes only a fixed set of providers, the supplied numeric used/remaining
+percentages, reset epochs and sample timestamp. Unknown or absent windows
+display a dash rather than a fabricated zero. Stale (>15m), invalid and
+unreachable sources explicitly display unavailable.
+
+The mobile UI shows separate Codex/Claude/Gemini/Antigravity usage cards.
+Missing provider quotas are not errors and do not affect RUNNING/IDLE
+session monitoring. The endpoint requires a compatible Dell node-agent
+build; before its rollout the public page will honestly show usage
+unavailable. It does not open the Dell local 8787 service to the Internet.
+
+Rollback is independent: disable the Dell optional node endpoint by
+reverting node-agent build, or revert the ProjectFlow SSE/Pages commits.
+The existing agent session monitoring does not depend on Dell usage.

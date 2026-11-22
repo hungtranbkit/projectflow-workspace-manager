@@ -514,3 +514,53 @@ def test_public_running_activity_hints_are_allowlisted_and_removed_on_idle(tmp_p
     assert data["sessions"]["proven_running"] == 1
     assert "SECRET_PRIVATE_PASSWORD" not in json.dumps(data)
     assert "PRIVATE_COMMAND_TOKEN" not in json.dumps(data)
+
+
+def test_live_snapshot_adds_sanitized_dell_ai_usage_without_leaking_account(tmp_path):
+    now = datetime(2026, 11, 22, 3, 30, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("dell-linux", "online", ts, "healthy", "EXECUTION_OK", "private", "secret"))
+    class Reader:
+        def usage_summary(self):
+            return {"schema_version": 1, "kind": "terminal-mcp-public-ai-usage",
+                    "source": "dell-local-ai-usage-monitor", "source_status": "ok",
+                    "sampled_at": ts,
+                    "account": "private@example.invalid", "password": "not-for-public",
+                    "providers": [
+                        {"provider": "codex", "state": "available",
+                         "windows": {"weekly": {"used_percent": 13.0,
+                                                "remaining_percent": 87.0,
+                                                "reset_at": None}}},
+                        {"provider": "claude", "state": "not_observed", "windows": {}},
+                        {"provider": "gemini", "state": "not_observed", "windows": {}},
+                        {"provider": "antigravity", "state": "not_observed", "windows": {}},
+                    ]}
+    class Monitor:
+        reader = Reader()
+        def snapshot(self, rows, *, now):
+            return {}
+    d = detailed_snapshot(nodes, sessions, now=now, monitor=Monitor())
+    assert d["usage"]["status"] == "ok"
+    assert d["usage"]["providers"][0]["windows"]["weekly"]["used_percent"] == 13.0
+    assert d["sessions"]["proven_running"] == 0  # quota never implies a running task
+    assert "private@example.invalid" not in json.dumps(d)
+    assert "not-for-public" not in json.dumps(d)
+
+
+def test_usage_source_failure_does_not_take_down_session_overview(tmp_path):
+    now = datetime(2026, 11, 22, 3, 30, tzinfo=timezone.utc)
+    nodes, sessions = _dbs(tmp_path)
+    class Broken:
+        def usage_summary(self):
+            raise PermissionError("private account must not be printed")
+    class Monitor:
+        reader = Broken()
+        def snapshot(self, rows, *, now):
+            return {}
+    d = detailed_snapshot(nodes, sessions, now=now, monitor=Monitor())
+    assert d["usage"]["status"] == "unavailable"
+    assert all(p["windows"] == {} for p in d["usage"]["providers"])
+    assert "PermissionError" not in json.dumps(d)

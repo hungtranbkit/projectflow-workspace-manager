@@ -11,7 +11,8 @@ class Element{
 const ids=["live-panel","live-health","live-time","live-nodes","live-open","live-signal",
  "live-one-minute","live-acceptance","live-ttl","live-transport","live-message",
  "live-node-list","live-sessions","live-sessions-note","live-projects","live-changes","live-refresh",
- "live-running-count","live-running-note","live-task-coverage","live-state-filters","live-show-more"];
+ "live-running-count","live-running-note","live-task-coverage","live-state-filters","live-show-more",
+  "live-ai-usage","live-usage-status","live-usage-time","live-usage-providers"];
 const els=Object.fromEntries(ids.map(i=>[i,new Element(i)]));
 const document={hidden:false,listeners:{},getElementById:i=>{assert.ok(els[i],"missing DOM #"+i);return els[i]},
  createElement:type=>new Element(type),addEventListener(k,f){this.listeners[k]=f;}};
@@ -73,6 +74,40 @@ assert.ok(els["live-sessions"].children[0].children.some(x=>x.textContent.includ
 assert.ok(els["live-projects"].children.length>=3);
 assert.ok(els["live-sessions"].children[0].children.some(x=>x.textContent.includes("chưa xác minh RUNNING")));
 assert.ok(els["live-transport"].textContent.includes("SSE"));
+const aiUsage=enrich(values());
+aiUsage.usage={schema_version:1,source_node:"dell-linux",status:"ok",
+  sampled_at:new Date().toISOString(),providers:[
+    {provider:"codex",state:"available",windows:{
+      weekly:{used_percent:13.0,remaining_percent:87.0,reset_at:null}}},
+    {provider:"claude",state:"available",windows:{
+      five_hour:{used_percent:6.0,remaining_percent:94.0,reset_at:null},
+      weekly:{used_percent:1.0,remaining_percent:99.0,reset_at:null}}},
+    {provider:"gemini",state:"not_observed",windows:{}},
+    {provider:"antigravity",state:"not_observed",windows:{}}
+  ]};
+source.emit("status",aiUsage);
+assert.ok(els["live-usage-status"].textContent.includes("Dell"));
+assert.equal(els["live-usage-providers"].children.length,4);
+const codexBar=els["live-usage-providers"].children[0].children[1].children[1].children[0];
+assert.equal(codexBar.style.width,"13%");
+assert.ok(els["live-usage-providers"].children[1].children[1].children[0].children[0].textContent.includes("5 giờ"));
+const invalidUsage=enrich(values());
+invalidUsage.usage={...aiUsage.usage,providers:aiUsage.usage.providers.map(x=>({...x}))};
+invalidUsage.usage.providers[0].windows={weekly:{
+  used_percent:99,remaining_percent:1,reset_at:null,access_token:"SECRET"}};
+source.emit("status",invalidUsage);
+assert.equal(els["live-panel"].dataset.health,"fresh",
+  "Malformed usage must not break session RUNNING/IDLE view");
+assert.equal(els["live-usage-providers"].children.length,1,
+  "Malicious quota extras must fail closed in the usage widget");
+assert.ok(els["live-usage-status"].textContent.includes("nguồn"));
+assert.ok(!els["live-usage-providers"].children.some(p=>p.textContent.includes("SECRET")));
+const unavailableUsage=enrich(values());
+unavailableUsage.usage={...aiUsage.usage,status:"stale"};
+source.emit("status",unavailableUsage);
+assert.ok(els["live-usage-status"].textContent.includes("cũ"));
+source.emit("status",enrich(values()));
+assert.ok(els["live-usage-status"].textContent.includes("nguồn"));
 const named=enrich(values());
 named.nodes.items[0].label="hp-linux";
 named.nodes.items[1].label="m910";
