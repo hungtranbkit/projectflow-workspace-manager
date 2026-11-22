@@ -41,10 +41,20 @@ _PUBLIC_TASKS = (
     ("crommacode", "Xây dựng nguồn bằng chứng hoạt động agent"),
     ("observability", "Hoàn thiện giám sát hoạt động agent"),
     ("woodpecker", "Kiểm thử hệ thống CI nội bộ"),
+    ("qualitygate", "Kiểm soát chất lượng mã nguồn"),
+    ("quality gate", "Kiểm soát chất lượng mã nguồn"),
     ("autoreply", "Kiểm thử trả lời tự động Zalo"),
     ("zalo", "Hoàn thiện chuyển tiếp tin nhắn Zalo"),
     ("ota", "Kiểm thử OTA ESP32"),
+    ("esp32", "Kiểm thử thiết bị ESP32"),
     ("mesflow", "Kiểm thử quy trình MESFlow"),
+    ("brandagent", "Triển khai Brand Agent"),
+    ("brand agent", "Triển khai Brand Agent"),
+    ("screen remote", "Kiểm thử Screen Remote"),
+    ("screenremote", "Kiểm thử Screen Remote"),
+    ("remoteops", "Kiểm thử RemoteOps"),
+    ("novaretail", "Kiểm thử NovaRetail"),
+    ("projectflow", "Điều phối công việc ProjectFlow"),
 )
 
 
