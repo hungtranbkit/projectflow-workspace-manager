@@ -290,3 +290,23 @@ def test_legacy_node_falls_back_only_when_task_label_endpoint_unsupported():
     assert _read_authenticated_task_label(UnknownTask(), "projectflow-safe",
                                           on_unsupported=fallback) is None
     assert len(fallback_calls) == 2
+
+
+def test_slow_task_readbacks_do_not_serialize_across_node_sessions():
+    import threading
+    from terminal_proof import TerminalProofMonitor
+    meeting = threading.Barrier(2)
+    rows = [
+        {"node_id": "hp-linux", "session_name": "projectflow-first"},
+        {"node_id": "m910", "session_name": "projectflow-second"},
+    ]
+    def state(_node, _session):
+        return {"exists": True, "allowed": True, "state": "IDLE"}
+    def task(_node, _session):
+        meeting.wait(timeout=4)
+        return {"title": "Hoàn thiện giám sát hoạt động agent",
+                "at": "2026-11-22T06:00:00+00:00"}
+    now = datetime(2026, 11, 22, 6, tzinfo=timezone.utc)
+    observed = TerminalProofMonitor(state, task_reader=task).snapshot(rows, now=now)
+    assert len(observed) == 2
+    assert all(v["task_source"] == "trusted_task_label" for v in observed.values())
