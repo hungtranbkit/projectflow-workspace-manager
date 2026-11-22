@@ -138,3 +138,27 @@ distinguishes the evidence categories without publishing raw terminal lines,
 commands, exact task bodies, paths, tokens or user content. No node-agent
 upgrade is required; these use existing authenticated GET status and tail
 routes. Verification still expires if the node cannot be read.
+
+## Recent work hints from a verified RUNNING terminal (22 Nov 2026)
+
+For the owner's mobile question "session đang chạy làm gì", the producer can
+inspect the **already-redacted last 20-line status tail**, but only classify
+up to its **last 8 non-empty lines**, and only after a separate trustworthy
+RUNNING proof. The public view renders no more than **three fixed Vietnamese
+work hints** (tests, build, source inspection, file edits, tool activity or
+error signals). The original terminal lines never appear in public HTTP/SSE,
+JavaScript, saved archives or browser storage.
+
+The mapping is intentionally strict and coarse. The server projects only
+labels in a fixed owned allowlist; the client independently validates the
+same allowed strings and uses `textContent`. If output has no safe match,
+`recent_actions=[]` and the UI does **not** manufacture activity. On IDLE,
+WAITING_INPUT or a stale checkpoint the hints disappear. The field is
+optional for older persisted snapshots.
+
+A hint such as "Có dòng báo kết quả kiểm thử PASS" means a **line that
+looks like a test PASS report exists in the recent terminal output**, not
+that the task's current run succeeded, and not that the agent changed any
+source files or was accepted. Only an access-controlled internal task detail
+view should show actual raw terminal lines, filenames, command arguments or
+full test logs. Public read-only CrommaCode never publishes those details.
