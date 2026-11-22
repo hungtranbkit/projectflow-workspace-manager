@@ -502,9 +502,11 @@ def test_public_running_activity_hints_are_allowlisted_and_removed_on_idle(tmp_p
                     ]},
             }
     data = detailed_snapshot(nodes, sessions, now=now, monitor=Witness())
-    rows = {x["session"]: x for x in data["sessions"]["items"]}
-    run = rows["projectflow-running-proof"]
-    idle = rows["projectflow-idle-proof"]
+    # Public session names may be masked; classify by verified state.
+    run = next(x for x in data["sessions"]["items"]
+               if x["execution_state"] == "RUNNING_VERIFIED")
+    idle = next(x for x in data["sessions"]["items"]
+                if x["execution_state"] == "IDLE")
     assert run["recent_actions"] == [
         "Có dòng báo đang chạy kiểm thử", "Có dòng báo build hoặc biên dịch"
     ]
