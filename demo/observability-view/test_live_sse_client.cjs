@@ -86,6 +86,23 @@ assert.ok(els["live-task-coverage"].textContent.includes("2/3"));
 assert.equal(els["live-node-list"].children[0].children[0].textContent,"hp-linux");
 assert.equal(els["live-node-list"].children[1].children[0].textContent,"m910");
 assert.equal(els["live-sessions"].children[0].children[1].textContent.includes("hp-linux"),true);
+// Node cards are ranked by current connection status, never registry order.
+const ordered=enrich(values());
+const makeNode=(label,status)=>({...ordered.nodes.items[0],label,status});
+ordered.nodes.items=[
+  makeNode("local","offline"), makeNode("m910","online"),
+  makeNode("win","unknown"), makeNode("nec1","degraded"),
+  makeNode("hp-linux","online"), makeNode("dell-linux","online"),
+  makeNode("macbook","offline")
+];
+ordered.nodes.total=7;ordered.nodes.online=3;ordered.nodes.degraded=1;
+ordered.nodes.unknown=1;ordered.nodes.offline=2;
+const sourceOrder=ordered.nodes.items.map(n=>n.label);
+source.emit("status",ordered);
+assert.deepEqual(els["live-node-list"].children.map(n=>n.children[0].textContent),
+  ["dell-linux","hp-linux","m910","nec1","win","local","macbook"]);
+assert.deepEqual(ordered.nodes.items.map(n=>n.label),sourceOrder,
+  "render must not modify registry/SSE input");
 const verified=enrich(values());
 verified.sessions.proven_running=1;
 verified.sessions.items[1].execution_state="RUNNING_VERIFIED";

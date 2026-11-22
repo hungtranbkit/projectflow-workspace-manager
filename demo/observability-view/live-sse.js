@@ -148,7 +148,13 @@
       " Chỉ báo RUNNING khi có output thực thi mới, không suy từ heartbeat.":
       "Luồng trực tiếp chưa được xác minh; đây là bản dự phòng. Không suy diễn RUNNING hay tiến độ nghiệm thu từ hoạt động phiên.");
     const grid=$("live-node-list");grid.replaceChildren();
-    for(const n of d.nodes.items){
+    // Display reachable nodes first regardless of their registry order.
+    // Do not mutate the incoming SSE payload; keep cards stable by name.
+    const nodeStatusRank={online:0,degraded:1,unknown:2,offline:3};
+    const orderedNodes=[...d.nodes.items].sort((a,b)=>
+      (nodeStatusRank[a.status]??4)-(nodeStatusRank[b.status]??4)||
+      a.label.localeCompare(b.label,"vi"));
+    for(const n of orderedNodes){
       const li=element("li"),head=element("strong","",n.label),pill=element("span","live-pill "+n.status,labels[n.status]);
       const details=element("span","live-node-detail",
         n.open_sessions+" phiên · "+n.recent_activity_signals+" tín hiệu ≤5 phút");
