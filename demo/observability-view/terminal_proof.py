@@ -89,7 +89,7 @@ def safe_recent_activity(output):
 # A tmux screen may redraw only an elapsed timer/spinner for hours. Those
 # redraws cannot prove that work is progressing.
 _BACKGROUND_WAIT = re.compile(
-    r"Waiting for background terminal\\s*\\(\\s*(?:(\\d+)h\\s*)?(?:(\\d+)m\\s*)?(?:(\\d+)s)?",
+    r"Waiting for background terminal\s*\(\s*(?:(\d+)h\s*)?(?:(\d+)m\s*)?(?:(\d+)s)?",
     re.I,
 )
 
@@ -120,10 +120,10 @@ def _meaningful_activity_digest(output):
             continue
         for pattern, label in _SAFE_ACTIVITY_RULES:
             if pattern.search(line):
-                count = re.match(r"^(\\d{1,6})\\s+(?:passed|failed)\\b", line, re.I)
+                count = re.match(r"^(\d{1,6})\s+(?:passed|failed)\b", line, re.I)
                 events.append(label + (":" + count.group(1) if count else ""))
                 break
-    return hashlib.sha256("\\n".join(events[-8:]).encode("utf-8")).digest() if events else None
+    return hashlib.sha256("\n".join(events[-8:]).encode("utf-8")).digest() if events else None
 
 
 def _unknown_but_foreground(status):
