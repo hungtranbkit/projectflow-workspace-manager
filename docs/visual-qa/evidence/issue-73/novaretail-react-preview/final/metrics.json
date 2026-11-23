@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "tool": "UIFix",
+  "toolVersion": "1.2.6",
+  "toolCommit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+  "sourceCommit": "331f9963a51d07ff59c0989214ba877cc5da0163",
+  "reference": "/home/dell/workspace/.worktrees/novaretail-visual-reference-fixture-001/docs/design/web-journey/06-order.png",
+  "referenceSha256": "a6406a15efeb0af044c83a19de836c4f78d8a1c80912b3c459383052424fb174",
+  "actualSha256": "4ceff5f68422059dda1b2bc2f21e26fb16d2c57641e2db3bf3a9703d4c3c5409",
+  "url": "http://127.0.0.1:45174/app/store-minh-anh/orders/new",
+  "viewport": {
+    "width": 1586,
+    "height": 992
+  },
+  "captureMode": "viewport",
+  "imageDimensions": {
+    "width": 1586,
+    "height": 992
+  },
+  "deviceScaleFactor": 1,
+  "threshold": 0.08,
+  "percentDiff": 0.19752916141235813,
+  "mismatchedPixels": 310775,
+  "totalPixels": 1573312,
+  "ssim": 0.9022011764023412,
+  "changedRegions": [
+    {
+      "x": 0,
+      "y": 0,
+      "w": 1586,
+      "h": 992
+    }
+  ],
+  "horizontalOverflow": false,
+  "pageErrors": [],
+  "blockedRequests": [],
+  "passed": false
+}

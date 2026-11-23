@@ -1,0 +1,94 @@
+................................FFFF..F.FF..F                            [100%]
+=================================== FAILURES ===================================
+_____________ test_reset_data_does_not_touch_an_unrelated_sandbox ______________
+tests/test_sandbox_reset_data.py:99: in test_reset_data_does_not_touch_an_unrelated_sandbox
+    sb1 = make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, (22340, 22359), "reset-a")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_sandbox_reset_data.py:63: in make_sandbox
+    assert row["status"] == "RUNNING", row
+E   AssertionError: {'id': 1, 'task_id': 1, 'repository_id': 1, 'owner_type': 'AGENT_WORKSPACE', ...}
+E   assert 'FAILED' == 'RUNNING'
+E     
+E     - RUNNING
+E     + FAILED
+__________ test_global_list_and_task_detail_agree_on_one_sandbox_each __________
+tests/test_task_sandbox_views.py:65: in test_global_list_and_task_detail_agree_on_one_sandbox_each
+    tid_a, rid_a, _, ws_a, sb_a = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-a", "Task A", (21500, 21519))
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_task_sandbox_views.py:50: in make_task_with_sandbox
+    assert sb["status"] == "RUNNING", sb
+E   AssertionError: {'id': 1, 'task_id': 1, 'repository_id': 1, 'owner_type': 'AGENT_WORKSPACE', ...}
+E   assert 'FAILED' == 'RUNNING'
+E     
+E     - RUNNING
+E     + FAILED
+_____ test_integration_sandbox_shows_multiple_source_repos_in_task_detail ______
+tests/test_task_sandbox_views.py:151: in test_integration_sandbox_shows_multiple_source_repos_in_task_detail
+    tid_b, rid_b, _, ws_b, sb_b = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-b2", "Task B unrelated", (21560, 21579))
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_task_sandbox_views.py:50: in make_task_with_sandbox
+    assert sb["status"] == "RUNNING", sb
+E   AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 3, 'owner_type': 'AGENT_WORKSPACE', ...}
+E   assert 'FAILED' == 'RUNNING'
+E     
+E     - RUNNING
+E     + FAILED
+________ test_stopped_and_cleanup_countdown_state_consistent_everywhere ________
+tests/test_task_sandbox_views.py:196: in test_stopped_and_cleanup_countdown_state_consistent_everywhere
+    tid, rid, _, ws, sb = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-stop", "Task Stop", (21580, 21599))
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_task_sandbox_views.py:50: in make_task_with_sandbox
+    assert sb["status"] == "RUNNING", sb
+E   AssertionError: {'id': 1, 'task_id': 1, 'repository_id': 1, 'owner_type': 'AGENT_WORKSPACE', ...}
+E   assert 'FAILED' == 'RUNNING'
+E     
+E     - RUNNING
+E     + FAILED
+_________________ test_sandbox_running_displays_urls_and_ports _________________
+tests/test_verification_ux.py:89: in test_sandbox_running_displays_urls_and_ports
+    assert sb["status"] == "RUNNING" and sb["health_status"] == "HEALTHY"
+E   AssertionError: assert ('FAILED' == 'RUNNING'
+E     
+E     - RUNNING
+E     + FAILED)
+_____ test_manual_pass_stores_exact_source_commit_and_stales_on_new_commit _____
+tests/test_verification_ux.py:135: in test_manual_pass_stores_exact_source_commit_and_stales_on_new_commit
+    assert r.status_code == 303
+E   assert 409 == 303
+E    +  where 409 = <Response [409 Conflict]>.status_code
+_______________ test_next_action_progresses_through_every_state ________________
+tests/test_verification_ux.py:173: in test_next_action_progresses_through_every_state
+    assert "Run Tests" in client.get(f"/workspaces/{w['id']}").text
+E   assert 'Run Tests' in '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><...ehind).\nsetTimeout(()=>{if(document.querySelector(\'[data-running]\'))location.reload()},1500)</script></body></html>'
+E    +  where '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><...ehind).\nsetTimeout(()=>{if(document.querySelector(\'[data-running]\'))location.reload()},1500)</script></body></html>' = <Response [200 OK]>.text
+E    +    where <Response [200 OK]> = get('/workspaces/1')
+E    +      where get = <starlette.testclient.TestClient object at 0x7f6d4ee46140>.get
+_____ test_task_detail_and_sandbox_detail_show_identical_runtime_identity ______
+tests/test_verification_ux.py:232: in test_task_detail_and_sandbox_detail_show_identical_runtime_identity
+    assert outputs["backend_url"] in page
+           ^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'backend_url'
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_task_centric_ux.py: 143 warnings
+tests/test_workflow_decision_ux.py: 121 warnings
+tests/test_sandbox_reset_data.py: 33 warnings
+tests/test_task_sandbox_views.py: 44 warnings
+tests/test_verification_ux.py: 88 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_sandbox_reset_data.py::test_reset_data_does_not_touch_an_unrelated_sandbox
+FAILED tests/test_task_sandbox_views.py::test_global_list_and_task_detail_agree_on_one_sandbox_each
+FAILED tests/test_task_sandbox_views.py::test_integration_sandbox_shows_multiple_source_repos_in_task_detail
+FAILED tests/test_task_sandbox_views.py::test_stopped_and_cleanup_countdown_state_consistent_everywhere
+FAILED tests/test_verification_ux.py::test_sandbox_running_displays_urls_and_ports
+FAILED tests/test_verification_ux.py::test_manual_pass_stores_exact_source_commit_and_stales_on_new_commit
+FAILED tests/test_verification_ux.py::test_next_action_progresses_through_every_state
+FAILED tests/test_verification_ux.py::test_task_detail_and_sandbox_detail_show_identical_runtime_identity
