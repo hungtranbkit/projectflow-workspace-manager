@@ -113,7 +113,7 @@ source.emit("status",verified);
 assert.equal(els["live-running-count"].textContent,"1");
 assert.equal(els["live-sessions"].children[0].children[0].children[0].textContent,
   "projectflow-observability-20261120","verified RUNNING must sort first");
-const runningButton=els["live-state-filters"].children.find(b=>b.textContent.startsWith("RUNNING"));
+const runningButton=els["live-state-filters"].children.find(b=>b.textContent.startsWith("Có tiến triển"));
 assert.ok(runningButton);
 runningButton.events.click();
 assert.equal(els["live-sessions"].children.length,1,"RUNNING filter must hide unverified cards");
@@ -137,15 +137,30 @@ assert.ok(els["live-sessions"].children[0].children.some(x=>
 assert.ok(els["live-sessions"].children[1].children.some(x=>
   x.textContent.includes("Task được gắn gần nhất: Hoàn thiện giám sát hoạt động agent")));
 const uiProof=enrich(values());
-uiProof.sessions.items[1].execution_state="RUNNING_VERIFIED";
-uiProof.sessions.items[1].running_verified=true;
+uiProof.sessions.items[1].execution_state="BUSY_UNVERIFIED";
+uiProof.sessions.items[1].running_verified=null;
 uiProof.sessions.items[1].evidence="agent_ui_busy";
-uiProof.sessions.items[1].last_checkpoint_at=new Date().toISOString();
-uiProof.sessions.proven_running=1;
+uiProof.sessions.proven_running=0;
 source.emit("status",uiProof);
-assert.equal(els["live-running-count"].textContent,"1");
+assert.equal(els["live-running-count"].textContent,"0");
 assert.ok(els["live-sessions"].children[0].children.some(x=>
-  x.textContent.includes("Claude/Codex hiển thị đang xử lý")));
+  x.textContent.includes("CLI foreground bận nhưng chưa có output mới")));
+const busyButton=els["live-state-filters"].children.find(b=>b.textContent.startsWith("CLI bận/chờ nền"));
+assert.ok(busyButton);
+busyButton.events.click();
+assert.equal(els["live-sessions"].children.length,1);
+els["live-state-filters"].children.find(b=>b.textContent.startsWith("Tất cả")).events.click();
+const stalled=enrich(values());
+stalled.sessions.items[1].execution_state="STALLED";
+stalled.sessions.items[1].evidence="node_observed";
+stalled.sessions.items[1].task_conflict=true;
+stalled.sessions.items[1].task_hint="Đối chiếu độ chính xác giao diện theo thiết kế";
+stalled.sessions.items[1].project="ProjectFlow";
+source.emit("status",stalled);
+const stalledCard=els["live-sessions"].children[0];
+assert.ok(stalledCard.children.some(x=>x.textContent.includes("Nhãn task được gắn không khớp")));
+assert.ok(stalledCard.children.some(x=>x.textContent.includes("Tiến trình nền chờ trên 15 phút")));
+
 const fullScreen=enrich(values());
 fullScreen.sessions.items[1].execution_state="RUNNING_VERIFIED";
 fullScreen.sessions.items[1].running_verified=true;
@@ -158,7 +173,7 @@ assert.ok(els["live-sessions"].children[0].children.some(x=>
 const safeWork=enrich(values());
 safeWork.sessions.items[1].execution_state="RUNNING_VERIFIED";
 safeWork.sessions.items[1].running_verified=true;
-safeWork.sessions.items[1].evidence="agent_ui_busy";
+safeWork.sessions.items[1].evidence="terminal_output_delta";
 safeWork.sessions.items[1].last_checkpoint_at=new Date().toISOString();
 safeWork.sessions.items[1].recent_actions=[
   "Có dòng báo đang chạy kiểm thử", "Có dòng báo build hoặc biên dịch"
@@ -174,7 +189,7 @@ assert.ok(safeRows.children[1].textContent.includes("đang chạy kiểm thử")
 const unsafeWork=enrich(values());
 unsafeWork.sessions.items[1].execution_state="RUNNING_VERIFIED";
 unsafeWork.sessions.items[1].running_verified=true;
-unsafeWork.sessions.items[1].evidence="agent_ui_busy";
+unsafeWork.sessions.items[1].evidence="terminal_output_delta";
 unsafeWork.sessions.items[1].recent_actions=["api_key=private-token"];
 unsafeWork.sessions.proven_running=1;
 source.emit("status",unsafeWork);
