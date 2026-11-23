@@ -1,0 +1,21 @@
+BASE_SHA=ac288928ab559799e6a6f34ff9be1de5fdfa5af3
+TEMPORARY_TEST_PACKAGE_MARKER=tests/__init__.py (only in extracted snapshot, prevents external package shadow)
+COMMAND=python -m pytest tests/test_state_invariants.py::test_invariant_cleanup_eligible_still_counts_toward_capacity tests/test_task_centric_ux.py::test_task_detail_aggregates_child_state_and_never_duplicates_it tests/test_verification_ux.py::test_manual_pass_stores_exact_source_commit_and_stales_on_new_commit tests/test_task_centric_ux.py::test_blocking_workspace_shown_and_next_action_progresses tests/test_workflow_decision_ux.py::test_missing_requirements_lists_full_remaining_set_for_create_sandbox tests/test_verification_ux.py::test_next_action_progresses_through_every_state tests/test_verification_ux.py::test_task_detail_and_sandbox_detail_show_identical_runtime_identity tests/test_workflow_dead_anchors.py::test_closed_sandbox_restarts_instead_of_duplicating -q
+EXIT=0
+
+........                                                                 [100%]
+=============================== warnings summary ===============================
+../../home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../../home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_state_invariants.py: 11 warnings
+tests/test_task_centric_ux.py: 22 warnings
+tests/test_verification_ux.py: 33 warnings
+tests/test_workflow_decision_ux.py: 11 warnings
+tests/test_workflow_dead_anchors.py: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
