@@ -86,6 +86,46 @@ def safe_recent_activity(output):
     return result
 
 
+# A tmux screen may redraw only an elapsed timer/spinner for hours. Those
+# redraws cannot prove that work is progressing.
+_BACKGROUND_WAIT = re.compile(
+    r"Waiting for background terminal\\s*\\(\\s*(?:(\\d+)h\\s*)?(?:(\\d+)m\\s*)?(?:(\\d+)s)?",
+    re.I,
+)
+
+
+def _is_long_background_wait(output):
+    if not isinstance(output, str):
+        return False
+    found = _BACKGROUND_WAIT.search(output[-4096:])
+    if not found:
+        return False
+    parts = [int(item) if item is not None else 0 for item in found.groups()]
+    return parts[0] * 3600 + parts[1] * 60 + parts[2] >= 15 * 60
+
+
+def _meaningful_activity_digest(output):
+    """Only vetted event categories/counts, never UI timers or private strings.
+
+    This digest stays in process memory; no raw line or identifier is returned
+    to public SSE. The whitelist intentionally favors false negatives over
+    showing an animated spinner as code progress.
+    """
+    if not isinstance(output, str):
+        return None
+    events = []
+    for line in _ANSI_ESCAPE.sub("", output[-4096:]).splitlines()[-12:]:
+        line = line.strip()
+        if not line or len(line) > 280:
+            continue
+        for pattern, label in _SAFE_ACTIVITY_RULES:
+            if pattern.search(line):
+                count = re.match(r"^(\\d{1,6})\\s+(?:passed|failed)\\b", line, re.I)
+                events.append(label + (":" + count.group(1) if count else ""))
+                break
+    return hashlib.sha256("\\n".join(events[-8:]).encode("utf-8")).digest() if events else None
+
+
 def _unknown_but_foreground(status):
     reason = status.get("reason")
     match = _FOREGROUND.search(reason) if isinstance(reason, str) else None
@@ -397,6 +437,8 @@ class TerminalProofMonitor:
         self.last_result = {}
         self.last_hash = {}
         self.proof_at = {}
+        self.last_semantic = {}
+        self.semantic_proof_at = {}
 
     def snapshot(self, rows, *, now=None):
         now = now or datetime.now(timezone.utc)
@@ -418,6 +460,8 @@ class TerminalProofMonitor:
             active = set(names)
             self.last_hash = {k: v for k, v in self.last_hash.items() if k in active}
             self.proof_at = {k: v for k, v in self.proof_at.items() if k in active}
+            self.last_semantic = {k: v for k, v in self.last_semantic.items() if k in active}
+            self.semantic_proof_at = {k: v for k, v in self.semantic_proof_at.items() if k in active}
             observed = {}
             def read_one(node, name):
                 value = self.reader(node, name)
@@ -425,7 +469,7 @@ class TerminalProofMonitor:
                     return value, None, None
                 raw = str(value.get("state") or "").upper()
                 screen_hash = None
-                if raw == "RUNNING" or (raw == "UNKNOWN" and _unknown_but_foreground(value)):
+                if (raw == "RUNNING" or (raw == "UNKNOWN" and _unknown_but_foreground(value))) and not _agent_ui_busy(value):
                     screen = getattr(self.reader, "screen_digest", None)
                     if callable(screen):
                         try:
@@ -464,40 +508,61 @@ class TerminalProofMonitor:
                     elif raw == "BLOCKED":
                         record = {"state": "BLOCKED", "evidence": "node_observed", "observed_at": at}
                     elif raw == "RUNNING" or (raw == "UNKNOWN" and _unknown_but_foreground(value)):
-                        # The raw pane is not published, even as a preview.
+                        # The raw pane stays private. A Claude/Codex busy footer
+                        # proves only that a turn is in flight, NOT that its
+                        # spinner, elapsed clock or background process advanced.
                         output = value.get("last_output")
-                        if isinstance(screen_hash, bytes) and len(screen_hash) == 32:
-                            kind, digest = "terminal_screen_delta", screen_hash
-                        elif isinstance(output, str) and output:
-                            kind = "terminal_output_delta"
-                            digest = hashlib.sha256(output[-50000:].encode("utf-8", "replace")).digest()
+                        if _agent_ui_busy(value):
+                            self.last_hash.pop(history_key, None)
+                            self.proof_at.pop(history_key, None)
+                            if _is_long_background_wait(output):
+                                self.semantic_proof_at.pop(history_key, None)
+                                record = {"state": "STALLED", "evidence": "node_observed",
+                                          "observed_at": at}
+                            else:
+                                digest = _meaningful_activity_digest(output)
+                                old = self.last_semantic.get(history_key)
+                                self.last_semantic[history_key] = digest
+                                if digest is not None and old is not None and digest != old:
+                                    self.semantic_proof_at[history_key] = now
+                                proof_time = self.semantic_proof_at.get(history_key)
+                                age = (now - proof_time).total_seconds() if proof_time else 10**9
+                                if 0 <= age <= _RUNNING_AGE:
+                                    record = {"state": "RUNNING_VERIFIED",
+                                              "evidence": "terminal_output_delta",
+                                              "observed_at": at,
+                                              "checkpoint_at": proof_time.isoformat(timespec="seconds")}
+                                else:
+                                    record = {"state": "BUSY_UNVERIFIED", "evidence": "agent_ui_busy",
+                                              "observed_at": at}
                         else:
-                            kind, digest = None, None
-                        if digest is not None:
-                            old = self.last_hash.get(history_key)
-                            self.last_hash[history_key] = (kind, digest)
-                            # A transition between full-screen and tail-only
-                            # observations is not a witnessed screen change.
-                            if old is not None and old[0] == kind and old[1] != digest:
-                                self.proof_at[history_key] = (now, kind)
-                            elif old is not None and old[0] != kind:
-                                self.proof_at.pop(history_key, None)
-                            proof = self.proof_at.get(history_key)
-                            age = (now - proof[0]).total_seconds() if proof else 10**9
-                            if proof and proof[1] == kind and 0 <= age <= _RUNNING_AGE:
-                                record = {"state": "RUNNING_VERIFIED", "evidence": kind,
-                                          "observed_at": at, "checkpoint_at": proof[0].isoformat(timespec="seconds")}
-                        # An agent may make no TEXT change in the last 20
-                        # terminal rows while the trusted CLI's busy footer
-                        # explicitly says a turn is in flight. Classify
-                        # that separately from a witnessed screen delta.
-                        if record is None and _agent_ui_busy(value):
-                            record = {"state": "RUNNING_VERIFIED", "evidence": "agent_ui_busy",
-                                      "observed_at": at, "checkpoint_at": at}
+                            if isinstance(screen_hash, bytes) and len(screen_hash) == 32:
+                                kind, digest = "terminal_screen_delta", screen_hash
+                            elif isinstance(output, str) and output:
+                                kind = "terminal_output_delta"
+                                digest = hashlib.sha256(output[-50000:].encode("utf-8", "replace")).digest()
+                            else:
+                                kind, digest = None, None
+                            if digest is not None:
+                                old = self.last_hash.get(history_key)
+                                self.last_hash[history_key] = (kind, digest)
+                                # Changing read source is not evidence.
+                                if old is not None and old[0] == kind and old[1] != digest:
+                                    self.proof_at[history_key] = (now, kind)
+                                elif old is not None and old[0] != kind:
+                                    self.proof_at.pop(history_key, None)
+                                proof = self.proof_at.get(history_key)
+                                age = (now - proof[0]).total_seconds() if proof else 10**9
+                                if proof and proof[1] == kind and 0 <= age <= _RUNNING_AGE:
+                                    record = {"state": "RUNNING_VERIFIED", "evidence": kind,
+                                              "observed_at": at,
+                                              "checkpoint_at": proof[0].isoformat(timespec="seconds")}
                     if raw in ("IDLE", "WAITING_INPUT", "WAITING", "BLOCKED") or value.get("input_required"):
                         # An ended turn invalidates proof before the same session's next run.
                         self.last_hash.pop(history_key, None)
                         self.proof_at.pop(history_key, None)
+                        self.last_semantic.pop(history_key, None)
+                        self.semantic_proof_at.pop(history_key, None)
                     # An explicitly assigned task is independent of liveness.
                     # UNKNOWN execution can have a verified label without
                     # becoming RUNNING or implying a new code checkpoint.
