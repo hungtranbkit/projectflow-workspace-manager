@@ -30,7 +30,7 @@ Route/data state are fixture-owned and concept-equivalent for the requested new-
 
 ## E — exact-SHA PR/CI: NOT PASS
 
-- ProjectFlow PR #74 exact evidence head `fd95ea595baeb1adb8d45731d9448a0698b94721`: exact workflow query returned **zero runs and zero check-runs**. Zero is not PASS. This head contains only handoff documentation updates on top of the tested PR content; it does not alter test/code results.
+- ProjectFlow PR #74 exact head `3f63f694d9e4694f7940b53b005b90033325e967` (includes the `tests/__init__.py` import-shadow fix): exact workflow query returned **zero runs and zero check-runs**. Zero is not PASS. The local preflight/build/smoke and eight-test targeted evidence is recorded above.
 - NovaRetail PR #160 remote head `c680931cda582e1effcf51726862404febef8b7e`: Application run [45262845323](https://github.com/hungtranbkit/novaretail-web/actions/runs/45262845323) and Audit run [45262845337](https://github.com/hungtranbkit/novaretail-web/actions/runs/45262845337) both completed **failure**. Audit failed prototype/parity. The application run's clean graph job failed on four existing orphan projects, while its Postgres and browser jobs failed at container initialization.
 - Prior exact-head Nova runs show app graph failure on four orphaned project files unchanged from PR base, and Browser/Postgres startup failure `Docker network create failed: all predefined address pools have been fully subnetted`. Runner reported machine `kimex-HP-EliteDesk-800-G4-DM-35W-Japan`; subsequent null container/network errors were cleanup fallout. This is shared runner IPAM capacity and is referred to the runner/repo owners in PR evidence. No network was removed or daemon config changed.
 
@@ -42,7 +42,7 @@ Dirty ProjectFlow `main`, production service/data, live order/API flow, and unre
 
 | Gate | Latest status |
 |---|---|
-| A — planner/full suite | FAIL (19 failures; five isolated rechecks pass singly; other causes remain) |
+| A — planner/full suite | FAIL (19 failures; eight selected UX/state tests pass in isolation; provider/sandbox and other causes remain) |
 | B — browser + visual gate | browser/tool execution PASS; 8% fidelity FAIL (16.723%) |
 | C — real React preview | route and responsive behavior demonstrated; visual acceptance FAIL |
 | D — opt-in and Vietnamese guide | targeted PASS |
