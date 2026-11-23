@@ -1,0 +1,13 @@
+{
+  "returncode": 1,
+  "stdout_bytes": 1394,
+  "stderr_bytes": 0,
+  "safe_fields": {
+    "api_error": "usage_limit_reached",
+    "api_error_status": 429,
+    "api_error_type": "rate_limit_error",
+    "terminal_reason": "api_error",
+    "is_error": true,
+    "subtype": "success"
+  }
+}
