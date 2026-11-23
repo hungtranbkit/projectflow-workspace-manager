@@ -27,11 +27,11 @@ Route/data state are fixture-owned and concept-equivalent for the requested new-
 
 ## D — Opt-in and Vietnamese guide: targeted PASS
 
-`VISUAL_QA_REQUIRED: true` applies to UI tasks only; non-UI tasks remain unaffected. TaskDecisionService is still the source of truth. Copy/paste guide: [`docs/VISUAL_QA_HUONG_DAN.md`](../../../VISUAL_QA_HUONG_DAN.md). After adding `tests/__init__.py`, `./scripts/preflight.sh`, `./scripts/build.sh`, and `./scripts/smoke.sh` all passed; smoke ran 1 test. The eight selected UX/state tests passed as recorded above. The full-suite failure and visual CLI negative/fail-closed results remain as stated; this does not certify the full suite.
+`VISUAL_QA_REQUIRED: true` applies to UI tasks only; non-UI tasks remain unaffected. TaskDecisionService is still the source of truth. Copy/paste guide: [`docs/VISUAL_QA_HUONG_DAN.md`](../../../VISUAL_QA_HUONG_DAN.md). After adding `tests/__init__.py`, `./scripts/preflight.sh`, `./scripts/build.sh`, and `./scripts/smoke.sh` all passed; smoke ran 1 test. The broader 14 non-provider tests passed on both base and branch as recorded above. The full-suite failure and visual CLI negative/fail-closed results remain as stated; this does not certify the full suite.
 
 ## E — exact-SHA PR/CI: NOT PASS
 
-- ProjectFlow PR #74 exact updated head `92a1be2647a9093aa73918fd7802069cbd6c29f5` (with the broader matched base/branch logs): exact queries returned **zero PR workflow runs and zero check-runs**. Zero is not PASS. The local preflight/build/smoke and targeted evidence is recorded above.
+- ProjectFlow PR #74 exact updated head `296f111c19d6cb3d141658d38a67656d853fae60` (with the broader matched base/branch logs and explicit CI query): exact queries returned **zero PR workflow runs and zero check-runs**. Zero is not PASS. The local preflight/build/smoke and targeted evidence is recorded above.
 - NovaRetail UI source/test head `c680931cda582e1effcf51726862404febef8b7e`: Application run [45262845323](https://github.com/hungtranbkit/novaretail-web/actions/runs/45262845323) and Audit run [45262845337](https://github.com/hungtranbkit/novaretail-web/actions/runs/45262845337) both completed failure. Subsequent docs-only exact head `a417ba7a701dbaab35192fd74ed431eabe85bb02`: push Application run [45266761113](https://github.com/hungtranbkit/novaretail-web/actions/runs/45266761113), Audit run [45266761092](https://github.com/hungtranbkit/novaretail-web/actions/runs/45266761092), and duplicate PR-event run [45266777828](https://github.com/hungtranbkit/novaretail-web/actions/runs/45266777828) now account for **8 completed exact-head check-runs, all failure**. Audit parity and app graph findings repeat; browser/Postgres initialization again fails on shared-runner IPAM. These failures are separate from the preview, with details below.
 - Prior exact-head Nova runs show app graph failure on four orphaned project files unchanged from PR base, and Browser/Postgres startup failure `Docker network create failed: all predefined address pools have been fully subnetted`. Runner reported machine `kimex-HP-EliteDesk-800-G4-DM-35W-Japan`; subsequent null container/network errors were cleanup fallout. This is shared runner IPAM capacity and is referred to the runner/repo owners in PR evidence. No network was removed or daemon config changed.
 
@@ -43,11 +43,11 @@ Dirty ProjectFlow `main`, production service/data, live order/API flow, and unre
 
 | Gate | Latest status |
 |---|---|
-| A — planner/full suite | FAIL (19 failures; eight selected UX/state tests pass on base and branch; provider/sandbox and other causes remain) |
+| A — planner/full suite | FAIL (19 failures; 14 implicated non-provider tests pass in isolation on base and branch; provider/Builder and suite-order causes remain) |
 | B — browser + visual gate | browser/tool execution PASS; 8% fidelity FAIL (16.723%) |
 | C — real React preview | route and responsive behavior demonstrated; visual acceptance FAIL |
 | D — opt-in and Vietnamese guide | targeted PASS |
 | E — exact-SHA CI and PR checks | NOT PASS (ProjectFlow zero runs/checks; Nova eight check-runs failed) |
 | F — safety | PASS |
 
-Next: (1) the three permitted Nova repairs are exhausted at 16.723%; a future separately scoped attempt should focus on tabs/goods/totals without changing the design or gate; (2) ProjectFlow maintainers must resolve unclassified suite/provider/Builder failures—the eight selected UX/state assertions pass on both base and branch, but no clean-base full-suite run exists; (3) runner/repository owners must restore shared Docker IPAM capacity and resolve pre-existing parity/build-graph inventory. Rollback only by reverting this task's own branch commits.
+Next: (1) the three permitted Nova repairs are exhausted at 16.723%; a future separately scoped attempt should focus on tabs/goods/totals without changing the design or gate; (2) ProjectFlow maintainers must resolve full-suite/provider/Builder and suite-order failures—the 14 implicated non-provider tests pass individually on both base and branch, but no clean-base full-suite run exists; (3) runner/repository owners must restore shared Docker IPAM capacity and resolve pre-existing parity/build-graph inventory. Rollback only by reverting this task's own branch commits.
