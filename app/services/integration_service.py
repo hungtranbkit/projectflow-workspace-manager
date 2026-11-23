@@ -76,7 +76,7 @@ class IntegrationService:
 
     # ---- E10.6: real verification of the INTEGRATED target, never just
     # trusting the Task worktree's own earlier PASS ------------------------
-    def verify_integrated_state(self, repo_path: str, commit: str) -> dict:
+    def verify_integrated_state(self, repo_path: str, commit: str, task_id: int | None = None) -> dict:
         """Runs the repository's own PROJECT.yaml-declared required CI
         stages (the exact same load_contract() DeploymentService/the
         real merge-gate probe flow already use) against a disposable
@@ -85,8 +85,15 @@ class IntegrationService:
         probe = self.git.create_baseline_probe(repo_path, commit)
         try:
             try:
-                contract = load_contract(Path(repo_path))
+                task = self.db.one("SELECT * FROM tasks WHERE id=?", (task_id,)) if task_id else None
+                from app.services.visual_qa_contract import task_requires_visual_qa
+                contract = load_contract(Path(repo_path), visual_qa_required=task_requires_visual_qa(task))
             except ContractError:
+                if task_id:
+                    task = self.db.one("SELECT * FROM tasks WHERE id=?", (task_id,))
+                    from app.services.visual_qa_contract import task_requires_visual_qa
+                    if task_requires_visual_qa(task):
+                        return {"passed": False, "results": [{"stage": "visual_qa", "ok": False, "stdout": "", "stderr": "Required visual QA contract is invalid or missing."}]}
                 contract = []
             results = []
             passed = True
@@ -151,7 +158,7 @@ class IntegrationService:
             # completely unaffected.
             self.git.git(repo_row["repo_path"], "update-ref", f"refs/heads/{ws['base_branch']}", integrated_commit)
 
-            verify = self.verify_integrated_state(repo_row["repo_path"], integrated_commit)
+            verify = self.verify_integrated_state(repo_row["repo_path"], integrated_commit, task_id=governing_id)
 
             reviewed_head = self.git.head(ws["worktree_path"])
             self.db.execute(

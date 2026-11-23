@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/image-to-code/design-spec.schema.json",
+  "title": "Image-to-code design specification",
+  "type": "object",
+  "required": ["version", "source", "breakpoints", "tokens", "typography", "layers", "components", "assets", "uncertainties"],
+  "properties": {
+    "version": {"const": "1.0"},
+    "source": {
+      "type": "object",
+      "required": ["path", "width_px", "height_px", "kind"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "width_px": {"type": "integer", "minimum": 1},
+        "height_px": {"type": "integer", "minimum": 1},
+        "kind": {"enum": ["screenshot", "mockup", "photograph", "other"]},
+        "viewport_css_width": {"type": ["integer", "null"], "minimum": 1},
+        "dpr": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "reference_view": {"enum": ["mobile", "tablet", "desktop", "unknown"]}
+      },
+      "additionalProperties": false
+    },
+    "breakpoints": {
+      "type": "object", "required": ["mobile", "tablet", "desktop"],
+      "properties": {
+        "mobile": {"$ref": "#/$defs/breakpoint"},
+        "tablet": {"$ref": "#/$defs/breakpoint"},
+        "desktop": {"$ref": "#/$defs/breakpoint"}
+      }, "additionalProperties": false
+    },
+    "tokens": {
+      "type": "object", "required": ["colors", "spacing", "radius", "shadows", "container_max_px"],
+      "properties": {
+        "colors": {"type": "object", "additionalProperties": {"type": "string"}},
+        "spacing": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
+        "radius": {"type": "object", "additionalProperties": {"type": ["number", "string"]}},
+        "shadows": {"type": "object", "additionalProperties": {"type": "string"}},
+        "container_max_px": {"type": ["number", "null"], "minimum": 1}
+      }, "additionalProperties": false
+    },
+    "typography": {
+      "type": "object", "required": ["heading", "body"],
+      "properties": {"heading": {"$ref": "#/$defs/typeStyle"}, "body": {"$ref": "#/$defs/typeStyle"}},
+      "additionalProperties": {"$ref": "#/$defs/typeStyle"}
+    },
+    "layers": {"type": "array", "items": {"$ref": "#/$defs/layer"}},
+    "components": {"type": "array", "items": {"$ref": "#/$defs/component"}},
+    "assets": {"type": "array", "items": {"$ref": "#/$defs/asset"}},
+    "uncertainties": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "evidence": {"enum": ["observed", "inferred", "unknown"]},
+    "confidence": {"enum": ["high", "medium", "low"]},
+    "bounds": {
+      "type": ["array", "null"], "items": {"type": "number", "minimum": 0}, "minItems": 4, "maxItems": 4
+    },
+    "breakpoint": {
+      "type": "object", "required": ["capture_width_px", "capture_height_px", "behavior", "evidence"],
+      "properties": {
+        "capture_width_px": {"type": "integer", "minimum": 1},
+        "capture_height_px": {"type": "integer", "minimum": 1},
+        "behavior": {"type": "string", "minLength": 1},
+        "evidence": {"$ref": "#/$defs/evidence"}
+      }, "additionalProperties": false
+    },
+    "typeStyle": {
+      "type": "object", "required": ["font_family", "fallback", "weight", "line_height", "letter_spacing_px", "size_px", "evidence", "confidence"],
+      "properties": {
+        "font_family": {"type": ["string", "null"]},
+        "fallback": {"type": "string"},
+        "weight": {"type": "integer", "minimum": 100, "maximum": 900},
+        "line_height": {"type": "number", "exclusiveMinimum": 0},
+        "letter_spacing_px": {"type": "number"},
+        "size_px": {"type": "object", "required": ["mobile", "tablet", "desktop"], "properties": {
+          "mobile": {"type": "number", "exclusiveMinimum": 0},
+          "tablet": {"type": "number", "exclusiveMinimum": 0},
+          "desktop": {"type": "number", "exclusiveMinimum": 0}
+        }, "additionalProperties": false},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "font_source": {"type": ["string", "null"]}
+      }, "additionalProperties": false
+    },
+    "layer": {
+      "type": "object", "required": ["id", "kind", "z_order", "bounds", "implementation", "evidence", "confidence"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["background", "layout", "component", "typography", "icon", "image", "microdetail"]},
+        "z_order": {"type": "integer"},
+        "bounds": {"$ref": "#/$defs/bounds"},
+        "implementation": {"type": "string", "minLength": 1},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "asset_id": {"type": ["string", "null"]}
+      }, "additionalProperties": false
+    },
+    "component": {
+      "type": "object", "required": ["id", "bounds", "size", "behavior", "states", "evidence", "confidence"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "bounds": {"$ref": "#/$defs/bounds"},
+        "size": {"type": "string"},
+        "behavior": {"type": "object", "required": ["mobile", "tablet", "desktop"], "properties": {
+          "mobile": {"type": "string"}, "tablet": {"type": "string"}, "desktop": {"type": "string"}
+        }, "additionalProperties": false},
+        "states": {"type": "array", "items": {"type": "string"}},
+        "evidence": {"$ref": "#/$defs/evidence"},
+        "confidence": {"$ref": "#/$defs/confidence"}
+      }, "additionalProperties": false
+    },
+    "asset": {
+      "type": "object", "required": ["id", "type", "file", "origin", "usage", "license", "status", "evidence"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "type": {"enum": ["background", "icon", "image", "illustration", "logo", "font", "texture"]},
+        "file": {"type": ["string", "null"]},
+        "origin": {"type": "string"},
+        "usage": {"type": "string"},
+        "license": {"type": "string"},
+        "status": {"enum": ["original-used", "extracted", "CSS-rebuilt", "generated-with-authorization", "pending"]},
+        "evidence": {"$ref": "#/$defs/evidence"}
+      }, "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "source": {
+    "path": "REPLACE_WITH_YOUR_REFERENCE.png",
+    "width_px": 1440,
+    "height_px": 900,
+    "kind": "mockup",
+    "viewport_css_width": null,
+    "dpr": null,
+    "reference_view": "desktop"
+  },
+  "breakpoints": {
+    "mobile": {"capture_width_px": 390, "capture_height_px": 844, "behavior": "DETERMINE FROM CONTENT; SAMPLE ONLY", "evidence": "inferred"},
+    "tablet": {"capture_width_px": 820, "capture_height_px": 1180, "behavior": "DETERMINE FROM CONTENT; SAMPLE ONLY", "evidence": "inferred"},
+    "desktop": {"capture_width_px": 1440, "capture_height_px": 900, "behavior": "MEASURE FROM REAL REFERENCE; SAMPLE ONLY", "evidence": "unknown"}
+  },
+  "tokens": {
+    "colors": {"surface": "#FFFFFF", "text": "#151515"},
+    "spacing": {"page": "TO_MEASURE"},
+    "radius": {"card": "TO_MEASURE"},
+    "shadows": {"card": "TO_MEASURE"},
+    "container_max_px": null
+  },
+  "typography": {
+    "heading": {"font_family": null, "fallback": "sans-serif", "weight": 700, "line_height": 1.1, "letter_spacing_px": 0, "size_px": {"mobile": 32, "tablet": 44, "desktop": 60}, "evidence": "inferred", "confidence": "low", "font_source": null},
+    "body": {"font_family": null, "fallback": "sans-serif", "weight": 400, "line_height": 1.5, "letter_spacing_px": 0, "size_px": {"mobile": 16, "tablet": 16, "desktop": 18}, "evidence": "inferred", "confidence": "low", "font_source": null}
+  },
+  "layers": [
+    {"id": "page-background", "kind": "background", "z_order": 0, "bounds": [0, 0, 1440, 900], "implementation": "CSS pending source verification", "evidence": "unknown", "confidence": "low", "asset_id": null}
+  ],
+  "components": [
+    {"id": "example-hero", "bounds": null, "size": "Measure from actual reference", "behavior": {"mobile": "to specify", "tablet": "to specify", "desktop": "to specify"}, "states": ["default"], "evidence": "unknown", "confidence": "low"}
+  ],
+  "assets": [],
+  "uncertainties": ["This is a shape example, not an analyzed mockup. Replace every sample value."]
+}

@@ -75,10 +75,20 @@ def load_exec_sandbox(repo: Path) -> dict:
     }
 
 
-def load_contract(repo: Path):
+def load_contract(repo: Path, *, visual_qa_required: bool = False):
     data = _read(repo)
     commands = data.get("commands") or {}; required = (data.get("ci") or {}).get("required") or [x for x in ("preflight", "test") if x in commands]
     if not required: raise ContractError("PROJECT.yaml declares no required CI stages")
+    if visual_qa_required:
+        from app.services.visual_qa_contract import load_visual_qa_contract
+        try:
+            visual_contract = load_visual_qa_contract(repo)
+        except ValueError as exc:
+            raise ContractError(str(exc)) from exc
+        if visual_contract is None:
+            raise ContractError("Task requires visual QA, but PROJECT.yaml has no enabled visual_qa contract")
+        if "visual_qa" not in required:
+            required = [*required, "visual_qa"]
     result = []
     for stage in required:
         spec = commands.get(stage)

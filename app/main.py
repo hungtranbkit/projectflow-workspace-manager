@@ -41,6 +41,7 @@ from app.services.deployment_service import DeploymentService, DeploymentError
 from app.services.deployment_decision import deployment_view
 from app.services.repository_contract_editor import RepositoryContractEditor, ContractEditError
 from app.services.project_contract import ContractError
+from app.services.visual_qa_contract import visual_qa_prompt_lines
 from app.services.completion_report_parser import parse_completion_report, strip_ansi
 from app.services.spec_registry import SpecRegistry, SpecError
 from app.services.spec_gate import SpecGate, spec_id_list, ALL_CLASSIFICATIONS
@@ -1757,6 +1758,8 @@ def create_app(settings=None):
                 instr=(workspace.get("builder_instructions") or "").strip()
                 if instr: parts+=["## BUILDER INSTRUCTIONS (this workspace only)",instr,""]
             parts+=_spec_context_section(t)
+            if repo_row:
+                parts+=visual_qa_prompt_lines(t, Path(repo_row["repo_path"]))
             # E8.8/E8.9: bounded architecture/design/test-contract slice
             # for THIS Task's own governing PlanItem/requirement ids --
             # never the whole project's engineering state. A Task with
@@ -2239,7 +2242,11 @@ def create_app(settings=None):
         recompute_task_status(w.get("task_id"))
         return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/test")
-    def test_agent(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))): w=agent_row(wid); runner.start("agent",wid,Path(w["worktree_path"])); return RedirectResponse(f"/workspaces/{wid}",303)
+    def test_agent(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
+        w=agent_row(wid)
+        try: runner.start("agent",wid,Path(w["worktree_path"]))
+        except ContractError as exc: raise HTTPException(422,str(exc))
+        return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/create-sandbox")
     def create_workspace_sandbox_standalone(wid:int,profile:str=Form(""), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         w=agent_row(wid)
@@ -2861,7 +2868,7 @@ def create_app(settings=None):
         if active: return RedirectResponse(f"/integrations/{iid}",303)
         invalidate(iid)
         try: runner.start("integration",iid,Path(i["worktree_path"]))
-        except ContractError: pass
+        except ContractError as exc: raise HTTPException(422,str(exc))
         return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/ready-for-main")
     def ready_main(iid:int, _authz: None = Depends(require_role("integration", "iid", "MEMBER"))):

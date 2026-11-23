@@ -1,0 +1,16 @@
+{
+  "html_file": "tests/fixtures/font-audit.html",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "selectors": [
+    {
+      "selector": "h1",
+      "expected_family": "Arial",
+      "expected_weight": "700",
+      "expected_size_px": 32,
+      "expected_lines": 1
+    }
+  ]
+}

@@ -510,9 +510,14 @@ class TaskDecisionService:
             head = self.git.head(ti_repo["worktree_path"])
         except Exception:
             return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": 0, "head": None}
+        task = self.db.one("SELECT * FROM tasks WHERE id=?", (task_id,))
+        from app.services.visual_qa_contract import task_requires_visual_qa
+        visual_qa_required = task_requires_visual_qa(task)
         try:
-            required = len(load_contract(Path(ti_repo["worktree_path"])))
+            required = len(load_contract(Path(ti_repo["worktree_path"]), visual_qa_required=visual_qa_required))
         except ContractError:
+            if visual_qa_required:
+                return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": 1, "head": head, "summary": {}}
             required = 0
         rows = self.db.all(
             "SELECT * FROM test_runs WHERE workspace_type='integration' AND workspace_id=? AND tested_commit=? ORDER BY id DESC",
@@ -955,6 +960,18 @@ class TaskDecisionService:
         latest = {}
         for r in rows:
             latest.setdefault(r["stage"], r)
+        task = self.db.one("SELECT * FROM tasks WHERE id=?", (b.get("task_id"),)) if b.get("task_id") else None
+        if task:
+            from app.services.visual_qa_contract import task_requires_visual_qa
+            if task_requires_visual_qa(task):
+                try:
+                    load_contract(Path(b["worktree_path"]), visual_qa_required=True)
+                except ContractError:
+                    return "FAIL"
+                if "visual_qa" not in latest:
+                    return "NOT_RUN"
+                if latest["visual_qa"]["status"] != "PASS":
+                    return "FAIL" if latest["visual_qa"]["status"] in ("FAIL", "TIMEOUT") else "NOT_RUN"
         if any(r["status"] == "FAIL" for r in latest.values()):
             return "FAIL"
         if all(r["status"] == "PASS" for r in latest.values()):

@@ -1,0 +1,11 @@
+{
+  "fonts": [
+    {
+      "id": "catty-headline",
+      "approved_original": "private-fonts/original-headline.woff2",
+      "candidate": "private-fonts/implementation-headline.woff2",
+      "original_sha256": null,
+      "note": "Do not commit licensed font files. To assert definitive identity, provide the original bytes or a trusted owner-verified SHA-256."
+    }
+  ]
+}

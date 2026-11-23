@@ -1,0 +1,47 @@
+{
+  "reference": "artifacts/reference-390.png",
+  "render": "artifacts/chromium-390.png",
+  "max_mask_fraction": 0.06,
+  "regions": [
+    {
+      "name": "face",
+      "priority": "critical",
+      "box": [
+        80,
+        100,
+        265,
+        340
+      ]
+    },
+    {
+      "name": "cta",
+      "priority": "critical",
+      "box": [
+        20,
+        650,
+        360,
+        710
+      ]
+    }
+  ],
+  "masks": [],
+  "components": [
+    {
+      "selector": ".cta",
+      "priority": "critical",
+      "tolerance_px": 3,
+      "reference": {
+        "x": 20,
+        "y": 650,
+        "width": 340,
+        "height": 52
+      },
+      "actual": {
+        "x": 21,
+        "y": 650,
+        "width": 340,
+        "height": 51
+      }
+    }
+  ]
+}

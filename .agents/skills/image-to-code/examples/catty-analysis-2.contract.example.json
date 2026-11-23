@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "reference": "artifacts/approved-mobile-reference.png",
+  "render": "artifacts/screenshots/mobile.png",
+  "required_categories": [
+    "icon",
+    "typography",
+    "button",
+    "artwork"
+  ],
+  "require_protected_assets": true,
+  "regions": [
+    {
+      "id": "feature-icon",
+      "category": "icon",
+      "reference_bounds": [
+        10,
+        10,
+        30,
+        30
+      ],
+      "render_bounds": [
+        10,
+        10,
+        30,
+        30
+      ],
+      "max_position_delta_px": 1,
+      "max_size_delta_px": 1,
+      "pixel_tolerance": 24,
+      "max_mismatch_fraction": 0.08
+    },
+    {
+      "id": "hero-heading",
+      "category": "typography",
+      "reference_bounds": [
+        30,
+        50,
+        180,
+        50
+      ],
+      "render_bounds": [
+        30,
+        50,
+        180,
+        50
+      ],
+      "max_position_delta_px": 1,
+      "max_size_delta_px": 1,
+      "pixel_tolerance": 24,
+      "max_mismatch_fraction": 0.1
+    },
+    {
+      "id": "conversar-com-a-catty-button",
+      "category": "button",
+      "reference_bounds": [
+        20,
+        110,
+        180,
+        44
+      ],
+      "render_bounds": [
+        20,
+        110,
+        180,
+        44
+      ],
+      "max_position_delta_px": 1,
+      "max_size_delta_px": 1,
+      "pixel_tolerance": 24,
+      "max_mismatch_fraction": 0.06
+    },
+    {
+      "id": "upper-glow",
+      "category": "artwork",
+      "reference_bounds": [
+        100,
+        10,
+        80,
+        30
+      ],
+      "render_bounds": [
+        100,
+        10,
+        80,
+        30
+      ],
+      "max_position_delta_px": 0,
+      "max_size_delta_px": 0,
+      "pixel_tolerance": 24,
+      "max_mismatch_fraction": 0.06
+    },
+    {
+      "id": "lower-glow",
+      "category": "artwork",
+      "reference_bounds": [
+        100,
+        155,
+        80,
+        30
+      ],
+      "render_bounds": [
+        100,
+        155,
+        80,
+        30
+      ],
+      "max_position_delta_px": 0,
+      "max_size_delta_px": 0,
+      "pixel_tolerance": 24,
+      "max_mismatch_fraction": 0.06
+    },
+    {
+      "id": "catty-front-paw",
+      "category": "artwork",
+      "reference_bounds": [
+        105,
+        115,
+        60,
+        35
+      ],
+      "render_bounds": [
+        105,
+        115,
+        60,
+        35
+      ],
+      "max_position_delta_px": 0,
+      "max_size_delta_px": 0,
+      "pixel_tolerance": 24,
+      "max_mismatch_fraction": 0.05
+    }
+  ],
+  "protected_assets": [
+    {
+      "id": "approved-original-composite",
+      "path": "public/assets/catty/REPLACE_WITH_APPROVED_ORIGINAL.webp",
+      "sha256": "REPLACE_WITH_APPROVED_SHA256"
+    }
+  ]
+}

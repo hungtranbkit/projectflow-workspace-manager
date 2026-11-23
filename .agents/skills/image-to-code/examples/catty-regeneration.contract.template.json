@@ -1,0 +1,38 @@
+{
+  "_note": "TEMPLATE ONLY — intentionally NOT approved until real generated images, measured crop coordinates, screenshots and independent review evidence exist. Replace all placeholder paths and values.",
+  "workflow": "reference_guided_two_stage_generation",
+  "reference": {
+    "full_screenshot": "artifacts/reference/original.png",
+    "component_crop": "artifacts/reference/catty-component-reference.png",
+    "crop_box": [0, 0, 390, 480],
+    "crop_usage": "generation_reference_only"
+  },
+  "scene": {
+    "origin": "image_generation_with_reference",
+    "conditioned_on": ["artifacts/reference/original.png", "artifacts/reference/catty-component-reference.png"],
+    "prompt_path": "artifacts/regeneration/scene-prompt.md",
+    "generated_image": "public/assets/catty/catty-hero-scene.webp",
+    "text_free": true,
+    "baked_lighting": true,
+    "duplicate_css_glow": false
+  },
+  "attempts": [
+    {"generated_image": "public/assets/catty/catty-hero-scene.webp", "status": "rejected", "issues": ["Template placeholder: no generation performed"]}
+  ],
+  "reviews": {
+    "subject_identity": {"status": "unknown", "notes": "Requires true side-by-side inspection of generated and original eyes, face and collar.", "evidence": []},
+    "anatomy_paws": {"status": "unknown", "notes": "Must visually confirm a natural connected and visible front paw.", "evidence": []},
+    "integrated_lighting": {"status": "unknown", "notes": "Verify cinematic source glow and absence of doubled CSS effects.", "evidence": []},
+    "composition": {"status": "unknown", "notes": "Check focal point, framing, orientation and safe text region.", "evidence": []},
+    "scene_continuity": {"status": "unknown", "notes": "No hard seams or smudged transitions in the upper or lower areas.", "evidence": []},
+    "text_and_ui_absence": {"status": "unknown", "notes": "Scene-only image must have no text, UI, phone, logo or button.", "evidence": []}
+  },
+  "typography_stage": {
+    "mode": "live_html_css_overlay",
+    "spec_path": "artifacts/regeneration/typography.json",
+    "final_render": "artifacts/screenshots/mobile.png",
+    "exact_copy": ["Seu inglês tá uma merda? A Catty resolve."],
+    "preserved_scene": false,
+    "layout_checked": false
+  }
+}

@@ -3,6 +3,7 @@ import subprocess, threading
 from datetime import datetime, timezone
 from pathlib import Path
 from app.services.project_contract import load_contract
+from app.services.visual_qa_contract import task_requires_visual_qa
 
 def now(): return datetime.now(timezone.utc).isoformat()
 
@@ -38,11 +39,32 @@ class TestRunner:
                 (now(), f"Test run was {stuck['status']} when the server restarted; the in-process work was lost. Retry.", stuck["id"]))
 
     def start(self, kind: str, entity_id: int, path: Path):
-        stages = load_contract(path)
+        stages = self.stages_for(kind, entity_id, path)
         ids = [self.db.execute("INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit) VALUES(?,?,?,?,?,?)", (kind, entity_id, cmd, stage, "QUEUED", self.git.head(path))) for stage, cmd, _, _ in stages]
         self.db.event(kind, entity_id, "TEST_STARTED", ", ".join(x[0] for x in stages))
         threading.Thread(target=self._run, args=(kind, entity_id, path, stages, ids), daemon=True).start()
         return ids
+
+    def stages_for(self, kind: str, entity_id: int, path: Path):
+        task = self._task_for(kind, entity_id)
+        return load_contract(path, visual_qa_required=task_requires_visual_qa(task))
+
+    def _task_for(self, kind: str, entity_id: int):
+        if kind == "agent":
+            return self.db.one(
+                "SELECT t.implementation_prompt,t.brief_requirements,t.brief_test_plan "
+                "FROM agent_workspaces w JOIN tasks t ON t.id=w.task_id WHERE w.id=?",
+                (entity_id,),
+            )
+        if kind == "integration":
+            return self.db.one(
+                "SELECT t.implementation_prompt,t.brief_requirements,t.brief_test_plan "
+                "FROM integration_workspaces iw "
+                "JOIN task_integrations ti ON ti.id=iw.task_integration_id "
+                "JOIN tasks t ON t.id=ti.task_id WHERE iw.id=?",
+                (entity_id,),
+            )
+        return None
     def _run(self, kind, entity_id, path, stages, ids):
         overall = True
         for (stage, command, working, timeout), run_id in zip(stages, ids):

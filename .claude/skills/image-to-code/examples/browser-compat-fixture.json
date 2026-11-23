@@ -1,0 +1,24 @@
+{
+  "html_file": "tests/fixtures/touch.html",
+  "engines": [
+    "chromium",
+    "webkit"
+  ],
+  "interactive": [
+    "#open",
+    "#close"
+  ],
+  "taps": [
+    {
+      "selector": "#open",
+      "expect": "#dialog.open"
+    }
+  ],
+  "swipes": [
+    {
+      "selector": "#dialog",
+      "dy": -80
+    }
+  ],
+  "tab_steps": 3
+}

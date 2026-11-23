@@ -1,0 +1,26 @@
+# Merge these entries into a UI repository's existing PROJECT.yaml.
+# Do not add visual_qa to ci.required: ProjectFlow appends it only when the
+# Task prompt contains VISUAL_QA_REQUIRED: true.
+commands:
+  visual_qa:
+    command: >-
+      for viewport in 430x932 768x1024 1366x768 1920x1080; do
+      ./tools/visual_qa/visual-qa --reference "docs/design/orders-${viewport}.png"
+      --url http://127.0.0.1:4173/app/store-minh-anh/orders --viewport "$viewport"
+      --out ".artifacts/visual-qa/${viewport}" --threshold 0.08 || exit $?; done
+    working_directory: .
+    timeout_seconds: 180
+visual_qa:
+  enabled: true
+  references:
+    430x932: docs/design/orders-430x932.png
+    768x1024: docs/design/orders-768x1024.png
+    1366x768: docs/design/orders-1366x768.png
+    1920x1080: docs/design/orders-1920x1080.png
+  route: http://127.0.0.1:4173/app/store-minh-anh/orders
+  viewports:
+    - {width: 430, height: 932}
+    - {width: 768, height: 1024}
+    - {width: 1366, height: 768}
+    - {width: 1920, height: 1080}
+  threshold: 0.08
