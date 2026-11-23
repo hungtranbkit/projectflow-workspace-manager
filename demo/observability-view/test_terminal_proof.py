@@ -468,15 +468,20 @@ def test_running_activity_hints_disappear_when_agent_becomes_idle():
     monitor = TerminalProofMonitor(lambda *_: observed.copy(), interval=1,
                                    clock=lambda: tick[0], task_reader=lambda *_: None)
     row = [{"node_id": "hp-linux", "session_name": "projectflow-safe-hint"}]
-    result = monitor.snapshot(row, now=now)[("hp-linux", "projectflow-safe-hint")]
+    first = monitor.snapshot(row, now=now)[("hp-linux", "projectflow-safe-hint")]
+    assert first["state"] == "BUSY_UNVERIFIED"
+    assert "recent_actions" not in first
+    tick[0] += 2
+    observed["last_output"] = observed["last_output"].replace("8 passed", "9 passed")
+    result = monitor.snapshot(row, now=now + timedelta(seconds=2))[("hp-linux", "projectflow-safe-hint")]
     assert result["state"] == "RUNNING_VERIFIED"
-    assert result["evidence"] == "agent_ui_busy"
+    assert result["evidence"] == "terminal_output_delta"
     assert set(result["recent_actions"]).issubset(PUBLIC_ACTIVITY_LABELS)
     assert len(result["recent_actions"]) >= 2
     assert "/private" not in str(result)
-    observed.update(state="IDLE", reason="claude is back at its composer", last_output="8 passed in 2.0s")
+    observed.update(state="IDLE", reason="claude is back at its composer", last_output="9 passed in 2.0s")
     tick[0] += 2
-    after = monitor.snapshot(row, now=now + timedelta(seconds=2))[("hp-linux", "projectflow-safe-hint")]
+    after = monitor.snapshot(row, now=now + timedelta(seconds=4))[("hp-linux", "projectflow-safe-hint")]
     assert after["state"] == "IDLE"
     assert "recent_actions" not in after
 
@@ -490,8 +495,8 @@ def test_running_without_safe_activity_text_returns_empty_list_not_raw_excerpt()
     monitor = TerminalProofMonitor(lambda *_: status, task_reader=lambda *_: None)
     result = monitor.snapshot([{"node_id":"macbook","session_name":"projectflow-sensitive-cli"}],now=now)
     record = result[("macbook","projectflow-sensitive-cli")]
-    assert record["state"] == "RUNNING_VERIFIED"
-    assert record["recent_actions"] == []
+    assert record["state"] == "BUSY_UNVERIFIED"
+    assert record.get("recent_actions", []) == []
     assert "API_TOKEN" not in str(record)
 
 
@@ -501,7 +506,7 @@ def test_codex_background_wait_timer_cannot_fake_running_or_refresh_checkpoint()
     status = {
         "state": "RUNNING", "agent_type": "codex", "exists": True, "allowed": True,
         "reason": "agent CLI busy footer matched 'esc to interrupt' at bottom offset 5; current command is 'codex'",
-        "last_output": "Waiting for background terminal (3h 50m 16s • esc to interrupt)\\n"
+        "last_output": "Waiting for background terminal (3h 50m 16s • esc to interrupt)\n"
                        "└ python3 - <<'PY'…",
     }
     class Reader:
@@ -530,7 +535,7 @@ def test_codex_recent_semantic_output_not_spinner_can_verify_progress():
     from terminal_proof import TerminalProofMonitor
     status = {"state": "RUNNING", "agent_type": "codex", "exists": True, "allowed": True,
               "reason": "agent CLI busy footer matched 'esc to interrupt' at bottom offset 1; current command is 'codex'",
-              "last_output": "17 passed in 1.2s\\nWaiting for background terminal (2m 10s)"}
+              "last_output": "17 passed in 1.2s\nWaiting for background terminal (2m 10s)"}
     tick = [0.]
     monitor = TerminalProofMonitor(lambda *_: status.copy(), interval=1,
                                    clock=lambda: tick[0], task_reader=lambda *_: None)
