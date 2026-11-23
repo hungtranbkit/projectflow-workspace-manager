@@ -1,0 +1,742 @@
+........................................................................ [  4%]
+........................................................................ [  9%]
+........................................................................ [ 13%]
+........................................................................ [ 18%]
+........................................................................ [ 22%]
+........................................................................ [ 27%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 41%]
+........................................................................ [ 45%]
+........................................................................ [ 50%]
+........................................................................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 64%]
+........................................................................ [ 68%]
+........................................................................ [ 73%]
+.............................................F.......................... [ 78%]
+.F...................................................................... [ 82%]
+................F.........F.F.............................FFF........... [ 87%]
+................................................................F.FF..F. [ 91%]
+..................................F.......F............................. [ 96%]
+.........................................................                [100%]
+=================================== FAILURES ===================================
+_____________ test_reset_data_does_not_touch_an_unrelated_sandbox ______________
+
+client = <starlette.testclient.TestClient object at 0x70dfb070f240>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_reset_data_does_not_touch0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_reset_data_does_not_touch0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70e021865c70>
+cleanup_sandboxes = [1, 2]
+
+    def test_reset_data_does_not_touch_an_unrelated_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        sb1 = make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, (22340, 22359), "reset-a")
+>       sb2 = make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, (22360, 22379), "reset-b")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_sandbox_reset_data.py:100: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <starlette.testclient.TestClient object at 0x70dfb070f240>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_reset_data_does_not_touch0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_reset_data_does_not_touch0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70e021865c70>
+cleanup_sandboxes = [1, 2], port_range = (22360, 22379), name = 'reset-b'
+
+    def make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, port_range, name):
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, name, port_range=port_range)
+        register(client, repo, name)
+        rid = next(r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == name)
+        client.post("/api/tasks", data={"title": f"{name} task", "risk_profile": "LOW"}, follow_redirects=False)
+        tid = [t for t in client.get("/api/tasks").json() if t["title"] == f"{name} task"][0]["id"]
+        client.post(f"/api/tasks/{tid}/select")
+        client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        sb = [s for s in client.get("/api/sandboxes").json() if s["repository_id"] == rid][0]
+        cleanup_sandboxes.append(sb["id"])
+        row = wait_status(client, sb["id"], ("RUNNING", "UNHEALTHY", "FAILED"))
+>       assert row["status"] == "RUNNING", row
+E       AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_sandbox_reset_data.py:63: AssertionError
+___________ test_multi_repo_task_session_sandbox_soak_leaves_no_leak ___________
+
+client = <starlette.testclient.TestClient object at 0x70e02150ecf0>
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-243/test_multi_repo_task_session_s0')
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70e037f58ca0>
+
+    def test_multi_repo_task_session_sandbox_soak_leaves_no_leak(client, tmp_path, sandboxable_repo_factory):
+        # `client` (via the `git_repo` fixture) already created
+        # tmp_path/"root"/"demo" as the workspace root -- reuse that same
+        # root rather than re-mkdir'ing it.
+        root = client.app.state.settings.root
+        N = 3
+    
+        before_containers = _wm_container_ids()
+        worktree_root = client.app.state.git.worktree_root
+        before_worktree_dirs = set(worktree_root.glob("*")) if worktree_root.is_dir() else set()
+    
+        client.app.state.agent_sessions.launchers = {"codex": AgentLauncher("Codex", "bash", ("-c", "true"))}
+    
+        sandbox_ids, workspace_ids, session_ids = [], [], []
+        for i in range(N):
+            repo = sandboxable_repo_factory(root, f"soak-{i}", port_range=(21200 + i * 10, 21209 + i * 10))
+            rid = register(client, repo)
+            r = client.post("/api/tasks", data={"title": f"Soak task {i}"}, follow_redirects=False)
+            assert r.status_code == 303, r.text
+            tid = int(r.headers["location"].split("/")[-1])
+            client.post(f"/api/tasks/{tid}/select")
+            r = client.post(f"/api/tasks/{tid}/workspaces",
+                             data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"},
+                             follow_redirects=False)
+            assert r.status_code == 303, r.text
+            w = client.get("/api/workspaces").json()[-1]
+            workspace_ids.append(w["id"])
+    
+            sb = [s for s in client.get("/api/sandboxes").json() if s["owner_id"] == w["id"]][0]
+>           assert sb["status"] == "RUNNING", sb
+E           AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}
+E           assert 'FAILED' == 'RUNNING'
+E             
+E             - RUNNING
+E             + FAILED
+
+tests/test_soak_multi_repo_resource_leak.py:90: AssertionError
+_________ test_invariant_cleanup_eligible_still_counts_toward_capacity _________
+
+client = <starlette.testclient.TestClient object at 0x70dfb1a5e360>
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70e083e42fb0>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_invariant_cleanup_eligibl0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_invariant_cleanup_eligibl0/root/demo'))
+
+    def test_invariant_cleanup_eligible_still_counts_toward_capacity(client, sandboxable_repo_factory, git_repo):
+        """Sandbox CLEANUP_ELIGIBLE -> may still be RUNNING during
+        retention; the real container is still up, so it must still count
+        against max_running (a capacity-enforcement bug otherwise: more
+        real containers could run than max_running allows)."""
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, "svc-cap", port_range=(21850, 21899))
+        register(client, repo, "svc-cap")
+        rid = [r for r in client.get("/api/repositories").json() if r["repo_name"] == "svc-cap"][0]["id"]
+        client.post("/api/tasks", data={"title": "Capacity check"}, follow_redirects=False)
+        tid = client.get("/api/tasks").json()[-1]["id"]
+        client.post(f"/api/tasks/{tid}/select")
+        client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "A", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        sb = client.get("/api/sandboxes").json()[-1]
+    
+        before = client.app.state.sandboxes.running_count()
+        client.app.state.db.execute("UPDATE sandboxes SET status='CLEANUP_ELIGIBLE' WHERE id=?", (sb["id"],))
+        after = client.app.state.sandboxes.running_count()
+>       assert after == before  # CLEANUP_ELIGIBLE must count exactly like RUNNING did
+        ^^^^^^^^^^^^^^^^^^^^^^
+E       assert 1 == 0
+
+tests/test_state_invariants.py:248: AssertionError
+_______ test_task_detail_aggregates_child_state_and_never_duplicates_it ________
+
+client = <starlette.testclient.TestClient object at 0x70dde96a3df0>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_task_detail_aggregates_ch0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_task_detail_aggregates_ch0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70e0815f1bc0>
+cleanup_sandboxes = [1]
+
+    def test_task_detail_aggregates_child_state_and_never_duplicates_it(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, "agg-repo", port_range=(21920, 21939))
+        register(client, repo, "agg-repo")
+        rid = client.get("/api/repositories").json()[0]["id"]
+        post_multi(client, "/api/tasks/new-with-workspace", [
+            ("title", "Aggregate task"), ("description", ""),
+            ("ws_repository_id", str(rid)), ("ws_agent", "claude"), ("ws_role", "Backend"), ("ws_base_branch", "main"), ("ws_sandbox_profile", "backend"),
+        ])
+        tid = client.get("/api/tasks").json()[0]["id"]
+        sb = client.get("/api/sandboxes").json()[0]
+        cleanup_sandboxes.append(sb["id"])
+    
+        page = client.get(f"/tasks/{tid}").text
+        outputs = client.app.state.sandboxes.outputs(sb["id"])
+>       assert outputs["backend_url"] in page  # same Sandbox record, no duplicated URL state
+               ^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'backend_url'
+
+tests/test_task_centric_ux.py:222: KeyError
+___________ test_blocking_workspace_shown_and_next_action_progresses ___________
+
+client = <starlette.testclient.TestClient object at 0x70e0b068f570>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_blocking_workspace_shown_0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_blocking_workspace_shown_0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70dfe02d6980>
+cleanup_sandboxes = [1]
+
+    def test_blocking_workspace_shown_and_next_action_progresses(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """The Task-level next_action (TaskDecisionService) progresses through
+        START_BUILDER -> SUBMIT_FOR_REVIEW -> START_REVIEW -> CREATE_INTEGRATION
+        as the one Builder Workspace moves through the gate model. (The
+        older per-sandbox "Run Tests"/"Open App and Verify" steps still exist,
+        but now live only on the Workspace's own Runtime section, a separate
+        concern from this Task-level gate engine -- section 39.)"""
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, "block-repo", port_range=(21960, 21979))
+        register(client, repo, "block-repo")
+        rid = client.get("/api/repositories").json()[0]["id"]
+        r = post_multi(client, "/api/tasks/new-with-workspace", [
+            ("title", "Block task"), ("description", ""),
+            ("ws_repository_id", str(rid)), ("ws_agent", "codex"), ("ws_role", "Backend"), ("ws_base_branch", "main"), ("ws_sandbox_profile", "backend"),
+        ], follow_redirects=False)
+        tid = int(r.headers["location"].split("/")[-1])
+        w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
+        for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
+    
+        page = client.get(f"/tasks/{tid}").text
+        assert "codex" in page
+        d = client.get(f"/api/tasks/{tid}/decision").json()
+        assert d["next_action"]["action"] == "START_BUILDER"
+    
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
+        d = client.get(f"/api/tasks/{tid}/decision").json()
+        assert d["next_action"]["action"] == "SUBMIT_FOR_REVIEW"  # builder READY, no review started
+    
+        client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+        d = client.get(f"/api/tasks/{tid}/decision").json()
+        assert d["next_action"]["action"] == "START_REVIEW"  # review in progress
+    
+        client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
+        d = client.get(f"/api/tasks/{tid}/decision").json()
+>       assert d["next_action"]["action"] == "START_QA"  # NORMAL risk, review PASS -- Runtime Verification next (sandbox already auto-created)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert 'REBUILD_SANDBOX' == 'START_QA'
+E         
+E         - START_QA
+E         + REBUILD_SANDBOX
+
+tests/test_task_centric_ux.py:298: AssertionError
+__________ test_global_list_and_task_detail_agree_on_one_sandbox_each __________
+
+client = <starlette.testclient.TestClient object at 0x70df2013a140>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_global_list_and_task_deta0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_global_list_and_task_deta0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70df7c7ac720>
+cleanup_sandboxes = []
+
+    def test_global_list_and_task_detail_agree_on_one_sandbox_each(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """Items 1, 2, 3, 4, 5, 9, 10, plus the REAL_UI_VERIFICATION Task A / Task B split."""
+        root, _ = git_repo
+>       tid_a, rid_a, _, ws_a, sb_a = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-a", "Task A", (21500, 21519))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_task_sandbox_views.py:65: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <starlette.testclient.TestClient object at 0x70df2013a140>
+root = PosixPath('/tmp/pytest-of-dell/pytest-243/test_global_list_and_task_deta0/root')
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70df7c7ac720>
+repo_name = 'repo-a', task_title = 'Task A', port_range = (21500, 21519)
+
+    def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, task_title, port_range):
+        """One Task with one Agent Workspace whose profile resolves to a real,
+        running sandbox -- the minimal disposable fixture every scenario below
+        builds on."""
+        repo = sandboxable_repo_factory(root, repo_name, port_range=port_range)
+        register(client, repo, repo_name)
+        rid = [r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == repo_name][0]
+        r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
+        assert r.status_code == 303
+        tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+        client.post(f"/api/tasks/{tid}/select")
+        r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
+        sb = [s for s in client.get("/api/sandboxes").json() if s["owner_type"] == "AGENT_WORKSPACE" and s["owner_id"] == ws["id"]][0]
+>       assert sb["status"] == "RUNNING", sb
+E       AssertionError: {'id': 1, 'task_id': 1, 'repository_id': 1, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_task_sandbox_views.py:50: AssertionError
+_____ test_integration_sandbox_shows_multiple_source_repos_in_task_detail ______
+
+client = <starlette.testclient.TestClient object at 0x70df7c106e00>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_integration_sandbox_shows0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_integration_sandbox_shows0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70e0b2befed0>
+cleanup_sandboxes = []
+
+    def test_integration_sandbox_shows_multiple_source_repos_in_task_detail(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """Item 6, plus staleness (item 7) and the C = Task A + C, Task B
+        untouched half of REAL_UI_VERIFICATION."""
+        root, _ = git_repo
+        backend = sandboxable_repo_factory(root, "backend-repo", port_range=(21540, 21559))
+        client_repo = root / "client-repo"
+        client_repo.mkdir()
+        run(client_repo, "git", "init", "-b", "main")
+        run(client_repo, "git", "config", "user.email", "t@t"); run(client_repo, "git", "config", "user.name", "t")
+        (client_repo / "PROJECT.yaml").write_text(
+            "schema_version: 1\nproject: {code: client-repo}\nsource: {root: .}\n"
+            "commands:\n  preflight: {command: 'true'}\n  test: {command: 'true'}\nci: {required: [preflight, test]}\n"
+        )
+        (client_repo / "README.md").write_text("client base\n")
+        run(client_repo, "git", "add", "."); run(client_repo, "git", "commit", "-m", "base")
+    
+        register(client, backend, "backend-repo"); register(client, client_repo, "client-repo")
+        repos = {r["repo_name"]: r["id"] for r in client.get("/api/repositories").json()}
+    
+        client.post("/api/tasks", data={"title": "Task A cross-repo"}, follow_redirects=False)
+        tid_a = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == "Task A cross-repo"][0]
+        client.post(f"/api/tasks/{tid_a}/select")
+        r = client.post(f"/api/tasks/{tid_a}/workspaces", data={"repository_id": repos["backend-repo"], "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        backend_ws = client.get("/api/workspaces").json()[-1]
+        (client.app.state.git.validate_worktree(backend_ws["worktree_path"]) / "feature.txt").write_text("backend feature\n")
+        run(backend_ws["worktree_path"], "git", "add", "."); run(backend_ws["worktree_path"], "git", "commit", "-m", "backend feature")
+    
+        r = client.post(f"/api/tasks/{tid_a}/workspaces", data={"repository_id": repos["client-repo"], "agent": "claude", "role": "Client", "base_branch": "main", "sandbox_profile": ""}, follow_redirects=False)
+        assert r.status_code == 303
+        client_ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == repos["client-repo"]][0]
+    
+        for w in (backend_ws, client_ws):
+            assert client.post(f"/api/workspaces/{w['id']}/ready", follow_redirects=False).status_code == 303
+            client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+            assert client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"}, follow_redirects=False).status_code == 303
+    
+        # unrelated Task B, must stay untouched by anything below
+>       tid_b, rid_b, _, ws_b, sb_b = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-b2", "Task B unrelated", (21560, 21579))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_task_sandbox_views.py:151: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <starlette.testclient.TestClient object at 0x70df7c106e00>
+root = PosixPath('/tmp/pytest-of-dell/pytest-243/test_integration_sandbox_shows0/root')
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70e0b2befed0>
+repo_name = 'repo-b2', task_title = 'Task B unrelated'
+port_range = (21560, 21579)
+
+    def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, task_title, port_range):
+        """One Task with one Agent Workspace whose profile resolves to a real,
+        running sandbox -- the minimal disposable fixture every scenario below
+        builds on."""
+        repo = sandboxable_repo_factory(root, repo_name, port_range=port_range)
+        register(client, repo, repo_name)
+        rid = [r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == repo_name][0]
+        r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
+        assert r.status_code == 303
+        tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+        client.post(f"/api/tasks/{tid}/select")
+        r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
+        sb = [s for s in client.get("/api/sandboxes").json() if s["owner_type"] == "AGENT_WORKSPACE" and s["owner_id"] == ws["id"]][0]
+>       assert sb["status"] == "RUNNING", sb
+E       AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 3, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_task_sandbox_views.py:50: AssertionError
+________ test_stopped_and_cleanup_countdown_state_consistent_everywhere ________
+
+client = <starlette.testclient.TestClient object at 0x70deb3fe8490>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_stopped_and_cleanup_count0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_stopped_and_cleanup_count0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70de7d206350>
+cleanup_sandboxes = []
+
+    def test_stopped_and_cleanup_countdown_state_consistent_everywhere(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """Items 8 and 9 (the stop/cleanup half): a stopped sandbox and a
+        scheduled cleanup countdown must read identically in both views."""
+        root, _ = git_repo
+>       tid, rid, _, ws, sb = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-stop", "Task Stop", (21580, 21599))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_task_sandbox_views.py:196: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <starlette.testclient.TestClient object at 0x70deb3fe8490>
+root = PosixPath('/tmp/pytest-of-dell/pytest-243/test_stopped_and_cleanup_count0/root')
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70de7d206350>
+repo_name = 'repo-stop', task_title = 'Task Stop', port_range = (21580, 21599)
+
+    def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, task_title, port_range):
+        """One Task with one Agent Workspace whose profile resolves to a real,
+        running sandbox -- the minimal disposable fixture every scenario below
+        builds on."""
+        repo = sandboxable_repo_factory(root, repo_name, port_range=port_range)
+        register(client, repo, repo_name)
+        rid = [r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == repo_name][0]
+        r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
+        assert r.status_code == 303
+        tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+        client.post(f"/api/tasks/{tid}/select")
+        r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
+        sb = [s for s in client.get("/api/sandboxes").json() if s["owner_type"] == "AGENT_WORKSPACE" and s["owner_id"] == ws["id"]][0]
+>       assert sb["status"] == "RUNNING", sb
+E       AssertionError: {'id': 1, 'task_id': 1, 'repository_id': 1, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_task_sandbox_views.py:50: AssertionError
+_________________ test_sandbox_running_displays_urls_and_ports _________________
+
+client = <starlette.testclient.TestClient object at 0x70df7c232f10>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_sandbox_running_displays_0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_sandbox_running_displays_0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70df6c26c1a0>
+cleanup_sandboxes = [1]
+
+    def test_sandbox_running_displays_urls_and_ports(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        root, _ = git_repo
+        w = make_standalone_ready_workspace(client, root, sandboxable_repo_factory, "verif-b", (21620, 21639))
+        r = client.post(f"/api/workspaces/{w['id']}/create-sandbox", data={"profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        sb = client.get("/api/sandboxes").json()[0]
+        cleanup_sandboxes.append(sb["id"])
+>       assert sb["status"] == "RUNNING" and sb["health_status"] == "HEALTHY"
+E       AssertionError: assert ('FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED)
+
+tests/test_verification_ux.py:89: AssertionError
+_____ test_manual_pass_stores_exact_source_commit_and_stales_on_new_commit _____
+
+client = <starlette.testclient.TestClient object at 0x70e022917790>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_manual_pass_stores_exact_0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_manual_pass_stores_exact_0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70e097fd2c40>
+cleanup_sandboxes = [1]
+
+    def test_manual_pass_stores_exact_source_commit_and_stales_on_new_commit(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        root, _ = git_repo
+        w = make_standalone_ready_workspace(client, root, sandboxable_repo_factory, "verif-d", (21660, 21679))
+        client.post(f"/api/workspaces/{w['id']}/create-sandbox", data={"profile": "backend"}, follow_redirects=False)
+        sb = client.get("/api/sandboxes").json()[0]
+        cleanup_sandboxes.append(sb["id"])
+        commit_at_verify = head(w["worktree_path"])
+    
+        r = client.post(f"/api/sandboxes/{sb['id']}/manual-verification", data={"result": "PASS", "note": "looks good"}, follow_redirects=False)
+>       assert r.status_code == 303
+E       assert 409 == 303
+E        +  where 409 = <Response [409 Conflict]>.status_code
+
+tests/test_verification_ux.py:135: AssertionError
+_______________ test_next_action_progresses_through_every_state ________________
+
+client = <starlette.testclient.TestClient object at 0x70df2027bdf0>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_next_action_progresses_th0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_next_action_progresses_th0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70e023fc2090>
+cleanup_sandboxes = [1]
+
+    def test_next_action_progresses_through_every_state(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, "verif-e", port_range=(21680, 21699))
+        register(client, repo, "verif-e")
+        rid = client.get("/api/repositories").json()[0]["id"]
+        client.post("/api/workspaces", data={"repository_id": rid, "agent": "codex", "task_name": "verif-e", "base_branch": "main"})
+        w = client.get("/api/workspaces").json()[0]
+    
+        # not READY yet -- Workspace Detail UX redesign (section 9): the
+        # generic, session-unaware "Agent chưa Mark Ready" message is
+        # replaced by a state-driven Current Action block reading the real
+        # AgentSession (here: none started yet at all).
+        assert "Start Codex" in _code(client, w["id"])
+    
+        client.post(f"/api/workspaces/{w['id']}/ready")
+        assert "Create Sandbox" in client.get(f"/workspaces/{w['id']}").text
+    
+        client.post(f"/api/workspaces/{w['id']}/create-sandbox", data={"profile": "backend"})
+        sb = client.get("/api/sandboxes").json()[0]
+        cleanup_sandboxes.append(sb["id"])
+>       assert "Run Tests" in client.get(f"/workspaces/{w['id']}").text
+E       assert 'Run Tests' in '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><...ehind).\nsetTimeout(()=>{if(document.querySelector(\'[data-running]\'))location.reload()},1500)</script></body></html>'
+E        +  where '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><...ehind).\nsetTimeout(()=>{if(document.querySelector(\'[data-running]\'))location.reload()},1500)</script></body></html>' = <Response [200 OK]>.text
+E        +    where <Response [200 OK]> = get('/workspaces/1')
+E        +      where get = <starlette.testclient.TestClient object at 0x70df2027bdf0>.get
+
+tests/test_verification_ux.py:173: AssertionError
+_____ test_task_detail_and_sandbox_detail_show_identical_runtime_identity ______
+
+client = <starlette.testclient.TestClient object at 0x70deb41dde10>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_task_detail_and_sandbox_d0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_task_detail_and_sandbox_d0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70e0522380f0>
+cleanup_sandboxes = [1]
+
+    def test_task_detail_and_sandbox_detail_show_identical_runtime_identity(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, "verif-g", port_range=(21720, 21739))
+        register(client, repo, "verif-g")
+        rid = client.get("/api/repositories").json()[0]["id"]
+        client.post("/api/tasks", data={"title": "Identity check"}, follow_redirects=False)
+        tid = client.get("/api/tasks").json()[0]["id"]
+        client.post(f"/api/tasks/{tid}/select")
+        client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"})
+        sb = client.get("/api/sandboxes").json()[0]
+        cleanup_sandboxes.append(sb["id"])
+        outputs = client.app.state.sandboxes.outputs(sb["id"])
+        ports_ = client.app.state.ports.ports_for(sb["id"])
+        commit = client.app.state.db.one("SELECT commit_sha FROM sandbox_sources WHERE sandbox_id=?", (sb["id"],))["commit_sha"]
+    
+        task_page = client.get(f"/tasks/{tid}").text
+        sandbox_page = client.get(f"/sandboxes/{sb['id']}").text
+        for page in (task_page, sandbox_page):
+>           assert outputs["backend_url"] in page
+                   ^^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'backend_url'
+
+tests/test_verification_ux.py:232: KeyError
+_____________ test_closed_sandbox_restarts_instead_of_duplicating ______________
+
+client = <starlette.testclient.TestClient object at 0x70dea2303f00>
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-243/test_closed_sandbox_restarts_i0')
+
+    def test_closed_sandbox_restarts_instead_of_duplicating(client, tmp_path):
+        from tests.conftest import make_repo, NGINX_SANDBOX_CONTRACT, NGINX_COMPOSE
+        root = tmp_path / "root"
+        repo = make_repo(root, "closed-test", NGINX_SANDBOX_CONTRACT.format(lo=21500, hi=21519))
+        (repo / "compose.yml").write_text(NGINX_COMPOSE)
+        run(repo, "git", "add", ".")
+        run(repo, "git", "commit", "-m", "sandbox contract")
+        register(client, repo, "closed-test")
+        rid = client.get("/api/repositories").json()[0]["id"]
+        tid = new_task(client, "Closed sandbox case", risk="NORMAL")
+        client.post(f"/api/tasks/{tid}/select")
+        w = add_workspace(client, tid, rid, sandbox_profile=None)
+        submit_for_review(client, w)
+        review(client, w, "PASS")
+        client.post(f"/api/tasks/{tid}/workspaces/{w['id']}/create-sandbox", data={}, follow_redirects=False)
+        sb = client.get("/api/sandboxes").json()[0]
+        sid = sb["id"]
+    
+        # Simulate a previous execution's sandbox now cleaned up.
+        client.app.state.db.execute("UPDATE sandboxes SET status='CLOSED' WHERE id=?", (sid,))
+    
+        d = decision(client, tid)
+        na = d["next_action"]
+        assert na["action"] == "RESTART_SANDBOX"
+        assert na["method"] == "POST"
+        assert na["target"] == f"/api/sandboxes/{sid}/start"
+    
+        r = client.post(na["target"], follow_redirects=False)
+        assert r.status_code == 303
+        # Same row restarted -- never a second sandbox created.
+        all_sandboxes = client.app.state.db.all("SELECT id FROM sandboxes WHERE owner_type='AGENT_WORKSPACE' AND owner_id=?", (w["id"],))
+        assert len(all_sandboxes) == 1
+        row = client.app.state.db.one("SELECT status FROM sandboxes WHERE id=?", (sid,))
+>       assert row["status"] in ("RUNNING", "PROVISIONING", "STARTING")
+E       AssertionError: assert 'FAILED' in ('RUNNING', 'PROVISIONING', 'STARTING')
+
+tests/test_workflow_dead_anchors.py:259: AssertionError
+____ test_missing_requirements_lists_full_remaining_set_for_create_sandbox _____
+
+client = <starlette.testclient.TestClient object at 0x70df34796690>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-243/test_missing_requirements_list0/root'), PosixPath('/tmp/pytest-of-dell/pytest-243/test_missing_requirements_list0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x70de8fe577f0>
+
+    def test_missing_requirements_lists_full_remaining_set_for_create_sandbox(client, git_repo, sandboxable_repo_factory):
+        """Section 12's exact worked example (this is the real Task #6
+        regression: a sandbox: contract exists and the workspace never opted
+        out with profile NONE, yet no sandbox exists at Runtime Verification
+        time -- in production that happened because auto-create silently hit
+        a capacity/runtime limit at Builder-Workspace-creation time
+        (auto_create_sandbox swallows SandboxError); here it is simulated
+        directly by removing the auto-created sandbox, which is
+        observationally identical to the decision layer). Create Sandbox
+        must still list 'Manual verification has not been completed'
+        alongside it, not only the one thing blocking right now."""
+        root, repo = git_repo
+        sb_repo = sandboxable_repo_factory(root, "qa-center")
+        register(client, sb_repo, "qa-center")
+        rid = client.get("/api/repositories").json()[0]["id"]
+        tid = new_task(client, "Runtime verification regression", risk="NORMAL")
+        client.post(f"/api/tasks/{tid}/select")
+        w = add_workspace(client, tid, rid, sandbox_profile=None)  # AUTO -> required
+        db = client.app.state.db
+        sb_ids = [r["id"] for r in db.all("SELECT id FROM sandboxes WHERE owner_type='AGENT_WORKSPACE' AND owner_id=?", (w["id"],))]
+        for sid in sb_ids:
+            db.execute("DELETE FROM sandbox_sources WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM sandbox_ports WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM sandbox_operations WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM manual_verifications WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM sandboxes WHERE id=?", (sid,))
+        submit_for_review(client, w)
+        review(client, w, "PASS")
+        d = decision(client, tid)
+        assert d["current_step"] == "TEST_QA"
+        assert d["next_action"]["action"] == "CREATE_SANDBOX"
+        assert d["missing_requirements"] == ["A Sandbox has not been created", "Manual verification has not been completed"]
+        assert d["next_action"]["target"] == f"/api/tasks/{tid}/workspaces/{w['id']}/create-sandbox"
+        assert d["next_action"]["method"] == "POST"
+    
+        # Successful action must advance the UI (section 6): once created,
+        # Create Sandbox never lingers as the primary action again.
+        r = client.post(d["next_action"]["target"], follow_redirects=False)
+        assert r.status_code == 303
+        d2 = decision(client, tid)
+        assert d2["next_action"]["action"] != "CREATE_SANDBOX"
+>       assert d2["next_action"]["action"] in ("SANDBOX_PROVISIONING", "START_QA")
+E       AssertionError: assert 'REBUILD_SANDBOX' in ('SANDBOX_PROVISIONING', 'START_QA')
+
+tests/test_workflow_decision_ux.py:186: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_action_feedback.py: 187 warnings
+tests/test_agent_observability.py: 11 warnings
+tests/test_agent_observability_p0_final.py: 22 warnings
+tests/test_agent_observability_p0_repair.py: 66 warnings
+tests/test_agent_observability_security.py: 22 warnings
+tests/test_agent_possibly_stuck.py: 33 warnings
+tests/test_architecture_design.py: 528 warnings
+tests/test_autonomous_execution.py: 396 warnings
+tests/test_autonomous_execution_real.py: 11 warnings
+tests/test_b01_authn.py: 220 warnings
+tests/test_b02_organizations.py: 286 warnings
+tests/test_b03_authz.py: 154 warnings
+tests/test_b04_csrf.py: 121 warnings
+tests/test_b05_ratelimit.py: 88 warnings
+tests/test_b06_sandbox.py: 22 warnings
+tests/test_b07_secrets.py: 242 warnings
+tests/test_b0_final_qualification.py: 143 warnings
+tests/test_b1_read_isolation.py: 110 warnings
+tests/test_b2_release_concurrency.py: 44 warnings
+tests/test_b3_github_app.py: 110 warnings
+tests/test_b4_github_webhook_ingestion.py: 132 warnings
+tests/test_b5_tenant_isolation_completeness.py: 88 warnings
+tests/test_b6_trusted_proxy.py: 66 warnings
+tests/test_b7_repository_identity.py: 154 warnings
+tests/test_backup_restore.py: 44 warnings
+tests/test_baseline_reproduction_duplicate_click.py: 11 warnings
+tests/test_baseline_waivers.py: 44 warnings
+tests/test_builder_completion_vs_session.py: 121 warnings
+tests/test_builder_exec_ux.py: 88 warnings
+tests/test_builder_workspace_ux.py: 88 warnings
+tests/test_change_overview.py: 99 warnings
+tests/test_cleanup_and_restart.py: 44 warnings
+tests/test_control_plane.py: 176 warnings
+tests/test_cross_repo_integration.py: 11 warnings
+tests/test_db_locked_handled_cleanly.py: 22 warnings
+tests/test_deployment.py: 165 warnings
+tests/test_deployment_hardening.py: 121 warnings
+tests/test_deployment_stuck_after_restart.py: 33 warnings
+tests/test_engineering_catalog.py: 275 warnings
+tests/test_engineering_domain.py: 319 warnings
+tests/test_engineering_lifecycle_ui.py: 297 warnings
+tests/test_execution_wave_reservation_stuck_after_restart.py: 33 warnings
+tests/test_execution_waves.py: 253 warnings
+tests/test_exited_no_report_recovery.py: 176 warnings
+tests/test_golden_e2e.py: 22 warnings
+tests/test_help_guide.py: 121 warnings
+tests/test_incidents.py: 242 warnings
+tests/test_integration_create_idempotent.py: 11 warnings
+tests/test_integration_lock_stuck_after_restart.py: 33 warnings
+tests/test_integration_push.py: 110 warnings
+tests/test_integration_test_run_stuck_after_restart.py: 33 warnings
+tests/test_live_terminal_routing.py: 88 warnings
+tests/test_merge_reconciliation.py: 143 warnings
+tests/test_operations_stuck_after_restart.py: 33 warnings
+tests/test_performance_regression.py: 55 warnings
+tests/test_planner_service.py: 451 warnings
+tests/test_product_acceptance.py: 253 warnings
+tests/test_productization_audit.py: 88 warnings
+tests/test_prompt_delivery.py: 55 warnings
+tests/test_prompt_ux.py: 99 warnings
+tests/test_qa_center_sandbox_contract.py: 110 warnings
+tests/test_real_merge.py: 132 warnings
+tests/test_release_pipeline.py: 319 warnings
+tests/test_repo_rename_worktree_repair.py: 22 warnings
+tests/test_repository_runtime_sandbox.py: 176 warnings
+tests/test_review_fix_loop.py: 319 warnings
+tests/test_review_fix_loop_real.py: 22 warnings
+tests/test_runtime_dependency_staleness.py: 11 warnings
+tests/test_sandbox_dies_self_heals.py: 22 warnings
+tests/test_sandbox_docker.py: 33 warnings
+tests/test_sandbox_reset_data.py: 33 warnings
+tests/test_sandbox_stuck_busy_after_restart.py: 33 warnings
+tests/test_sidebar_nav.py: 77 warnings
+tests/test_simple_mode.py: 154 warnings
+tests/test_smoke.py: 11 warnings
+tests/test_soak_multi_repo_resource_leak.py: 11 warnings
+tests/test_spec_compliance.py: 88 warnings
+tests/test_spec_lifecycle.py: 407 warnings
+tests/test_spec_supervisor_gate.py: 99 warnings
+tests/test_state_invariants.py: 99 warnings
+tests/test_task_centric_ux.py: 143 warnings
+tests/test_task_lifecycle_engine.py: 275 warnings
+tests/test_task_sandbox_views.py: 44 warnings
+tests/test_task_wizard.py: 99 warnings
+tests/test_test_design.py: 473 warnings
+tests/test_transcript_tail_persistence.py: 22 warnings
+tests/test_verification_ux.py: 88 warnings
+tests/test_web.py: 110 warnings
+tests/test_wizard_sandbox_picks_latest.py: 11 warnings
+tests/test_workflow_dead_anchors.py: 143 warnings
+tests/test_workflow_decision_ux.py: 121 warnings
+tests/test_workflow_engine.py: 462 warnings
+tests/test_workspace_branch_collision.py: 22 warnings
+tests/test_workspace_detail_ux.py: 110 warnings
+tests/test_worktree_manager.py: 209 warnings
+tests/test_worktree_manager_real.py: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_agent_possibly_stuck.py: 3 warnings
+tests/test_autonomous_execution.py: 3 warnings
+tests/test_autonomous_execution_real.py: 1 warning
+tests/test_builder_completion_vs_session.py: 9 warnings
+tests/test_builder_exec_ux.py: 3 warnings
+tests/test_builder_workspace_ux.py: 1 warning
+tests/test_control_plane.py: 6 warnings
+tests/test_engineering_catalog.py: 8 warnings
+tests/test_engineering_domain.py: 1 warning
+tests/test_execution_wave_reservation_stuck_after_restart.py: 1 warning
+tests/test_execution_waves.py: 7 warnings
+tests/test_exited_no_report_recovery.py: 18 warnings
+tests/test_golden_e2e.py: 6 warnings
+tests/test_live_terminal_routing.py: 6 warnings
+tests/test_planner_service.py: 1 warning
+tests/test_productization_audit.py: 2 warnings
+tests/test_prompt_delivery.py: 5 warnings
+tests/test_review_fix_loop.py: 2 warnings
+tests/test_review_fix_loop_real.py: 1 warning
+tests/test_soak_multi_repo_resource_leak.py: 1 warning
+tests/test_spec_lifecycle.py: 1 warning
+tests/test_spec_supervisor_gate.py: 3 warnings
+tests/test_state_invariants.py: 3 warnings
+tests/test_transcript_tail_persistence.py: 2 warnings
+tests/test_workflow_engine.py: 7 warnings
+tests/test_workspace_detail_ux.py: 7 warnings
+tests/test_worktree_manager.py: 2 warnings
+tests/test_worktree_manager_real.py: 1 warning
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=2257089) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/_pytest/python.py:191: PytestReturnNotNoneWarning: Test functions should return None, but tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete returned <class 'tuple'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/test_simple_mode.py::test_mode_query_param_sets_cookie_and_persists
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/starlette/testclient.py:518: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_sandbox_reset_data.py::test_reset_data_does_not_touch_an_unrelated_sandbox
+FAILED tests/test_soak_multi_repo_resource_leak.py::test_multi_repo_task_session_sandbox_soak_leaves_no_leak
+FAILED tests/test_state_invariants.py::test_invariant_cleanup_eligible_still_counts_toward_capacity
+FAILED tests/test_task_centric_ux.py::test_task_detail_aggregates_child_state_and_never_duplicates_it
+FAILED tests/test_task_centric_ux.py::test_blocking_workspace_shown_and_next_action_progresses
+FAILED tests/test_task_sandbox_views.py::test_global_list_and_task_detail_agree_on_one_sandbox_each
+FAILED tests/test_task_sandbox_views.py::test_integration_sandbox_shows_multiple_source_repos_in_task_detail
+FAILED tests/test_task_sandbox_views.py::test_stopped_and_cleanup_countdown_state_consistent_everywhere
+FAILED tests/test_verification_ux.py::test_sandbox_running_displays_urls_and_ports
+FAILED tests/test_verification_ux.py::test_manual_pass_stores_exact_source_commit_and_stales_on_new_commit
+FAILED tests/test_verification_ux.py::test_next_action_progresses_through_every_state
+FAILED tests/test_verification_ux.py::test_task_detail_and_sandbox_detail_show_identical_runtime_identity
+FAILED tests/test_workflow_dead_anchors.py::test_closed_sandbox_restarts_instead_of_duplicating
+FAILED tests/test_workflow_decision_ux.py::test_missing_requirements_lists_full_remaining_set_for_create_sandbox
+14 failed, 1555 passed, 1 skipped, 12159 warnings in 2756.95s (0:45:56)

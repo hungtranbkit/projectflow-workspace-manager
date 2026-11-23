@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "tool": "UIFix",
+  "toolVersion": "1.2.6",
+  "toolCommit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+  "sourceCommit": "b80a379098b28a09da47da8cd5829c94bf387b22",
+  "reference": "/tmp/visual-qa-smoke-uGJiSY/reference.png",
+  "referenceSha256": "9f65d312989d0aae40de76358a6c49f2f383a3cc32fd13422c88f5cbac25c713",
+  "actualSha256": "9f65d312989d0aae40de76358a6c49f2f383a3cc32fd13422c88f5cbac25c713",
+  "url": "http://127.0.0.1:35265/same",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "captureMode": "viewport",
+  "imageDimensions": {
+    "width": 320,
+    "height": 240
+  },
+  "deviceScaleFactor": 1,
+  "threshold": 0,
+  "percentDiff": 0,
+  "mismatchedPixels": 0,
+  "totalPixels": 76800,
+  "ssim": 1,
+  "changedRegions": [],
+  "horizontalOverflow": false,
+  "pageErrors": [],
+  "blockedRequests": [],
+  "passed": true
+}

@@ -211,15 +211,27 @@ class PlannerAgentInvoker:
                 # JSON envelopes on stdout (stderr may be empty). Keep only an
                 # allowlisted subtype: raw payload/errors may contain secrets.
                 subtype = "unknown"
+                api_error = None
                 try:
                     payload = json.loads(result.stdout or "")
-                    if isinstance(payload, dict) and isinstance(payload.get("subtype"), str) and payload.get("subtype") in {
-                        "error_max_turns", "error_max_structured_output_retries",
-                        "error_during_execution", "error_max_budget_usd",
-                    }:
-                        subtype = payload["subtype"]
+                    if isinstance(payload, dict):
+                        if isinstance(payload.get("subtype"), str) and payload.get("subtype") in {
+                            "error_max_turns", "error_max_structured_output_retries",
+                            "error_during_execution", "error_max_budget_usd",
+                        }:
+                            subtype = payload["subtype"]
+                        # Claude CLI can return subtype=success with is_error=true
+                        # for account-level API errors. Expose only a fixed,
+                        # reviewed category; never include provider text.
+                        if (payload.get("is_error") is True
+                                and payload.get("api_error") == "usage_limit_reached"
+                                and payload.get("api_error_status") == 429
+                                and payload.get("api_error_type") == "rate_limit_error"):
+                            api_error = "usage_limit_reached"
                 except (TypeError, ValueError):
                     pass
+                if api_error:
+                    subtype = api_error
                 last_error = PlannerAgentError(
                     f"Planner exited {result.returncode} (attempt {attempt}/{self.max_attempts}): subtype={subtype}")
                 continue
@@ -236,9 +248,14 @@ class PlannerAgentInvoker:
                 # Never put the raw error envelope in a user-visible error:
                 # it can include provider diagnostics, prompts or credentials.
                 subtype = envelope.get("subtype")
+                if (envelope.get("is_error") is True
+                        and envelope.get("api_error") == "usage_limit_reached"
+                        and envelope.get("api_error_status") == 429
+                        and envelope.get("api_error_type") == "rate_limit_error"):
+                    subtype = "usage_limit_reached"
                 if not isinstance(subtype, str) or subtype not in {
                     "error_max_turns", "error_max_structured_output_retries",
-                    "error_during_execution", "error_max_budget_usd",
+                    "error_during_execution", "error_max_budget_usd", "usage_limit_reached",
                 }:
                     subtype = "unknown"
                 stop_reason = envelope.get("stop_reason")

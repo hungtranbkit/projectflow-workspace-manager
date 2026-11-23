@@ -185,6 +185,32 @@ def test_malformed_envelope_produces_execution_failed_no_plan_row(client, git_re
     assert client.get(f"/api/changes/{cid}/plans").json() == []
 
 
+def test_planner_reports_allowlisted_provider_usage_limit_without_raw_payload(client, git_repo):
+    root, repo = git_repo
+    rid = register(client, repo, "demo")
+    cid = new_change(client, "Provider limit is sanitized", project_id=rid)
+    client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "VIBE"})
+
+    def limited_runner(argv, cwd, timeout):
+        class R:
+            returncode = 1
+            stdout = json.dumps({
+                "is_error": True, "subtype": "success", "api_error": "usage_limit_reached",
+                "api_error_status": 429, "api_error_type": "rate_limit_error",
+                "result": "private provider diagnostics must never escape",
+            })
+            stderr = ""
+        return R()
+
+    client.app.state.planner_service.invoker.runner = limited_runner
+    response = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "PLANNER_EXECUTION_FAILED"
+    assert "subtype=usage_limit_reached" in response.json()["message"]
+    assert "private provider diagnostics" not in response.text
+    assert client.get(f"/api/changes/{cid}/plans").json() == []
+
+
 def test_malformed_inner_result_produces_output_invalid_no_plan_row(client, git_repo):
     root, repo = git_repo
     rid = register(client, repo, "demo")

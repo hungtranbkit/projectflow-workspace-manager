@@ -1,0 +1,46 @@
+REAL PLANNER TEST -- outcome: PLANNER_EXECUTION_FAILED
+F
+=================================== FAILURES ===================================
+___________________ test_real_planner_invocation_end_to_end ____________________
+
+client = <starlette.testclient.TestClient object at 0x738a5eb40ad0>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-283/test_real_planner_invocation_e0/root'), PosixPath('/tmp/pytest-of-dell/pytest-283/test_real_planner_invocation_e0/root/demo'))
+
+    @pytest.mark.skipif(not shutil.which("claude"), reason="real `claude` CLI not available in this environment")
+    def test_real_planner_invocation_end_to_end(client, git_repo):
+        """E4.21: one safe, real, non-fake Planner invocation. Disposable
+        Change/workflow, real `claude -p --json-schema` subprocess call, no
+        production repository mutation, no Task execution -- materializes
+        only into disposable Task records and asserts no Agent session was
+        ever started for them."""
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Add an endpoint returning the current workflow profile", project_id=rid)
+        client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "VIBE"})
+    
+        r = client.post(f"/api/changes/{cid}/plan", data={
+            "provider": "claude",
+            # note: real invocation uses the REAL invoker (no fake runner
+            # installed in this test) -- this is deliberate.
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        print("REAL PLANNER TEST -- outcome:", body["outcome"])
+>       assert body["outcome"] in ("PLAN_READY", "HUMAN_DECISION_REQUIRED"), body
+E       AssertionError: {'outcome': 'PLANNER_EXECUTION_FAILED', 'plan': None, 'message': 'Planner exited 1 (attempt 2/2): subtype=unknown'}
+E       assert 'PLANNER_EXECUTION_FAILED' in ('PLAN_READY', 'HUMAN_DECISION_REQUIRED')
+
+tests/test_planner_service.py:600: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_planner_service.py: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_planner_service.py::test_real_planner_invocation_end_to_end
