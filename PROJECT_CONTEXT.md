@@ -20,6 +20,6 @@ Updated 2026-11-24. Recovery remains open; this is not a completion claim.
 
 ## Next actions
 
-1. Update ProjectFlow evidence/context handoff and PR #74 / issue #73 from exact remote trees without overwriting local WIP; requery exact-SHA CI on both PRs.
-2. Keep both PRs draft/open: visual threshold, full suite, and exact-SHA CI are not accepted. Send the confirmed Docker IPAM capacity finding to the owning runner group through PR/issue evidence.
-3. Any future Nova repair requires a new explicitly bounded task; current task used all three allowed loops. Preserve artifacts and rollback only by reverting task-branch commits.
+1. Keep both PRs draft/open: visual threshold, full suite, and exact-SHA CI are not accepted. The requested three Nova visual loops are exhausted.
+2. ProjectFlow owners should fix the unclassified full-suite/provider/Builder failures and run the complete suite; five selected UX/state cases passed singly but are not proven baseline or branch defects.
+3. Shared runner/repository owners should restore Docker IPAM capacity and resolve the existing Nova parity/build-graph inventory. Preserve all artifacts; rollback only by reverting task-branch commits.

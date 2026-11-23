@@ -30,8 +30,8 @@ Route/data state are fixture-owned and concept-equivalent for the requested new-
 
 ## E — exact-SHA PR/CI: NOT PASS
 
-- ProjectFlow PR #74 remote head `14327ef5ba9e2e3eb628feced8c6ea9a3f65e3fc`: exact workflow query returned **zero runs**. Zero runs is not PASS.
-- NovaRetail PR #160 remote head `c680931cda582e1effcf51726862404febef8b7e`: Application run [45262845323](https://github.com/hungtranbkit/novaretail-web/actions/runs/45262845323) remained queued on last query; Audit run [45262845337](https://github.com/hungtranbkit/novaretail-web/actions/runs/45262845337) failed the prototype/parity check. Audit logs are on shared runner `hp-novaretail-ci`; current check failure is not yet resolved.
+- ProjectFlow PR #74 exact evidence head `fd95ea595baeb1adb8d45731d9448a0698b94721`: exact workflow query returned **zero runs and zero check-runs**. Zero is not PASS. This head contains only handoff documentation updates on top of the tested PR content; it does not alter test/code results.
+- NovaRetail PR #160 remote head `c680931cda582e1effcf51726862404febef8b7e`: Application run [45262845323](https://github.com/hungtranbkit/novaretail-web/actions/runs/45262845323) and Audit run [45262845337](https://github.com/hungtranbkit/novaretail-web/actions/runs/45262845337) both completed **failure**. Audit failed prototype/parity. The application run's clean graph job failed on four existing orphan projects, while its Postgres and browser jobs failed at container initialization.
 - Prior exact-head Nova runs show app graph failure on four orphaned project files unchanged from PR base, and Browser/Postgres startup failure `Docker network create failed: all predefined address pools have been fully subnetted`. Runner reported machine `kimex-HP-EliteDesk-800-G4-DM-35W-Japan`; subsequent null container/network errors were cleanup fallout. This is shared runner IPAM capacity and is referred to the runner/repo owners in PR evidence. No network was removed or daemon config changed.
 
 ## F — safety: PASS
@@ -42,11 +42,11 @@ Dirty ProjectFlow `main`, production service/data, live order/API flow, and unre
 
 | Gate | Latest status |
 |---|---|
-| A — planner/full suite | FAIL (19 failures; two isolated reruns pass; other causes remain) |
+| A — planner/full suite | FAIL (19 failures; five isolated rechecks pass singly; other causes remain) |
 | B — browser + visual gate | browser/tool execution PASS; 8% fidelity FAIL (16.723%) |
 | C — real React preview | route and responsive behavior demonstrated; visual acceptance FAIL |
 | D — opt-in and Vietnamese guide | targeted PASS |
-| E — exact-SHA CI and PR checks | NOT PASS (ProjectFlow zero runs; Nova Audit fail, App queued) |
+| E — exact-SHA CI and PR checks | NOT PASS (ProjectFlow zero runs/checks; Nova eight check-runs failed) |
 | F — safety | PASS |
 
-Next: (1) keep PRs draft and issue open; a future separately scoped repair must address tabs/goods/totals regions without altering the design or gate; (2) fix ProjectFlow failures by their owning causes and establish exact-SHA CI; (3) runner owners must restore Docker IPAM capacity and repository owners resolve parity/orphan-project checks. Rollback only by reverting this task's own branch commits.
+Next: (1) the three permitted Nova repairs are exhausted at 16.723%; a future separately scoped attempt should focus on tabs/goods/totals without changing the design or gate; (2) ProjectFlow maintainers must resolve the unclassified suite/provider/Builder failures—five isolated tests passed singly and are not proven branch regressions; (3) runner/repository owners must restore shared Docker IPAM capacity and resolve pre-existing parity/build-graph inventory. Rollback only by reverting this task's own branch commits.
