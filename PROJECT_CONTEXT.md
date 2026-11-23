@@ -4,7 +4,7 @@ Updated 2026-11-24. Recovery remains open; this is not a completion claim.
 
 ## Worktrees and safety
 
-- ProjectFlow: `/home/dell/workspace/.worktrees/projectflow-visual-qa-73`, branch `agent/codex/visual-qa-73`, local evidence commits `d21b95c07876398a42e18de4b3cf7a33e47a9db2` then the follow-up evidence update; connector-synced PR #74 head `e3cf7672839caa5c2ca5eddc689763af787e0d2a`. Preserve its two untracked evidence directories and do not mutate dirty `main`.
+- ProjectFlow: `/home/dell/workspace/.worktrees/projectflow-visual-qa-73`, branch `agent/codex/visual-qa-73`, evidence/context updates are committed locally and synchronized to draft PR #74; use `git rev-parse HEAD` and the PR page for exact current SHAs. Preserve its two untracked evidence directories and do not mutate dirty `main`.
 - NovaRetail: `/home/dell/workspace/.worktrees/novaretail-visual-reference-fixture-001`, branch `feature/nwr-visual-reference-fixture-001`; PR #160 remote head `c680931cda582e1effcf51726862404febef8b7e`. Its three permitted measured repair loops ended at source `a46e236d32e0b1d7d3b7594b3a82d8ec0ec72e5f`, local final tree `e500e77e0be0d645b41d84785ac761a4c37ffd37`; no more loops in this task.
 - No production writes, deploys, merge, credential storage, or ProjectFlow main changes.
 
@@ -16,7 +16,7 @@ Updated 2026-11-24. Recovery remains open; this is not a completion claim.
 - Exact current-head Nova CI at c680931: Audit run 45262845337 and Application run 45262845323 completed failure; eight exact-SHA check-runs failed. Audit log shows `retail.issues` and `retail.store-settings` mappings missing. App graph check shows four existing orphan projects; Postgres/browser container jobs fail before test steps due shared runner Docker IPAM exhaustion (`all predefined address pools have been fully subnetted`) on `hp-novaretail-ci`. These are separate from preview code; runner owners were notified through PR #160 and issue #73 evidence.
 - ProjectFlow full suite remains **19 failed / 1551 passed / 1 skipped, exit 1**, in `docs/visual-qa/evidence/issue-73/logs/full-suite-final-attempt.log`. Five provider-backed failures returned `Planner exited 1 ... subtype=unknown`; a separate single real Claude probe confirmed HTTP429 usage limit, but the five `unknown` outcomes are not proven to share that cause. Real Builder E2E timed out at 420s. Sandbox lifecycle, capacity/UX/state, soak, and verification failures are distinct. Five tests corresponding to full-suite UX/state failures were rerun in two bounded commands on 2026-11-24 and all passed singly; they are not individually reproducible but the suite remains failed. Earlier focused 55-test process exited 143 after 29 dots, without summary; cause unknown. Do not claim full suite pass.
 - ProjectFlow preflight/build/smoke and provider-independent visual contract checks have prior recorded passes; Vietnamese copy/paste guide is `docs/VISUAL_QA_HUONG_DAN.md`. Opt-in remains UI-only and TaskDecisionService remains authoritative.
-- PR #74 exact remote head `e3cf7672839caa5c2ca5eddc689763af787e0d2a` has zero workflow runs and zero check-runs. Zero is not PASS. Current local ProjectFlow branch status contains only the two preserved untracked evidence directories plus any committed evidence-only updates.
+- PR #74 latest exact remote head has zero workflow runs and zero check-runs. Zero is not PASS. Current local ProjectFlow branch status contains only the two preserved untracked evidence directories plus committed evidence-only updates.
 
 ## Next actions
 
