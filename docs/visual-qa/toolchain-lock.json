@@ -21,8 +21,8 @@
       "browser": "matching Playwright Chromium; CHROME_PATH is an optional executable override",
       "deviceScaleFactor": 1,
       "isolatedHostFallback": {
-        "image": "mcr.microsoft.com/playwright:v1.63.0-noble",
-        "imageDigest": "sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27",
+        "image": "mcr.microsoft.com/playwright:v1.60.0-noble",
+        "imageDigest": "sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948",
         "scope": "ephemeral local test container only; no published ports; mount only the UI preview and tool worktree read-only",
         "rootSandbox": "Playwright's official root-container behavior disables Chromium sandbox in that disposable test container; do not use this for production browsing"
       }

@@ -526,6 +526,46 @@ def test_spec_gate_unaffected(client, git_repo):
     assert client.get(f"/api/tasks/{tid}/spec-gate").json()["outcome"] == "NOT_APPLICABLE"
 
 
+def test_planner_retries_once_with_validator_errors_and_canonical_ids(client, git_repo):
+    root, repo = git_repo
+    rid = register(client, repo, "demo")
+    cid = new_change(client, "Planner repairs invalid requirement IDs", project_id=rid)
+    client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "VIBE"})
+    invalid = minimal_valid_plan(tasks=[{
+        "key": "T1", "title": "Implement it", "task_type": "IMPLEMENTATION",
+        "preferred_role": "BUILDER", "depends_on": [], "requirements": ["return workflow profile"],
+    }])
+    valid = minimal_valid_plan()
+    replies = [json.dumps(fake_envelope(invalid)), json.dumps(fake_envelope(valid))]
+    calls = []
+
+    def sequence_runner(argv, cwd, timeout):
+        calls.append(argv)
+        class R:
+            returncode = 0
+            stderr = ""
+            stdout = replies.pop(0)
+        return R()
+
+    client.app.state.planner_service.invoker.runner = sequence_runner
+    response = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] in ("PLAN_READY", "HUMAN_DECISION_REQUIRED")
+    assert len(calls) == 2
+    repair_prompt = calls[1][2]
+    assert "repair" in repair_prompt.lower()
+    assert "unknown requirement id" in repair_prompt
+    assert "SpecRegistry" in repair_prompt
+    schema = json.loads(calls[0][6])
+    task = schema["properties"]["tasks"]["items"]["properties"]
+    context = client.app.state.planner_service.context_builder.build(cid, "VIBE")
+    assert task["requirements"]["items"]["enum"] == sorted(
+        item["id"] for item in context["spec"]["approved_requirements"]
+    )
+    assert task["task_type"]["enum"] == sorted(context["engineering"]["task_types"])
+    assert task["preferred_role"]["enum"] == [None, *sorted(context["engineering"]["roles"])]
+
+
 def test_task_decision_service_unaffected_by_materialized_task(client, git_repo):
     cid, r = create_and_plan(client, git_repo)
     plan_id = r.json()["plan"]["id"]
