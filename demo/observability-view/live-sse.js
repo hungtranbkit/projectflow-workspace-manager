@@ -31,10 +31,10 @@
   const execNames={RUNNING_VERIFIED:"Có tín hiệu tiến triển",BUSY_UNVERIFIED:"CLI bận · chưa rõ tiến độ",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Chờ nền lâu · nghi kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
   const projects=new Set(["Zalo Group Hub","MESFlow","ESP32 Kiosk / OTA","ProjectFlow","Brand Agent","Screen Remote","RemoteOps","Chưa phân loại"]);
   let activeProject="all";
-  let activeState="all";
+  let activeState="running";
   let displayLimit=24;
   const stateRank={RUNNING_VERIFIED:0,BUSY_UNVERIFIED:1,STALLED:2,WAITING_INPUT:3,BLOCKED:4,IDLE:5,OPEN_UNVERIFIED:6,EXITED:7};
-  const stateFilters=[["all","Tất cả"],["running","Có tiến triển"],["busy","CLI bận/chờ nền"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","IDLE"],["unverified","Chưa xác minh"]];
+  const stateFilters=[["running","Có tiến triển"],["busy","CLI bận/chờ nền"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","IDLE"],["unverified","Chưa xác minh"],["all","Tất cả"]];
   const stateMatch=(s)=>activeState==="all"||
     (activeState==="running"&&s.execution_state==="RUNNING_VERIFIED")||
     (activeState==="busy"&&["BUSY_UNVERIFIED","STALLED"].includes(s.execution_state))||

@@ -68,6 +68,8 @@ assert.equal(els["live-acceptance"].textContent,"UNKNOWN");
 assert.equal(els["live-ttl"].textContent,"UNKNOWN");
 assert.equal(els["live-panel"].dataset.health,"fresh");
 assert.equal(els["live-node-list"].children.length,2);
+assert.equal(els["live-sessions"].children.length,0,"default filter shows only verified progress");
+els["live-state-filters"].children.find(b=>b.textContent.startsWith("Tất cả")).events.click();
 assert.equal(els["live-sessions"].children.length,2);
 assert.ok(els["live-sessions"].children[0].children.some(x=>x.textContent.includes("Sửa lỗi giới hạn và chuyển tiếp ảnh")));
 assert.ok(els["live-projects"].children.length>=3);
@@ -143,6 +145,7 @@ uiProof.sessions.items[1].evidence="agent_ui_busy";
 uiProof.sessions.proven_running=0;
 source.emit("status",uiProof);
 assert.equal(els["live-running-count"].textContent,"0");
+els["live-state-filters"].children.find(b=>b.textContent.startsWith("Tất cả")).events.click();
 assert.ok(els["live-sessions"].children[0].children.some(x=>
   x.textContent.includes("CLI foreground bận nhưng chưa có output mới")));
 const busyButton=els["live-state-filters"].children.find(b=>b.textContent.startsWith("CLI bận/chờ nền"));
@@ -160,7 +163,6 @@ source.emit("status",stalled);
 const stalledCard=els["live-sessions"].children[0];
 assert.ok(stalledCard.children.some(x=>x.textContent.includes("Nhãn task được gắn không khớp")));
 assert.ok(stalledCard.children.some(x=>x.textContent.includes("Tiến trình nền chờ trên 15 phút")));
-
 const fullScreen=enrich(values());
 fullScreen.sessions.items[1].execution_state="RUNNING_VERIFIED";
 fullScreen.sessions.items[1].running_verified=true;
