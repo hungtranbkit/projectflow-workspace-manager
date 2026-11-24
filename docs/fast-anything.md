@@ -1,62 +1,66 @@
 # fast-anything — Performance Optimization Pilot
 
-Status: **installation and runtime verification pending** (2026-11-24). This document is a reproducible runbook, not evidence of a completed installation.
+## Current status
 
-## Upstream
+Evidence snapshot: `2026-11-24 11:35:34 UTC`. The user-level installation and synthetic tool workflow passed on the healthy Dell Linux x86_64 development node. A real Code Graph RAG workload was **not found or run**, so the synthetic result is not evidence that ProjectFlow or a Code Graph RAG application is faster. No production service or application source was modified.
 
-- Source: https://github.com/EL4CTEO/fast-anything
-- Package: https://www.npmjs.com/package/@el4cteo/fast-anything
-- License: MIT (verify at the pinned tag).
-- Purpose: profile an actual workload, select deterministic CPU-hot functions, port only eligible functions to Rust, verify recorded calls, benchmark the whole application, and roll back if needed.
+The install is intentionally local to this user account. Use `scripts/fast-anything-pilot.sh` to install, check, or remove the pinned CLI. The installed MCP registrations are user-scoped and point at the absolute executable path; no repository-specific or production MCP config was changed.
 
-## Deployment policy
+## Verified release and package
 
-Pilot on an online Linux development node with sufficient free space; do not deploy to production or install fleet-wide automatically. HP was reported overloaded during planning, so prefer a healthy node. Check disk and inode availability, node/npm/Python/Rust versions, architecture and CLI compatibility first. Use a dedicated user-owned prefix and isolated test directory; no sudo, global PATH replacement, or unattended toolchain upgrades. Confirm exact stable npm version and platform package against the official release; pin the version rather than installing an unverified latest. Audit source/package metadata, executable provenance and install scripts before installation. No secrets, raw recordings, build caches or generated binaries in Git.
+- Upstream repository: <https://github.com/EL4CTEO/fast-anything>
+- npm package: <https://www.npmjs.com/package/@el4cteo/fast-anything>
+- Selected stable release: `0.8.6` (`latest` at verification time, 2026-11-24 UTC)
+- Official GitHub release: <https://github.com/EL4CTEO/fast-anything/releases/tag/v0.8.6>
+- Tag `v0.8.6` resolves to source commit `ba571858d222836843fcd0bccbd94a4290c36ac2`
+- Main package integrity: `sha512-oayRBlpXFu7ReoIjPfj9YD2tVICMLtrBL7nwCxr+XGg1UfIOmmu6PD3O3uZ0EOJBgahf7NUmoY3rWkaCwyRuog==`
+- Linux x64 package: `@el4cteo/fast-anything-linux-x64@0.8.6`; `os=linux`, `cpu=x64`, `libc=glibc`; integrity `sha512-4RuvY/iSgwiKNmF3esmOjn8ya/FR5j8q6vjNhR1NxHZ6pQURvqF3xgLfgkLLVGqmT2BZKizWZpeB/8d6S5zJzg==`
+- License: MIT. Node engine: `>=18`.
+- Package audit: no npm lifecycle scripts were declared. The npm wrapper selects the platform package and launches its binary. The Linux artifact is an x86-64 dynamically linked ELF (glibc, `libgcc_s`); SHA-256 `240504aef174edc52c653ab5d30594f94be0bd16be68f04616f7b675d2675288`.
+- The published npm integrity pins the downloaded tarballs. npm wrote a local `package-lock.json` in the user install prefix with these package integrities; the relevant integrity values are recorded above. The lockfile remains with the user-local install rather than becoming a ProjectFlow runtime dependency. The binary was not independently rebuilt or signed as part of this pilot; treat npm integrity and the upstream tag as the recorded provenance evidence.
 
-Example (replace VERSION with verified exact version):
-```bash
-npm view @el4cteo/fast-anything dist-tags versions --json
-npm view @el4cteo/fast-anything@VERSION repository dist.integrity engines --json
-npm install --prefix "$HOME/.local/share/projectflow-tools/fast-anything" --save-exact @el4cteo/fast-anything@VERSION
-FA="$HOME/.local/share/projectflow-tools/fast-anything/node_modules/.bin/fast-anything"
-"$FA" --version
-"$FA" doctor
-"$FA" --help
-```
+## Installation and agent registration
 
-Check the pinned package lifecycle scripts and transitive metadata before running npm install. Rust is needed for compiling ports, not necessarily for profiling. If prerequisites are missing, install only reviewed user-space dependencies or report the actual blocker. Do not circumvent permissions.
+- Install prefix: `$HOME/.local/share/projectflow-tools/fast-anything`
+- Installed command: `$HOME/.local/share/projectflow-tools/fast-anything/node_modules/.bin/fast-anything`
+- Installed package size: 2.7 MiB.
+- Versions at verification: Node `v26.7.0`, npm `11.19.0`, Python `3.14.4`, rustc `1.100.0`, Cargo `1.100.0`, Claude Code `2.1.331`, Codex CLI `0.171.0`.
+- Rust was initially absent. The official rustup installer was reviewed and run with a minimal stable profile and `--no-modify-path`; no sudo or system package changes. Toolchain is user-owned, about 600 MiB in `$HOME/.rustup` plus 43 MiB in `$HOME/.cargo`. Cargo is added only to each MCP server's configured `PATH`, not to shell startup files.
+- `fast-anything doctor`: PASS (`ready to scan`, `ready to port`); it also reports optional runtimes not installed (Ruby, Go, PHP, R, Bun, Deno).
+- Claude Code: registered `fast-anything` at **user** scope; `claude mcp list` reports Connected.
+- Codex: registered `fast-anything` in user config; `codex mcp get fast-anything` reports enabled stdio transport.
+- Direct MCP stdio check: `initialize` PASS (protocol `2025-03-26`); `tools/list` PASS with all eight tools: `fast_scan`, `fast_port`, `fast_verify`, `fast_enable`, `fast_disable`, `fast_bench`, `fast_report`, `fast_status`. Direct `tools/call fast_status` also passed and showed the port disabled after rollback.
+- Existing MCP entries were preserved; neither client had a `fast-anything` entry before this registration. Configs contain the absolute local executable path and Cargo PATH; they are user-local and are not committed.
 
-## Agent use
+## Synthetic smoke evidence (not application evidence)
 
-Use the absolute binary path when configuring MCP. Check the local CLI help for the supported commands and scope before registration. Example Claude Code registration in a dedicated pilot workspace:
-```bash
-claude mcp add fast-anything -- "$FA" mcp
-```
-Use equivalent verified Codex CLI MCP registration; verify the registered server and tool listing via a smoke invocation. Do not overwrite existing server entries or secrets; keep project-level config out of production until reviewed.
+The isolated workload came from upstream's `examples/fuzzy-dedupe` at tag `v0.8.6`, copied to a disposable `/tmp` directory. It is deterministic and contains no proprietary input. The port implementation was the upstream tag's reference Rust example, not an AI-generated or application change.
 
-## Performance workflow
+Commands were run from the disposable workload directory with the absolute CLI path and `$HOME/.cargo/bin` on PATH:
 
-1. Establish a representative, offline/reproducible workload; collect baseline wall time, CPU, RSS and output hash.
-2. Use `fast-anything scan -- python app.py` (replace app.py with the selected workload). A network, DB, I/O or inference bottleneck is not automatically a Rust optimization candidate.
-3. Select a deterministic, portable CPU hotspot. Inspect `port` output and generated TASK.md before agent changes.
-4. Run `verify`; do not enable a port before successful verification and project regression tests. Never alter recordings to make verification pass.
-5. Benchmark original vs optimized on the same machine/input, alternating runs, at least five runs per variant; report median and spread, memory, disk and correctness.
-6. Accept only evidence-backed improvement (pilot target >=20% lower end-to-end median runtime, no correctness regression). Use `disable` and rerun the original tests to prove rollback. If not worthwhile, keep the original.
-7. Keep generated native code reviewable, keep .fast/ recordings and build caches out of Git, clean only pilot-owned disposable caches after preserving sanitized reports.
+1. `fast-anything scan -- python3 app.py` — exit 0. Latest run: 41.00 s profiled; `fuzzy.find_duplicates` ranked first at 100.0% cumulative share, with `levenshtein` and `normalize` listed as helpers.
+2. `fast-anything port fuzzy.find_duplicates` — exit 0; recorded 1 real call.
+3. Copied the reference Rust implementation from the same upstream tag into the generated temporary crate, then `fast-anything verify fuzzy.find_duplicates` — exit 0; 33/33 calls matched (1 recorded, 7 edge, 25 derived). Reported per-call time: 11,874.2 ms Python vs 15.2 ms Rust (783×).
+4. `fast-anything enable fuzzy.find_duplicates` — exit 0.
+5. `fast-anything bench --runs 5` — exit 0; five interleaved runs per variant. Tool output: Python median 10.2606 s (standard deviation 0.7995 s) vs Rust median 0.0465 s (standard deviation 0.0057 s), 220.6×. CLI summary rounded this to 10.26 s vs 47 ms, 221×, `±799 ms`.
+6. An additional five alternating Python/Rust runs recorded end-to-end time and peak RSS with `/usr/bin/time`: Python median 9.9757 s (range 8.9260–10.7063 s), median peak RSS 10,768 KiB (range 10,676–10,880 KiB); Rust median 0.0515 s (range 0.0379–0.0895 s), median peak RSS 11,604 KiB (range 11,512–11,736 KiB). The ratio of those medians is about 193.7×. All ten runs produced the same output SHA-256: `c198d28657c7892c1f23d81576969f09619d1522c2af59f5017e80d458c1ecc0`.
+7. `fast-anything report` — exit 0; generated Markdown and SVG in the disposable `.fast` directory (not committed).
+8. `fast-anything disable fuzzy.find_duplicates` — exit 0; restored `fuzzy.py` byte-for-byte to the upstream original (SHA-256 `4a668121ae0396069b953e718dfb9b51d6d272f3f576148fe4bfa3f7eed52031`). The post-rollback output hash matched the ten-run result above.
 
-First production-relevant candidate: Code Graph RAG offline parsing/indexing or search processing. Do not change a live service. Run only an isolated representative workload with non-sensitive inputs. A successful synthetic smoke test does not prove application acceleration.
+The Rust-enabled sample used about 836 KiB more median peak RSS than the Python variant. The smoke project's `.fast` data occupied 71 MiB at measurement time. System disk remained at 74% used with about 122 GiB free; no disk cleanup was needed. Generated `.fast/` content is excluded from Git. The pilot-owned synthetic `.fast/` directory was removed with `fast-anything clean --all` after evidence was recorded; the user npm cache was left untouched.
 
-## Verification record (to be filled from real execution)
+## Real Code Graph RAG workload
 
-| Field | Status |
-|---|---|
-| Node / UTC timestamp | Pending |
-| Package version / official release / integrity | Pending |
-| Binary path / architecture | Pending |
-| Disk before/after / toolchain | Pending |
-| Doctor / MCP handshake | Pending |
-| Profile smoke / output correctness | Pending |
-| Actual project workload benchmark | Pending |
-| Rollback / cleanup | Pending |
+**BLOCKED / NOT RUN.** A read-only inspection found a local document RAG engine candidate, but its parser/retrieval source layout was not a Code Graph RAG workload. No dedicated Code Graph RAG repository or safe representative parsing/indexing/query command was identified on the node. No live service, external data, model call, or proprietary source was profiled or sent to an external service. The synthetic workload above proves only that the tool's scan, port, verify, enable, bench, report, MCP, and rollback paths work.
 
-Record exact commands, exit codes, sanitized output and source commit; distinguish PASS, FAIL, NOT RUN and BLOCKED. Save implementation scripts and evidence in a dedicated branch/PR, without credentials, sensitive machine identifiers or private data. Do not mark installation or optimization complete without real output.
+Next step: identify the actual Code Graph RAG repository and a safe offline workload. Then capture its unmodified baseline and profile; do not claim acceleration until a real workload passes output-equivalence checks and the same five-run benchmark threshold (at least 20% lower end-to-end median).
+
+## Project checks and limitations
+
+- `bash -n scripts/fast-anything-pilot.sh` — PASS.
+- Installer safe-uninstall check with temporary HOME directories — PASS: marked install removed; repeating uninstall returned 0; unmarked directory refused with exit 1 and its file remained. The real install was not removed.
+- `scripts/fast-anything-pilot.sh install 0.8.6` and `check 0.8.6` — PASS; exact package version and CLI `--version` matched.
+- Project `scripts/preflight.sh` — PASS.
+- Project `scripts/test.sh` — attempted, exit 4: this worktree had no project dependencies installed and pytest could not import `fastapi`. The suite's session fixture also performs real Docker cleanup over `wm-*` resources; it was not safe to run that suite on a shared node without isolating its Docker daemon. No project test dependency installation or Docker test run was performed.
+- One earlier smoke invocation exceeded the command's initial 30-second capture window; the generated profile showed it completed. A subsequent tracked scan completed with exit 0 and supplied the result above.
+- No GitHub Actions rerun, production change, main merge, or force-push was performed.
