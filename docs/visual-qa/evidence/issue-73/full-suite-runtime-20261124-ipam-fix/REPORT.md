@@ -23,13 +23,14 @@ Checkout used a detached clean worktree at `cee006ca53eb36b7be29cf654fb3081844c4
 | `./scripts/preflight.sh` | PASS, exit 0 |
 | `./scripts/build.sh` | PASS, exit 0 |
 | 14 formerly failing sandbox tests (node IDs from previous `summary.json`) | 14 passed, exit 0, real Docker Compose |
+| Disposable `nginx:1.28-alpine` Compose `up`/`down` on `10.252.255.240/28` | Container reached running; network subnet verified; down removed only the named project network; PASS |
 | `pytest` visual contract, execution, subprocess integration selection | 18 passed, exit 0 |
 | `node --test tests/test_visual_qa_cli.mjs` | 4 passed, exit 0 |
 | `node tools/visual_qa/smoke.mjs` | PASS, exit 0; positive, negative, repaired and missing-reference/server/dimensions cases |
 | `./scripts/test.sh` | 1,575 passed, 1 skipped, exit 0; 52:17 |
 | `pytest --collect-only -q` | exit 0; module collection counts sum to 1,575; differs by one from runtime outcomes |
 
-The browser smoke used the existing authorized Chromium wrapper and pinned local Playwright; no network or provider request was made. Docker returned to 29 networks, with zero `wm-*` networks or containers after suite completion. The `10.252.0.0/16` test pool was absent from Docker allocations after cleanup.
+The browser smoke used the existing authorized Chromium wrapper and pinned local Playwright; no network or provider request was made. Docker returned to 29 networks, with zero `wm-*` networks or containers after suite completion. The `10.252.0.0/16` test pool was absent from Docker allocations after cleanup. A separate final disposable Compose lifecycle probe used the pre-verified unused `10.252.255.240/28`; its recorded output shows a running nginx container and successful project-scoped removal.
 
 ## Reproduction
 

@@ -1,0 +1,21 @@
+PROJECT=wm-issue73-ipam-probe-4069107
+STEP=compose-up
+ Network wm-issue73-ipam-probe-4069107_default Creating 
+ Network wm-issue73-ipam-probe-4069107_default Creating 
+ Network wm-issue73-ipam-probe-4069107_default Created 
+ Network wm-issue73-ipam-probe-4069107_default Created 
+ Container wm-issue73-ipam-probe-4069107-web-1 Creating 
+ Container wm-issue73-ipam-probe-4069107-web-1 Created 
+ Container wm-issue73-ipam-probe-4069107-web-1 Starting 
+ Container wm-issue73-ipam-probe-4069107-web-1 Started 
+CONTAINER=/wm-issue73-ipam-probe-4069107-web-1 STATE=running
+NETWORK=wm-issue73-ipam-probe-4069107_default SUBNET=10.252.255.240/28
+STEP=compose-down
+ Container wm-issue73-ipam-probe-4069107-web-1 Stopping 
+ Container wm-issue73-ipam-probe-4069107-web-1 Stopped 
+ Container wm-issue73-ipam-probe-4069107-web-1 Removing 
+ Container wm-issue73-ipam-probe-4069107-web-1 Removed 
+ Network wm-issue73-ipam-probe-4069107_default Removing 
+ Network wm-issue73-ipam-probe-4069107_default Removed 
+NETWORK_CLEANUP=PASS
+COMPOSE_LIFECYCLE=PASS
