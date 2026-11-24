@@ -562,3 +562,25 @@ def test_codex_recent_semantic_output_not_spinner_can_verify_progress():
     tick[0] += 35
     expired = monitor.snapshot(row, now=now+timedelta(seconds=41))[("dell-linux", row[0]["session_name"])]
     assert expired["state"] == "BUSY_UNVERIFIED"
+
+
+def test_authenticated_git_dirty_projects_only_boolean_without_private_metadata():
+    import json
+    from terminal_proof import TerminalProofMonitor
+    status = {"state": "RUNNING", "agent_type": "claude", "allowed": True, "exists": True,
+              "reason": "agent CLI busy footer matched 'esc to interrupt' at bottom offset 0; current command is 'claude'",
+              "last_output": "Working (1m 11s • esc to interrupt)",
+              "resource": {"git": {"repo": "/PRIVATE/CUSTOMER_PROJECT", "branch": "private-branch",
+                                    "dirty": True, "diff": "SUPER_SECRET_TOKEN"}}}
+    monitor = TerminalProofMonitor(lambda *_: status.copy(), interval=0, task_reader=lambda *_: None)
+    now = datetime(2026,11,24,10,0,tzinfo=timezone.utc)
+    observed = monitor.snapshot([{"node_id":"dell-linux","session_name":"zgh-s7-setup-kit-20261124"}],now=now)
+    card = observed[("dell-linux","zgh-s7-setup-kit-20261124")]
+    assert card["state"] == "BUSY_UNVERIFIED"
+    assert card["git_dirty"] is True
+    for secret in ("PRIVATE", "CUSTOMER_PROJECT", "private-branch", "SUPER_SECRET_TOKEN"):
+        assert secret not in json.dumps(card)
+    status["resource"]["git"]["dirty"] = "true"
+    another = TerminalProofMonitor(lambda *_: status.copy(), interval=0, task_reader=lambda *_: None)
+    observed = another.snapshot([{"node_id":"dell-linux","session_name":"zgh-s7-setup-kit-20261124"}],now=now)
+    assert "git_dirty" not in observed[("dell-linux","zgh-s7-setup-kit-20261124")]
