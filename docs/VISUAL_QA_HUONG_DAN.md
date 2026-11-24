@@ -90,6 +90,21 @@ Smoke chạy page fixture local: baseline chính xác PASS (0%), cố ý đổi 
 - Không tạo app thứ hai hoặc đổi framework; không đưa secrets/reference chưa được phép ra ngoài.
 - Không chạy yêu cầu cài đặt tùy chọn upstream; các dependency nâng cao không cần cho screenshot/diff.
 
+### Phân biệt stage runner và runtime provider
+
+Trong PR #74, `tests/test_visual_qa_execution.py` kiểm tra `TestRunner.start()` và `TaskDecisionService` thật với DB/command executor cô lập. Lệnh tái chạy:
+
+```sh
+.venv/bin/python -m pytest -p no:cacheprovider -q \
+  tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py
+node --test tests/test_visual_qa_cli.mjs
+node tools/visual_qa/smoke.mjs
+```
+
+Các kiểm tra này chứng minh marker UI thêm stage, stage fail làm gate fail, và task backend không có marker không bị thêm stage; chúng không chứng minh model/provider đã dựng hoặc sửa giao diện. Nếu Codex/Claude CLI chưa có phiên đăng nhập được ủy quyền, ghi runtime là **UNVERIFIED**, không tự đọc/in token, không gọi API bằng credential không rõ nguồn và không đưa reference riêng tư lên dịch vụ bên ngoài. Khi có runtime hợp lệ, dùng fixture local được phép, lưu prompt/lệnh đã khử bí mật, mã nguồn trước/sau và chạy lại cùng reference bằng UIFix. Không biến kết quả của fixture chưa được duyệt thành bằng chứng tương đương sản phẩm.
+
+Benchmark issue #73 ở commit `b18c54dd12b781f22bfc89699b21a964e18106bb` xác nhận one-shot-ui là công cụ chẩn đoán: ở controlled payment displacement 24px, one-shot báo 5.476663% trong khi UIFix pinned báo 9.409958% và fail ngưỡng 8%. Vì vậy giữ UIFix làm gate; không dùng tỷ lệ của one-shot để quyết định pass.
+
 ## 8. Xóa/rollback
 
 Tắt opt-in bằng cách bỏ marker khỏi Task prompt theo quy trình versioning Task, hoặc xóa riêng `visual_qa` block/command khỏi `PROJECT.yaml`. Xóa cache cục bộ bằng `rm -rf .runtime/uifix-v1.2.6` chỉ trong root ProjectFlow. Đảo code qua revert PR. Không xóa preview service/port mà task không sở hữu và không deploy production từ pilot.
