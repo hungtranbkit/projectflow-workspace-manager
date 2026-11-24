@@ -577,6 +577,6 @@ def test_authenticated_dirty_worktree_only_reaches_public_as_boolean(tmp_path):
     assert s["execution_state"]=="BUSY_UNVERIFIED"
     assert s["git_dirty"] is True
     assert s["running_verified"] is None
-    assert s["session"] is not None # static registry without fleet discovery
+    assert s["session"] is None  # unapproved raw session names stay private
     for forbidden in ("PRIVATE_COMMAND","PRIVATE/CUSTOMER","SECRET_DATA","PRIVATE_TOKEN"):
         assert forbidden not in json.dumps(d)
