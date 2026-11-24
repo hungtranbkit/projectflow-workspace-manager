@@ -1,0 +1,173 @@
+SOURCE_SHA=cee006ca53eb36b7be29cf654fb3081844c4cce1
+WORKTREE=<EXACT_CHECKOUT>
+........................................................................ [  4%]
+........................................................................ [  9%]
+........................................................................ [ 13%]
+........................................................................ [ 18%]
+........................................................................ [ 22%]
+........................................................................ [ 27%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 41%]
+........................................................................ [ 45%]
+........................................................................ [ 50%]
+........................................................................ [ 54%]
+........................................................................ [ 59%]
+........................................................................ [ 64%]
+........................................................................ [ 68%]
+........................................................................ [ 73%]
+........................................................................ [ 77%]
+........................................................................ [ 82%]
+........................................................................ [ 86%]
+........................................................................ [ 91%]
+........................................................................ [ 96%]
+...............................................................          [100%]
+=============================== warnings summary ===============================
+../..<VENV>/lib/python3.14/site-packages/fastapi/testclient.py:1
+  <VENV>/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../..<VENV>/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_action_feedback.py: 187 warnings
+tests/test_agent_observability.py: 11 warnings
+tests/test_agent_observability_p0_final.py: 22 warnings
+tests/test_agent_observability_p0_repair.py: 66 warnings
+tests/test_agent_observability_security.py: 22 warnings
+tests/test_agent_possibly_stuck.py: 33 warnings
+tests/test_architecture_design.py: 528 warnings
+tests/test_autonomous_execution.py: 396 warnings
+tests/test_autonomous_execution_real.py: 11 warnings
+tests/test_b01_authn.py: 220 warnings
+tests/test_b02_organizations.py: 286 warnings
+tests/test_b03_authz.py: 154 warnings
+tests/test_b04_csrf.py: 121 warnings
+tests/test_b05_ratelimit.py: 88 warnings
+tests/test_b06_sandbox.py: 22 warnings
+tests/test_b07_secrets.py: 242 warnings
+tests/test_b0_final_qualification.py: 143 warnings
+tests/test_b1_read_isolation.py: 110 warnings
+tests/test_b2_release_concurrency.py: 44 warnings
+tests/test_b3_github_app.py: 110 warnings
+tests/test_b4_github_webhook_ingestion.py: 132 warnings
+tests/test_b5_tenant_isolation_completeness.py: 88 warnings
+tests/test_b6_trusted_proxy.py: 66 warnings
+tests/test_b7_repository_identity.py: 154 warnings
+tests/test_backup_restore.py: 44 warnings
+tests/test_baseline_reproduction_duplicate_click.py: 11 warnings
+tests/test_baseline_waivers.py: 44 warnings
+tests/test_builder_completion_vs_session.py: 121 warnings
+tests/test_builder_exec_ux.py: 88 warnings
+tests/test_builder_workspace_ux.py: 88 warnings
+tests/test_change_overview.py: 99 warnings
+tests/test_cleanup_and_restart.py: 44 warnings
+tests/test_control_plane.py: 176 warnings
+tests/test_cross_repo_integration.py: 11 warnings
+tests/test_db_locked_handled_cleanly.py: 22 warnings
+tests/test_deployment.py: 165 warnings
+tests/test_deployment_hardening.py: 121 warnings
+tests/test_deployment_stuck_after_restart.py: 33 warnings
+tests/test_engineering_catalog.py: 275 warnings
+tests/test_engineering_domain.py: 319 warnings
+tests/test_engineering_lifecycle_ui.py: 297 warnings
+tests/test_execution_wave_reservation_stuck_after_restart.py: 33 warnings
+tests/test_execution_waves.py: 253 warnings
+tests/test_exited_no_report_recovery.py: 176 warnings
+tests/test_golden_e2e.py: 22 warnings
+tests/test_help_guide.py: 121 warnings
+tests/test_incidents.py: 242 warnings
+tests/test_integration_create_idempotent.py: 11 warnings
+tests/test_integration_lock_stuck_after_restart.py: 33 warnings
+tests/test_integration_push.py: 110 warnings
+tests/test_integration_test_run_stuck_after_restart.py: 33 warnings
+tests/test_live_terminal_routing.py: 88 warnings
+tests/test_merge_reconciliation.py: 143 warnings
+tests/test_operations_stuck_after_restart.py: 33 warnings
+tests/test_performance_regression.py: 55 warnings
+tests/test_planner_service.py: 462 warnings
+tests/test_product_acceptance.py: 253 warnings
+tests/test_productization_audit.py: 88 warnings
+tests/test_prompt_delivery.py: 55 warnings
+tests/test_prompt_ux.py: 99 warnings
+tests/test_qa_center_sandbox_contract.py: 110 warnings
+tests/test_real_merge.py: 132 warnings
+tests/test_release_pipeline.py: 319 warnings
+tests/test_repo_rename_worktree_repair.py: 22 warnings
+tests/test_repository_runtime_sandbox.py: 176 warnings
+tests/test_review_fix_loop.py: 319 warnings
+tests/test_review_fix_loop_real.py: 22 warnings
+tests/test_runtime_dependency_staleness.py: 11 warnings
+tests/test_sandbox_dies_self_heals.py: 22 warnings
+tests/test_sandbox_docker.py: 33 warnings
+tests/test_sandbox_reset_data.py: 33 warnings
+tests/test_sandbox_stuck_busy_after_restart.py: 33 warnings
+tests/test_sidebar_nav.py: 77 warnings
+tests/test_simple_mode.py: 154 warnings
+tests/test_smoke.py: 11 warnings
+tests/test_soak_multi_repo_resource_leak.py: 11 warnings
+tests/test_spec_compliance.py: 88 warnings
+tests/test_spec_lifecycle.py: 407 warnings
+tests/test_spec_supervisor_gate.py: 99 warnings
+tests/test_state_invariants.py: 99 warnings
+tests/test_task_centric_ux.py: 143 warnings
+tests/test_task_lifecycle_engine.py: 275 warnings
+tests/test_task_sandbox_views.py: 44 warnings
+tests/test_task_wizard.py: 99 warnings
+tests/test_test_design.py: 473 warnings
+tests/test_transcript_tail_persistence.py: 22 warnings
+tests/test_verification_ux.py: 88 warnings
+tests/test_web.py: 110 warnings
+tests/test_wizard_sandbox_picks_latest.py: 11 warnings
+tests/test_workflow_dead_anchors.py: 143 warnings
+tests/test_workflow_decision_ux.py: 121 warnings
+tests/test_workflow_engine.py: 462 warnings
+tests/test_workspace_branch_collision.py: 22 warnings
+tests/test_workspace_detail_ux.py: 110 warnings
+tests/test_worktree_manager.py: 220 warnings
+tests/test_worktree_manager_real.py: 11 warnings
+  <VENV>/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_agent_possibly_stuck.py: 3 warnings
+tests/test_autonomous_execution.py: 3 warnings
+tests/test_autonomous_execution_real.py: 1 warning
+tests/test_builder_completion_vs_session.py: 9 warnings
+tests/test_builder_exec_ux.py: 3 warnings
+tests/test_builder_workspace_ux.py: 1 warning
+tests/test_control_plane.py: 6 warnings
+tests/test_engineering_catalog.py: 8 warnings
+tests/test_engineering_domain.py: 1 warning
+tests/test_execution_wave_reservation_stuck_after_restart.py: 1 warning
+tests/test_execution_waves.py: 7 warnings
+tests/test_exited_no_report_recovery.py: 18 warnings
+tests/test_golden_e2e.py: 6 warnings
+tests/test_live_terminal_routing.py: 6 warnings
+tests/test_planner_service.py: 1 warning
+tests/test_productization_audit.py: 2 warnings
+tests/test_prompt_delivery.py: 5 warnings
+tests/test_review_fix_loop.py: 2 warnings
+tests/test_review_fix_loop_real.py: 1 warning
+tests/test_soak_multi_repo_resource_leak.py: 3 warnings
+tests/test_spec_lifecycle.py: 1 warning
+tests/test_spec_supervisor_gate.py: 3 warnings
+tests/test_state_invariants.py: 3 warnings
+tests/test_transcript_tail_persistence.py: 2 warnings
+tests/test_workflow_engine.py: 7 warnings
+tests/test_workspace_detail_ux.py: 7 warnings
+tests/test_worktree_manager.py: 3 warnings
+tests/test_worktree_manager_real.py: 1 warning
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=<PID>) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+  <VENV>/lib/python3.14/site-packages/_pytest/python.py:191: PytestReturnNotNoneWarning: Test functions should return None, but tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete returned <class 'tuple'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/test_simple_mode.py::test_mode_query_param_sets_cookie_and_persists
+  <VENV>/lib/python3.14/site-packages/starlette/testclient.py:518: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1575 passed, 1 skipped, 12184 warnings in 3137.38s (0:52:17)
+FULL_SUITE_EXIT=0

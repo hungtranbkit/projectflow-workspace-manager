@@ -112,4 +112,18 @@ Benchmark issue #73 ở commit `b18c54dd12b781f22bfc89699b21a964e18106bb` xác n
 Tắt opt-in bằng cách bỏ marker khỏi Task prompt theo quy trình versioning Task, hoặc xóa riêng `visual_qa` block/command khỏi `PROJECT.yaml`. Xóa cache cục bộ bằng `rm -rf .runtime/uifix-v1.2.6` chỉ trong root ProjectFlow. Đảo code qua revert PR. Không xóa preview service/port mà task không sở hữu và không deploy production từ pilot.
 
 
-Full-suite rerun ngày 24/11/2026: `./scripts/test.sh` chạy đủ 46:35, kết quả 14 failed / 1561 passed / 1 skipped. Các sandbox failure được đối chiếu với `sandbox_operations.stderr_tail` trong SQLite tạm: Docker daemon trả `all predefined address pools have been fully subnetted`; đây là blocker của môi trường runner, không được coi là PASS hoặc “sửa” bằng bỏ test. Báo cáo và log đã khử đường dẫn host ở `docs/visual-qa/evidence/issue-73/full-suite-runtime-20261124/`.
+### Docker sandbox tests trên host hết IPAM mặc định
+
+Test fixture nginx khai báo bridge subnet riêng cho từng Compose sandbox. Mặc định test chọn pool `10.252.0.0/16`, kiểm tra không giao với route IPv4 và subnet Docker hiện có, rồi chia subnet `/28` riêng cho mỗi project qua file `.env` tạm. Điều này không đổi cấu hình daemon hay luồng Compose thực. Nếu pool mặc định xung đột với mạng của host, đặt `PROJECTFLOW_TEST_DOCKER_IPAM_POOL` thành một IPv4 private pool chưa dùng sau khi kiểm tra route/network inventory:
+
+```sh
+ip -j route show
+docker network ls
+docker network inspect $(docker network ls -q)
+export PROJECTFLOW_TEST_DOCKER_IPAM_POOL=10.253.0.0/16
+./scripts/test.sh
+```
+
+Fixture cũng kiểm tra overlap và dừng rõ ràng nếu pool cấu hình bị chiếm. Chọn pool chỉ cho test; không sửa daemon, restart Docker, prune network dùng chung, hoặc dùng một dải còn route/network overlap. Xem log và inventory của lần chạy thực tế trước khi chọn dải.
+
+Exact-SHA rerun 24/11/2026 tại `cee006ca53eb36b7be29cf654fb3081844c4cce1`: `./scripts/test.sh` exit 0, 1,575 passed / 1 skipped trong 52:17; 14 node IDs từng lỗi do IPAM nay pass. Collect-only module totals là 1,575, còn runtime outcomes là 1,576; chênh một item chưa được giải thích. Log, preflight/build, targeted, smoke và inventory ở `docs/visual-qa/evidence/issue-73/full-suite-runtime-20261124-ipam-fix/`. Full-suite pass cục bộ không đồng nghĩa CI exact-SHA đã chạy; PR #74 workflow vẫn chờ maintainer cho phép bật lại.

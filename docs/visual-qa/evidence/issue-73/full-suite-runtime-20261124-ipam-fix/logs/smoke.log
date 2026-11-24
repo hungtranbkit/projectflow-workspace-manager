@@ -1,0 +1,1 @@
+PASS visual-qa smoke: positive 0; negative 1; repaired 0; reference SHA unchanged; missing reference, dimension mismatch, unavailable server
