@@ -31,11 +31,14 @@
   const execNames={RUNNING_VERIFIED:"Có tín hiệu tiến triển",BUSY_UNVERIFIED:"CLI bận · chưa rõ tiến độ",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Chờ nền lâu · nghi kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
   const projects=new Set(["Zalo Group Hub","MESFlow","ESP32 Kiosk / OTA","ProjectFlow","Brand Agent","Screen Remote","RemoteOps","Chưa phân loại"]);
   let activeProject="all";
-  let activeState="running";
+  // Busy/stalled agent turns should be visible even without code-progress proof.
+  let activeState="active";
   let displayLimit=24;
   const stateRank={RUNNING_VERIFIED:0,BUSY_UNVERIFIED:1,STALLED:2,WAITING_INPUT:3,BLOCKED:4,IDLE:5,OPEN_UNVERIFIED:6,EXITED:7};
-  const stateFilters=[["running","Có tiến triển"],["busy","CLI bận/chờ nền"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","IDLE"],["unverified","Chưa xác minh"],["all","Tất cả"]];
+  const activeStates=new Set(["RUNNING_VERIFIED","BUSY_UNVERIFIED","STALLED"]);
+  const stateFilters=[["active","Đang hoạt động"],["all","Tất cả"],["running","Có tiến triển"],["busy","CLI bận/chờ nền"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","IDLE"],["unverified","Chưa xác minh"]];
   const stateMatch=(s)=>activeState==="all"||
+    (activeState==="active"&&activeStates.has(s.execution_state))||
     (activeState==="running"&&s.execution_state==="RUNNING_VERIFIED")||
     (activeState==="busy"&&["BUSY_UNVERIFIED","STALLED"].includes(s.execution_state))||
     (activeState==="waiting"&&s.execution_state==="WAITING_INPUT")||
@@ -99,7 +102,7 @@
     for(const id of ["live-nodes","live-open","live-signal","live-one-minute"])set(id,"—");
     set("live-acceptance","UNKNOWN");set("live-ttl","UNKNOWN");set("live-transport","Chưa kết nối");
     set("live-message",reason||"Không suy diễn dữ liệu nếu nguồn không hợp lệ.");
-    set("live-running-count","—");set("live-running-note","Không có dữ liệu được xác minh");set("live-task-coverage","Nhãn task và agent chưa xác minh.");
+    set("live-active-count","—");set("live-running-count","—");set("live-running-note","Không có dữ liệu được xác minh");set("live-task-coverage","Nhãn task và agent chưa xác minh.");
     const states=$("live-state-filters");if(states)states.replaceChildren();
     const more=$("live-show-more");if(more)more.hidden=true;
     $("live-node-list").replaceChildren();$("live-sessions").replaceChildren();$("live-changes").replaceChildren();$("live-projects").replaceChildren();set("live-sessions-note","Không có dữ liệu phiên xác minh.");
@@ -176,18 +179,22 @@
       const all=[...d.sessions.items].sort((a,b)=>
         (stateRank[a.execution_state]??9)-(stateRank[b.execution_state]??9)||
         String(a.label).localeCompare(String(b.label)));
+      const activeCount=all.filter(s=>activeStates.has(s.execution_state)).length;
+      const busyCount=all.filter(s=>["BUSY_UNVERIFIED","STALLED"].includes(s.execution_state)).length;
+      set("live-active-count",activeCount);
       set("live-running-count",d.sessions.proven_running);
       set("live-task-coverage",int(d.sessions.task_label_verified)&&int(d.sessions.agent_identified)
         ?"Task có nhãn chính thức: "+d.sessions.task_label_verified+"/"+d.sessions.open+
          " · Loại agent xác định: "+d.sessions.agent_identified+"/"+d.sessions.open
         :"Đang chờ số liệu xác minh nguồn task và agent.");
-      set("live-running-note",d.sessions.proven_running
-        ?"Có tín hiệu output thực thi mới; chưa đồng nghĩa đã sửa code":"Chưa có bằng chứng tiến triển gần đây; agent bận có thể vẫn đang chờ");
+      set("live-running-note",activeCount
+        ?busyCount+" phiên CLI bận/chờ nền · "+d.sessions.proven_running+" phiên có tín hiệu tiến triển; chưa đồng nghĩa đã sửa code"
+        :"Không có agent đang chạy/chờ nền được xác minh; các phiên IDLE vẫn xem được trong Tất cả");
       const stateList=$("live-state-filters");
       if(stateList){
         stateList.replaceChildren();
         for(const [key,label] of stateFilters){
-          const count=key==="running"?d.sessions.proven_running:
+          const count=key==="active"?activeCount:key==="running"?d.sessions.proven_running:
             all.filter(s=>key==="all"||
               (key==="busy"&&["BUSY_UNVERIFIED","STALLED"].includes(s.execution_state))||
               (key==="waiting"&&s.execution_state==="WAITING_INPUT")||
@@ -214,6 +221,12 @@
         (activeProject==="all"||activeProject===s.project)&&stateMatch(s));
       const visible=matches.slice(0,displayLimit);
       const showing=visible.length;
+      if(!showing){
+        const explanation=activeState==="active"
+          ?"Không có agent đang chạy/chờ nền được xác minh. "+d.sessions.open+" phiên vẫn đang mở; chọn Tất cả để xem phiên IDLE/chưa xác minh."
+          :"Không có phiên khớp bộ lọc. Chọn Tất cả để xem những phiên còn mở.";
+        list.appendChild(element("li","session-empty",explanation));
+      }
       for(const s of visible){
         const li=element("li","session-card"+(s.execution_state==="RUNNING_VERIFIED"?" running-first":""));
         const line=element("div","session-card-heading");
