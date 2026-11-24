@@ -135,7 +135,7 @@ assert.equal(els["live-running-count"].textContent,"1");
 assert.ok(els["live-sessions"].children[0].children.some(x=>
   x.textContent.includes("Đã quan sát nội dung terminal thay đổi")));
 assert.ok(els["live-sessions"].children[1].children.some(x=>
-  x.textContent.includes("Task được gắn gần nhất: Hoàn thiện giám sát hoạt động agent")));
+  x.textContent.includes("Task được gắn gần nhất (chưa xác nhận công việc hiện tại): Hoàn thiện giám sát hoạt động agent")));
 const uiProof=enrich(values());
 uiProof.sessions.items[1].execution_state="RUNNING_VERIFIED";
 uiProof.sessions.items[1].running_verified=true;
@@ -146,6 +146,9 @@ source.emit("status",uiProof);
 assert.equal(els["live-running-count"].textContent,"1");
 assert.ok(els["live-sessions"].children[0].children.some(x=>
   x.textContent.includes("Claude/Codex hiển thị đang xử lý")));
+const weakProof=els["live-sessions"].children[0];
+assert.ok(weakProof.children[0].children[1].textContent.includes("Terminal/CLI hoạt động"));
+assert.ok(weakProof.children[0].children[1].className.includes("unverified"));
 const fullScreen=enrich(values());
 fullScreen.sessions.items[1].execution_state="RUNNING_VERIFIED";
 fullScreen.sessions.items[1].running_verified=true;
