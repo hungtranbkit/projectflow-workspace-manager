@@ -14,7 +14,7 @@ _PROJECTS = (
     ("Zalo Group Hub", ("zgh-", "zalo-", "zalo-hub-")),
     ("MESFlow", ("mesflow-",)),
     ("ESP32 Kiosk / OTA", ("esp-", "esp32-", "ota-", "m910-claude-esp-", "m910-codex-esp-")),
-    ("ProjectFlow", ("projectflow-", "qg-", "qualitygate-", "m910-projectflow-", "woodpecker-")),
+    ("ProjectFlow", ("projectflow-", "qg-", "qualitygate-", "m910-projectflow-", "woodpecker-", "visual-fidelity-")),
     ("Brand Agent", ("brandagent-", "m910-codex-brandagent-")),
     ("Screen Remote", ("screenremote-", "screen-remote-")),
     ("RemoteOps", ("remoteops-",)),
@@ -22,6 +22,7 @@ _PROJECTS = (
 
 # Most-specific first. These are deliberately not raw free-form session titles.
 _TASK_HINTS = (
+    ("visual-fidelity", "Đối chiếu độ chính xác giao diện theo thiết kế"),
     ("photo-capacity", "Sửa lỗi giới hạn và chuyển tiếp ảnh"),
     ("autoreply", "Kiểm tra chuyển tiếp và tự động trả lời Zalo"),
     ("wifi", "Ổn định kết nối Wi-Fi Galaxy S7"),

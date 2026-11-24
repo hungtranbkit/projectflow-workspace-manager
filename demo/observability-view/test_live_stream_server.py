@@ -514,3 +514,40 @@ def test_public_running_activity_hints_are_allowlisted_and_removed_on_idle(tmp_p
     assert data["sessions"]["proven_running"] == 1
     assert "SECRET_PRIVATE_PASSWORD" not in json.dumps(data)
     assert "PRIVATE_COMMAND_TOKEN" not in json.dumps(data)
+
+
+def test_visual_qa_cannot_be_mislabeled_novaretail_by_stale_task_binding(tmp_path):
+    """Incident #75: task label from node must agree with known session project."""
+    now = datetime(2026, 11, 23, 14, 10, tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes, sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("dell-linux", "online", ts, "healthy", "EXECUTION_OK", "private", "secret"))
+    name = "visual-fidelity-qa-p0-20261123"
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records("
+                   "node_id,agent_type,status,deleted_at,last_activity_at,last_seen_at,"
+                   "session_name,launch_command) VALUES(?,?,?,?,?,?,?,?)",
+                   ("dell-linux", "codex", "ACTIVE", None, ts, ts,
+                    name, "PRIVATE_COMMAND_SECRET"))
+    class Witness:
+        def snapshot(self, rows, *, now):
+            assert len(rows) == 1
+            return {("dell-linux", name): {
+                "state": "STALLED", "evidence": "node_observed",
+                "observed_at": ts,
+                "task_hint": "Kiểm thử NovaRetail",
+                "task_source": "trusted_task_label",
+            }}
+    data = detailed_snapshot(nodes, sessions, now=now, monitor=Witness())
+    card = data["sessions"]["items"][0]
+    assert card["project"] == "ProjectFlow"
+    assert card["task_hint"] == "Đối chiếu độ chính xác giao diện theo thiết kế"
+    assert card["task_source"] == "session_name_hint"
+    assert card["task_conflict"] is True
+    assert card["execution_state"] == "STALLED"
+    assert card["running_verified"] is None
+    assert data["sessions"]["proven_running"] == 0
+    assert "Kiểm thử NovaRetail" not in json.dumps(data)
+    assert "PRIVATE_COMMAND_SECRET" not in json.dumps(data)

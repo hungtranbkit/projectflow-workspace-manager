@@ -28,22 +28,16 @@
     "Có dòng báo thực thi công cụ",
     "Có dòng thông báo lỗi cần kiểm tra"
   ]);
-  const execNames={RUNNING_VERIFIED:"RUNNING · có bằng chứng",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Bị kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
-  // The old backend can call UI-spinner/screen redraws 'RUNNING_VERIFIED'.
-  // Its raw evidence is real, but it does NOT prove task-level progress.
-  const isWeakProgressProof=s=>s.execution_state==="RUNNING_VERIFIED"&&
-    ["terminal_screen_delta","terminal_output_delta","agent_ui_busy"].includes(s.evidence);
-  const publicStateLabel=s=>isWeakProgressProof(s)
-    ?"Terminal/CLI hoạt động · chưa xác minh tiến độ"
-    :execNames[s.execution_state];
+  const execNames={RUNNING_VERIFIED:"Có tín hiệu tiến triển",BUSY_UNVERIFIED:"CLI bận · chưa rõ tiến độ",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Chờ nền lâu · nghi kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
   const projects=new Set(["Zalo Group Hub","MESFlow","ESP32 Kiosk / OTA","ProjectFlow","Brand Agent","Screen Remote","RemoteOps","Chưa phân loại"]);
   let activeProject="all";
-  let activeState="all";
+  let activeState="running";
   let displayLimit=24;
-  const stateRank={RUNNING_VERIFIED:0,WAITING_INPUT:1,BLOCKED:2,STALLED:3,IDLE:4,OPEN_UNVERIFIED:5,EXITED:6};
-  const stateFilters=[["all","Tất cả"],["running","RUNNING"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","IDLE"],["unverified","Chưa xác minh"]];
+  const stateRank={RUNNING_VERIFIED:0,BUSY_UNVERIFIED:1,STALLED:2,WAITING_INPUT:3,BLOCKED:4,IDLE:5,OPEN_UNVERIFIED:6,EXITED:7};
+  const stateFilters=[["running","Có tiến triển"],["busy","CLI bận/chờ nền"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","IDLE"],["unverified","Chưa xác minh"],["all","Tất cả"]];
   const stateMatch=(s)=>activeState==="all"||
     (activeState==="running"&&s.execution_state==="RUNNING_VERIFIED")||
+    (activeState==="busy"&&["BUSY_UNVERIFIED","STALLED"].includes(s.execution_state))||
     (activeState==="waiting"&&s.execution_state==="WAITING_INPUT")||
     (activeState==="blocked"&&["BLOCKED","STALLED"].includes(s.execution_state))||
     (activeState==="idle"&&s.execution_state==="IDLE")||
@@ -70,6 +64,7 @@
            !["session_name_hint","unavailable","trusted_task_label"].includes(s.task_source)||
            !["registry_only","verified_recent_checkpoint","node_observed","terminal_output_delta","terminal_screen_delta","agent_ui_busy"].includes(s.evidence)||
            !(s.running_verified===null||(s.running_verified===true&&s.execution_state==="RUNNING_VERIFIED"))||
+           (s.task_conflict!==undefined&&typeof s.task_conflict!=="boolean")||
            (s.commit_ref!==null&&!/^[a-f0-9]{7,12}$/.test(s.commit_ref))||
            (s.branch_ref!==null&&!/^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,69}$/.test(s.branch_ref))||
            (s.session!==null&&!(typeof s.session==="string"&&/^[a-z0-9][a-z0-9._-]{2,89}$/.test(s.session)))||
@@ -187,13 +182,14 @@
          " · Loại agent xác định: "+d.sessions.agent_identified+"/"+d.sessions.open
         :"Đang chờ số liệu xác minh nguồn task và agent.");
       set("live-running-note",d.sessions.proven_running
-        ?"Tín hiệu CLI/terminal thực, KHÔNG phải bằng chứng code/test/deploy hay task đang tiến triển":"Chưa có phiên RUNNING được bộ thu thập đánh dấu");
+        ?"Có tín hiệu output thực thi mới; chưa đồng nghĩa đã sửa code":"Chưa có bằng chứng tiến triển gần đây; agent bận có thể vẫn đang chờ");
       const stateList=$("live-state-filters");
       if(stateList){
         stateList.replaceChildren();
         for(const [key,label] of stateFilters){
           const count=key==="running"?d.sessions.proven_running:
             all.filter(s=>key==="all"||
+              (key==="busy"&&["BUSY_UNVERIFIED","STALLED"].includes(s.execution_state))||
               (key==="waiting"&&s.execution_state==="WAITING_INPUT")||
               (key==="blocked"&&["BLOCKED","STALLED"].includes(s.execution_state))||
               (key==="idle"&&s.execution_state==="IDLE")||
@@ -222,15 +218,16 @@
         const li=element("li","session-card"+(s.execution_state==="RUNNING_VERIFIED"?" running-first":""));
         const line=element("div","session-card-heading");
         line.appendChild(element("strong","",s.session||s.label));
-        line.appendChild(element("span","session-state "+(s.execution_state==="RUNNING_VERIFIED"&&!isWeakProgressProof(s)?"verified":"unverified"),
-          publicStateLabel(s)));
+        line.appendChild(element("span","session-state "+(s.execution_state==="RUNNING_VERIFIED"?"verified":"unverified"),
+          execNames[s.execution_state]));
         li.appendChild(line);
         li.appendChild(element("div","session-context",s.project+" · "+s.node+" · "+agents[s.agent_type]));
         li.appendChild(element("p","session-work",s.task_source==="trusted_task_label"
-          ?"Task được gắn gần nhất (chưa xác nhận công việc hiện tại): "+s.task_hint
+          ?(s.running_verified===true?"Đang thực thi: ":"Task được gắn gần nhất: ")+s.task_hint
           :s.task_source==="session_name_hint"
           ?"Task gợi ý theo tên phiên: "+s.task_hint
           :"Chưa có task được xác minh"));
+        if(s.task_conflict) li.appendChild(element("small","session-source","Nhãn task được gắn không khớp dự án của phiên; đã bỏ nhãn sai."));
         li.appendChild(element("small","session-source",
           (s.task_source==="trusted_task_label"?"Nhãn task gắn qua Terminal MCP":s.task_source==="session_name_hint"?"Mục tiêu suy ra từ tên session":"Chưa có mô tả task")
           +" · tín hiệu: "+activity[s.activity_bucket]));
@@ -240,8 +237,10 @@
           " · chưa xác minh commit mới"));
         li.appendChild(element("small","session-proof",
           s.evidence==="terminal_output_delta"?"Đã quan sát nội dung terminal thay đổi khi tiến trình chạy · chưa xác minh sửa code":
-          s.evidence==="terminal_screen_delta"?"Toàn màn hình terminal thay đổi, có thể chỉ là timer/spinner · chưa xác minh tiến triển":
-          s.evidence==="agent_ui_busy"?"Claude/Codex hiển thị đang xử lý · chưa xác minh tiến triển hay thay đổi code":
+          s.evidence==="terminal_screen_delta"?"Toàn màn hình terminal thay đổi khi tiến trình foreground chạy · không đồng nghĩa sửa code":
+          s.execution_state==="STALLED"?"Tiến trình nền chờ trên 15 phút · nghi kẹt, chưa có tiến triển mới":
+          s.execution_state==="BUSY_UNVERIFIED"?"CLI foreground bận nhưng chưa có output mới chứng minh tiến triển":
+          s.evidence==="agent_ui_busy"?"CLI foreground bận · không phải bằng chứng sửa code":
           s.execution_state==="IDLE"?"Đã xác minh agent đang chờ lệnh":
           s.execution_state==="WAITING_INPUT"?"Agent đang chờ nhập liệu":
           s.running_verified===true?"RUNNING được xác minh bằng checkpoint mới":"Chưa có bằng chứng code mới / chưa xác minh RUNNING"));
@@ -272,7 +271,7 @@
       const incomplete=coverage&&coverage.unreachable_nodes.length
         ?" · "+coverage.unreachable_nodes.length+" node chưa kết nối":"";
       set("live-sessions-note","Đang hiển thị "+showing+"/"+scoped+
-        incomplete+". RUNNING dựa trên output thực thi mới; mục tiêu suy từ tên phiên chỉ là gợi ý.");
+        incomplete+". Tiến triển xác minh và CLI bận/chờ nền là hai trạng thái riêng; tên phiên chỉ là gợi ý.");
     }else{
       projectList.appendChild(element("span","","Bản lưu chưa có tên dự án/task."));
       list.appendChild(element("li","","Bản lưu chưa có chi tiết phiên. Chỉ đang hiển thị tổng hợp."));
