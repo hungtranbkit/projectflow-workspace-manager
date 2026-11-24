@@ -28,14 +28,17 @@
     "Có dòng báo thực thi công cụ",
     "Có dòng thông báo lỗi cần kiểm tra"
   ]);
-  const execNames={RUNNING_VERIFIED:"Có tín hiệu tiến triển",BUSY_UNVERIFIED:"CLI bận · chưa rõ tiến độ",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Chờ nền lâu · nghi kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
+  const execNames={RUNNING_VERIFIED:"Có tín hiệu tiến triển",BUSY_UNVERIFIED:"RUNNING · CLI đang thực thi",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Chờ nền lâu · nghi kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
   const projects=new Set(["Zalo Group Hub","MESFlow","ESP32 Kiosk / OTA","ProjectFlow","Brand Agent","Screen Remote","RemoteOps","Chưa phân loại"]);
   let activeProject="all";
-  let activeState="running";
+  // Busy/stalled agent turns should be visible even without code-progress proof.
+  let activeState="active";
   let displayLimit=24;
   const stateRank={RUNNING_VERIFIED:0,BUSY_UNVERIFIED:1,STALLED:2,WAITING_INPUT:3,BLOCKED:4,IDLE:5,OPEN_UNVERIFIED:6,EXITED:7};
-  const stateFilters=[["running","Có tiến triển"],["busy","CLI bận/chờ nền"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","IDLE"],["unverified","Chưa xác minh"],["all","Tất cả"]];
+  const activeStates=new Set(["RUNNING_VERIFIED","BUSY_UNVERIFIED","STALLED"]);
+  const stateFilters=[["active","Đang hoạt động"],["all","Tất cả"],["running","Có tiến triển"],["busy","CLI bận/chờ nền"],["waiting","Chờ nhập liệu"],["blocked","Bị chặn"],["idle","IDLE"],["unverified","Chưa xác minh"]];
   const stateMatch=(s)=>activeState==="all"||
+    (activeState==="active"&&activeStates.has(s.execution_state))||
     (activeState==="running"&&s.execution_state==="RUNNING_VERIFIED")||
     (activeState==="busy"&&["BUSY_UNVERIFIED","STALLED"].includes(s.execution_state))||
     (activeState==="waiting"&&s.execution_state==="WAITING_INPUT")||
@@ -61,6 +64,7 @@
         if(!/^Session \d{2,3}$/.test(s.label)||!isNodeLabel(s.node)||!Object.hasOwn(agents,s.agent_type)||
            !Object.hasOwn(activity,s.activity_bucket)||!Object.hasOwn(execNames,s.execution_state)||
            !projects.has(s.project)||typeof s.task_hint!=="string"||s.task_hint.length>120||
+           (s.git_dirty!==undefined&&s.git_dirty!==null&&typeof s.git_dirty!=="boolean")||
            !["session_name_hint","unavailable","trusted_task_label"].includes(s.task_source)||
            !["registry_only","verified_recent_checkpoint","node_observed","terminal_output_delta","terminal_screen_delta","agent_ui_busy"].includes(s.evidence)||
            !(s.running_verified===null||(s.running_verified===true&&s.execution_state==="RUNNING_VERIFIED"))||
@@ -99,7 +103,7 @@
     for(const id of ["live-nodes","live-open","live-signal","live-one-minute"])set(id,"—");
     set("live-acceptance","UNKNOWN");set("live-ttl","UNKNOWN");set("live-transport","Chưa kết nối");
     set("live-message",reason||"Không suy diễn dữ liệu nếu nguồn không hợp lệ.");
-    set("live-running-count","—");set("live-running-note","Không có dữ liệu được xác minh");set("live-task-coverage","Nhãn task và agent chưa xác minh.");
+    set("live-active-count","—");set("live-running-count","—");set("live-running-note","Không có dữ liệu được xác minh");set("live-task-coverage","Nhãn task và agent chưa xác minh.");
     const states=$("live-state-filters");if(states)states.replaceChildren();
     const more=$("live-show-more");if(more)more.hidden=true;
     $("live-node-list").replaceChildren();$("live-sessions").replaceChildren();$("live-changes").replaceChildren();$("live-projects").replaceChildren();set("live-sessions-note","Không có dữ liệu phiên xác minh.");
@@ -176,18 +180,22 @@
       const all=[...d.sessions.items].sort((a,b)=>
         (stateRank[a.execution_state]??9)-(stateRank[b.execution_state]??9)||
         String(a.label).localeCompare(String(b.label)));
+      const activeCount=all.filter(s=>activeStates.has(s.execution_state)).length;
+      const busyCount=all.filter(s=>["BUSY_UNVERIFIED","STALLED"].includes(s.execution_state)).length;
+      set("live-active-count",activeCount);
       set("live-running-count",d.sessions.proven_running);
       set("live-task-coverage",int(d.sessions.task_label_verified)&&int(d.sessions.agent_identified)
         ?"Task có nhãn chính thức: "+d.sessions.task_label_verified+"/"+d.sessions.open+
          " · Loại agent xác định: "+d.sessions.agent_identified+"/"+d.sessions.open
         :"Đang chờ số liệu xác minh nguồn task và agent.");
-      set("live-running-note",d.sessions.proven_running
-        ?"Có tín hiệu output thực thi mới; chưa đồng nghĩa đã sửa code":"Chưa có bằng chứng tiến triển gần đây; agent bận có thể vẫn đang chờ");
+      set("live-running-note",activeCount
+        ?busyCount+" phiên CLI bận/chờ nền · "+d.sessions.proven_running+" phiên có tín hiệu tiến triển; chưa đồng nghĩa đã sửa code"
+        :"Không có agent đang chạy/chờ nền được xác minh; các phiên IDLE vẫn xem được trong Tất cả");
       const stateList=$("live-state-filters");
       if(stateList){
         stateList.replaceChildren();
         for(const [key,label] of stateFilters){
-          const count=key==="running"?d.sessions.proven_running:
+          const count=key==="active"?activeCount:key==="running"?d.sessions.proven_running:
             all.filter(s=>key==="all"||
               (key==="busy"&&["BUSY_UNVERIFIED","STALLED"].includes(s.execution_state))||
               (key==="waiting"&&s.execution_state==="WAITING_INPUT")||
@@ -214,6 +222,12 @@
         (activeProject==="all"||activeProject===s.project)&&stateMatch(s));
       const visible=matches.slice(0,displayLimit);
       const showing=visible.length;
+      if(!showing){
+        const explanation=activeState==="active"
+          ?"Không có agent đang chạy/chờ nền được xác minh. "+d.sessions.open+" phiên vẫn đang mở; chọn Tất cả để xem phiên IDLE/chưa xác minh."
+          :"Không có phiên khớp bộ lọc. Chọn Tất cả để xem những phiên còn mở.";
+        list.appendChild(element("li","session-empty",explanation));
+      }
       for(const s of visible){
         const li=element("li","session-card"+(s.execution_state==="RUNNING_VERIFIED"?" running-first":""));
         const line=element("div","session-card-heading");
@@ -231,6 +245,8 @@
         li.appendChild(element("small","session-source",
           (s.task_source==="trusted_task_label"?"Nhãn task gắn qua Terminal MCP":s.task_source==="session_name_hint"?"Mục tiêu suy ra từ tên session":"Chưa có mô tả task")
           +" · tín hiệu: "+activity[s.activity_bucket]));
+        if(s.git_dirty===true)li.appendChild(element("small","session-code",
+          "Git có thay đổi chưa commit · chưa chứng minh agent ở lượt hiện tại tạo ra các thay đổi đó"));
         if(s.commit_ref||s.branch_ref)li.appendChild(element("small","session-code",
           "Git tham chiếu: "+(s.branch_ref||"không rõ nhánh")
           +(s.commit_ref?" @ "+s.commit_ref:"")+
@@ -239,7 +255,7 @@
           s.evidence==="terminal_output_delta"?"Đã quan sát nội dung terminal thay đổi khi tiến trình chạy · chưa xác minh sửa code":
           s.evidence==="terminal_screen_delta"?"Toàn màn hình terminal thay đổi khi tiến trình foreground chạy · không đồng nghĩa sửa code":
           s.execution_state==="STALLED"?"Tiến trình nền chờ trên 15 phút · nghi kẹt, chưa có tiến triển mới":
-          s.execution_state==="BUSY_UNVERIFIED"?"CLI foreground bận nhưng chưa có output mới chứng minh tiến triển":
+          s.execution_state==="BUSY_UNVERIFIED"?"Claude/Codex đang thực thi một lượt lệnh; chưa có output mới chứng minh task tiến triển":
           s.evidence==="agent_ui_busy"?"CLI foreground bận · không phải bằng chứng sửa code":
           s.execution_state==="IDLE"?"Đã xác minh agent đang chờ lệnh":
           s.execution_state==="WAITING_INPUT"?"Agent đang chờ nhập liệu":

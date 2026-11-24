@@ -11,7 +11,7 @@ class Element{
 const ids=["live-panel","live-health","live-time","live-nodes","live-open","live-signal",
  "live-one-minute","live-acceptance","live-ttl","live-transport","live-message",
  "live-node-list","live-sessions","live-sessions-note","live-projects","live-changes","live-refresh",
- "live-running-count","live-running-note","live-task-coverage","live-state-filters","live-show-more"];
+ "live-active-count","live-running-count","live-running-note","live-task-coverage","live-state-filters","live-show-more"];
 const els=Object.fromEntries(ids.map(i=>[i,new Element(i)]));
 const document={hidden:false,listeners:{},getElementById:i=>{assert.ok(els[i],"missing DOM #"+i);return els[i]},
  createElement:type=>new Element(type),addEventListener(k,f){this.listeners[k]=f;}};
@@ -68,7 +68,11 @@ assert.equal(els["live-acceptance"].textContent,"UNKNOWN");
 assert.equal(els["live-ttl"].textContent,"UNKNOWN");
 assert.equal(els["live-panel"].dataset.health,"fresh");
 assert.equal(els["live-node-list"].children.length,2);
-assert.equal(els["live-sessions"].children.length,0,"default filter shows only verified progress");
+assert.equal(els["live-active-count"].textContent,"0");
+assert.equal(els["live-sessions"].children.length,1,"empty active list should show a useful explanation");
+assert.ok(els["live-sessions"].children[0].textContent.includes("chọn Tất cả"));
+const activeButton=els["live-state-filters"].children.find(b=>b.textContent.startsWith("Đang hoạt động"));
+assert.ok(activeButton&&activeButton.attributes["aria-pressed"]==="true","active view must be selected by default");
 els["live-state-filters"].children.find(b=>b.textContent.startsWith("Tất cả")).events.click();
 assert.equal(els["live-sessions"].children.length,2);
 assert.ok(els["live-sessions"].children[0].children.some(x=>x.textContent.includes("Sửa lỗi giới hạn và chuyển tiếp ảnh")));
@@ -113,6 +117,7 @@ verified.sessions.items[1].evidence="verified_recent_checkpoint";
 verified.sessions.items[1].last_checkpoint_at=new Date().toISOString();
 source.emit("status",verified);
 assert.equal(els["live-running-count"].textContent,"1");
+assert.equal(els["live-active-count"].textContent,"1");
 assert.equal(els["live-sessions"].children[0].children[0].children[0].textContent,
   "projectflow-observability-20261120","verified RUNNING must sort first");
 const runningButton=els["live-state-filters"].children.find(b=>b.textContent.startsWith("Có tiến triển"));
@@ -145,14 +150,33 @@ uiProof.sessions.items[1].evidence="agent_ui_busy";
 uiProof.sessions.proven_running=0;
 source.emit("status",uiProof);
 assert.equal(els["live-running-count"].textContent,"0");
+assert.equal(els["live-active-count"].textContent,"1");
+els["live-state-filters"].children.find(b=>b.textContent.startsWith("Đang hoạt động")).events.click();
+assert.equal(els["live-sessions"].children.length,1,
+  "busy session must remain visible with the default active filter even without verified progress");
+assert.ok(els["live-sessions"].children[0].children[0].children[1].textContent.includes("RUNNING · CLI đang thực thi"));
 els["live-state-filters"].children.find(b=>b.textContent.startsWith("Tất cả")).events.click();
 assert.ok(els["live-sessions"].children[0].children.some(x=>
-  x.textContent.includes("CLI foreground bận nhưng chưa có output mới")));
+  x.textContent.includes("Claude/Codex đang thực thi một lượt lệnh")));
 const busyButton=els["live-state-filters"].children.find(b=>b.textContent.startsWith("CLI bận/chờ nền"));
 assert.ok(busyButton);
 busyButton.events.click();
 assert.equal(els["live-sessions"].children.length,1);
 els["live-state-filters"].children.find(b=>b.textContent.startsWith("Tất cả")).events.click();
+const gitBusy=enrich(values());
+gitBusy.sessions.items[1].execution_state="BUSY_UNVERIFIED";
+gitBusy.sessions.items[1].running_verified=null;
+gitBusy.sessions.items[1].evidence="agent_ui_busy";
+gitBusy.sessions.items[1].git_dirty=true;
+gitBusy.sessions.proven_running=0;
+source.emit("status",gitBusy);
+const dirtyCard=els["live-sessions"].children[0];
+assert.ok(dirtyCard.children.some(x=>x.textContent.includes("Git có thay đổi chưa commit")));
+assert.ok(dirtyCard.children.some(x=>x.textContent.includes("chưa chứng minh agent")));
+const illegalDirty=enrich(values());
+illegalDirty.sessions.items[1].git_dirty="/private/customer/project";
+source.emit("status",illegalDirty);
+assert.equal(els["live-panel"].dataset.health,"unknown","client rejects raw Git metadata");
 const stalled=enrich(values());
 stalled.sessions.items[1].execution_state="STALLED";
 stalled.sessions.items[1].evidence="node_observed";
@@ -160,6 +184,11 @@ stalled.sessions.items[1].task_conflict=true;
 stalled.sessions.items[1].task_hint="Đối chiếu độ chính xác giao diện theo thiết kế";
 stalled.sessions.items[1].project="ProjectFlow";
 source.emit("status",stalled);
+els["live-state-filters"].children.find(b=>b.textContent.startsWith("Đang hoạt động")).events.click();
+assert.equal(els["live-sessions"].children.length,1,
+  "stalled background session must be visible in active overview with a warning");
+assert.ok(els["live-sessions"].children[0].children[0].children[1].textContent.includes("nghi kẹt"));
+els["live-state-filters"].children.find(b=>b.textContent.startsWith("Tất cả")).events.click();
 const stalledCard=els["live-sessions"].children[0];
 assert.ok(stalledCard.children.some(x=>x.textContent.includes("Nhãn task được gắn không khớp")));
 assert.ok(stalledCard.children.some(x=>x.textContent.includes("Tiến trình nền chờ trên 15 phút")));

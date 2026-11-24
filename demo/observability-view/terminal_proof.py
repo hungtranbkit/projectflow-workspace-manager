@@ -573,6 +573,16 @@ class TerminalProofMonitor:
                         record["task_hint"] = label["title"]
                         record["task_source"] = "trusted_task_label"
                     if record is not None:
+                        # Status comes from the authenticated node. Export only
+                        # the strict Boolean working-tree dirty flag, NEVER
+                        # the repository path, filenames or diff content.
+                        # Dirty is a snapshot of uncommitted work, not proof
+                        # that this particular agent turn wrote those changes.
+                        resource = value.get("resource")
+                        git_meta = resource.get("git") if isinstance(resource, dict) else None
+                        dirty = git_meta.get("dirty") if isinstance(git_meta, dict) else None
+                        if type(dirty) is bool:
+                            record["git_dirty"] = dirty
                         if record["state"] == "RUNNING_VERIFIED":
                             record["recent_actions"] = safe_recent_activity(value.get("last_output"))
                         # Node status is trusted for agent type, but never publish a
