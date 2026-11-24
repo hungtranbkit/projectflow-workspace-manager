@@ -30,6 +30,26 @@ CAPACITIES = ("healthy", "overloaded", "draining", "unknown")
 MAX_STREAM_CLIENTS = 18
 SEM = threading.BoundedSemaphore(MAX_STREAM_CLIENTS)
 
+# Only these reviewed titles are eligible for cross-project consistency checks.
+# A reused / incorrectly bound session task label must not override a known
+# session project. This map never contains raw node metadata or user prompts.
+_TASK_LABEL_PROJECTS = {
+    "Xây dựng nguồn bằng chứng hoạt động agent": "ProjectFlow",
+    "Hoàn thiện giám sát hoạt động agent": "ProjectFlow",
+    "Kiểm thử hệ thống CI nội bộ": "ProjectFlow",
+    "Kiểm soát chất lượng mã nguồn": "ProjectFlow",
+    "Kiểm thử trả lời tự động Zalo": "Zalo Group Hub",
+    "Hoàn thiện chuyển tiếp tin nhắn Zalo": "Zalo Group Hub",
+    "Kiểm thử OTA ESP32": "ESP32 Kiosk / OTA",
+    "Kiểm thử thiết bị ESP32": "ESP32 Kiosk / OTA",
+    "Kiểm thử quy trình MESFlow": "MESFlow",
+    "Triển khai Brand Agent": "Brand Agent",
+    "Kiểm thử Screen Remote": "Screen Remote",
+    "Kiểm thử RemoteOps": "RemoteOps",
+    "Kiểm thử NovaRetail": "NovaRetail",
+    "Điều phối công việc ProjectFlow": "ProjectFlow",
+}
+
 
 def _age_seconds(value, now):
     event = _instant(value)
@@ -137,15 +157,22 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
             last_activity_at=row["last_activity_at"],
             last_commit=row["last_commit"], git_branch=row["git_branch"], now=now)
         proof = observed.get((key, row["session_name"]))
-        if proof and proof.get("state") in ("IDLE", "WAITING_INPUT", "BLOCKED", "RUNNING_VERIFIED"):
+        if proof and proof.get("state") in ("IDLE", "WAITING_INPUT", "BLOCKED", "STALLED", "BUSY_UNVERIFIED", "RUNNING_VERIFIED"):
             summary["execution_state"] = proof["state"]
             summary["evidence"] = proof["evidence"]
             summary["running_verified"] = True if proof["state"] == "RUNNING_VERIFIED" else None
             summary["last_checkpoint_at"] = proof.get("checkpoint_at")
         if proof and proof.get("task_source") == "trusted_task_label":
-            # A task label is only proof of assignment, never of execution.
-            summary["task_hint"] = proof["task_hint"]
-            summary["task_source"] = "trusted_task_label"
+            # The authenticated label can still be stale or misattached; when
+            # both a known session project and a curated label project exist,
+            # an explicit mismatch is NOT permission to claim a current task.
+            title = proof.get("task_hint")
+            expected = _TASK_LABEL_PROJECTS.get(title)
+            if expected and summary["project"] != "Chưa phân loại" and expected != summary["project"]:
+                summary["task_conflict"] = True
+            else:
+                summary["task_hint"] = title
+                summary["task_source"] = "trusted_task_label"
         # With authenticated node monitoring, only a new output delta is an
         # execution activity signal. A registry heartbeat is never progress.
         if monitor is not None:
@@ -189,6 +216,7 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
                 "project": summary["project"],
                 "task_hint": summary["task_hint"],
                 "task_source": summary["task_source"],
+                "task_conflict": summary.get("task_conflict", False),
                 "execution_state": summary["execution_state"],
                 "evidence": summary["evidence"],
                 "commit_ref": summary["commit_ref"],
@@ -205,8 +233,9 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
             })
     # Rank every registered session BEFORE truncating the public list.
     # A heartbeat never upgrades OPEN_UNVERIFIED to RUNNING_VERIFIED.
-    rank = {"RUNNING_VERIFIED": 0, "WAITING_INPUT": 1, "BLOCKED": 2,
-            "STALLED": 3, "IDLE": 4, "OPEN_UNVERIFIED": 5, "EXITED": 6}
+    rank = {"RUNNING_VERIFIED": 0, "BUSY_UNVERIFIED": 1, "STALLED": 2,
+            "WAITING_INPUT": 3, "BLOCKED": 4, "IDLE": 5,
+            "OPEN_UNVERIFIED": 6, "EXITED": 7}
     session_details.sort(key=lambda item: (
         rank.get(item["execution_state"], 7),
         _age_seconds(item["last_checkpoint_at"], now) if
@@ -272,7 +301,7 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
         "proven_running": proven_running,
         "task_label_verified": task_label_verified,
         "agent_identified": agent_identified,
-        "running_verification": "verified_recent_checkpoint_or_live_output_delta",
+        "running_verification": "recent_meaningful_output_or_non_agent_foreground_delta",
         "observation_source": ("terminal_mcp_authenticated_fleet" if fleet_coverage
                                else "terminal_mcp_authenticated_status" if monitor is not None
                                else "registry_only"),

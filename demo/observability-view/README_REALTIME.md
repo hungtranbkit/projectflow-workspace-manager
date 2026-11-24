@@ -162,3 +162,36 @@ that the task's current run succeeded, and not that the agent changed any
 source files or was accepted. Only an access-controlled internal task detail
 view should show actual raw terminal lines, filenames, command arguments or
 full test logs. Public read-only CrommaCode never publishes those details.
+
+
+## P0 correction: CLI busy != task progress (23 Nov 2026)
+
+An authenticated terminal status may confirm Claude/Codex has an in-flight turn,
+but **terminal clock/spinner and a busy footer do not verify productive work**.
+The public projection now separates:
+
+- `RUNNING_VERIFIED`: changed recent allowlisted test/build/tool activity in the
+  *same session instance*, or a changed foreground terminal for non-agent tools;
+  still not proof of a code edit, a passing test suite or successful deployment.
+- `BUSY_UNVERIFIED`: genuine current Claude/Codex foreground busy marker with
+  **no new meaningful approved output**. A fresh timer redraw alone is ignored.
+- `STALLED`: a foreground agent shows an explicit background-terminal wait of
+  at least 15 minutes. This is a **suspected blockage**, not permission to kill
+  its subprocess or delete the session.
+
+Only sanitized, curated action labels may reach public SSE. The collector never
+ships raw terminal text or foreground commands. The last meaningful semantic
+output digest and last progress instant are kept only in process memory, tied to
+node, session name, stable ID and generation; the proof expires in 30 seconds.
+Changing from IDLE/WAITING_INPUT clears prior evidence.
+
+The owner-reported Session 01 mismatch (Visual Fidelity QA vs. NovaRetail)
+is guarded by a curated task-label/project consistency gate. If an authenticated
+assignment's reviewed project conflicts with the project derived from a known
+session namespace, the public card discards the mismatched title, shows the
+session name-based task as **unverified hint**, and displays a conflict warning.
+No private task titles or internal session IDs are exposed.
+
+Deployment rule: land both backend and JS client together, restart only the
+read-only ProjectFlow SSE user service, and verify real mobile SSE evidence.
+This source change alone is not evidence that production was deployed.
