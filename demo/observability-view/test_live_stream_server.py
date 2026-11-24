@@ -551,3 +551,32 @@ def test_visual_qa_cannot_be_mislabeled_novaretail_by_stale_task_binding(tmp_pat
     assert data["sessions"]["proven_running"] == 0
     assert "Kiểm thử NovaRetail" not in json.dumps(data)
     assert "PRIVATE_COMMAND_SECRET" not in json.dumps(data)
+
+
+def test_authenticated_dirty_worktree_only_reaches_public_as_boolean(tmp_path):
+    now = datetime(2026,11,24,10,0,tzinfo=timezone.utc)
+    ts = now.isoformat()
+    nodes,sessions = _dbs(tmp_path)
+    with sqlite3.connect(nodes) as db:
+        db.execute("INSERT INTO nodes VALUES(?,?,?,?,?,?,?)",
+                   ("dell-linux","online",ts,"healthy","EXECUTION_OK","PRIVATE_HOST","PRIVATE_TOKEN"))
+    with sqlite3.connect(sessions) as db:
+        db.execute("INSERT INTO session_records(node_id,agent_type,status,deleted_at,"
+                   "last_activity_at,last_seen_at,session_name,launch_command)"
+                   " VALUES(?,?,?,?,?,?,?,?)",
+                   ("dell-linux","claude","ACTIVE",None,ts,ts,
+                    "zgh-s7-setup-kit-20261124","PRIVATE_COMMAND"))
+    class Readback:
+        def snapshot(self, rows, *, now):
+            return {("dell-linux","zgh-s7-setup-kit-20261124"): {
+              "state":"BUSY_UNVERIFIED","evidence":"agent_ui_busy","observed_at":ts,
+              "agent_type":"claude","git_dirty":True,
+              "resource":{"git":{"repo":"/PRIVATE/CUSTOMER","diff":"SECRET_DATA"}}}}
+    d=detailed_snapshot(nodes,sessions,now=now,monitor=Readback())
+    s=d["sessions"]["items"][0]
+    assert s["execution_state"]=="BUSY_UNVERIFIED"
+    assert s["git_dirty"] is True
+    assert s["running_verified"] is None
+    assert s["session"] is not None # static registry without fleet discovery
+    for forbidden in ("PRIVATE_COMMAND","PRIVATE/CUSTOMER","SECRET_DATA","PRIVATE_TOKEN"):
+        assert forbidden not in json.dumps(d)
