@@ -5,7 +5,7 @@ Status: **A FAIL; D runtime-stage integration verified; E blocked.** No producti
 ## Exact full-suite run
 
 - Worktree: task-owned `.worktrees/projectflow-visual-qa-73`, branch `agent/codex/visual-qa-73`.
-- Source HEAD at run start: `2805bcd37fa9f183f7e38a887fc8891884051961`; worktree included the documented uncommitted changes for the visual-stage integration and `pythonpath` fix. This is not a claim that that dirty tree equals a commit SHA.
+- Local source HEAD at run start: `2805bcd37fa9f183f7e38a887fc8891884051961`; worktree had relevant uncommitted test/config changes. Before final PR publication, blob hashes for eight runtime/gate files (pyproject, TestRunner, TaskDecisionService, contract loader, visual contract/execution/subprocess tests and visual CLI) were compared with exact PR head `4e98802a8cba94e1a68bfc1b5b8b3f7ca4b1f174` and matched byte-for-byte. Per-file blob SHAs are recorded in `summary.json`. Later commits changed documentation/context only. This ties the tested executable path to the published PR source without claiming the original dirty local HEAD was the commit SHA.
 - Command: `CHROME_PATH=<authorized-chromium-wrapper> VISUAL_QA_PLAYWRIGHT_FROM="$PWD" ./scripts/test.sh`.
 - Result: exit 1, **14 failed / 1561 passed / 1 skipped**, 2795.43 seconds (46:35), 12,182 warnings. Full sanitized output: [`full-suite.log`](full-suite.log).
 - The previous five provider-backed failures did not recur in this run. Their prior `subtype=unknown` output did not establish quota as their cause. The current 14 failures are all caused by Docker sandbox provisioning failure and downstream state assertions.

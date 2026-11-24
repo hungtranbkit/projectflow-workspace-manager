@@ -108,9 +108,9 @@
   "targeted_visual_runner_exit_code": 0,
   "evidence_sha256": {
     "full-suite.log": "9db67741b618544f91b1433b3f8d9795660ebad2d178466e7095a69e8804e121",
-    "REPORT.md": "c3f85d4d5eb15fa5eef8261e197b19ef6c24113d3feee2fd99a7de923587d85d",
+    "REPORT.md": "58dec0f010d216f0f43d9dcf584a220983c45bed299146280bff4dddcc90bf3d",
     "runner-integration-subprocess-20261124-02/SHA256SUMS.json": "e11d755ecafbc27f191de1072917ef6928178b84b599382b9e529be78913ef00",
-    "summary.json": "e654e4e4903ed659963007585c75c6d2593bc9ec47cfb0b1fb58faa6d508828f",
+    "summary.json": "b9101c2fc661e54222cf1847bafcee08617bfad7deca76fd79faa5fe1f5ba313",
     "preflight.log": "53c41730f4187288ceb926407151168588f4ca97ffb34dda247c68b2c281edfd",
     "visual-cli-contract.log": "8060ff312d471368484087f992868e9d0b99ee7622ae0db04b9d213d102e667f",
     "visual-smoke.log": "8f053bd8c4239f5245d8c09babee2de73e766ad6ade6f91036ecd7ec1811a730",
@@ -119,5 +119,17 @@
   "collection_probe_exit_code": 0,
   "full_suite_summary_outcomes": 1576,
   "full_suite_vs_collection_count_discrepancy": 1,
-  "count_discrepancy_status": "unexplained; no inference"
+  "count_discrepancy_status": "unexplained; no inference",
+  "tested_file_blob_matches_pr_head": "4e98802a8cba94e1a68bfc1b5b8b3f7ca4b1f174",
+  "tested_file_blob_matches_count": 8,
+  "tested_file_blob_shas": {
+    "pyproject.toml": "57369b643ff2c599f638f34cac898664a9df46cf",
+    "app/services/test_runner.py": "c1595c38e07d4e26923d8ec4537a53865a7acce5",
+    "app/services/task_decision_service.py": "08623da17050fb85709980060c1e25cfd90c196d",
+    "app/services/project_contract.py": "17acab7051a7390f305fcb4bdcdb79ec7a22e7eb",
+    "tests/test_visual_qa_contract.py": "c3d1e09c44417691c493305580d88c0a9026d396",
+    "tests/test_visual_qa_execution.py": "182ba90e100458ed467dd874b96ec6809470768b",
+    "tests/test_visual_qa_runner_subprocess.py": "f730fb9ab85ad4f7e09fb434937ea9f49620a4d4",
+    "tools/visual_qa/visual-qa.mjs": "a77c67dc05aedee8188a0a0e45f8fbfc0e0068a6"
+  }
 }
