@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "kind": "terminal-mcp-public-aggregate",
-  "observed_at": "2026-11-24T15:55:56+00:00",
+  "observed_at": "2026-11-24T16:00:58+00:00",
   "expected_refresh_seconds": 300,
   "fresh_window_seconds": 300,
   "nodes": {
     "total": 9,
-    "online": 5,
-    "offline": 4,
+    "online": 6,
+    "offline": 3,
     "unknown": 0,
     "items": [
       {
@@ -30,9 +30,9 @@
       },
       {
         "label": "local",
-        "status": "offline",
+        "status": "online",
         "open_sessions": 3,
-        "recent_activity_signals": 0
+        "recent_activity_signals": 3
       },
       {
         "label": "m910",
@@ -68,7 +68,7 @@
   },
   "sessions": {
     "open": 6,
-    "recent_activity_signals": 3,
+    "recent_activity_signals": 6,
     "running_verified": null
   },
   "acceptance": {
