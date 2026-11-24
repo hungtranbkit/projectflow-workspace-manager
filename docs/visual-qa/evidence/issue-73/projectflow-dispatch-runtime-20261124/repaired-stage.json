@@ -1,0 +1,40 @@
+{
+  "rows": [
+    {
+      "id": 1,
+      "stage": "test",
+      "status": "PASS",
+      "tested_commit": "d308d481441eaea23e151e0126a92dfa4b596cd2",
+      "exit_code": 0,
+      "started_at": "2026-11-24T13:43:30.025783+00:00",
+      "finished_at": "2026-11-24T13:43:30.030908+00:00"
+    },
+    {
+      "id": 2,
+      "stage": "visual_qa",
+      "status": "PASS",
+      "tested_commit": "d308d481441eaea23e151e0126a92dfa4b596cd2",
+      "exit_code": 0,
+      "started_at": "2026-11-24T13:43:30.031908+00:00",
+      "finished_at": "2026-11-24T13:43:32.798503+00:00"
+    }
+  ],
+  "decision": {
+    "decision": {
+      "status": "ACTIVE",
+      "stage": "DEVELOPMENT",
+      "test_readiness": "NO",
+      "next_action": {
+        "action": "START_BUILDER",
+        "label": "Start Claude: p0-visual-qa-dispatch-verified",
+        "reason": "Builder Workspace ready, agent not started yet.",
+        "target": "/workspaces/1",
+        "method": "GET"
+      },
+      "blocking_reasons": []
+    },
+    "builderTestsStatus": "PASS",
+    "head": "d308d481441eaea23e151e0126a92dfa4b596cd2",
+    "agentStatus": "NOT_STARTED"
+  }
+}

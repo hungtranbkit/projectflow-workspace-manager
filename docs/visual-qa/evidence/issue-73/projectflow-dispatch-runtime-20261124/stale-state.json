@@ -1,0 +1,22 @@
+{
+  "testedSha": "d308d481441eaea23e151e0126a92dfa4b596cd2",
+  "currentSha": "2e3a64eea93d56346e5fcb0987eef16a291c726f",
+  "decision": {
+    "decision": {
+      "status": "ACTIVE",
+      "stage": "DEVELOPMENT",
+      "test_readiness": "NO",
+      "next_action": {
+        "action": "START_BUILDER",
+        "label": "Start Claude: p0-visual-qa-dispatch-verified",
+        "reason": "Builder Workspace ready, agent not started yet.",
+        "target": "/workspaces/1",
+        "method": "GET"
+      },
+      "blocking_reasons": []
+    },
+    "builderTestsStatus": "NOT_RUN",
+    "head": "2e3a64eea93d56346e5fcb0987eef16a291c726f",
+    "agentStatus": "NOT_STARTED"
+  }
+}

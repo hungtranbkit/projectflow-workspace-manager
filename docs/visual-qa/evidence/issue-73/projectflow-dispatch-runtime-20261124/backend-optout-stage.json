@@ -1,0 +1,31 @@
+{
+  "rows": [
+    {
+      "id": 3,
+      "stage": "test",
+      "status": "PASS",
+      "tested_commit": "2e3a64eea93d56346e5fcb0987eef16a291c726f",
+      "exit_code": 0,
+      "started_at": "2026-11-24T13:43:34.035485+00:00",
+      "finished_at": "2026-11-24T13:43:34.039969+00:00"
+    }
+  ],
+  "decision": {
+    "decision": {
+      "status": "ACTIVE",
+      "stage": "DEVELOPMENT",
+      "test_readiness": "NO",
+      "next_action": {
+        "action": "START_BUILDER",
+        "label": "Start Claude: p0-visual-qa-backend-optout",
+        "reason": "Builder Workspace ready, agent not started yet.",
+        "target": "/workspaces/2",
+        "method": "GET"
+      },
+      "blocking_reasons": []
+    },
+    "builderTestsStatus": "PASS",
+    "head": "2e3a64eea93d56346e5fcb0987eef16a291c726f",
+    "agentStatus": "NOT_STARTED"
+  }
+}

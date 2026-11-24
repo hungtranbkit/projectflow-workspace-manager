@@ -127,3 +127,19 @@ export PROJECTFLOW_TEST_DOCKER_IPAM_POOL=10.253.0.0/16
 Fixture cũng kiểm tra overlap và dừng rõ ràng nếu pool cấu hình bị chiếm. Chọn pool chỉ cho test; không sửa daemon, restart Docker, prune network dùng chung, hoặc dùng một dải còn route/network overlap. Xem log và inventory của lần chạy thực tế trước khi chọn dải.
 
 Exact-SHA rerun 24/11/2026 tại `cee006ca53eb36b7be29cf654fb3081844c4cce1`: `./scripts/test.sh` exit 0, 1,575 passed / 1 skipped trong 52:17; 14 node IDs từng lỗi do IPAM nay pass. Collect-only module totals là 1,575, còn runtime outcomes là 1,576; chênh một item chưa được giải thích. Log, preflight/build, targeted, smoke và inventory ở `docs/visual-qa/evidence/issue-73/full-suite-runtime-20261124-ipam-fix/`. Full-suite pass cục bộ không đồng nghĩa CI exact-SHA đã chạy; PR #74 workflow vẫn chờ maintainer cho phép bật lại.
+
+
+## 9. Replay dispatch Builder → TestRunner thật
+
+Bằng chứng local trong bundle ProjectFlow dispatch runtime cho thấy editor và visual gate là hai bước của cùng Task, qua các adapter hiện có:
+
+1. Tạo Task UI trên worktree disposable; thêm đúng dòng `VISUAL_QA_REQUIRED: true`. Không đặt marker cho backend/firmware.
+2. Chạy React UI preview trên loopback, thêm reference/route/viewport/threshold cố định vào `PROJECT.yaml`, kiểm tra SHA PNG và UIFix pin. Chỉ dùng fixture đã được phép; ghi rõ nếu proposal chưa được duyệt.
+3. Dùng hành động Builder hiện có để khởi chạy provider. Đây là API session → `AgentSessionManager`; không dùng PlannerAgentInvoker để sửa code. Đảm bảo repo đã được xem xét/trust theo prompt Claude Code nếu CLI yêu cầu. Nếu slash skill không được nhận diện, yêu cầu agent mở trực tiếp file project-local `.claude/skills/image-to-code/SKILL.md` (hoặc `.agents/skills/image-to-code/SKILL.md`) và ghi nhận hash.
+4. Sau khi agent sửa source trong đúng worktree, bấm **Run tests** của workspace. Endpoint `POST /api/workspaces/{id}/test` gọi TestRunner, chạy command từ `PROJECT.yaml`, ghi từng `test_runs` theo SHA. TestRunner chỉ đo/gate; không sửa source.
+5. Xác minh cùng SHA trên stage row và `TaskDecisionService.builder_tests_status`: negative phải FAIL; sau edit phải PASS dưới 8%; commit/source đổi sau đó phải khiến evidence thành `NOT_RUN`. Task backend không có marker chỉ chạy stage thường.
+6. Lưu reference/actual/diff/overlay/metrics, sanitized prompt/transcript, provider exit, stage logs và SHA. Không coi `TaskDecisionService.evaluate().test_readiness=NO` trong một Task còn ACTIVE là visual gate failure; visual-test verdict là trường builder-tests canonical, nhưng Task vẫn phải đạt các trạng thái nghiệp vụ còn lại.
+
+Ví dụ replay bằng giao diện ProjectFlow: **Task UI → Builder → agent sửa source → Run tests → xem Test Runs và SHA hiện tại**. CLI chạy manual ngoài Builder chỉ kiểm tra tool/provider trực tiếp và không chứng minh ProjectFlow đã dispatch. Nếu chưa có login provider được ủy quyền, dừng ở **UNVERIFIED**; không tự lấy token, không giả kết quả và không retry quota-limited provider.
+
+Lần chạy synthetic được ghi tại `docs/visual-qa/evidence/issue-73/projectflow-dispatch-runtime-20261124/`: regression UIFix 26.680849% FAIL tại SHA `8913bda32a647bfb399f13497e273cbab424307f`; một lần Claude Builder repair; stage cùng SHA sửa PASS 5.784358% tại `d308d481441eaea23e151e0126a92dfa4b596cd2`; stale SHA trả `NOT_RUN`; backend opt-out chỉ có stage `test`. Reference là POS proposal chưa duyệt — đây là tool/runtime acceptance, không phải product-design approval.
