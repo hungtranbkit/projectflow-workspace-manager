@@ -23,7 +23,7 @@ failed to create network wm-reset-b-agent_workspace-2-b6384f_default
 
 ## Deterministic collection failure fixed
 
-With the local `tests/__init__.py` package marker present, `pytest --collect-only -q -o pythonpath=.` reproduces **11 collection errors / exit 2** because legacy modules import `conftest` and sibling modules by top-level name. `pyproject.toml` now uses `pythonpath = [".", "tests"]`; default collection succeeds for all **1,572 tests**. This fixes collection without changing assertions or suppressing tests.
+With the local `tests/__init__.py` package marker present, `pytest --collect-only -q -o pythonpath=.` reproduces **11 collection errors / exit 2** because legacy modules import `conftest` and sibling modules by top-level name. `pyproject.toml` now uses `pythonpath = [".", "tests"]`; the post-run probe collected **1,575 items**, with no import errors. Full-suite outcome count is 1,576, so one-item count discrepancy remains open rather than inferred away. This fixes collection without changing assertions or suppressing tests.
 
 ## Actual ProjectFlow command-runner visual stage
 

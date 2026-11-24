@@ -1,8 +1,9 @@
 {
-  "REPORT.md": "da17bdb8931859c6a30971be371fb7048377e106032f6faade87c2f71531bc03",
+  "REPORT.md": "c3f85d4d5eb15fa5eef8261e197b19ef6c24113d3feee2fd99a7de923587d85d",
   "full-suite.log": "9db67741b618544f91b1433b3f8d9795660ebad2d178466e7095a69e8804e121",
-  "summary.json": "e654e4e4903ed659963007585c75c6d2593bc9ec47cfb0b1fb58faa6d508828f",
+  "summary.json": "b9101c2fc661e54222cf1847bafcee08617bfad7deca76fd79faa5fe1f5ba313",
   "preflight.log": "53c41730f4187288ceb926407151168588f4ca97ffb34dda247c68b2c281edfd",
   "visual-cli-contract.log": "8060ff312d471368484087f992868e9d0b99ee7622ae0db04b9d213d102e667f",
-  "visual-smoke.log": "8f053bd8c4239f5245d8c09babee2de73e766ad6ade6f91036ecd7ec1811a730"
+  "visual-smoke.log": "8f053bd8c4239f5245d8c09babee2de73e766ad6ade6f91036ecd7ec1811a730",
+  "collect-proof.log": "2096aa5991c19160afaeefb109e41601d1cf17e9fe34f26dc329c97fdd5fa6db"
 }
