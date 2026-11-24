@@ -4,7 +4,7 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
 
 ## Scope and safety
 
-- ProjectFlow task worktree: `/home/dell/workspace/.worktrees/projectflow-visual-qa-73`, branch `agent/codex/visual-qa-73`; local HEAD at latest verification `2805bcd37fa9f183f7e38a887fc8891884051961`, with uncommitted task changes. Preserve the existing dirty `main`, all WIP, and remote history. PR #74 is draft; remote head before the final evidence/doc follow-up was `8da5194da975cd3b771347e21752e623e850d8c6`; the docs/evidence follow-up was published in descendant commit `dcc63fe17f78ea16b953b514170982a4dff7e8fe`.
+- ProjectFlow task worktree: `/home/dell/workspace/.worktrees/projectflow-visual-qa-73`, branch `agent/codex/visual-qa-73`; local HEAD at latest verification `2805bcd37fa9f183f7e38a887fc8891884051961`, with uncommitted task changes. Preserve the existing dirty `main`, all WIP, and remote history. PR #74 is draft; scoped code/evidence was published by connector as commits `8da5194da975cd3b771347e21752e623e850d8c6`, `dcc63fe17f78ea16b953b514170982a4dff7e8fe`, and handoff `57a5527a763aff90f2f8c775921cd93ef06e13ff`. Last observed remote ref was `57a5527a763aff90f2f8c775921cd93ef06e13ff`.
 - No production writes, merge/deploy, force push, shared Docker cleanup, or workflow bypass occurred. Local `gh auth status` reports its token invalid; GitHub connector is the safe publication route.
 - NovaRetail is separate: PR #160 exact head `0f1f616b14d919019cd1299954f179f2fc11bbb4`, POS proposal is unapproved fixture-only at 5.784358%, original legacy order screen 11.524542% and `REFERENCE_NOT_EQUIVALENT`. Do not claim product visual acceptance or alter its reference in this ProjectFlow-only turn.
 
@@ -28,6 +28,6 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
 
 ## Next actions
 
-1. Publish the scoped test/config/guide/evidence changes as a fast-forward to the latest PR #74 head using the GitHub connector; confirm exact remote SHA and keep PR draft.
+1. Recheck PR #74 remote head and zero-check status before any follow-up; keep the PR draft. The local shell credential is invalid, so use the GitHub connector for any authorized update.
 2. Ask the Docker/runner owner for a bounded, isolated test daemon or restored address pool; then run `./scripts/test.sh` again and classify any remaining non-IPAM failures from fresh tracebacks.
 3. Ask the ProjectFlow maintainer to re-enable/authorize the disabled Actions workflow and run checks on the resulting exact PR SHA. Keep A/E blocked until real full-suite and exact-SHA CI pass.
