@@ -28,7 +28,7 @@
     "Có dòng báo thực thi công cụ",
     "Có dòng thông báo lỗi cần kiểm tra"
   ]);
-  const execNames={RUNNING_VERIFIED:"Có tín hiệu tiến triển",BUSY_UNVERIFIED:"CLI bận · chưa rõ tiến độ",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Chờ nền lâu · nghi kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
+  const execNames={RUNNING_VERIFIED:"Có tín hiệu tiến triển",BUSY_UNVERIFIED:"RUNNING · CLI đang thực thi",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Chờ nền lâu · nghi kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
   const projects=new Set(["Zalo Group Hub","MESFlow","ESP32 Kiosk / OTA","ProjectFlow","Brand Agent","Screen Remote","RemoteOps","Chưa phân loại"]);
   let activeProject="all";
   // Busy/stalled agent turns should be visible even without code-progress proof.
@@ -64,6 +64,7 @@
         if(!/^Session \d{2,3}$/.test(s.label)||!isNodeLabel(s.node)||!Object.hasOwn(agents,s.agent_type)||
            !Object.hasOwn(activity,s.activity_bucket)||!Object.hasOwn(execNames,s.execution_state)||
            !projects.has(s.project)||typeof s.task_hint!=="string"||s.task_hint.length>120||
+           (s.git_dirty!==undefined&&s.git_dirty!==null&&typeof s.git_dirty!=="boolean")||
            !["session_name_hint","unavailable","trusted_task_label"].includes(s.task_source)||
            !["registry_only","verified_recent_checkpoint","node_observed","terminal_output_delta","terminal_screen_delta","agent_ui_busy"].includes(s.evidence)||
            !(s.running_verified===null||(s.running_verified===true&&s.execution_state==="RUNNING_VERIFIED"))||
@@ -244,6 +245,8 @@
         li.appendChild(element("small","session-source",
           (s.task_source==="trusted_task_label"?"Nhãn task gắn qua Terminal MCP":s.task_source==="session_name_hint"?"Mục tiêu suy ra từ tên session":"Chưa có mô tả task")
           +" · tín hiệu: "+activity[s.activity_bucket]));
+        if(s.git_dirty===true)li.appendChild(element("small","session-code",
+          "Git có thay đổi chưa commit · chưa chứng minh agent ở lượt hiện tại tạo ra các thay đổi đó"));
         if(s.commit_ref||s.branch_ref)li.appendChild(element("small","session-code",
           "Git tham chiếu: "+(s.branch_ref||"không rõ nhánh")
           +(s.commit_ref?" @ "+s.commit_ref:"")+
@@ -252,7 +255,7 @@
           s.evidence==="terminal_output_delta"?"Đã quan sát nội dung terminal thay đổi khi tiến trình chạy · chưa xác minh sửa code":
           s.evidence==="terminal_screen_delta"?"Toàn màn hình terminal thay đổi khi tiến trình foreground chạy · không đồng nghĩa sửa code":
           s.execution_state==="STALLED"?"Tiến trình nền chờ trên 15 phút · nghi kẹt, chưa có tiến triển mới":
-          s.execution_state==="BUSY_UNVERIFIED"?"CLI foreground bận nhưng chưa có output mới chứng minh tiến triển":
+          s.execution_state==="BUSY_UNVERIFIED"?"Claude/Codex đang thực thi một lượt lệnh; chưa có output mới chứng minh task tiến triển":
           s.evidence==="agent_ui_busy"?"CLI foreground bận · không phải bằng chứng sửa code":
           s.execution_state==="IDLE"?"Đã xác minh agent đang chờ lệnh":
           s.execution_state==="WAITING_INPUT"?"Agent đang chờ nhập liệu":
