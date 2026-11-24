@@ -217,6 +217,9 @@ def detailed_snapshot(nodes_db: Path, sessions_db: Path, now=None, monitor=None)
                 "task_hint": summary["task_hint"],
                 "task_source": summary["task_source"],
                 "task_conflict": summary.get("task_conflict", False),
+                "git_dirty": (proof.get("git_dirty")
+                              if isinstance(proof, dict) and type(proof.get("git_dirty")) is bool
+                              else None),
                 "execution_state": summary["execution_state"],
                 "evidence": summary["evidence"],
                 "commit_ref": summary["commit_ref"],
