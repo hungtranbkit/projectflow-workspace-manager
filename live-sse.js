@@ -29,6 +29,13 @@
     "Có dòng thông báo lỗi cần kiểm tra"
   ]);
   const execNames={RUNNING_VERIFIED:"RUNNING · có bằng chứng",IDLE:"IDLE",WAITING_INPUT:"Chờ nhập liệu",BLOCKED:"Bị chặn",EXITED:"Đã dừng",STALLED:"Bị kẹt",OPEN_UNVERIFIED:"MỞ · chưa xác minh"};
+  // The old backend can call UI-spinner/screen redraws 'RUNNING_VERIFIED'.
+  // Its raw evidence is real, but it does NOT prove task-level progress.
+  const isWeakProgressProof=s=>s.execution_state==="RUNNING_VERIFIED"&&
+    ["terminal_screen_delta","terminal_output_delta","agent_ui_busy"].includes(s.evidence);
+  const publicStateLabel=s=>isWeakProgressProof(s)
+    ?"Terminal/CLI hoạt động · chưa xác minh tiến độ"
+    :execNames[s.execution_state];
   const projects=new Set(["Zalo Group Hub","MESFlow","ESP32 Kiosk / OTA","ProjectFlow","Brand Agent","Screen Remote","RemoteOps","Chưa phân loại"]);
   let activeProject="all";
   let activeState="all";
@@ -180,7 +187,7 @@
          " · Loại agent xác định: "+d.sessions.agent_identified+"/"+d.sessions.open
         :"Đang chờ số liệu xác minh nguồn task và agent.");
       set("live-running-note",d.sessions.proven_running
-        ?"Có bằng chứng hoạt động mới; chưa đồng nghĩa đã sửa code":"Chưa có phiên RUNNING được xác minh từ các node đang kết nối");
+        ?"Tín hiệu CLI/terminal thực, KHÔNG phải bằng chứng code/test/deploy hay task đang tiến triển":"Chưa có phiên RUNNING được bộ thu thập đánh dấu");
       const stateList=$("live-state-filters");
       if(stateList){
         stateList.replaceChildren();
@@ -215,12 +222,12 @@
         const li=element("li","session-card"+(s.execution_state==="RUNNING_VERIFIED"?" running-first":""));
         const line=element("div","session-card-heading");
         line.appendChild(element("strong","",s.session||s.label));
-        line.appendChild(element("span","session-state "+(s.execution_state==="RUNNING_VERIFIED"?"verified":"unverified"),
-          execNames[s.execution_state]));
+        line.appendChild(element("span","session-state "+(s.execution_state==="RUNNING_VERIFIED"&&!isWeakProgressProof(s)?"verified":"unverified"),
+          publicStateLabel(s)));
         li.appendChild(line);
         li.appendChild(element("div","session-context",s.project+" · "+s.node+" · "+agents[s.agent_type]));
         li.appendChild(element("p","session-work",s.task_source==="trusted_task_label"
-          ?(s.running_verified===true?"Đang thực thi: ":"Task được gắn gần nhất: ")+s.task_hint
+          ?"Task được gắn gần nhất (chưa xác nhận công việc hiện tại): "+s.task_hint
           :s.task_source==="session_name_hint"
           ?"Task gợi ý theo tên phiên: "+s.task_hint
           :"Chưa có task được xác minh"));
@@ -233,8 +240,8 @@
           " · chưa xác minh commit mới"));
         li.appendChild(element("small","session-proof",
           s.evidence==="terminal_output_delta"?"Đã quan sát nội dung terminal thay đổi khi tiến trình chạy · chưa xác minh sửa code":
-          s.evidence==="terminal_screen_delta"?"Toàn màn hình terminal thay đổi khi tiến trình foreground chạy · không đồng nghĩa sửa code":
-          s.evidence==="agent_ui_busy"?"Claude/Codex hiển thị đang xử lý · chưa xác minh thay đổi code":
+          s.evidence==="terminal_screen_delta"?"Toàn màn hình terminal thay đổi, có thể chỉ là timer/spinner · chưa xác minh tiến triển":
+          s.evidence==="agent_ui_busy"?"Claude/Codex hiển thị đang xử lý · chưa xác minh tiến triển hay thay đổi code":
           s.execution_state==="IDLE"?"Đã xác minh agent đang chờ lệnh":
           s.execution_state==="WAITING_INPUT"?"Agent đang chờ nhập liệu":
           s.running_verified===true?"RUNNING được xác minh bằng checkpoint mới":"Chưa có bằng chứng code mới / chưa xác minh RUNNING"));
