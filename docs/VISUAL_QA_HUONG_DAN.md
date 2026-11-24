@@ -92,11 +92,12 @@ Smoke chạy page fixture local: baseline chính xác PASS (0%), cố ý đổi 
 
 ### Phân biệt stage runner và runtime provider
 
-Trong PR #74, `tests/test_visual_qa_execution.py` kiểm tra `TestRunner.start()` và `TaskDecisionService` thật với DB/command executor cô lập. Lệnh tái chạy:
+Trong PR #74, `tests/test_visual_qa_execution.py` kiểm tra `TestRunner.start()` và `TaskDecisionService`. `tests/test_visual_qa_runner_subprocess.py` bổ sung kiểm tra tích hợp gọi command runner subprocess thật, SQLite tạm, git fixture và HTTP server loopback; bằng chứng có positive, negative, stale SHA và fail-closed.
 
 ```sh
 .venv/bin/python -m pytest -p no:cacheprovider -q \
-  tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py
+  tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py \
+  tests/test_visual_qa_runner_subprocess.py
 node --test tests/test_visual_qa_cli.mjs
 node tools/visual_qa/smoke.mjs
 ```
@@ -108,3 +109,6 @@ Benchmark issue #73 ở commit `b18c54dd12b781f22bfc89699b21a964e18106bb` xác n
 ## 8. Xóa/rollback
 
 Tắt opt-in bằng cách bỏ marker khỏi Task prompt theo quy trình versioning Task, hoặc xóa riêng `visual_qa` block/command khỏi `PROJECT.yaml`. Xóa cache cục bộ bằng `rm -rf .runtime/uifix-v1.2.6` chỉ trong root ProjectFlow. Đảo code qua revert PR. Không xóa preview service/port mà task không sở hữu và không deploy production từ pilot.
+
+
+Full-suite rerun ngày 24/11/2026: `./scripts/test.sh` chạy đủ 46:35, kết quả 14 failed / 1561 passed / 1 skipped. Các sandbox failure được đối chiếu với `sandbox_operations.stderr_tail` trong SQLite tạm: Docker daemon trả `all predefined address pools have been fully subnetted`; đây là blocker của môi trường runner, không được coi là PASS hoặc “sửa” bằng bỏ test. Báo cáo và log đã khử đường dẫn host ở `docs/visual-qa/evidence/issue-73/full-suite-runtime-20261124/`.
