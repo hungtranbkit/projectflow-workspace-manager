@@ -1,0 +1,77 @@
+[
+  {
+    "path": "BENCHMARK-20261124.md",
+    "sha256": "c8e7c4e6723f478dce4f9341ab6e6a5870c3e7b2cee8e9458362d77aed361738",
+    "bytes": 11143
+  },
+  {
+    "path": "agent-runtime-probe.json",
+    "sha256": "353d73aa5bd06abaac32bce3e5911481152d62018e81d6c663f259b57f88de80",
+    "bytes": 2368
+  },
+  {
+    "path": "controlled-regression/actual.png",
+    "sha256": "38179b6649e450e6032c0f2afaa089bf8cfbd001f5a685a10b3bc572f1d5fe21",
+    "bytes": 255821
+  },
+  {
+    "path": "controlled-regression/diff.png",
+    "sha256": "8882e3038e12f675ac6702bb2c9710f0edba42ac66b64a2e0fb031ec1faf334d",
+    "bytes": 71304
+  },
+  {
+    "path": "controlled-regression/overlay.png",
+    "sha256": "fa336fe466a0f6a63154e60aae6f83d38bd160db631bfce922b4f7dc4636624b",
+    "bytes": 194170
+  },
+  {
+    "path": "dcgen-separation-port.py",
+    "sha256": "77be5c9a51fcfea08b1e624fcb43faffd9390f01cb1e9b62204f49a0c247e28a",
+    "bytes": 2713
+  },
+  {
+    "path": "logs/base-import-shadow.log",
+    "sha256": "6c83efa90df034be5a1585fab5b613575a05fe7bd5391d21d0ea13eede5b94c2",
+    "bytes": 1860
+  },
+  {
+    "path": "logs/branch-import-shadow.log",
+    "sha256": "530f95a92b16e474ed6c8d15dcd967847599e8618a7fea613e6bbedb9bc33fab",
+    "bytes": 963
+  },
+  {
+    "path": "logs/one-shot-build.log",
+    "sha256": "a0c32d1dac8679d1f27072b3ad90f1c46a5cfde395c3cee466b4cc707ee17ca8",
+    "bytes": 74
+  },
+  {
+    "path": "logs/projectflow-cli-tests.log",
+    "sha256": "927ce407a3e5da726495e8e9a518b311ab78769457d11867db54a9edf79cc2cc",
+    "bytes": 427
+  },
+  {
+    "path": "logs/projectflow-targeted-tests.log",
+    "sha256": "4899e21826a111344efdde851e630d418087c3ef941d17fffb3ba0ccdfee7f66",
+    "bytes": 887
+  },
+  {
+    "path": "logs/projectflow-visual-smoke.log",
+    "sha256": "8f053bd8c4239f5245d8c09babee2de73e766ad6ade6f91036ecd7ec1811a730",
+    "bytes": 141
+  },
+  {
+    "path": "metrics.json",
+    "sha256": "171f71e81f583e630cdf49453a84f4afdab16654e301d6ec990fab9a075aa122",
+    "bytes": 20076
+  },
+  {
+    "path": "one-shot-positive-heatmap.png",
+    "sha256": "8c6ab4de5d88f8e477a107c7ce61ed89ff0cc52bc8a26356e3ed48786125bb84",
+    "bytes": 423438
+  },
+  {
+    "path": "one-shot-regression-heatmap.png",
+    "sha256": "83778c9b7ddaecb9b62ec2e2ef7e15cda37458eae331b41d9e9f363e55334642",
+    "bytes": 423465
+  }
+]

@@ -1,0 +1,86 @@
+{
+  "claude-code": {
+    "cli_available": true,
+    "cli_path": "claude",
+    "install_layout": [
+      {
+        "path": ".claude/skills/image-to-code",
+        "has_skill": true
+      }
+    ],
+    "runtime_invocation": "UNVERIFIED",
+    "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+  },
+  "codex": {
+    "cli_available": true,
+    "cli_path": "codex",
+    "install_layout": [
+      {
+        "path": ".agents/skills/image-to-code",
+        "has_skill": true
+      }
+    ],
+    "runtime_invocation": "UNVERIFIED",
+    "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+  },
+  "opencode": {
+    "cli_available": false,
+    "cli_path": null,
+    "install_layout": [
+      {
+        "path": ".opencode/skills/image-to-code",
+        "has_skill": false
+      }
+    ],
+    "runtime_invocation": "NOT_TESTED_CLI_UNAVAILABLE",
+    "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+  },
+  "hermes": {
+    "cli_available": false,
+    "cli_path": null,
+    "install_layout": [
+      {
+        "path": ".hermes/skills/image-to-code",
+        "has_skill": false
+      }
+    ],
+    "runtime_invocation": "NOT_TESTED_CLI_UNAVAILABLE",
+    "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+  },
+  "codebuff": {
+    "cli_available": false,
+    "cli_path": null,
+    "install_layout": [
+      {
+        "path": ".agents/skills/image-to-code",
+        "has_skill": true
+      }
+    ],
+    "runtime_invocation": "NOT_TESTED_CLI_UNAVAILABLE",
+    "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+  },
+  "cursor": {
+    "cli_available": false,
+    "cli_path": null,
+    "install_layout": [
+      {
+        "path": ".cursor/skills/image-to-code",
+        "has_skill": false
+      }
+    ],
+    "runtime_invocation": "NOT_TESTED_CLI_UNAVAILABLE",
+    "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+  },
+  "gemini-cli": {
+    "cli_available": true,
+    "cli_path": "gemini",
+    "install_layout": [
+      {
+        "path": ".gemini/skills/image-to-code",
+        "has_skill": false
+      }
+    ],
+    "runtime_invocation": "UNVERIFIED",
+    "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+  }
+}
