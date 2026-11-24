@@ -12,7 +12,7 @@ Status: **A FAIL; D runtime-stage integration verified; E blocked.** No producti
 
 ## Reproduced sandbox root cause
 
-Read-only inspection of pytest-owned SQLite databases under `/tmp/pytest-of-dell/pytest-353/` found failed `sandbox_operations` rows. For example, `test_reset_data_does_not_touch0/test.db` records `operation_type=PROVISION`, `status=FAILED`, `exit_code=1`; `stderr_tail` contains:
+Read-only inspection of pytest-owned SQLite databases under `$PYTEST_TMP/` found failed `sandbox_operations` rows. For example, `test_reset_data_does_not_touch0/test.db` records `operation_type=PROVISION`, `status=FAILED`, `exit_code=1`; `stderr_tail` contains:
 
 ```text
 Error response from daemon: all predefined address pools have been fully subnetted

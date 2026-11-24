@@ -78,7 +78,8 @@ CLI không tự sửa source; CLI tạo bằng chứng và hướng dẫn, agent
 
 ```sh
 node --test tests/test_visual_qa_cli.mjs
-node tools/visual_qa/smoke.mjs
+CHROME_PATH=/path/to/authorized-chromium-wrapper \
+VISUAL_QA_PLAYWRIGHT_FROM="$PWD" node tools/visual_qa/smoke.mjs
 ```
 
 Smoke chạy page fixture local: baseline chính xác PASS (0%), cố ý đổi màu FAIL, chạy lại bản đã sửa PASS (0%) với cùng reference SHA; reference thiếu/hỏng và server không sẵn sàng phải trả lỗi. Nó không chứng minh reference tương đương với màn nghiệp vụ.

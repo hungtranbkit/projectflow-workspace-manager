@@ -4,7 +4,7 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
 
 ## Scope and safety
 
-- ProjectFlow task worktree: `/home/dell/workspace/.worktrees/projectflow-visual-qa-73`, branch `agent/codex/visual-qa-73`; local HEAD at latest verification `2805bcd37fa9f183f7e38a887fc8891884051961`, with uncommitted task changes. Preserve the existing dirty `main`, all WIP, and remote history. PR #74 is draft; last confirmed remote head before this handoff was `4d866b9855185c7dc1a0b7517a60e93017ecb00c`.
+- ProjectFlow task worktree: `/home/dell/workspace/.worktrees/projectflow-visual-qa-73`, branch `agent/codex/visual-qa-73`; local HEAD at latest verification `2805bcd37fa9f183f7e38a887fc8891884051961`, with uncommitted task changes. Preserve the existing dirty `main`, all WIP, and remote history. PR #74 is draft; remote head before the final evidence/doc follow-up was `8da5194da975cd3b771347e21752e623e850d8c6`; the local docs/evidence follow-up remains pending publication.
 - No production writes, merge/deploy, force push, shared Docker cleanup, or workflow bypass occurred. Local `gh auth status` reports its token invalid; GitHub connector is the safe publication route.
 - NovaRetail is separate: PR #160 exact head `0f1f616b14d919019cd1299954f179f2fc11bbb4`, POS proposal is unapproved fixture-only at 5.784358%, original legacy order screen 11.524542% and `REFERENCE_NOT_EQUIVALENT`. Do not claim product visual acceptance or alter its reference in this ProjectFlow-only turn.
 
