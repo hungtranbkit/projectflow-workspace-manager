@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from tests.workspace_contract import workspace_contract
+from tests.workspace_contract import configure_backlog_task, workspace_contract
 
 
 def run(path, *args):
@@ -317,6 +317,7 @@ def test_multi_repo_partial_merge_keeps_task_active(client, git_repo):
     repos = {r["repo_name"]: r["id"] for r in client.get("/api/repositories").json()}
 
     r = client.post("/api/tasks/create", data={
+        **workspace_contract("Multi-repo merge task"),
         "title": "Multi-repo merge task", "risk_profile": "LOW",
         "repository_id": repos["demo"], "agent": "claude", "sandbox_profile": "NONE",
         "ws_repository_id": [str(repos["second"])], "ws_agent": ["codex"], "ws_role": ["Firmware"],
@@ -390,6 +391,7 @@ def test_sandbox_cleanup_scheduled_only_after_done(client, git_repo, sandboxable
     # real sandbox, for the DONE transition to actually happen here.
     client.post("/api/tasks", data={"title": "Cleanup gating task", "risk_profile": "LOW"}, follow_redirects=False)
     tid = client.get("/api/tasks").json()[0]["id"]
+    configure_backlog_task(client, tid, "Cleanup gating task")
     client.post(f"/api/tasks/{tid}/select")
     r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
     assert r.status_code == 303

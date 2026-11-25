@@ -33,3 +33,18 @@ Run pytest -q tests/test_real_merge.py tests/test_cleanup_and_restart.py and ver
 Record the commit and the database and HTTP results asserted in tests/test_real_merge.py and tests/test_cleanup_and_restart.py.
 """,
     }
+
+
+def configure_backlog_task(client, task_id, title):
+    fields = workspace_contract(title)
+    response = client.post(
+        f"/api/tasks/{task_id}/prompt",
+        data={"implementation_prompt": fields["implementation_prompt"]},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303, response.text
+    trace = {key.removeprefix("spec_"): value for key, value in fields.items()
+             if key.startswith("spec_") and key != "spec_change_classification"}
+    trace["classification"] = fields["spec_change_classification"]
+    response = client.post(f"/api/tasks/{task_id}/spec", data=trace, follow_redirects=False)
+    assert response.status_code == 303, response.text
