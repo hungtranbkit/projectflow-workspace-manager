@@ -23,7 +23,7 @@
 {% if tab == 'overview' %}
 <section class="a-grid">
 <article><h3>Nguồn của snapshot</h3><p><code title="{{src.commit}}">{{src.commit[:12]}}</code> · {{src.branch or 'không ghi nhánh'}}</p>
-<p>Commit lúc {{src.committed_at}} · tạo snapshot {{stamp(current.generated_at)}}</p>
+<p>Commit lúc {{src.committed_at}} (UTC) · tạo snapshot {{stamp(current.generated_at)}}</p>
 <p>{{'Nhập từ pilot' if current.origin == 'imported-pilot' else 'Chạy lại có cổng'}}{% if src.file_count is defined %} · {{src.file_count}} tệp nguồn{% endif %}</p></article>
 <article class="a-state a-{{fresh.state|lower}}"><h3>Độ mới</h3><p><strong>{{label[fresh.state]}}</strong></p><p>{{fresh.reason}}</p></article>
 <article class="a-state a-{{dep.state|lower}}"><h3>Nguồn so với đang chạy</h3><p><strong>{{label[dep.state]}}</strong></p><p>{{dep.reason}}</p>

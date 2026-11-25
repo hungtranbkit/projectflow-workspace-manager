@@ -39,6 +39,7 @@ FRESH_SECONDS = 7 * 86400
 PROJECT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:/@ -]{0,199}$")
 
 # Credential shapes refused in any stored artifact or manifest.
@@ -78,6 +79,24 @@ CREATE INDEX IF NOT EXISTS arch_snapshots_project ON arch_snapshots(project, gen
 
 class ArtifactRejected(ValueError):
     """Input refused by validation; the message is safe to show an operator."""
+
+
+def utc_iso(value: str) -> str:
+    """Normalize a timezone-aware ISO-8601 timestamp to canonical UTC `YYYY-MM-DDTHH:MM:SSZ`.
+
+    Naive timestamps are refused: an offset-less time cannot be placed in UTC without guessing.
+    """
+    from datetime import datetime, timezone
+
+    if not isinstance(value, str) or len(value) > 40:
+        raise ArtifactRejected("timestamp: text required")
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ArtifactRejected("timestamp: not ISO-8601") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ArtifactRejected("timestamp: timezone offset required")
+    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def sha256(data: bytes) -> str:
@@ -156,7 +175,10 @@ def validate_manifest(m: dict) -> dict:
     _keys(src, "source", ("type", "commit", "committed_at"), ("branch", "input_manifest_sha256", "file_count"))
     if src["type"] not in SOURCE_TYPES or not SHA1_RE.fullmatch(src["commit"] or ""):
         raise ArtifactRejected("source: full 40-hex commit required")
-    _text(src["committed_at"], "source.committed_at", limit=40)
+    # Canonical form is UTC only; writers normalize with utc_iso() before storing.
+    if not isinstance(src["committed_at"], str) or not UTC_RE.fullmatch(src["committed_at"]) \
+            or utc_iso(src["committed_at"]) != src["committed_at"]:
+        raise ArtifactRejected("source.committed_at: canonical UTC 'YYYY-MM-DDTHH:MM:SSZ' required")
     if "branch" in src:
         _text(src["branch"], "source.branch", limit=200)
     if "input_manifest_sha256" in src and not SHA256_RE.fullmatch(src["input_manifest_sha256"]):

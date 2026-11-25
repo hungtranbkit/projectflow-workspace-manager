@@ -37,6 +37,7 @@ from app.services.architecture_center import (  # noqa: E402
     read_regular_file,
     sha256,
     validate_html,
+    utc_iso,
     validate_project,
 )
 from app.services.architecture_runs import (  # noqa: E402
@@ -249,7 +250,7 @@ def cmd_run(args) -> int:
             limitations.append("Snapshot chỉ có một công cụ; không đủ cặp cùng commit.")
         manifest = build_manifest(
             req["project"],
-            dict(type="git-commit", commit=commit, committed_at=info["committed_at"], branch=p.get("branch_label") or p["ref"],
+            dict(type="git-commit", commit=commit, committed_at=utc_iso(info["committed_at"]), branch=p.get("branch_label") or p["ref"],
                  input_manifest_sha256=sha256(smb), file_count=source_manifest["includedCount"]),
             "rerun",
             dict(summary=f"Chạy lại có cổng #{task_id}: hai công cụ ghim commit, chạy ngoại tuyến trong container chỉ đọc.",
@@ -313,7 +314,7 @@ def cmd_import(args) -> int:
     """Import existing native outputs of BOTH tools rendered from one commit."""
     validate_project(args.project)
     tools = json.loads(read_regular_file(Path(args.tools), MAX_AUX))
-    src_info = dict(type="git-commit", commit=args.commit, committed_at=args.committed_at)
+    src_info = dict(type="git-commit", commit=args.commit, committed_at=utc_iso(args.committed_at))
     if args.branch:
         src_info["branch"] = args.branch
     if args.source_manifest:

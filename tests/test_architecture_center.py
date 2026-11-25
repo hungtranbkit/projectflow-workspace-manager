@@ -28,6 +28,7 @@ from app.services.architecture_center import (
     history,
     read_regular_file,
     sha256,
+    utc_iso,
     validate_html,
 )
 from app.services.fleet_steward import SOURCES, Memory
@@ -53,7 +54,7 @@ def manifest(project=PROJECT, commit=COMMIT, archify=ARCHIFY, floorplan=FLOORPLA
 
     return dict(
         schema=SCHEMA_VERSION, project=project,
-        source=dict(type="git-commit", commit=commit, committed_at="2026-11-01T00:00:00+07:00", branch="main"),
+        source=dict(type="git-commit", commit=commit, committed_at="2026-10-31T17:00:00Z", branch="main"),
         generated_at=at or int(time.time()) - 60, origin="imported-pilot",
         provenance=dict(summary="synthetic fixture", operator="test"),
         tools=dict(archify=dict(version="v3.3.0", commit="b" * 40), floorplan=dict(version="0.11.0", commit="c" * 40)),
@@ -398,3 +399,19 @@ def test_harness_ttl_expiry_is_visible(tmp_path):
     r = runs_mod.request_rerun(PROJECT, cfg=cfg, state=tmp_path / "st", launcher=lambda *a: None, now=past)
     run = runs_mod.runs(PROJECT, tmp_path / "st")[0]
     assert run["id"] == r["task_id"] and run["state"] == "EXPIRED" and run["cleanup"] == "CLEANUP_PENDING"
+
+
+def test_committed_at_is_canonical_utc(tmp_path):
+    assert utc_iso("2026-11-06T21:15:51+07:00") == "2026-11-06T14:15:51Z"
+    assert utc_iso("2026-11-06T14:15:51Z") == "2026-11-06T14:15:51Z"
+    for bad in ("2026-11-06T21:15:51", "yesterday", "", "2026-13-01T00:00:00Z"):
+        with pytest.raises(ArtifactRejected):
+            utc_iso(bad)
+    store = ArchitectureStore(tmp_path / "s.db")
+    for bad in ("2026-11-06T21:15:51+07:00", "2026-11-06T14:15:51+00:00", "2026-11-06T14:15:51.5Z", "2026-11-06 14:15:51Z"):
+        m = manifest()
+        m["source"]["committed_at"] = bad
+        with pytest.raises(ArtifactRejected, match="canonical UTC"):
+            store.put(m, {"archify": ARCHIFY, "floorplan": FLOORPLAN})
+    snap, _ = store.put(manifest(), {"archify": ARCHIFY, "floorplan": FLOORPLAN})
+    assert store.snapshot(PROJECT, snap)["source"]["committed_at"].endswith("Z")
