@@ -112,13 +112,15 @@ def sandboxable_repo_factory(tmp_path):
         return repo
     return make
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(autouse=True)
 def _docker_sandbox_safety_net():
-    """Clean only compose starts recorded by this pytest process.
+    """Clean only compose starts recorded by this test after its fixtures finish.
 
     A prefix sweep is unsafe: another task or ProjectFlow session may own
     another wm-* namespace. Use the runtime's existing ownership guard and
     exact compose project; never enumerate or prune host-wide resources.
+    Releasing after each test also prevents this process from retaining
+    networks until the end of a large suite and exhausting the host pool.
     """
     yield
     for project, (manager, sandbox_id) in list(_created_test_sandboxes.items()):

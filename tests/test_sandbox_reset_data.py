@@ -91,8 +91,13 @@ def test_reset_data_refuses_unowned_sandbox(client, git_repo, sandboxable_repo_f
     compose project must be refused, never blindly torn down."""
     sb = make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, (22320, 22339), "reset-unowned")
     client.app.state.db.execute("UPDATE sandboxes SET compose_project=? WHERE id=?", ("not-a-real-project-xyz", sb["id"]))
-    with pytest.raises(Exception):
-        client.app.state.sandboxes.reset_data(sb["id"])
+    try:
+        with pytest.raises(Exception):
+            client.app.state.sandboxes.reset_data(sb["id"])
+    finally:
+        # Restore this fixture's deliberately corrupted metadata so normal
+        # ownership-checked teardown can release its own real network.
+        client.app.state.db.execute("UPDATE sandboxes SET compose_project=? WHERE id=?", (sb["compose_project"], sb["id"]))
 
 
 def test_reset_data_does_not_touch_an_unrelated_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
