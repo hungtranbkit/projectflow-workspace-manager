@@ -1,0 +1,23 @@
+{% extends "base.html" %}{% block title %}Quản gia ProjectFlow{% endblock %}
+{% block header_action %}<form method="post" action="/steward/logout"><button>Đăng xuất</button></form>{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/fleet-steward.css">
+<div class="steward"><h2 class="s-mobile-title">Quản gia ProjectFlow</h2>
+<form class="s-search" method="get" action="/steward"><label for="sq">Hỏi quản gia</label><div><input id="sq" name="q" value="{{q}}" placeholder="Zalo Hub đang chạy ở đâu?" maxlength="240"><button>Tra cứu</button></div>
+<div class="s-filters"><label>Node<select name="node"><option value="">Tất cả node</option>{% for n in ['dell-linux','hp-linux','m910','macbook','nec1'] %}<option {{'selected' if n==v.node}}>{{n}}</option>{% endfor %}</select></label>
+<label>Dự án<select name="project"><option value="">Tất cả dự án</option>{% for name in v.projects %}<option {{'selected' if name==v.project}}>{{name}}</option>{% endfor %}</select></label>
+<label>Ngày (giờ VN)<input type="date" name="when" value="{{v.when}}"></label></div></form>
+<nav class="s-tabs">{% for k,txt in [('now','Hiện trạng'),('history','Lịch sử'),('next','Việc tiếp theo')] %}<a aria-current="{{'page' if k==v.mode else 'false'}}" href="{{request.url.include_query_params(intent=k,page=1).path}}?{{request.url.include_query_params(intent=k,page=1).query}}">{{txt}}</a>{% endfor %}</nav>
+{% if v.project %}<h2>{{v.project}}</h2>{% endif %}
+{% if v.answer %}<h3>Trả lời theo bản đo</h3>{% for a in v.answer %}<article><strong>{{a.text}}</strong><p>{{a.node}} · {{a.source}} · {{stamp(a.at)}}</p></article>{% endfor %}{% endif %}
+<div class="s-nodes">{% for n in v.nodes %}<a href="/steward?node={{n.node|urlencode}}&amp;project={{v.project|urlencode}}&amp;when={{v.when|urlencode}}&amp;intent={{v.mode}}"><strong>{{n.node}}</strong><span>{{n.count}} mục · {{stamp(n.at)}}</span><small>{{'Trong 15 phút tính đến mốc xem' if n.fresh else 'Chưa có bản đo mới tại mốc xem'}}</small></a>{% endfor %}</div>
+{% if v.mode=='history' %}<h3>Thay đổi đã ghi</h3>{% if not v.events %}<p>Chưa ghi nhận thay đổi trong khoảng thời gian này.</p>{% endif %}
+{% for e in v.events %}{% set r=e.after or e.before %}<article><strong>{{e.event}} · {{r.name}}</strong><p>{{stamp(e.at)}} · {{e.node}} · {{r.source}}</p><p>{% if e.before %}Trước {{e.before.state}} {{e.before.version}} {{e.before.location}}{% endif %} {% if e.after %}Sau {{e.after.state}} {{e.after.version}} {{e.after.location}}{% endif %}</p></article>{% endfor %}
+{% elif v.mode=='next' %}<h3>Việc cần kiểm chứng</h3>{% for a in v.actions %}<article><strong>{{a.reason}}</strong><p>{{a.node}} · {{a.source}} · {{stamp(a.at)}}</p></article>{% else %}<p>Chưa có việc phát sinh từ các nguồn đang xem.</p>{% endfor %}
+{% else %}<h3>{{total}} mục quan sát được</h3>{% if not total %}<p>Chưa có bằng chứng cho lựa chọn này.</p>{% endif %}
+{% for r in v['items'] %}<article><strong>{{r.name}}</strong> <small>{{r.state}}</small><p>{{r.node}} · {{r.source}} · {{stamp(r.at)}}{% if not r.fresh %} · Đã cũ{% endif %}</p>
+{% if r.project %}<a href="/steward?project={{r.project|urlencode}}">{{r.project}}</a>{% else %}<span>Chưa gắn dự án</span>{% endif %}{% if r.version %} · <code>{{r.version}}</code>{% endif %}{% if r.location and r.location!=r.name %}<p>{{r.location}}</p>{% endif %}</article>{% endfor %}
+{% if pages>1 %}<nav class="s-tabs">{% if p>1 %}<a href="?{{request.url.include_query_params(page=p-1).query}}">Trang trước</a>{% endif %}<span>{{p}} / {{pages}}</span>{% if p<pages %}<a href="?{{request.url.include_query_params(page=p+1).query}}">Trang sau</a>{% endif %}</nav>{% endif %}{% endif %}
+{% if v.records %}<h3>Hồ sơ ProjectFlow</h3>{% for r in v.records %}<article><strong>{% if r.kind=='task' %}<a href="/tasks/{{r.id}}">Task #{{r.id}}</a>{% else %}{{r.kind}} #{{r.id}}{% endif %} · {{r.value}}</strong><p>{{r.target}} · {{r.stamp}}{% if r.stamp %} UTC{% endif %} {{r.version or ''}}</p></article>{% endfor %}{% endif %}
+<details><summary>Phạm vi nguồn</summary>{% for n in v.nodes %}<p>{{n.node}} · {% for source,status in n.sources.items() %}{{source}} ({{status}}) {% endfor %}</p>{% endfor %}</details></div>
+{% endblock %}
