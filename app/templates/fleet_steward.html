@@ -8,8 +8,9 @@
 <div class="s-filters"><label>Node<select name="node"><option value="">Tất cả node</option>{% for n in ['dell-linux','hp-linux','m910','macbook','nec1'] %}<option {{'selected' if n==v.node}}>{{n}}</option>{% endfor %}</select></label>
 <label>Dự án<select name="project"><option value="">Tất cả dự án</option>{% for name in v.projects %}<option {{'selected' if name==v.project}}>{{name}}</option>{% endfor %}</select></label>
 <label>Ngày (giờ VN)<input type="date" name="when" value="{{v.when}}"></label></div></form>
+<p><a href="/steward/architecture">Kiến trúc dự án (Archify · Floorplan)</a></p>
 <nav class="s-tabs">{% for k,txt in [('now','Hiện trạng'),('history','Lịch sử'),('next','Việc tiếp theo')] %}<a aria-current="{{'page' if k==v.mode else 'false'}}" href="{{request.url.include_query_params(intent=k,page=1).path}}?{{request.url.include_query_params(intent=k,page=1).query}}">{{txt}}</a>{% endfor %}</nav>
-{% if v.project %}<h2>{{v.project}}</h2>{% endif %}
+{% if v.project %}<h2>{{v.project}}</h2><p><a href="/steward/architecture/{{v.project}}">Kiến trúc của dự án này</a></p>{% endif %}
 {% if v.answer %}<h3>Trả lời theo bản đo</h3>{% for a in v.answer %}<article><strong>{{a.text}}</strong><p>{{a.node}} · {{a.source}} · {{stamp(a.at)}}</p></article>{% endfor %}{% endif %}
 <div class="s-nodes">{% for n in v.nodes %}<a href="/steward?node={{n.node|urlencode}}&amp;project={{v.project|urlencode}}&amp;when={{v.when|urlencode}}&amp;intent={{v.mode}}"><strong>{{n.node}}</strong><span>{{n.count}} mục · {{stamp(n.at)}}</span><small>{{'Trong 15 phút tính đến mốc xem' if n.fresh else 'Chưa có bản đo mới tại mốc xem'}}</small></a>{% endfor %}</div>
 {% if v.mode=='history' %}<h3>Thay đổi đã ghi</h3>{% if not v.events %}<p>Chưa ghi nhận thay đổi trong khoảng thời gian này.</p>{% endif %}
