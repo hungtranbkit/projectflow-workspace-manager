@@ -1,7 +1,7 @@
 {
   "change_id": "ORCH-STD-20261123",
   "state": "FAILED_SAFE",
-  "captured_at_utc": "2026-11-23T15:44:52Z",
+  "captured_at_utc": "2026-11-25T07:33:00Z",
   "repository": {
     "path": "/home/dell/workspace/projectflow-orchestrator-release-v1-20261123",
     "branch": "integration/orchestrator-v1-20261123",
@@ -773,5 +773,145 @@
     "Tighten the task-authored report instruction around the exact literal closing delimiter and retain strict parser refusal for malformed output.",
     "Obtain independent Review evidence only after a complete exact-SHA/scope/test report is ingested; no agent self-review.",
     "Run production DB backup, migration dry-run and rollback readiness checks only after the canary and independent Review pass; keep live unchanged meanwhile."
+  ],
+  "continuations": [
+    {
+      "date_utc": "2026-11-25T07:27:54Z",
+      "state": "FAILED_SAFE_LOCAL_CHECKPOINT",
+      "local_branch": "integration/orchestrator-v1-20261123",
+      "pre_change_sha": "f072aa50c8b1c083280746db8015dbee587d0833",
+      "shared_pr": {
+        "number": 92,
+        "url": "https://github.com/hungtranbkit/projectflow-workspace-manager/pull/92",
+        "head_ref": "agent/codex/orch-std-20261123-release",
+        "head_sha": "a827bb955f8b3d23b765b770ca6754cb79b01ce3",
+        "base_ref": "main",
+        "base_sha": "7e8b54a904a4451b6d4b00fd30befa4b438ab3b2",
+        "owner_reported_exact_head_results": {
+          "tests": "38/38 PASS",
+          "native_callback_canaries": "2 PASS",
+          "independently_run_by": "owner; not rerun in this integration worktree"
+        },
+        "duplicate_pr_created": false,
+        "dell_github_api_state": "gh credential invalid; API returned 401; ls-remote verified exact branch and main refs"
+      },
+      "implementation": {
+        "migration": "V43 orchestration_leases coordination metadata only",
+        "entrypoint": "existing CleanupWorker.reconcile callback -> exited report ingestion -> AutonomousExecutionService.scheduled_reconcile_tick",
+        "coordination": "durable global supervisor lease plus per-goal dispatch lease; recovery first; at most one new DAG task only when recovery has no action; recheck owner before side effects",
+        "model_policy": "Codex advisor disabled because blind CLI output included command_execution and no trusted model receipt; Claude tool-less path uses --restricted --strict-mcp-config --no-chrome --disable-slash-commands --no-session-persistence --tools \"\" --max-turns 1 and omits --json-schema; strict local JSON validation; deterministic fallback",
+        "no_live_changes": true
+      },
+      "blind_eval": {
+        "case_source": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/takeover-20261125T0635Z/decision-cases.json",
+        "prompt_sha256": "2323b22a8da5d1535ef0a06eec1068917503994963312afaf4084bc38014ac29",
+        "input_fields": "case id and observation only; QA allowed_actions and max_new_starts excluded",
+        "prior_claimed_scores": "Opus 12/12 and Codex 12/12; not accepted as tool-less current model evidence because prior Opus schema run reported tool_use and Codex emitted command_execution; Codex model receipt absent",
+        "fresh_actual_cli_call": {
+          "cli_version": "Claude Code 2.1.332",
+          "requested_model": "claude-opus-5-5",
+          "canonical_model_receipt": "claude-opus-5-5",
+          "provider_receipt": "firstParty",
+          "effort_requested": "high",
+          "num_turns": 1,
+          "stop_reason": "end_turn",
+          "permission_denials": [],
+          "server_tool_use": {
+            "web_fetch_requests": 0,
+            "web_search_requests": 0
+          },
+          "cost_estimate_usd": 0.0519978,
+          "decision_body": "invalid JSON; no action/proposal accepted; no decision score assigned",
+          "evidence_file": "/tmp/orch-tool-less-opus-blind-eval.json"
+        }
+      },
+      "verification": [
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_recovery_model_policy.py tests/test_orchestrator_supervisor_tick.py tests/test_lease_takeover_external.py tests/test_native_callback_recovery.py tests/test_orchestration_v2_dispatch.py::test_change_goal_refuses_second_active_executor_for_another_task tests/test_orchestration_v2_dispatch.py::test_recovery_resumes_same_task_after_confirmed_restart_failure",
+          "exit": 0,
+          "result": "19 passed"
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_recovery_model_policy.py",
+          "exit": 0,
+          "result": "8 passed; includes command_execution receipt rejection"
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_executor_report_ingestion.py tests/test_transcript_tail_persistence.py tests/test_orchestration_v2_dispatch.py tests/test_exited_no_report_recovery.py tests/test_builder_completion_vs_session.py tests/test_recovery_model_policy.py tests/test_orchestrator_supervisor_tick.py tests/test_lease_takeover_external.py tests/test_native_callback_recovery.py tests/test_cleanup_and_restart.py",
+          "exit": 1,
+          "result": "78 passed, 3 failed. All three failures are title-only cleanup fixtures receiving HTTP 409 at workspace creation under the V2 task-contract gate; assertions unchanged, fixture edits reverted, regression classification pending strict-base comparison."
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_b01_authn.py tests/test_b03_authz.py tests/test_agent_observability_security.py tests/test_smoke.py tests/test_quality_isolated_runner.py tests/test_quality_isolated_runtime.py tests/test_agent_quality_task_gate.py",
+          "exit": 0,
+          "result": "183 passed, 1 existing skip"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/preflight.sh",
+          "exit": 0,
+          "result": "preflight PASS"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/build.sh",
+          "exit": 0,
+          "result": "source distribution build PASS"
+        },
+        {
+          "command": "env PATH=/home/dell/workspace/projectflow-workspace-manager/.venv/bin:$PATH VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/smoke.sh",
+          "exit": 0,
+          "result": "1 passed"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m compileall -q app tests",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "git diff --check",
+          "exit": 0,
+          "result": "PASS before evidence append; rerun before commit"
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_spec_registry.py tests/test_spec_gate.py tests/test_spec_supervisor_gate.py",
+          "exit": 0,
+          "result": "35 passed"
+        },
+        {
+          "command": "git diff --check; /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m json.tool docs/orchestration-standard/ORCH-STD-20261123/EVIDENCE.json >/dev/null; project venv compileall app tests",
+          "exit": 0,
+          "result": "final pre-commit check PASS"
+        }
+      ],
+      "live_readonly_check": {
+        "systemd_state": "active/running",
+        "working_directory": "/home/dell/workspace/.worktrees/projectflow-steward-90-7b74",
+        "git_sha": "e16862c75f696800c4c3d56eaa12903c1c7bbdd2",
+        "local_health_http": 200,
+        "public_https_http": 200,
+        "checked_utc": "2026-11-25T07:27:54Z",
+        "changed": false,
+        "rollback": "not attempted; old 26c1d3c is not the live rollback baseline"
+      },
+      "local_commit": {
+        "sha": "42fc8b11cfe1146c95a420305b8c8cc3a29cc4bd",
+        "subject": "feat: add leased orchestration recovery supervisor",
+        "branch": "integration/orchestrator-v1-20261123",
+        "pushed": false
+      },
+      "remaining_gates": [
+        "commit scoped local integration changes",
+        "apply this exact delta to shared PR #92 and rerun its required CI/review",
+        "classify three cleanup-fixture failures against same-environment baseline",
+        "isolated end-to-end canary and independent Review",
+        "release owner validates current live SHA, backup/migration, lock and rollback before any deployment"
+      ],
+      "planning_hashes_sha256": {
+        "feature_spec": "3adcbe0864f2a509a5f808074b2db114bfdb899a45de3c8202e76fe758cb4130",
+        "spec": "9193f41dc935ab0110a67d45d2604723228894fbc2a91f56a085d48775642825",
+        "plan": "f6ff1542d436b4e0b250c9f53068dc861d3530558a366080e3f11a5b060bb20f",
+        "approval": "5be8b286fd6b7f7d4daa7ed305cd913499517241d985bf260e6f62a401626708"
+      },
+      "repository_checkpoint": "Source/test/evidence checkpoint committed locally; PR #92 still requires this delta and required CI/review. No deployment."
+    }
   ]
 }

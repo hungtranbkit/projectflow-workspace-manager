@@ -189,6 +189,12 @@ class PlannerAgentInvoker:
             # locally, with no CLI schema tool enabled.
             if not require_toolless:
                 argv += ["--json-schema", json.dumps(schema)]
+            if require_toolless:
+                # Per-invocation isolation only: disable built-in tools,
+                # ignore user/project/local settings and plugins, and
+                # ignore configured MCP servers. No global config changes.
+                argv += ["--restricted", "--strict-mcp-config", "--no-chrome",
+                         "--disable-slash-commands", "--no-session-persistence"]
             argv += ["--tools", "", "--max-turns", "1" if require_toolless else "3"]
             if model is not None:
                 if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", model):
@@ -275,11 +281,16 @@ class PlannerAgentInvoker:
                 if require_toolless:
                     usage = envelope.get("usage")
                     tool_usage = usage.get("server_tool_use") if isinstance(usage, dict) else None
-                    tool_counts = [v for v in tool_usage.values() if isinstance(v, (int, float))] if isinstance(tool_usage, dict) else []
+                    tool_counts = list(tool_usage.values()) if isinstance(tool_usage, dict) else []
+                    tool_activity = any(envelope.get(k) for k in
+                                        ("tool_events", "tool_calls", "tool_activity", "tools_used"))
                     if (envelope.get("stop_reason") != "end_turn"
+                            or not isinstance(envelope.get("permission_denials"), list)
                             or envelope.get("permission_denials")
-                            or any(v != 0 for v in tool_counts)
-                            or not isinstance(tool_usage, dict)):
+                            or any(not isinstance(v, (int, float)) or isinstance(v, bool) or v != 0 for v in tool_counts)
+                            or tool_activity
+                            or not isinstance(tool_usage, dict)
+                            or envelope.get("num_turns") != 1):
                         raise PlannerAgentError("Planner response includes tool activity or lacks a clean final receipt")
                     receipt["toolless_verified"] = True
                 return receipt

@@ -91,8 +91,11 @@ class RecoveryDecisionService:
                 same.append((row, event))
         for row, event in same:
             if row["action"] == "RECOVERY_AI_PROPOSAL":
+                stored_receipt = event.get("provider_receipt") or {}
+                if stored_receipt.get("toolless_verified") is not True:
+                    continue
                 return {"source": "CACHED_MODEL_PROPOSAL", **event.get("proposal", {}),
-                        "provider_receipt": event.get("provider_receipt")}
+                        "provider_receipt": stored_receipt}
             if row["action"] == "RECOVERY_AI_FALLBACK":
                 stamp = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
                 if datetime.now(timezone.utc) - stamp < timedelta(seconds=self.cooldown_seconds):
@@ -196,12 +199,13 @@ class RecoveryDecisionService:
                 proposal[field] = self._bounded(proposal.get(field), 400)
             event = {"proposal": proposal, "provider": receipt["provider"],
                      "resolved_model": receipt["resolved_model"], "effort_requested": receipt["effort_requested"],
-                     "turns": receipt["turns"], "cost_estimate_usd": receipt["cost_estimate_usd"]}
+                     "turns": receipt["turns"], "cost_estimate_usd": receipt["cost_estimate_usd"],
+                     "toolless_verified": True}
             event["provider_receipt"] = {k: receipt.get(k) for k in
-                ("provider", "resolved_model", "effort_requested", "turns", "cost_estimate_usd")}
+                ("provider", "resolved_model", "effort_requested", "turns", "cost_estimate_usd", "toolless_verified")}
             self._event("RECOVERY_AI_PROPOSAL", fingerprint, event, task_id)
             return {"source": "MODEL_ADVISORY", **proposal, "provider_receipt": {
-                k: receipt.get(k) for k in ("provider", "resolved_model", "effort_requested", "turns", "cost_estimate_usd")}}
+                k: receipt.get(k) for k in ("provider", "resolved_model", "effort_requested", "turns", "cost_estimate_usd", "toolless_verified")}}
         except Exception as exc:
             self._event("RECOVERY_AI_FAILED", fingerprint, {"error": type(exc).__name__}, task_id)
             self._event("RECOVERY_AI_FALLBACK", fingerprint, {"reason": "AI_PROPOSAL_INVALID"}, task_id)

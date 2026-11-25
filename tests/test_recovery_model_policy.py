@@ -72,6 +72,9 @@ def test_toolless_recovery_uses_no_schema_tool_and_rejects_tool_activity(tmp_pat
     assert "--tools" in seen["argv"] and seen["argv"][seen["argv"].index("--tools") + 1] == ""
     assert "--json-schema" not in seen["argv"]
     assert seen["argv"][seen["argv"].index("--max-turns") + 1] == "1"
+    for flag in ("--restricted", "--strict-mcp-config", "--no-chrome",
+                 "--disable-slash-commands", "--no-session-persistence"):
+        assert flag in seen["argv"]
     assert receipt["toolless_verified"] is True
 
     def tool_using_runner(argv, cwd, timeout):
@@ -97,6 +100,21 @@ def test_toolless_recovery_uses_no_schema_tool_and_rejects_tool_activity(tmp_pat
             stderr = ""
         return Result()
     invoker.runner = unreceipted_runner
+    with pytest.raises(PlannerAgentError, match="tool activity"):
+        invoker.invoke("claude", "sanitized incident", {"type": "object"}, tmp_path,
+            model="claude-opus-5-5", effort="high", return_receipt=True, require_toolless=True)
+
+    def command_execution_runner(argv, cwd, timeout):
+        class Result:
+            returncode = 0
+            stdout = json.dumps({"is_error": False, "subtype": "success", "result": '{"ok":true}',
+                "modelUsage": {"claude-opus-5-5": {"canonicalModel": "claude-opus-5-5"}},
+                "num_turns": 1, "stop_reason": "end_turn", "permission_denials": [],
+                "usage": {"server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 0}},
+                "tool_events": [{"name": "command_execution"}]})
+            stderr = ""
+        return Result()
+    invoker.runner = command_execution_runner
     with pytest.raises(PlannerAgentError, match="tool activity"):
         invoker.invoke("claude", "sanitized incident", {"type": "object"}, tmp_path,
             model="claude-opus-5-5", effort="high", return_receipt=True, require_toolless=True)

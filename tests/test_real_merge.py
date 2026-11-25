@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from tests.workspace_contract import workspace_contract
+
 
 def run(path, *args):
     return subprocess.run(list(args), cwd=path, text=True, capture_output=True, check=True)
@@ -112,7 +114,14 @@ class FakeGh:
 
 
 def create_task(client, title, rid, agent="claude", risk="LOW"):
-    r = client.post("/api/tasks/create", data={"title": title, "repository_id": rid, "agent": agent, "sandbox_profile": "NONE", "risk_profile": risk}, follow_redirects=False)
+    r = client.post("/api/tasks/create", data={
+        **workspace_contract(title),
+        "title": title,
+        "repository_id": rid,
+        "agent": agent,
+        "sandbox_profile": "NONE",
+        "risk_profile": risk,
+    }, follow_redirects=False)
     assert r.status_code == 303, r.text
     return int(r.headers["location"].split("/")[-1])
 

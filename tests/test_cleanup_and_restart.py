@@ -6,6 +6,8 @@ import subprocess
 import time
 
 import pytest
+
+from tests.workspace_contract import workspace_contract
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -33,11 +35,13 @@ def register(client, repo):
 def _provision_one(client, root, repo):
     register(client, repo)
     rid = client.get("/api/repositories").json()[0]["id"]
-    client.post("/api/tasks", data={"title": "Cleanup check"}, follow_redirects=False)
-    tid = client.get("/api/tasks").json()[0]["id"]
-    client.post(f"/api/tasks/{tid}/select")
-    r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "A", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
-    assert r.status_code == 303
+    title = "Cleanup check"
+    response = client.post("/api/tasks/create", data={
+        **workspace_contract(title),
+        "title": title, "repository_id": rid, "agent": "codex",
+        "primary_role": "A", "primary_base_branch": "main", "sandbox_profile": "backend",
+    }, follow_redirects=False)
+    assert response.status_code == 303, response.text
     return client.get("/api/sandboxes").json()[0]
 
 
