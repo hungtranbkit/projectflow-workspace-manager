@@ -4,7 +4,7 @@ Date: 2026-11-26 (Asia/Bangkok). Scope: `tests/test_spec_lifecycle.py` only; no 
 
 ## Identity and ownership
 
-- Published PR #74 head at start and reproduction: `47abf6f147e5f91910b2e4684631adbee2fa9425`; tree `9c8fd6340e5237929ec39c1c188b560ded81ecde`; parent/base candidate `78e4ddf8d35036e3511163ff2b6e996e00b3a486`.
+- Published PR #74 head at start and reproduction: `47abf6f147e5f91910b2e4684631adbee2fa9425`; tree `9c8fd6340e5237929ec39c1c188b560ded81ecde`; parent/base candidate `78e4ddf8d35036e3511163ff2b6e996e00b3a486`. The source/evidence update was published as `d7fa2f0cfa0765efa1a4ec2ee0975befaf5085bd` (tree `581b2a9af01d7449d8d4da304296f8f8c84fa905`, parent exactly the verified PR head); PR head was verified at that SHA after publication.
 - Current task worktree began clean at local `fd007d400145d73ef603590cf73159dd2b2b7552`; its tree exactly matched PR head. The test changes were run in that tree-equivalent worktree; the base reproduction used a detached clean checkout at the exact parent above. The base and PR commit objects were fetched/read without moving any branch.
 - Python 3.14.4; pytest 9.2.0; existing task venv; no repo dependency changes. For the lifecycle module, `PATH=/usr/bin:/bin` excluded Claude. Disk remained ample. Main checkout and unrelated WIP were not modified.
 
@@ -60,4 +60,4 @@ This folder includes sanitized red/green logs, JUnit XML, and source blob hashes
 
 ## Gate and next step
 
-PF-04b1 deterministic spec lifecycle seam: PASS (38 deterministic cases plus provider/visual regression 20 pass). Real-provider authorization remains absent; the real-provider test was not run. This does not change A–F overall status: A full suite remains FAIL/not rerun; B/C remain blocked by approved Nova reference/acceptance; D retains prior local evidence only; E is not PASS (PR #74 workflow disabled/no exact-head checks); F preserved. Next lane is separately authorized PF-04b2 only after checking its owner/scope; do not invoke a provider without authorization.
+PF-04b1 deterministic spec lifecycle seam: PASS (38 deterministic cases plus provider/visual regression 20 pass). Real-provider authorization remains absent; the real-provider test was not run. The commit updates the existing draft PR only; no merge or CI activation. This does not change A–F overall status: A full suite remains FAIL/not rerun; B/C remain blocked by approved Nova reference/acceptance; D retains prior local evidence only; E is not PASS (PR #74 workflow disabled/no exact-head checks); F preserved. Next lane is separately authorized PF-04b2 only after checking its owner/scope; do not invoke a provider without authorization.
