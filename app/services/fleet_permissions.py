@@ -41,12 +41,13 @@ def classify(returncode, output):
         ("STATUS_PROBE_TIMEOUT", ("status_probe_timeout",)),
         ("SUDO_REQUIRED", ("sudo:", "no new privileges")),
         ("AUTH_REQUIRED", ("could not read username", "terminal prompts disabled", "authentication failed", "publickey", "not logged", "http 401", "login required", "gh auth login")),
+        ("RATE_LIMITED", ("rate limit exceeded", "secondary rate limit", "http 429", "too many requests")),
         ("GIT_WRITE_DENIED", ("http 403", "write access", "protected branch", "permission to", "resource not accessible")),
         ("TRUST_REQUIRED", ("trust this", "not trusted", "trust dialog")),
         ("CLI_UNSUPPORTED", ("unexpected argument", "unknown option", "unrecognized", "not found")),
         ("DISK_LOW", ("no space left",)),
         ("ACL_DENIED", ("permission denied", "access is denied")),
-        ("OFFLINE", ("node_unreachable", "no route to host", "network is unreachable", "connection refused")),
+        ("OFFLINE", ("node_unreachable", "no route to host", "network is unreachable", "connection refused", "could not resolve host")),
     ):
         if any(needle in text for needle in needles):
             return code

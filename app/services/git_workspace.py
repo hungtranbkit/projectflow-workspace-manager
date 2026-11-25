@@ -162,15 +162,23 @@ class GitWorkspaceService:
             return result
         # Verify the server-advertised old OID in our own pre-push hook. Git
         # sends that same old OID in the deletion request; the server rejects
-        # an intervening update. No force option or unrelated repo hook runs.
+        # an intervening update. Preserve the repository's existing policy
+        # hook with identical argv/stdin; cleanup must not bypass its denial.
+        policy = Path(self.git(repo, "rev-parse", "--git-path", "hooks/pre-push").stdout.strip())
+        if not policy.is_absolute():
+            policy = repo / policy
         with tempfile.TemporaryDirectory(prefix="pf83-delete-") as hooks:
             hook = Path(hooks)/"pre-push"
-            hook.write_text("#!/bin/sh\ncount=0\n"
+            updates = shlex.quote(str(Path(hooks)/"updates"))
+            quoted_policy = shlex.quote(str(policy))
+            hook.write_text("#!/bin/sh\n"
+                f"cat > {updates} || exit 1\ncount=0\n"
                 "while read -r local_ref local_oid remote_ref remote_oid; do\n"
                 "  count=$((count + 1))\n"
                 "  case $local_oid in ''|*[!0]*) exit 1;; esac\n"
                 f"  [ \"$remote_ref\" = '{ref}' ] && [ \"$remote_oid\" = '{sha}' ] || exit 1\n"
-                "done\n[ \"$count\" -eq 1 ]\n")
+                f"done < {updates}\n[ \"$count\" -eq 1 ] || exit 1\n"
+                f"if [ -x {quoted_policy} ]; then {quoted_policy} \"$@\" < {updates}; else exit 0; fi\n")
             hook.chmod(0o700)
             deleted = self.git(repo, "-c", f"core.hooksPath={hooks}", "push", "origin", "--delete", branch, check=False)
         absent = self.git(repo, "ls-remote", "--exit-code", "origin", ref, check=False)

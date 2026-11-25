@@ -15,6 +15,9 @@ def fleet():
 @pytest.mark.parametrize('text,expected', [
     ('could not read Username: terminal prompts disabled', 'AUTH_REQUIRED'),
     ('HTTP 403: Resource not accessible', 'GIT_WRITE_DENIED'),
+    ('HTTP 403: API rate limit exceeded', 'RATE_LIMITED'),
+    ('HTTP 429: Too many requests', 'RATE_LIMITED'),
+    ('Could not resolve host: github.com', 'OFFLINE'),
     ('Permission denied (publickey)', 'AUTH_REQUIRED'),
     ('Permission denied: workspace', 'ACL_DENIED'),
     ('STATUS_PROBE_TIMEOUT', 'STATUS_PROBE_TIMEOUT'),
@@ -111,6 +114,26 @@ def test_canary_push_readback_cleanup_with_real_bare_remote(git_repo, tmp_path):
     assert result['cleanup'] == 'PASS'
     assert subprocess.check_output(['git', 'ls-remote', str(remote)]) == b''
     assert subprocess.check_output(['git', '-C', str(repo), 'status', '--porcelain']) == before
+
+
+def test_canary_cleanup_respects_existing_pre_push_policy(git_repo):
+    from app.services.git_workspace import GitWorkspaceService
+    root, repo = git_repo
+    remote = root / 'remote.git'
+    subprocess.run(['git', 'init', '--bare', str(remote)], check=True, capture_output=True)
+    subprocess.run(['git', '-C', str(repo), 'remote', 'add', 'origin', str(remote)], check=True)
+    hooks = root / 'policy-hooks'
+    hooks.mkdir()
+    hook = hooks / 'pre-push'
+    hook.write_text('#!/bin/sh\nwhile read -r local_ref local_oid remote_ref remote_oid; do\n'
+                    '  [ "$local_ref" != "(delete)" ] || exit 17\ndone\n')
+    hook.chmod(0o700)
+    subprocess.run(['git', '-C', str(repo), 'config', 'core.hooksPath', str(hooks)], check=True)
+    result = GitWorkspaceService(root).push_canary(repo)
+    assert result['cleanup'] == 'NOT_RUN'
+    assert result['code'] == 'BLOCKED'
+    assert Path(result['worktree']).is_dir()
+    assert subprocess.check_output(['git', '--git-dir', str(remote), 'rev-parse', result['branch']], text=True).strip() == result['pushed_sha']
 
 
 def test_container_launcher_confines_writes_and_is_not_root(tmp_path):
