@@ -1,0 +1,50 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.2.0, pluggy-1.7.0
+rootdir: $SCRATCH_BASE
+configfile: pyproject.toml
+plugins: anyio-4.16.0
+collected 3 items
+
+tests/test_test_design.py FFF
+
+=================================== FAILURES ===================================
+______________________ test_test_design_structured_result ______________________
+tests/test_test_design.py:142: in test_test_design_structured_result
+    assert result["outcome"] == "READY"
+E   AssertionError: assert 'EXECUTION_FAILED' == 'READY'
+E
+E     - READY
+E     + EXECUTION_FAILED
+_______________ test_review_pass_approves_test_case_set_and_plan _______________
+tests/test_test_design.py:307: in test_review_pass_approves_test_case_set_and_plan
+    review = do_review(client, cid, "PASS")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_test_design.py:104: in do_review
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"No Test Design exists for this Change yet -- run /tests/design first"}
+E   assert 404 == 200
+E    +  where 404 = <Response [404 Not Found]>.status_code
+______________________________ test_coverage_full ______________________________
+tests/test_test_design.py:237: in test_coverage_full
+    assert coverage["requirements_uncovered"] == []
+E   AssertionError: assert ['REQ-001', 'REQ-002'] == []
+E
+E     Left contains 2 more items, first extra item: 'REQ-001'
+E     Use -v to get more diff
+=============================== warnings summary ===============================
+../..$TEST_VENV/lib/python3.14/site-packages/fastapi/testclient.py:1
+  $TEST_VENV/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../..$TEST_VENV/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_test_design.py: 33 warnings
+  $TEST_VENV/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: $WORKTREE/docs/visual-qa/evidence/issue-73/pf-04b2-test-design-20261126/base-red.xml -
+=========================== short test summary info ============================
+FAILED tests/test_test_design.py::test_test_design_structured_result - Assert...
+FAILED tests/test_test_design.py::test_review_pass_approves_test_case_set_and_plan
+FAILED tests/test_test_design.py::test_coverage_full - AssertionError: assert...
+======================== 3 failed, 45 warnings in 4.02s ========================

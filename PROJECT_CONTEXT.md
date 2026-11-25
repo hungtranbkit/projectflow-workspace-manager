@@ -1,3 +1,11 @@
+## 2026-11-26 PF-04b2 Test Design fake-runner seam
+
+- Exact PR #74 candidate at start: `624b88ca9fd86db67c1d1f309c41468bacc22f82`, tree `a433f91871680da8d2fd34e5daaa497d2702a3af`; clean task worktree tree matched. Current base `main` was `cbeaffe417765f2778eeb9ad96cd0db21a9acb69`. Candidate/base Test Design source blob before fix was identical (`23522d1a4af7d1b14923191c1b0f03615cf603f0`).
+- `tests/test_test_design.py` had the PF-04b1 seam: helper and custom deterministic fakes replaced only `invoker.runner`, while `PlannerAgentInvoker.invoke()` resolves `which('claude')` first. Three nodes reproduced on both base and candidate with restricted PATH: structured design expected READY but got EXECUTION_FAILED; review then returned 404; full coverage lacked both requirements.
+- Test-only repair: inject resolver+runner together, assert planner/design/review share invoker, assert READY/REVIEWED in happy helpers, and add unavailable-CLI fail-closed/no-runner-call regression. Changed file blob `7ac58b7fd3bb4534de4a38d22e281936bdfa8fdf`; no production changes/provider invocation.
+- Verification on Python 3.14.4/pytest 9.2.0: Test Design 44 passed, 1 real-provider node deselected, exit 0; PF-04b1 + planner envelope + visual contract/execution regressions 58 passed, exit 0; collection-only inventory 45; scoped `git diff --check` exit 0. No full suite/build/CI. Evidence: `docs/visual-qa/evidence/issue-73/pf-04b2-test-design-20261126/REPORT.md`.
+- PR #74 remains draft; before publication exact head was `624b88c…`; no merge, CI enablement, provider or production operation. A remains unqualified by targeted tests; B/C blocked; E not PASS; F preserved.
+
 ## 2026-11-26 PF-04b1 spec lifecycle deterministic fixture seam
 
 - On exact published PR #74 head `47abf6f147e5f91910b2e4684631adbee2fa9425` (tree-equivalent local task worktree; base parent `78e4ddf8d35036e3511163ff2b6e996e00b3a486`), three representative historical lifecycle failures reproduced identically on base and candidate with `PATH=/usr/bin:/bin`: fake runner was set, but `PlannerAgentInvoker.invoke()` first called real `which('claude')`, so analysis returned `EXECUTION_FAILED`; downstream proposal returned HTML 409.
