@@ -3,6 +3,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from app.launchers import AGENT_LAUNCHERS, AgentLauncher
@@ -71,6 +72,27 @@ class TerminalLauncherService:
         executable = self.which(launcher.executable)
         if not executable: raise LauncherError("AGENT_CLI_NOT_FOUND", f"{launcher.label} CLI chưa được cài hoặc không có trong PATH")
         return self._launch(worktree, launcher.label, [executable, *launcher.args])
+
+    def launch_trusted_agent(self, worktree, agent: str, prompt_file: Path, *, state=None):
+        """Explicit opt-in profile; preflight completes before any terminal opens.
+
+        Existing desktop launch remains interactive. This entry point uses the
+        same versioned runner as Linux/macOS/Windows fleet setup and CLI use.
+        """
+        from app.services.fleet_permissions import FleetProfile, PROFILE
+        path = self.validate_worktree(worktree)
+        launcher = self.launcher_for(agent)
+        prompt_file = prompt_file.resolve()
+        if not prompt_file.is_file() or not prompt_file.is_relative_to(path):
+            raise LauncherError("INVALID_PROMPT", "Prompt must be a file inside the owned worktree")
+        gate = FleetProfile(path, state).preflight(agent)
+        if gate["code"] != "PASS":
+            return {**gate, "profile": PROFILE, "result": "blocked", "dispatched": False}
+        command = [sys.executable, str(Path(__file__).resolve().parents[2] / "scripts/fleet-permissions.py"), "launch",
+                   "--workspace", str(path), "--agent", agent, "--prompt-file", str(prompt_file)]
+        if state is not None:
+            command.extend(["--state", str(state)])
+        return {**self._launch(path, launcher.label, command), "profile": PROFILE}
 
     def _launch(self, worktree, label, command):
         path = self.validate_worktree(worktree); terminal = self.detect_terminal(); argv = terminal.argv(path, command)

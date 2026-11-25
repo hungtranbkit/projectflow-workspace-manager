@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +15,16 @@ class GitCommandError(RuntimeError):
 
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 BRANCH = re.compile(r"^(?:agent/[a-z0-9-]+/[a-z0-9-]+|integration/[a-z0-9-]+|main|master|develop)$")
+
+
+def noninteractive_git_env(base=None):
+    """Preserve credential helpers; refuse terminal/GUI credential prompts."""
+    env = dict(os.environ if base is None else base)
+    env.update(GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never",
+               GIT_ASKPASS="/bin/false" if os.name != "nt" else "cmd /c exit 1",
+               SSH_ASKPASS="/bin/false" if os.name != "nt" else "cmd /c exit 1")
+    env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes -oConnectTimeout=10")
+    return env
 
 
 def slugify(value: str) -> str:
@@ -79,12 +91,52 @@ class GitWorkspaceService:
             return None
         return hashlib.sha256(",".join(roots).encode("utf-8")).hexdigest()
     def _run(self, argv: list[str], cwd: Path, check=True, timeout=None) -> CommandResult:
-        try: proc = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout or self.timeout, shell=False)
+        try: proc = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout or self.timeout, shell=False, env=noninteractive_git_env(), stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired as exc: raise GitCommandError(f"Command timed out: {argv[0:2]}") from exc
         result = CommandResult(argv, str(cwd), proc.returncode, proc.stdout, proc.stderr); self.audit.append(result)
         if check and proc.returncode: raise GitCommandError(proc.stderr.strip() or proc.stdout.strip(), result)
         return result
     def git(self, repo, *args, check=True): return self._run(["git", *args], Path(repo), check=check)
+    def push_canary(self, repo):
+        """Normal push of a unique owned commit, SHA readback, exact-ref cleanup.
+
+        Failure preserves the local worktree/commit for recovery. Never force,
+        never target main, never remove a ref whose SHA no longer matches ours.
+        """
+        repo = self.validate_repo(repo)
+        branch = self.validate_branch("agent/codex/pf83-canary-" + uuid.uuid4().hex)
+        path = self.validate_worktree(self.worktree_root / branch.rsplit("/", 1)[1])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ref = "refs/heads/" + branch
+        exists = self.git(repo, "ls-remote", "--exit-code", "origin", ref, check=False)
+        if exists.returncode != 2:
+            raise GitSafetyError("Canary ref is not proven absent")
+        self.git(repo, "worktree", "add", "-b", branch, str(path), "HEAD")
+        marker = path / (".pf83-canary-" + uuid.uuid4().hex)
+        marker.write_text("ProjectFlow owner-authorized disposable branch write canary\n")
+        self.git(path, "add", "--", marker.name)
+        self.git(path, "commit", "-m", "test: owner-authorized fleet branch canary [skip ci]", "--", marker.name)
+        sha = self.head(path)
+        result = {"code": "BLOCKED", "branch": branch, "worktree": str(path), "pushed_sha": sha, "cleanup": "NOT_RUN"}
+        pushed = self.git(path, "push", "origin", f"HEAD:{ref}", check=False)
+        if pushed.returncode:
+            result["push_returncode"] = pushed.returncode
+            return result
+        readback = self.git(repo, "ls-remote", "--exit-code", "origin", ref, check=False)
+        remote_sha = readback.stdout.split()[0] if readback.returncode == 0 and readback.stdout.split() else None
+        result["readback_sha"] = remote_sha
+        if remote_sha != sha:
+            return result
+        # Ordinary exact-ref deletion. Only the unique ref created above.
+        deleted = self.git(repo, "push", "origin", "--delete", branch, check=False)
+        absent = self.git(repo, "ls-remote", "--exit-code", "origin", ref, check=False)
+        if deleted.returncode or absent.returncode != 2:
+            return result
+        self.git(repo, "worktree", "remove", str(path))
+        # Branch tip remains available through the receipt SHA and reflog;
+        # -D is deliberately avoided: this task's canary branch is retained.
+        result.update(code="PASS", cleanup="PASS", local_branch="RETAINED_CHECKPOINT")
+        return result
     def branch_exists(self, repo, branch): return self.git(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{self.validate_branch(branch)}", check=False).returncode == 0
     def base_exists(self, repo, branch):
         self.validate_branch(branch)

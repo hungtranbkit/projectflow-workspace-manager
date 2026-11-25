@@ -1,0 +1,33 @@
+schema_version: 1
+id: FEAT-FLEET-PERMISSIONS
+title: Owner-scoped fleet permissions and unattended launch
+version: 1
+status: approved
+summary: Owner-authorized issue 83, 2026-11-25; audit, reversible user setup, isolated launch and real Git delivery evidence.
+scope:
+  includes:
+    - Versioned audit, setup, check and rollback for owned agent worktrees
+    - Noninteractive Git and trusted-project CLI launch with bounded preflight
+    - Per-node evidence and task-owned push/readback/cleanup canaries
+  excludes:
+    - Root agents, policy bypass, production deployment and fleet service restart
+    - Automatic trust of arbitrary dialogs and credential transfer
+requirements:
+  - id: REQ-FP-001
+    text: Audit by default, preserve credentials and WIP, and make setup idempotent and rollback conflict-aware.
+  - id: REQ-FP-002
+    text: Bound probes and classify missing auth, permissions, trust, offline nodes and unsupported CLIs separately without secret output.
+  - id: REQ-FP-003
+    text: Launch only explicitly owned isolated worktrees using supported CLI options; checkpoint before dispatch and never infer RUNNING from submission.
+  - id: REQ-FP-004
+    text: Prove normal task-owned Git push, exact SHA readback and exact-ref cleanup without main writes or force pushes.
+acceptance_criteria:
+  - id: AC-FP-001
+    requirement_ids: [REQ-FP-001, REQ-FP-002]
+    text: Local negative fixtures and repeat apply/rollback tests pass, with real per-node before/after evidence and unresolved nodes explicitly blocked or offline.
+  - id: AC-FP-002
+    requirement_ids: [REQ-FP-003, REQ-FP-004]
+    text: HP branch delivery and CLI canaries pass before safe user-level rollout to reachable nodes; missing authority remains a blocker.
+invariants:
+  - id: INV-FP-001
+    text: No secret transfer, security-dialog auto-answer, root agent, force push, production change, Actions run or interruption of other sessions.
