@@ -140,3 +140,14 @@ def test_remote_identity_and_missing_measurement(tmp_path):
     m = Memory(tmp_path / "m")
     m.init()
     assert all(not n["fresh"] and n["at"] is None for n in read_view(m)["nodes"])
+
+
+def test_questions_find_a_repo_by_short_name(tmp_path):
+    memory = Memory(tmp_path / "ops.db")
+    memory.init()
+    report = sample(int(time.time()))
+    report["items"][0]["project"] = "example/quang-cao"
+    memory.ingest(report)
+    assert (
+        read_view(memory, q="Quang Cao chạy ở đâu?")["project"] == "example/quang-cao"
+    )

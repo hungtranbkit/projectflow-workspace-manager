@@ -303,7 +303,16 @@ def read_view(memory, q="", node="", project="", when="", intent=""):
             (
                 p
                 for p in sorted(projects, key=len, reverse=True)
-                if p.lower() in words or p.replace("-", " ") in words
+                if any(
+                    re.search(
+                        r"(?<![a-z0-9])" + re.escape(alias) + r"(?![a-z0-9])", words
+                    )
+                    for alias in (
+                        p.lower(),
+                        p.split("/")[-1].lower(),
+                        p.split("/")[-1].lower().replace("-", " "),
+                    )
+                )
             ),
             "",
         )
