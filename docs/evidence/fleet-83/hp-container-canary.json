@@ -1,0 +1,11 @@
+{
+  "code": "PASS",
+  "returncode": 0,
+  "elapsed_ms": 16994,
+  "execution": "EXITED",
+  "dispatched": true,
+  "task_outcome": "BLOCKED",
+  "runtime": "docker",
+  "write_readback": "FAIL",
+  "reason": "CLI_UNSUPPORTED: missing code-mode host in initial container mount"
+}

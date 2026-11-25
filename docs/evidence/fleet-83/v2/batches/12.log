@@ -1,0 +1,31 @@
+........................................................................ [ 75%]
+.......................                                                  [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_product_acceptance.py: 231 warnings
+tests/test_productization_audit.py: 77 warnings
+tests/test_prompt_delivery.py: 55 warnings
+tests/test_prompt_ux.py: 99 warnings
+tests/test_qa_center_sandbox_contract.py: 110 warnings
+tests/test_release_pipeline.py: 275 warnings
+tests/test_repo_rename_worktree_repair.py: 22 warnings
+tests/test_repository_runtime_sandbox.py: 165 warnings
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_productization_audit.py::test_actual_scope_overlap_despite_declared_safe_scopes
+tests/test_productization_audit.py::test_actual_scope_overlap_despite_declared_safe_scopes
+tests/test_prompt_delivery.py::test_start_builder_delivers_prompt_automatically
+tests/test_prompt_delivery.py::test_title_fallback_prompt_is_delivered_when_no_implementation_prompt
+tests/test_prompt_delivery.py::test_delivery_failure_then_manual_retry_succeeds
+tests/test_prompt_delivery.py::test_resume_on_already_delivered_session_never_resends
+tests/test_prompt_delivery.py::test_return_to_builder_delivers_repair_prompt_with_review_findings
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=864929) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+95 passed, 8 deselected, 1053 warnings in 154.16s (0:02:34)

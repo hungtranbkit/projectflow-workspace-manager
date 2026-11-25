@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="103" time="164.591" timestamp="2026-11-25T11:52:49.461824+07:00" hostname="kimex-HP-EliteDesk-800-G4-DM-35W-Japan"><testcase classname="tests.test_spec_lifecycle" name="test_requirement_analysis_structured_result" time="0.996" /><testcase classname="tests.test_spec_lifecycle" name="test_requirement_analysis_ambiguity_classification" time="0.960" /><testcase classname="tests.test_spec_lifecycle" name="test_how_decision_never_creates_human_decision" time="0.979" /><testcase classname="tests.test_spec_lifecycle" name="test_what_decision_requires_human" time="0.953" /><testcase classname="tests.test_spec_lifecycle" name="test_requirement_analysis_creates_traceable_task" time="1.116" /><testcase classname="tests.test_spec_lifecycle" name="test_valid_spec_proposal_created" time="1.251" /><testcase classname="tests.test_spec_lifecycle" name="test_invalid_structured_output_rejected" time="1.135" /><testcase classname="tests.test_spec_lifecycle" name="test_duplicate_id_deterministically_remapped" time="1.147" /><testcase classname="tests.test_spec_lifecycle" name="test_updating_existing_feature_reuses_its_own_ids" time="1.130" /><testcase classname="tests.test_spec_lifecycle" name="test_new_feature_starts_at_version_one" time="1.129" /><testcase classname="tests.test_spec_lifecycle" name="test_duplicate_global_requirement_id_within_same_new_feature_never_reaches_registry_error" time="1.175" /><testcase classname="tests.test_spec_lifecycle" name="test_proposal_never_ready_when_validation_invalid" time="1.204" /><testcase classname="tests.test_spec_lifecycle" name="test_review_pass_marks_proposal_ready" time="1.261" /><testcase classname="tests.test_spec_lifecycle" name="test_review_needs_refinement" time="1.203" /><testcase classname="tests.test_spec_lifecycle" name="test_review_human_decision_required" time="1.227" /><testcase classname="tests.test_spec_lifecycle" name="test_logical_contradiction_finding_recorded" time="1.382" /><testcase classname="tests.test_spec_lifecycle" name="test_untestable_requirement_finding_recorded" time="1.316" /><testcase classname="tests.test_spec_lifecycle" name="test_review_does_not_receive_author_rationale" time="1.206" /><testcase classname="tests.test_spec_lifecycle" name="test_auto_refinement_creates_new_revision_and_history" time="1.312" /><testcase classname="tests.test_spec_lifecycle" name="test_bounded_refinement_loop_never_infinite" time="1.238" /><testcase classname="tests.test_spec_lifecycle" name="test_refinement_never_weakens_invariants_or_deletes_requirements" time="1.086" /><testcase classname="tests.test_spec_lifecycle" name="test_human_decision_blocks_apply" time="1.113" /><testcase classname="tests.test_spec_lifecycle" name="test_human_decision_resolution_preserved_and_resumes" time="1.199" /><testcase classname="tests.test_spec_lifecycle" name="test_apply_changes_baseline" time="1.087" /><testcase classname="tests.test_spec_lifecycle" name="test_failed_apply_leaves_canonical_tree_valid" time="1.074" /><testcase classname="tests.test_spec_lifecycle" name="test_cannot_apply_a_non_ready_proposal" time="1.058" /><testcase classname="tests.test_spec_lifecycle" name="test_plan_valid_requirement_ids_resolve" time="1.202" /><testcase classname="tests.test_spec_lifecycle" name="test_fictional_requirement_id_rejected" time="1.010" /><testcase classname="tests.test_spec_lifecycle" name="test_baseline_staleness_visible" time="1.022" /><testcase classname="tests.test_spec_lifecycle" name="test_plan_spec_drift_when_referenced_requirement_disappears" time="1.217" /><testcase classname="tests.test_spec_lifecycle" name="test_existing_manually_authored_specs_unaffected" time="0.999" /><testcase classname="tests.test_spec_lifecycle" name="test_spec_gate_unaffected_by_e5" time="0.974" /><testcase classname="tests.test_spec_lifecycle" name="test_planner_still_works_without_any_spec_proposal" time="1.070" /><testcase classname="tests.test_spec_lifecycle" name="test_manual_task_and_supervisor_unaffected" time="1.458" /><testcase classname="tests.test_spec_lifecycle" name="test_production_specs_root_never_touched_by_this_suite" time="0.001" /><testcase classname="tests.test_spec_registry" name="test_valid_spec_registry_loads" time="0.003" /><testcase classname="tests.test_spec_registry" name="test_missing_spec_manifest_raises" time="0.001" /><testcase classname="tests.test_spec_registry" name="test_missing_features_dir_raises" time="0.001" /><testcase classname="tests.test_spec_registry" name="test_duplicate_feature_id_raises" time="0.005" /><testcase classname="tests.test_spec_registry" name="test_duplicate_requirement_id_across_features_raises" time="0.004" /><testcase classname="tests.test_spec_registry" name="test_feature_missing_required_field_raises" time="0.002" /><testcase classname="tests.test_spec_registry" name="test_feature_invalid_status_raises" time="0.002" /><testcase classname="tests.test_spec_registry" name="test_feature_ids_for_resolves_across_kinds" time="0.002" /><testcase classname="tests.test_spec_registry" name="test_baseline_digest_is_deterministic_and_content_sensitive" time="0.012" /><testcase classname="tests.test_spec_registry" name="test_baseline_digest_never_writes_to_disk" time="0.004" /><testcase classname="tests.test_spec_supervisor_gate" name="test_spec_features_list_and_detail" time="0.968" /><testcase classname="tests.test_spec_supervisor_gate" name="test_spec_feature_detail_404_for_unknown_id" time="1.151" /><testcase classname="tests.test_spec_supervisor_gate" name="test_save_task_spec_rejects_unknown_classification" time="1.009" /><testcase classname="tests.test_spec_supervisor_gate" name="test_save_task_spec_round_trips_and_is_readable_via_gate_endpoint" time="0.971" /><testcase classname="tests.test_spec_supervisor_gate" name="test_legacy_task_with_no_spec_classification_starts_unaffected" time="1.462" /><testcase classname="tests.test_spec_supervisor_gate" name="test_behavior_change_without_spec_linkage_blocks_agent_start" time="1.315" /><testcase classname="tests.test_spec_supervisor_gate" name="test_behavior_change_with_valid_spec_linkage_starts_and_injects_spec_context" time="1.476" /><testcase classname="tests.test_spec_supervisor_gate" name="test_no_spec_linkage_means_no_spec_section_in_prompt" time="1.497" /><testcase classname="tests.test_state_invariants" name="test_invariant_merged_repo_has_no_blockers_and_no_workflow_actions" time="1.690" /><testcase classname="tests.test_state_invariants" name="test_invariant_task_done_implies_all_required_repos_merged" time="1.351" /><testcase classname="tests.test_state_invariants" name="test_invariant_never_done_while_a_required_repo_is_unmerged" time="1.663" /><testcase classname="tests.test_state_invariants" name="test_invariant_integration_ready_requires_head_equal_verified" time="1.785" /><testcase classname="tests.test_state_invariants" name="test_invariant_test_pass_verified_commit_equals_tested_commit" time="1.717" /><testcase classname="tests.test_state_invariants" name="test_invariant_cleanup_eligible_still_counts_toward_capacity" time="2.886" /><testcase classname="tests.test_state_invariants" name="test_invariant_cleanup_eligible_sandbox_is_not_reported_not_running" time="2.673" /><testcase classname="tests.test_state_invariants" name="test_invariant_live_session_cwd_matches_its_workspace_worktree" time="6.316" /><testcase classname="tests.test_state_invariants" name="test_invariant_at_most_one_live_session_per_workspace" time="11.405" /><testcase classname="tests.test_task_centric_ux" name="test_task_can_have_multiple_workspaces_across_multiple_repos" time="1.455" /><testcase classname="tests.test_task_centric_ux" name="test_failed_workspace_does_not_roll_back_task_or_successful_workspace" time="1.072" /><testcase classname="tests.test_task_centric_ux" name="test_legacy_workspace_can_attach_to_existing_task_without_new_worktree" time="1.097" /><testcase classname="tests.test_task_centric_ux" name="test_create_task_from_workspace_prefills_title_and_attaches_without_new_worktree" time="1.093" /><testcase classname="tests.test_task_centric_ux" name="test_kanban_maps_task_states_to_correct_columns" time="1.976" /><testcase classname="tests.test_task_centric_ux" name="test_task_detail_aggregates_child_state_and_never_duplicates_it" time="2.912" /><testcase classname="tests.test_task_centric_ux" name="test_test_readiness_no_partial_yes" time="3.146" /><testcase classname="tests.test_task_centric_ux" name="test_blocking_workspace_shown_and_next_action_progresses" time="3.622" /><testcase classname="tests.test_task_centric_ux" name="test_ready_workspace_never_makes_task_ready_for_main" time="2.620" /><testcase classname="tests.test_task_centric_ux" name="test_create_integration_gated_with_reason_when_not_all_ready" time="3.598" /><testcase classname="tests.test_task_centric_ux" name="test_ready_for_main_task_enters_ready_for_main_column" time="9.241" /><testcase classname="tests.test_task_centric_ux" name="test_merged_task_enters_done_column" time="2.003" /><testcase classname="tests.test_task_lifecycle_engine" name="test_01_backlog_no_workspace" time="1.094" /><testcase classname="tests.test_task_lifecycle_engine" name="test_02_selected_no_brief_no_workspace" time="1.457" /><testcase classname="tests.test_task_lifecycle_engine" name="test_03_brief_complete_no_workspace" time="1.500" /><testcase classname="tests.test_task_lifecycle_engine" name="test_04_workspace_created_not_submitted" time="1.328" /><testcase classname="tests.test_task_lifecycle_engine" name="test_05_submitted_no_review" time="1.717" /><testcase classname="tests.test_task_lifecycle_engine" name="test_06_review_running" time="1.430" /><testcase classname="tests.test_task_lifecycle_engine" name="test_07_low_risk_review_pass_is_ready_for_main" time="1.496" /><testcase classname="tests.test_task_lifecycle_engine" name="test_08_normal_risk_review_pass_needs_integration" time="1.649" /><testcase classname="tests.test_task_lifecycle_engine" name="test_09_fix_required_blocks_task" time="1.468" /><testcase classname="tests.test_task_lifecycle_engine" name="test_10_high_risk_requires_qa_before_integration" time="1.508" /><testcase classname="tests.test_task_lifecycle_engine" name="test_11_high_risk_qa_pass_moves_to_integration" time="1.776" /><testcase classname="tests.test_task_lifecycle_engine" name="test_12_cross_repo_partial_merge_stays_active" time="1.932" /><testcase classname="tests.test_task_lifecycle_engine" name="test_13_all_required_merges_done_reaches_done" time="1.553" /><testcase classname="tests.test_task_lifecycle_engine" name="test_14_cancelled_task" time="1.147" /><testcase classname="tests.test_task_lifecycle_engine" name="test_risk_policy_gate_requirements[LOW-False-False]" time="1.439" /><testcase classname="tests.test_task_lifecycle_engine" name="test_risk_policy_gate_requirements[NORMAL-True-True]" time="1.386" /><testcase classname="tests.test_task_lifecycle_engine" name="test_risk_policy_gate_requirements[HIGH-True-True]" time="1.442" /><testcase classname="tests.test_task_lifecycle_engine" name="test_project_default_risk_profile_is_normal_when_unspecified" time="0.987" /><testcase classname="tests.test_task_lifecycle_engine" name="test_task_detail_gate_checklist_marks_skipped_gates_not_required_not_pass" time="1.350" /><testcase classname="tests.test_task_lifecycle_engine" name="test_review_pass_stale_after_new_commit_on_branch" time="1.543" /><testcase classname="tests.test_task_lifecycle_engine" name="test_qa_pass_stale_after_brief_version_bump" time="1.799" /><testcase classname="tests.test_task_lifecycle_engine" name="test_integration_not_current_blocks_ready_for_main" time="1.519" /><testcase classname="tests.test_task_lifecycle_engine" name="test_brief_bump_after_submit_does_not_retroactively_validate_old_review" time="1.562" /><testcase classname="tests.test_task_lifecycle_engine" name="test_brief_save_without_content_change_does_not_bump_version" time="1.297" /><testcase classname="tests.test_task_lifecycle_engine" name="test_fix_kiosk_session_high_risk_cross_repo_golden_flow" time="3.371" /><testcase classname="tests.test_task_sandbox_views" name="test_global_list_and_task_detail_agree_on_one_sandbox_each" time="3.038"><failure message="AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}&#10;assert 'FAILED' == 'RUNNING'&#10;  &#10;  - RUNNING&#10;  + FAILED">client = &lt;starlette.testclient.TestClient object at 0x76201ef638a0&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_global_list_and_task_deta0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_global_list_and_task_deta0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x76201dc7c250&gt;
+cleanup_sandboxes = [1]
+
+    def test_global_list_and_task_detail_agree_on_one_sandbox_each(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """Items 1, 2, 3, 4, 5, 9, 10, plus the REAL_UI_VERIFICATION Task A / Task B split."""
+        root, _ = git_repo
+        tid_a, rid_a, _, ws_a, sb_a = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-a", "Task A", (21500, 21519))
+        cleanup_sandboxes.append(sb_a["id"])
+&gt;       tid_b, rid_b, _, ws_b, sb_b = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-b", "Task B", (21520, 21539))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_task_sandbox_views.py:67: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = &lt;starlette.testclient.TestClient object at 0x76201ef638a0&gt;
+root = PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_global_list_and_task_deta0/root')
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x76201dc7c250&gt;
+repo_name = 'repo-b', task_title = 'Task B', port_range = (21520, 21539)
+
+    def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, task_title, port_range):
+        """One Task with one Agent Workspace whose profile resolves to a real,
+        running sandbox -- the minimal disposable fixture every scenario below
+        builds on."""
+        repo = sandboxable_repo_factory(root, repo_name, port_range=port_range)
+        register(client, repo, repo_name)
+        rid = [r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == repo_name][0]
+        r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
+        assert r.status_code == 303
+        tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+        client.post(f"/api/tasks/{tid}/select")
+        r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
+        sb = [s for s in client.get("/api/sandboxes").json() if s["owner_type"] == "AGENT_WORKSPACE" and s["owner_id"] == ws["id"]][0]
+&gt;       assert sb["status"] == "RUNNING", sb
+E       AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_task_sandbox_views.py:50: AssertionError</failure></testcase><testcase classname="tests.test_task_sandbox_views" name="test_integration_sandbox_shows_multiple_source_repos_in_task_detail" time="3.289"><failure message="AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 3, 'owner_type': 'AGENT_WORKSPACE', ...}&#10;assert 'FAILED' == 'RUNNING'&#10;  &#10;  - RUNNING&#10;  + FAILED">client = &lt;starlette.testclient.TestClient object at 0x76201d1d0270&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_integration_sandbox_shows0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_integration_sandbox_shows0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x76201c884460&gt;
+cleanup_sandboxes = []
+
+    def test_integration_sandbox_shows_multiple_source_repos_in_task_detail(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """Item 6, plus staleness (item 7) and the C = Task A + C, Task B
+        untouched half of REAL_UI_VERIFICATION."""
+        root, _ = git_repo
+        backend = sandboxable_repo_factory(root, "backend-repo", port_range=(21540, 21559))
+        client_repo = root / "client-repo"
+        client_repo.mkdir()
+        run(client_repo, "git", "init", "-b", "main")
+        run(client_repo, "git", "config", "user.email", "t@t"); run(client_repo, "git", "config", "user.name", "t")
+        (client_repo / "PROJECT.yaml").write_text(
+            "schema_version: 1\nproject: {code: client-repo}\nsource: {root: .}\n"
+            "commands:\n  preflight: {command: 'true'}\n  test: {command: 'true'}\nci: {required: [preflight, test]}\n"
+        )
+        (client_repo / "README.md").write_text("client base\n")
+        run(client_repo, "git", "add", "."); run(client_repo, "git", "commit", "-m", "base")
+    
+        register(client, backend, "backend-repo"); register(client, client_repo, "client-repo")
+        repos = {r["repo_name"]: r["id"] for r in client.get("/api/repositories").json()}
+    
+        client.post("/api/tasks", data={"title": "Task A cross-repo"}, follow_redirects=False)
+        tid_a = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == "Task A cross-repo"][0]
+        client.post(f"/api/tasks/{tid_a}/select")
+        r = client.post(f"/api/tasks/{tid_a}/workspaces", data={"repository_id": repos["backend-repo"], "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        backend_ws = client.get("/api/workspaces").json()[-1]
+        (client.app.state.git.validate_worktree(backend_ws["worktree_path"]) / "feature.txt").write_text("backend feature\n")
+        run(backend_ws["worktree_path"], "git", "add", "."); run(backend_ws["worktree_path"], "git", "commit", "-m", "backend feature")
+    
+        r = client.post(f"/api/tasks/{tid_a}/workspaces", data={"repository_id": repos["client-repo"], "agent": "claude", "role": "Client", "base_branch": "main", "sandbox_profile": ""}, follow_redirects=False)
+        assert r.status_code == 303
+        client_ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == repos["client-repo"]][0]
+    
+        for w in (backend_ws, client_ws):
+            assert client.post(f"/api/workspaces/{w['id']}/ready", follow_redirects=False).status_code == 303
+            client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+            assert client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"}, follow_redirects=False).status_code == 303
+    
+        # unrelated Task B, must stay untouched by anything below
+&gt;       tid_b, rid_b, _, ws_b, sb_b = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-b2", "Task B unrelated", (21560, 21579))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_task_sandbox_views.py:151: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = &lt;starlette.testclient.TestClient object at 0x76201d1d0270&gt;
+root = PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_integration_sandbox_shows0/root')
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x76201c884460&gt;
+repo_name = 'repo-b2', task_title = 'Task B unrelated'
+port_range = (21560, 21579)
+
+    def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, task_title, port_range):
+        """One Task with one Agent Workspace whose profile resolves to a real,
+        running sandbox -- the minimal disposable fixture every scenario below
+        builds on."""
+        repo = sandboxable_repo_factory(root, repo_name, port_range=port_range)
+        register(client, repo, repo_name)
+        rid = [r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == repo_name][0]
+        r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
+        assert r.status_code == 303
+        tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+        client.post(f"/api/tasks/{tid}/select")
+        r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
+        sb = [s for s in client.get("/api/sandboxes").json() if s["owner_type"] == "AGENT_WORKSPACE" and s["owner_id"] == ws["id"]][0]
+&gt;       assert sb["status"] == "RUNNING", sb
+E       AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 3, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_task_sandbox_views.py:50: AssertionError</failure></testcase><testcase classname="tests.test_task_sandbox_views" name="test_stopped_and_cleanup_countdown_state_consistent_everywhere" time="3.740" /><testcase classname="tests.test_task_sandbox_views" name="test_empty_states_distinguish_not_configured_from_not_yet_created" time="1.278" /></testsuite></testsuites>

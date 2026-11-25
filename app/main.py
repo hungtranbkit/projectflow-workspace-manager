@@ -2565,10 +2565,21 @@ def create_app(settings=None):
             if gate["outcome"] not in ("PASS","NOT_APPLICABLE"):
                 raise GitSafetyError(f"SpecGate {gate['outcome']}: {gate['reason']}")
         mode="VIEW_ONLY" if mode=="VIEW_ONLY" else "INTERACTIVE"
-        sid=agent_sessions.start(task_id=w["task_id"],workspace_id=w["id"],agent=w["agent"],worktree_path=w["worktree_path"],mode=mode)
+        from app.services.fleet_dispatch import FleetDispatch
+        from app.services.fleet_permissions import FleetError
+        try:
+            dispatch = FleetDispatch(settings)
+            trusted = dispatch.prepare(w,workspace_agent_prompt(w)) if dispatch.enrollment(w) is not None else None
+        except FleetError as exc:
+            raise GitSafetyError(str(exc)) from exc
+        launch_options = {"trusted_launch":trusted} if trusted else {}
+        sid=agent_sessions.start(task_id=w["task_id"],workspace_id=w["id"],agent=w["agent"],worktree_path=w["worktree_path"],mode=mode,**launch_options)
         db.event("agent",w["id"],"SESSION_STARTED",f"session={sid} mode={mode}")
-        delivered=_deliver_to_session(w,sid,note_exited_without_report=note_exited_without_report)
-        db.event("agent",w["id"],"PROMPT_DELIVERED" if delivered else "PROMPT_DELIVERY_FAILED",f"session={sid}")
+        if trusted:
+            db.event("agent",w["id"],"PROMPT_SUBMITTED",f"session={sid}; execution awaits durable runner receipt")
+        else:
+            delivered=_deliver_to_session(w,sid,note_exited_without_report=note_exited_without_report)
+            db.event("agent",w["id"],"PROMPT_DELIVERED" if delivered else "PROMPT_DELIVERY_FAILED",f"session={sid}")
         return sid
     def _resume_builder_session(w):
         """[Resume Agent] (section 4): never blindly starts a second
@@ -2589,6 +2600,8 @@ def create_app(settings=None):
            process."""
         session=decision.latest_session(w["id"])
         if session and session["status"] in ("STARTING","RUNNING","WAITING_FOR_INPUT"):
+            if session.get("command_profile")=="trusted-project-unattended-v1":
+                return session["id"]
             if session["prompt_status"] in ("PENDING","FAILED"):
                 delivered=_deliver_to_session(w,session["id"])
                 db.event("agent",w["id"],"PROMPT_DELIVERED" if delivered else "PROMPT_DELIVERY_FAILED",f"session={session['id']} (retry)")
@@ -2700,6 +2713,42 @@ def create_app(settings=None):
             try: agent_sessions.persist_tail(sid)
             except Exception: pass
 
+    @app.get("/api/workspaces/{wid}/fleet")
+    def fleet_status(wid:int, _authz: None = Depends(require_read_role("workspace", "wid"))):
+        from app.services.fleet_dispatch import FleetDispatch
+        from app.services.fleet_permissions import FleetError
+        try:
+            task = FleetDispatch(settings).enrollment(agent_row(wid))
+            return {"enrolled": task is not None, "task": task, "readiness_version":2}
+        except FleetError as exc:
+            return JSONResponse({"code":"TRUST_REQUIRED","message":str(exc)},status_code=409)
+
+    @app.post("/api/workspaces/{wid}/fleet")
+    async def fleet_enroll(wid:int, request:Request, _authz: None = Depends(require_role("workspace", "wid", "OWNER"))):
+        from app.services.fleet_dispatch import FleetDispatch
+        from app.services.fleet_permissions import FleetError
+        try:
+            live = latest_session_for_workspace(wid)
+            if live and live["status"] in LIVE_SESSION_STATUSES:
+                raise FleetError("ACTIVE_SESSION_EXISTS")
+            result=FleetDispatch(settings).enroll(agent_row(wid),await request.json())
+            db.event("agent",wid,"FLEET_ENROLLED","readiness_version=2")
+            return result
+        except (FleetError,ValueError) as exc:
+            return JSONResponse({"code":"TRUST_REQUIRED","message":str(exc)},status_code=409)
+
+    @app.delete("/api/workspaces/{wid}/fleet")
+    def fleet_rollback(wid:int, _authz: None = Depends(require_role("workspace", "wid", "OWNER"))):
+        from app.services.fleet_dispatch import FleetDispatch
+        from app.services.fleet_permissions import FleetError
+        try:
+            live=latest_session_for_workspace(wid)
+            if live and live["status"] in LIVE_SESSION_STATUSES:
+                raise FleetError("ACTIVE_SESSION_EXISTS")
+            return FleetDispatch(settings).profile(agent_row(wid)).rollback()
+        except FleetError as exc:
+            return JSONResponse({"code":"BLOCKED","message":str(exc)},status_code=409)
+
     @app.post("/api/workspaces/{wid}/open-terminal")
     def open_terminal(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         w=agent_row(wid)
@@ -2727,8 +2776,15 @@ def create_app(settings=None):
         if live and live["status"] in LIVE_SESSION_STATUSES:
             return JSONResponse({"ok":False,"code":"ACTIVE_SESSION_EXISTS","message":f"An AgentSession is already {live['status']} for this workspace -- open it instead of starting a second, untracked agent process.","session_id":live["id"]},status_code=409)
         try:
+            from app.services.fleet_dispatch import FleetDispatch
+            from app.services.fleet_permissions import FleetError
+            if FleetDispatch(settings).enrollment(w):
+                sid=_start_builder_session(w)
+                return {"ok":True,"session_id":sid,"result":"requested","profile":"trusted-project-unattended-v1"}
             result=launcher.launch_agent(w["worktree_path"],w["agent"]); db.event("agent",wid,"AGENT_LAUNCHED",f"agent={w['agent']} path={result['worktree']} terminal={result['terminal']} result=requested")
             return {"ok":True,"message":f"{result['agent']} terminal đã được yêu cầu mở.",**result}
+        except (FleetError, GitSafetyError, SessionError) as exc:
+            return JSONResponse({"ok":False,"code":"BLOCKED","message":str(exc)},status_code=409)
         except LauncherError as exc:
             db.event("agent",wid,"AGENT_LAUNCH_FAILED",f"agent={w['agent']} path={w['worktree_path']} result={exc.code}")
             return JSONResponse({"ok":False,"code":exc.code,"message":str(exc),"fallback":f"cd {w['worktree_path']}"},status_code=409)

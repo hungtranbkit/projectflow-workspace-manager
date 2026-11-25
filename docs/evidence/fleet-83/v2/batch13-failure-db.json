@@ -1,0 +1,127 @@
+{
+  "/tmp/pytest-of-kimex/pytest-1267/test_two_agent_sandboxes_are_f0/test.db": {
+    "sandboxes": [
+      {
+        "id": 1,
+        "status": "CLOSED",
+        "error_code": null,
+        "error_message": null,
+        "compose_project": "wm-svc-a-agent_workspace-1-baa440"
+      },
+      {
+        "id": 2,
+        "status": "CLOSED",
+        "error_code": "COMPOSE_UP_FAILED",
+        "error_message": "docker compose up failed",
+        "compose_project": "wm-svc-b-agent_workspace-2-9069b2"
+      }
+    ],
+    "operations": [
+      {
+        "operation_type": "PROVISION",
+        "status": "SUCCESS",
+        "exit_code": 0,
+        "stderr_tail": " Network wm-svc-a-agent_workspace-1-baa440_default Creating \n Network wm-svc-a-agent_workspace-1-baa440_default Creating \n Network wm-svc-a-agent_workspace-1-baa440_default Created \n Network wm-svc-a-agent_workspace-1-baa440_default Created \n Container wm-svc-a-agent_workspace-1-baa440-app-1 Creating \n Container wm-svc-a-agent_workspace-1-baa440-app-1 Created \n Container wm-svc-a-agent_workspace-1-baa440-app-1 Starting \n Container wm-svc-a-agent_workspace-1-baa440-app-1 Started \n"
+      },
+      {
+        "operation_type": "PROVISION",
+        "status": "FAILED",
+        "exit_code": 1,
+        "stderr_tail": " Network wm-svc-b-agent_workspace-2-9069b2_default Creating \n Network wm-svc-b-agent_workspace-2-9069b2_default Creating \n Network wm-svc-b-agent_workspace-2-9069b2_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-svc-b-agent_workspace-2-9069b2_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-svc-b-agent_workspace-2-9069b2-app-1 Creating \nfailed to create network wm-svc-b-agent_workspace-2-9069b2_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+      },
+      {
+        "operation_type": "CLEANUP",
+        "status": "SUCCESS",
+        "exit_code": 0,
+        "stderr_tail": ""
+      },
+      {
+        "operation_type": "CLEANUP",
+        "status": "SUCCESS",
+        "exit_code": 0,
+        "stderr_tail": " Container wm-svc-a-agent_workspace-1-baa440-app-1 Stopping \n Container wm-svc-a-agent_workspace-1-baa440-app-1 Stopped \n Container wm-svc-a-agent_workspace-1-baa440-app-1 Removing \n Container wm-svc-a-agent_workspace-1-baa440-app-1 Removed \n Network wm-svc-a-agent_workspace-1-baa440_default Removing \n Network wm-svc-a-agent_workspace-1-baa440_default Removed \n"
+      }
+    ]
+  },
+  "/tmp/pytest-of-kimex/pytest-1267/test_reset_data_does_not_touch0/test.db": {
+    "sandboxes": [
+      {
+        "id": 1,
+        "status": "CLOSED",
+        "error_code": "COMPOSE_UP_FAILED",
+        "error_message": "docker compose up failed",
+        "compose_project": "wm-reset-a-agent_workspace-1-193110"
+      }
+    ],
+    "operations": [
+      {
+        "operation_type": "PROVISION",
+        "status": "FAILED",
+        "exit_code": 1,
+        "stderr_tail": " Network wm-reset-a-agent_workspace-1-193110_default Creating \n Network wm-reset-a-agent_workspace-1-193110_default Creating \n Network wm-reset-a-agent_workspace-1-193110_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-reset-a-agent_workspace-1-193110_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-reset-a-agent_workspace-1-193110-app-1 Creating \nfailed to create network wm-reset-a-agent_workspace-1-193110_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+      },
+      {
+        "operation_type": "CLEANUP",
+        "status": "SUCCESS",
+        "exit_code": 0,
+        "stderr_tail": ""
+      }
+    ]
+  },
+  "/tmp/pytest-of-kimex/pytest-1267/test_restart_reconciliation_re0/live.db": {
+    "sandboxes": [
+      {
+        "id": 1,
+        "status": "CLOSED",
+        "error_code": "COMPOSE_UP_FAILED",
+        "error_message": "docker compose up failed",
+        "compose_project": "wm-svc-stuck-restart-agent_workspace-1-9091b3"
+      }
+    ],
+    "operations": [
+      {
+        "operation_type": "PROVISION",
+        "status": "FAILED",
+        "exit_code": 1,
+        "stderr_tail": " Network wm-svc-stuck-restart-agent_workspace-1-9091b3_default Creating \n Network wm-svc-stuck-restart-agent_workspace-1-9091b3_default Creating \n Network wm-svc-stuck-restart-agent_workspace-1-9091b3_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-svc-stuck-restart-agent_workspace-1-9091b3_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-svc-stuck-restart-agent_workspace-1-9091b3-app-1 Creating \nfailed to create network wm-svc-stuck-restart-agent_workspace-1-9091b3_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+      },
+      {
+        "operation_type": "PROVISION",
+        "status": "FAILED",
+        "exit_code": 1,
+        "stderr_tail": " Network wm-svc-stuck-restart-agent_workspace-1-9091b3_default Creating \n Network wm-svc-stuck-restart-agent_workspace-1-9091b3_default Creating \n Network wm-svc-stuck-restart-agent_workspace-1-9091b3_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-svc-stuck-restart-agent_workspace-1-9091b3_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-svc-stuck-restart-agent_workspace-1-9091b3-app-1 Creating \nfailed to create network wm-svc-stuck-restart-agent_workspace-1-9091b3_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+      },
+      {
+        "operation_type": "CLEANUP",
+        "status": "SUCCESS",
+        "exit_code": 0,
+        "stderr_tail": ""
+      }
+    ]
+  },
+  "/tmp/pytest-of-kimex/pytest-1267/test_multi_repo_task_session_s0/test.db": {
+    "sandboxes": [
+      {
+        "id": 1,
+        "status": "CLOSED",
+        "error_code": "COMPOSE_UP_FAILED",
+        "error_message": "docker compose up failed",
+        "compose_project": "wm-soak-0-agent_workspace-1-16aded"
+      }
+    ],
+    "operations": [
+      {
+        "operation_type": "PROVISION",
+        "status": "FAILED",
+        "exit_code": 1,
+        "stderr_tail": " Network wm-soak-0-agent_workspace-1-16aded_default Creating \n Network wm-soak-0-agent_workspace-1-16aded_default Creating \n Network wm-soak-0-agent_workspace-1-16aded_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-soak-0-agent_workspace-1-16aded_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-soak-0-agent_workspace-1-16aded-app-1 Creating \nfailed to create network wm-soak-0-agent_workspace-1-16aded_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+      },
+      {
+        "operation_type": "CLEANUP",
+        "status": "SUCCESS",
+        "exit_code": 0,
+        "stderr_tail": ""
+      }
+    ]
+  }
+}

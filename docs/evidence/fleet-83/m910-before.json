@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "profile": "trusted-project-unattended-v1",
+  "observed_at": "2026-11-25T02:44:38Z",
+  "os": "Linux",
+  "node": "mesflow-ThinkCentre-M910q",
+  "uid": 1000,
+  "executables": {
+    "git": "/usr/bin/git",
+    "gh": null,
+    "codex": "/home/mesflow/.local/bin/codex",
+    "claude": "/home/mesflow/.local/bin/claude",
+    "docker": "/usr/bin/docker",
+    "sudo": "/usr/bin/sudo"
+  },
+  "checks": {
+    "sudo": {
+      "code": "SUDO_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 10
+    },
+    "docker": {
+      "code": "ACL_DENIED",
+      "returncode": 1,
+      "elapsed_ms": 80
+    },
+    "gh_auth": {
+      "code": "CLI_UNSUPPORTED",
+      "returncode": null,
+      "elapsed_ms": 1
+    },
+    "gh_identity": {
+      "code": "CLI_UNSUPPORTED",
+      "returncode": null,
+      "elapsed_ms": 1
+    },
+    "github_push": {
+      "code": "CLI_UNSUPPORTED",
+      "returncode": null,
+      "elapsed_ms": 0
+    },
+    "codex_version": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 99,
+      "version": "0.165.0"
+    },
+    "claude_version": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 19,
+      "version": "2.1.326"
+    },
+    "codex_auth": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 262
+    },
+    "claude_auth": {
+      "code": "AUTH_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 483
+    },
+    "git_helper": {
+      "code": "AUTH_REQUIRED"
+    },
+    "workspace": {
+      "code": "Path is not a git repository root"
+    },
+    "disk": {
+      "code": "PASS",
+      "free_bytes": 12615176192,
+      "free_inodes": 6512343
+    },
+    "serial_adb": {
+      "code": "NOT_REQUIRED",
+      "reason": "Git/CLI task; no device access requested"
+    },
+    "admin": {
+      "code": "OWNER_BOOTSTRAP_REQUIRED",
+      "required_for_task": false
+    },
+    "managed_policy": {
+      "code": "OBSERVED",
+      "present": [],
+      "effective": "CLI_ENFORCED_NOT_OVERRIDDEN"
+    }
+  },
+  "write_canary": "NOT_RUN",
+  "execution": "NOT_DISPATCHED"
+}

@@ -1,0 +1,58 @@
+{
+  "/tmp/pytest-of-kimex/pytest-1268/test_invariant_cleanup_eligibl1/test.db": [
+    {
+      "operation_type": "PROVISION",
+      "status": "FAILED",
+      "exit_code": 1,
+      "stderr_tail": " Network wm-svc-cap2-agent_workspace-1-a5bf56_default Creating \n Network wm-svc-cap2-agent_workspace-1-a5bf56_default Creating \n Network wm-svc-cap2-agent_workspace-1-a5bf56_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-svc-cap2-agent_workspace-1-a5bf56_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-svc-cap2-agent_workspace-1-a5bf56-app-1 Creating \nfailed to create network wm-svc-cap2-agent_workspace-1-a5bf56_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+    }
+  ],
+  "/tmp/pytest-of-kimex/pytest-1268/test_invariant_cleanup_eligibl0/test.db": [
+    {
+      "operation_type": "PROVISION",
+      "status": "FAILED",
+      "exit_code": 1,
+      "stderr_tail": " Network wm-svc-cap-agent_workspace-1-e5f3ce_default Creating \n Network wm-svc-cap-agent_workspace-1-e5f3ce_default Creating \n Network wm-svc-cap-agent_workspace-1-e5f3ce_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-svc-cap-agent_workspace-1-e5f3ce_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-svc-cap-agent_workspace-1-e5f3ce-app-1 Creating \nfailed to create network wm-svc-cap-agent_workspace-1-e5f3ce_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+    }
+  ],
+  "/tmp/pytest-of-kimex/pytest-1268/test_task_detail_aggregates_ch0/test.db": [
+    {
+      "operation_type": "PROVISION",
+      "status": "FAILED",
+      "exit_code": 1,
+      "stderr_tail": " Network wm-agg-repo-agent_workspace-1-a8bfb2_default Creating \n Network wm-agg-repo-agent_workspace-1-a8bfb2_default Creating \n Network wm-agg-repo-agent_workspace-1-a8bfb2_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-agg-repo-agent_workspace-1-a8bfb2_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-agg-repo-agent_workspace-1-a8bfb2-app-1 Creating \nfailed to create network wm-agg-repo-agent_workspace-1-a8bfb2_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+    }
+  ],
+  "/tmp/pytest-of-kimex/pytest-1268/test_blocking_workspace_shown_0/test.db": [
+    {
+      "operation_type": "PROVISION",
+      "status": "FAILED",
+      "exit_code": 1,
+      "stderr_tail": " Network wm-block-repo-agent_workspace-1-c9ad9e_default Creating \n Network wm-block-repo-agent_workspace-1-c9ad9e_default Creating \n Network wm-block-repo-agent_workspace-1-c9ad9e_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-block-repo-agent_workspace-1-c9ad9e_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-block-repo-agent_workspace-1-c9ad9e-app-1 Creating \nfailed to create network wm-block-repo-agent_workspace-1-c9ad9e_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+    }
+  ],
+  "/tmp/pytest-of-kimex/pytest-1268/test_global_list_and_task_deta0/test.db": [
+    {
+      "operation_type": "PROVISION",
+      "status": "FAILED",
+      "exit_code": 1,
+      "stderr_tail": " Network wm-repo-b-agent_workspace-2-a4ca4a_default Creating \n Network wm-repo-b-agent_workspace-2-a4ca4a_default Creating \n Network wm-repo-b-agent_workspace-2-a4ca4a_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-repo-b-agent_workspace-2-a4ca4a_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-repo-b-agent_workspace-2-a4ca4a-app-1 Creating \nfailed to create network wm-repo-b-agent_workspace-2-a4ca4a_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+    }
+  ],
+  "/tmp/pytest-of-kimex/pytest-1268/test_integration_sandbox_shows0/test.db": [
+    {
+      "operation_type": "PROVISION",
+      "status": "FAILED",
+      "exit_code": 1,
+      "stderr_tail": " Network wm-repo-b2-agent_workspace-3-dcedc8_default Creating \n Network wm-repo-b2-agent_workspace-3-dcedc8_default Creating \n Network wm-repo-b2-agent_workspace-3-dcedc8_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-repo-b2-agent_workspace-3-dcedc8_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-repo-b2-agent_workspace-3-dcedc8-app-1 Creating \nfailed to create network wm-repo-b2-agent_workspace-3-dcedc8_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+    }
+  ],
+  "/tmp/pytest-of-kimex/pytest-1268/test_stopped_and_cleanup_count0/test.db": [
+    {
+      "operation_type": "PROVISION",
+      "status": "FAILED",
+      "exit_code": 1,
+      "stderr_tail": " Network wm-repo-stop-agent_workspace-1-78b91c_default Creating \n Network wm-repo-stop-agent_workspace-1-78b91c_default Creating \n Network wm-repo-stop-agent_workspace-1-78b91c_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-repo-stop-agent_workspace-1-78b91c_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-repo-stop-agent_workspace-1-78b91c-app-1 Creating \nfailed to create network wm-repo-stop-agent_workspace-1-78b91c_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+    }
+  ]
+}

@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="6" skipped="0" tests="103" time="154.537" timestamp="2026-11-25T11:40:44.516919+07:00" hostname="kimex-HP-EliteDesk-800-G4-DM-35W-Japan"><testcase classname="tests.test_spec_lifecycle" name="test_requirement_analysis_structured_result" time="1.058" /><testcase classname="tests.test_spec_lifecycle" name="test_requirement_analysis_ambiguity_classification" time="0.981" /><testcase classname="tests.test_spec_lifecycle" name="test_how_decision_never_creates_human_decision" time="0.993" /><testcase classname="tests.test_spec_lifecycle" name="test_what_decision_requires_human" time="0.981" /><testcase classname="tests.test_spec_lifecycle" name="test_requirement_analysis_creates_traceable_task" time="1.025" /><testcase classname="tests.test_spec_lifecycle" name="test_valid_spec_proposal_created" time="1.197" /><testcase classname="tests.test_spec_lifecycle" name="test_invalid_structured_output_rejected" time="1.038" /><testcase classname="tests.test_spec_lifecycle" name="test_duplicate_id_deterministically_remapped" time="1.047" /><testcase classname="tests.test_spec_lifecycle" name="test_updating_existing_feature_reuses_its_own_ids" time="1.025" /><testcase classname="tests.test_spec_lifecycle" name="test_new_feature_starts_at_version_one" time="1.030" /><testcase classname="tests.test_spec_lifecycle" name="test_duplicate_global_requirement_id_within_same_new_feature_never_reaches_registry_error" time="1.068" /><testcase classname="tests.test_spec_lifecycle" name="test_proposal_never_ready_when_validation_invalid" time="1.045" /><testcase classname="tests.test_spec_lifecycle" name="test_review_pass_marks_proposal_ready" time="1.096" /><testcase classname="tests.test_spec_lifecycle" name="test_review_needs_refinement" time="1.063" /><testcase classname="tests.test_spec_lifecycle" name="test_review_human_decision_required" time="1.073" /><testcase classname="tests.test_spec_lifecycle" name="test_logical_contradiction_finding_recorded" time="1.093" /><testcase classname="tests.test_spec_lifecycle" name="test_untestable_requirement_finding_recorded" time="1.127" /><testcase classname="tests.test_spec_lifecycle" name="test_review_does_not_receive_author_rationale" time="1.108" /><testcase classname="tests.test_spec_lifecycle" name="test_auto_refinement_creates_new_revision_and_history" time="1.093" /><testcase classname="tests.test_spec_lifecycle" name="test_bounded_refinement_loop_never_infinite" time="1.140" /><testcase classname="tests.test_spec_lifecycle" name="test_refinement_never_weakens_invariants_or_deletes_requirements" time="1.093" /><testcase classname="tests.test_spec_lifecycle" name="test_human_decision_blocks_apply" time="1.095" /><testcase classname="tests.test_spec_lifecycle" name="test_human_decision_resolution_preserved_and_resumes" time="1.064" /><testcase classname="tests.test_spec_lifecycle" name="test_apply_changes_baseline" time="1.165" /><testcase classname="tests.test_spec_lifecycle" name="test_failed_apply_leaves_canonical_tree_valid" time="1.083" /><testcase classname="tests.test_spec_lifecycle" name="test_cannot_apply_a_non_ready_proposal" time="1.148" /><testcase classname="tests.test_spec_lifecycle" name="test_plan_valid_requirement_ids_resolve" time="1.402" /><testcase classname="tests.test_spec_lifecycle" name="test_fictional_requirement_id_rejected" time="1.184" /><testcase classname="tests.test_spec_lifecycle" name="test_baseline_staleness_visible" time="1.191" /><testcase classname="tests.test_spec_lifecycle" name="test_plan_spec_drift_when_referenced_requirement_disappears" time="1.498" /><testcase classname="tests.test_spec_lifecycle" name="test_existing_manually_authored_specs_unaffected" time="1.063" /><testcase classname="tests.test_spec_lifecycle" name="test_spec_gate_unaffected_by_e5" time="1.158" /><testcase classname="tests.test_spec_lifecycle" name="test_planner_still_works_without_any_spec_proposal" time="1.325" /><testcase classname="tests.test_spec_lifecycle" name="test_manual_task_and_supervisor_unaffected" time="1.657" /><testcase classname="tests.test_spec_lifecycle" name="test_production_specs_root_never_touched_by_this_suite" time="0.001" /><testcase classname="tests.test_spec_registry" name="test_valid_spec_registry_loads" time="0.005" /><testcase classname="tests.test_spec_registry" name="test_missing_spec_manifest_raises" time="0.001" /><testcase classname="tests.test_spec_registry" name="test_missing_features_dir_raises" time="0.002" /><testcase classname="tests.test_spec_registry" name="test_duplicate_feature_id_raises" time="0.007" /><testcase classname="tests.test_spec_registry" name="test_duplicate_requirement_id_across_features_raises" time="0.007" /><testcase classname="tests.test_spec_registry" name="test_feature_missing_required_field_raises" time="0.005" /><testcase classname="tests.test_spec_registry" name="test_feature_invalid_status_raises" time="0.005" /><testcase classname="tests.test_spec_registry" name="test_feature_ids_for_resolves_across_kinds" time="0.005" /><testcase classname="tests.test_spec_registry" name="test_baseline_digest_is_deterministic_and_content_sensitive" time="0.027" /><testcase classname="tests.test_spec_registry" name="test_baseline_digest_never_writes_to_disk" time="0.006" /><testcase classname="tests.test_spec_supervisor_gate" name="test_spec_features_list_and_detail" time="1.081" /><testcase classname="tests.test_spec_supervisor_gate" name="test_spec_feature_detail_404_for_unknown_id" time="1.183" /><testcase classname="tests.test_spec_supervisor_gate" name="test_save_task_spec_rejects_unknown_classification" time="0.992" /><testcase classname="tests.test_spec_supervisor_gate" name="test_save_task_spec_round_trips_and_is_readable_via_gate_endpoint" time="1.126" /><testcase classname="tests.test_spec_supervisor_gate" name="test_legacy_task_with_no_spec_classification_starts_unaffected" time="1.434" /><testcase classname="tests.test_spec_supervisor_gate" name="test_behavior_change_without_spec_linkage_blocks_agent_start" time="1.282" /><testcase classname="tests.test_spec_supervisor_gate" name="test_behavior_change_with_valid_spec_linkage_starts_and_injects_spec_context" time="1.619" /><testcase classname="tests.test_spec_supervisor_gate" name="test_no_spec_linkage_means_no_spec_section_in_prompt" time="1.481" /><testcase classname="tests.test_state_invariants" name="test_invariant_merged_repo_has_no_blockers_and_no_workflow_actions" time="1.624" /><testcase classname="tests.test_state_invariants" name="test_invariant_task_done_implies_all_required_repos_merged" time="1.320" /><testcase classname="tests.test_state_invariants" name="test_invariant_never_done_while_a_required_repo_is_unmerged" time="1.688" /><testcase classname="tests.test_state_invariants" name="test_invariant_integration_ready_requires_head_equal_verified" time="1.767" /><testcase classname="tests.test_state_invariants" name="test_invariant_test_pass_verified_commit_equals_tested_commit" time="1.749" /><testcase classname="tests.test_state_invariants" name="test_invariant_cleanup_eligible_still_counts_toward_capacity" time="1.365"><failure message="assert 1 == 0">client = &lt;starlette.testclient.TestClient object at 0x749c44adcaf0&gt;
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x749c33f76090&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_invariant_cleanup_eligibl0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_invariant_cleanup_eligibl0/root/demo'))
+
+    def test_invariant_cleanup_eligible_still_counts_toward_capacity(client, sandboxable_repo_factory, git_repo):
+        """Sandbox CLEANUP_ELIGIBLE -&gt; may still be RUNNING during
+        retention; the real container is still up, so it must still count
+        against max_running (a capacity-enforcement bug otherwise: more
+        real containers could run than max_running allows)."""
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, "svc-cap", port_range=(21850, 21899))
+        register(client, repo, "svc-cap")
+        rid = [r for r in client.get("/api/repositories").json() if r["repo_name"] == "svc-cap"][0]["id"]
+        client.post("/api/tasks", data={"title": "Capacity check"}, follow_redirects=False)
+        tid = client.get("/api/tasks").json()[-1]["id"]
+        client.post(f"/api/tasks/{tid}/select")
+        client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "A", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        sb = client.get("/api/sandboxes").json()[-1]
+    
+        before = client.app.state.sandboxes.running_count()
+        client.app.state.db.execute("UPDATE sandboxes SET status='CLEANUP_ELIGIBLE' WHERE id=?", (sb["id"],))
+        after = client.app.state.sandboxes.running_count()
+&gt;       assert after == before  # CLEANUP_ELIGIBLE must count exactly like RUNNING did
+        ^^^^^^^^^^^^^^^^^^^^^^
+E       assert 1 == 0
+
+tests/test_state_invariants.py:248: AssertionError</failure></testcase><testcase classname="tests.test_state_invariants" name="test_invariant_cleanup_eligible_sandbox_is_not_reported_not_running" time="1.657" /><testcase classname="tests.test_state_invariants" name="test_invariant_live_session_cwd_matches_its_workspace_worktree" time="6.339" /><testcase classname="tests.test_state_invariants" name="test_invariant_at_most_one_live_session_per_workspace" time="11.496" /><testcase classname="tests.test_task_centric_ux" name="test_task_can_have_multiple_workspaces_across_multiple_repos" time="1.465" /><testcase classname="tests.test_task_centric_ux" name="test_failed_workspace_does_not_roll_back_task_or_successful_workspace" time="1.068" /><testcase classname="tests.test_task_centric_ux" name="test_legacy_workspace_can_attach_to_existing_task_without_new_worktree" time="1.079" /><testcase classname="tests.test_task_centric_ux" name="test_create_task_from_workspace_prefills_title_and_attaches_without_new_worktree" time="1.092" /><testcase classname="tests.test_task_centric_ux" name="test_kanban_maps_task_states_to_correct_columns" time="1.943" /><testcase classname="tests.test_task_centric_ux" name="test_task_detail_aggregates_child_state_and_never_duplicates_it" time="1.679"><failure message="KeyError: 'backend_url'">client = &lt;starlette.testclient.TestClient object at 0x749c111016a0&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_task_detail_aggregates_ch0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_task_detail_aggregates_ch0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x749c111defb0&gt;
+cleanup_sandboxes = [1]
+
+    def test_task_detail_aggregates_child_state_and_never_duplicates_it(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, "agg-repo", port_range=(21920, 21939))
+        register(client, repo, "agg-repo")
+        rid = client.get("/api/repositories").json()[0]["id"]
+        post_multi(client, "/api/tasks/new-with-workspace", [
+            ("title", "Aggregate task"), ("description", ""),
+            ("ws_repository_id", str(rid)), ("ws_agent", "claude"), ("ws_role", "Backend"), ("ws_base_branch", "main"), ("ws_sandbox_profile", "backend"),
+        ])
+        tid = client.get("/api/tasks").json()[0]["id"]
+        sb = client.get("/api/sandboxes").json()[0]
+        cleanup_sandboxes.append(sb["id"])
+    
+        page = client.get(f"/tasks/{tid}").text
+        outputs = client.app.state.sandboxes.outputs(sb["id"])
+&gt;       assert outputs["backend_url"] in page  # same Sandbox record, no duplicated URL state
+               ^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'backend_url'
+
+tests/test_task_centric_ux.py:222: KeyError</failure></testcase><testcase classname="tests.test_task_centric_ux" name="test_test_readiness_no_partial_yes" time="2.073" /><testcase classname="tests.test_task_centric_ux" name="test_blocking_workspace_shown_and_next_action_progresses" time="2.186"><failure message="AssertionError: assert 'REBUILD_SANDBOX' == 'START_QA'&#10;  &#10;  - START_QA&#10;  + REBUILD_SANDBOX">client = &lt;starlette.testclient.TestClient object at 0x749c33f9cd10&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_blocking_workspace_shown_0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_blocking_workspace_shown_0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x749c015347d0&gt;
+cleanup_sandboxes = [1]
+
+    def test_blocking_workspace_shown_and_next_action_progresses(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """The Task-level next_action (TaskDecisionService) progresses through
+        START_BUILDER -&gt; SUBMIT_FOR_REVIEW -&gt; START_REVIEW -&gt; CREATE_INTEGRATION
+        as the one Builder Workspace moves through the gate model. (The
+        older per-sandbox "Run Tests"/"Open App and Verify" steps still exist,
+        but now live only on the Workspace's own Runtime section, a separate
+        concern from this Task-level gate engine -- section 39.)"""
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, "block-repo", port_range=(21960, 21979))
+        register(client, repo, "block-repo")
+        rid = client.get("/api/repositories").json()[0]["id"]
+        r = post_multi(client, "/api/tasks/new-with-workspace", [
+            ("title", "Block task"), ("description", ""),
+            ("ws_repository_id", str(rid)), ("ws_agent", "codex"), ("ws_role", "Backend"), ("ws_base_branch", "main"), ("ws_sandbox_profile", "backend"),
+        ], follow_redirects=False)
+        tid = int(r.headers["location"].split("/")[-1])
+        w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
+        for sb in client.get("/api/sandboxes").json(): cleanup_sandboxes.append(sb["id"])
+    
+        page = client.get(f"/tasks/{tid}").text
+        assert "codex" in page
+        d = client.get(f"/api/tasks/{tid}/decision").json()
+        assert d["next_action"]["action"] == "START_BUILDER"
+    
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"})
+        d = client.get(f"/api/tasks/{tid}/decision").json()
+        assert d["next_action"]["action"] == "SUBMIT_FOR_REVIEW"  # builder READY, no review started
+    
+        client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+        d = client.get(f"/api/tasks/{tid}/decision").json()
+        assert d["next_action"]["action"] == "START_REVIEW"  # review in progress
+    
+        client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"})
+        d = client.get(f"/api/tasks/{tid}/decision").json()
+&gt;       assert d["next_action"]["action"] == "START_QA"  # NORMAL risk, review PASS -- Runtime Verification next (sandbox already auto-created)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert 'REBUILD_SANDBOX' == 'START_QA'
+E         
+E         - START_QA
+E         + REBUILD_SANDBOX
+
+tests/test_task_centric_ux.py:298: AssertionError</failure></testcase><testcase classname="tests.test_task_centric_ux" name="test_ready_workspace_never_makes_task_ready_for_main" time="1.438" /><testcase classname="tests.test_task_centric_ux" name="test_create_integration_gated_with_reason_when_not_all_ready" time="2.827" /><testcase classname="tests.test_task_centric_ux" name="test_ready_for_main_task_enters_ready_for_main_column" time="8.185" /><testcase classname="tests.test_task_centric_ux" name="test_merged_task_enters_done_column" time="1.732" /><testcase classname="tests.test_task_lifecycle_engine" name="test_01_backlog_no_workspace" time="0.984" /><testcase classname="tests.test_task_lifecycle_engine" name="test_02_selected_no_brief_no_workspace" time="1.281" /><testcase classname="tests.test_task_lifecycle_engine" name="test_03_brief_complete_no_workspace" time="1.338" /><testcase classname="tests.test_task_lifecycle_engine" name="test_04_workspace_created_not_submitted" time="1.255" /><testcase classname="tests.test_task_lifecycle_engine" name="test_05_submitted_no_review" time="1.690" /><testcase classname="tests.test_task_lifecycle_engine" name="test_06_review_running" time="1.381" /><testcase classname="tests.test_task_lifecycle_engine" name="test_07_low_risk_review_pass_is_ready_for_main" time="1.413" /><testcase classname="tests.test_task_lifecycle_engine" name="test_08_normal_risk_review_pass_needs_integration" time="1.633" /><testcase classname="tests.test_task_lifecycle_engine" name="test_09_fix_required_blocks_task" time="1.457" /><testcase classname="tests.test_task_lifecycle_engine" name="test_10_high_risk_requires_qa_before_integration" time="1.419" /><testcase classname="tests.test_task_lifecycle_engine" name="test_11_high_risk_qa_pass_moves_to_integration" time="1.725" /><testcase classname="tests.test_task_lifecycle_engine" name="test_12_cross_repo_partial_merge_stays_active" time="2.183" /><testcase classname="tests.test_task_lifecycle_engine" name="test_13_all_required_merges_done_reaches_done" time="1.917" /><testcase classname="tests.test_task_lifecycle_engine" name="test_14_cancelled_task" time="1.338" /><testcase classname="tests.test_task_lifecycle_engine" name="test_risk_policy_gate_requirements[LOW-False-False]" time="1.617" /><testcase classname="tests.test_task_lifecycle_engine" name="test_risk_policy_gate_requirements[NORMAL-True-True]" time="1.678" /><testcase classname="tests.test_task_lifecycle_engine" name="test_risk_policy_gate_requirements[HIGH-True-True]" time="1.723" /><testcase classname="tests.test_task_lifecycle_engine" name="test_project_default_risk_profile_is_normal_when_unspecified" time="1.150" /><testcase classname="tests.test_task_lifecycle_engine" name="test_task_detail_gate_checklist_marks_skipped_gates_not_required_not_pass" time="1.422" /><testcase classname="tests.test_task_lifecycle_engine" name="test_review_pass_stale_after_new_commit_on_branch" time="1.694" /><testcase classname="tests.test_task_lifecycle_engine" name="test_qa_pass_stale_after_brief_version_bump" time="2.122" /><testcase classname="tests.test_task_lifecycle_engine" name="test_integration_not_current_blocks_ready_for_main" time="1.627" /><testcase classname="tests.test_task_lifecycle_engine" name="test_brief_bump_after_submit_does_not_retroactively_validate_old_review" time="1.756" /><testcase classname="tests.test_task_lifecycle_engine" name="test_brief_save_without_content_change_does_not_bump_version" time="1.278" /><testcase classname="tests.test_task_lifecycle_engine" name="test_fix_kiosk_session_high_risk_cross_repo_golden_flow" time="3.311" /><testcase classname="tests.test_task_sandbox_views" name="test_global_list_and_task_detail_agree_on_one_sandbox_each" time="2.949"><failure message="AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}&#10;assert 'FAILED' == 'RUNNING'&#10;  &#10;  - RUNNING&#10;  + FAILED">client = &lt;starlette.testclient.TestClient object at 0x749b62acb130&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_global_list_and_task_deta0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_global_list_and_task_deta0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x749b618b90c0&gt;
+cleanup_sandboxes = [1]
+
+    def test_global_list_and_task_detail_agree_on_one_sandbox_each(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """Items 1, 2, 3, 4, 5, 9, 10, plus the REAL_UI_VERIFICATION Task A / Task B split."""
+        root, _ = git_repo
+        tid_a, rid_a, _, ws_a, sb_a = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-a", "Task A", (21500, 21519))
+        cleanup_sandboxes.append(sb_a["id"])
+&gt;       tid_b, rid_b, _, ws_b, sb_b = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-b", "Task B", (21520, 21539))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_task_sandbox_views.py:67: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = &lt;starlette.testclient.TestClient object at 0x749b62acb130&gt;
+root = PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_global_list_and_task_deta0/root')
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x749b618b90c0&gt;
+repo_name = 'repo-b', task_title = 'Task B', port_range = (21520, 21539)
+
+    def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, task_title, port_range):
+        """One Task with one Agent Workspace whose profile resolves to a real,
+        running sandbox -- the minimal disposable fixture every scenario below
+        builds on."""
+        repo = sandboxable_repo_factory(root, repo_name, port_range=port_range)
+        register(client, repo, repo_name)
+        rid = [r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == repo_name][0]
+        r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
+        assert r.status_code == 303
+        tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+        client.post(f"/api/tasks/{tid}/select")
+        r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
+        sb = [s for s in client.get("/api/sandboxes").json() if s["owner_type"] == "AGENT_WORKSPACE" and s["owner_id"] == ws["id"]][0]
+&gt;       assert sb["status"] == "RUNNING", sb
+E       AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_task_sandbox_views.py:50: AssertionError</failure></testcase><testcase classname="tests.test_task_sandbox_views" name="test_integration_sandbox_shows_multiple_source_repos_in_task_detail" time="2.537"><failure message="AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 3, 'owner_type': 'AGENT_WORKSPACE', ...}&#10;assert 'FAILED' == 'RUNNING'&#10;  &#10;  - RUNNING&#10;  + FAILED">client = &lt;starlette.testclient.TestClient object at 0x749b60ba4f30&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_integration_sandbox_shows0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_integration_sandbox_shows0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x749b60be33d0&gt;
+cleanup_sandboxes = []
+
+    def test_integration_sandbox_shows_multiple_source_repos_in_task_detail(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """Item 6, plus staleness (item 7) and the C = Task A + C, Task B
+        untouched half of REAL_UI_VERIFICATION."""
+        root, _ = git_repo
+        backend = sandboxable_repo_factory(root, "backend-repo", port_range=(21540, 21559))
+        client_repo = root / "client-repo"
+        client_repo.mkdir()
+        run(client_repo, "git", "init", "-b", "main")
+        run(client_repo, "git", "config", "user.email", "t@t"); run(client_repo, "git", "config", "user.name", "t")
+        (client_repo / "PROJECT.yaml").write_text(
+            "schema_version: 1\nproject: {code: client-repo}\nsource: {root: .}\n"
+            "commands:\n  preflight: {command: 'true'}\n  test: {command: 'true'}\nci: {required: [preflight, test]}\n"
+        )
+        (client_repo / "README.md").write_text("client base\n")
+        run(client_repo, "git", "add", "."); run(client_repo, "git", "commit", "-m", "base")
+    
+        register(client, backend, "backend-repo"); register(client, client_repo, "client-repo")
+        repos = {r["repo_name"]: r["id"] for r in client.get("/api/repositories").json()}
+    
+        client.post("/api/tasks", data={"title": "Task A cross-repo"}, follow_redirects=False)
+        tid_a = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == "Task A cross-repo"][0]
+        client.post(f"/api/tasks/{tid_a}/select")
+        r = client.post(f"/api/tasks/{tid_a}/workspaces", data={"repository_id": repos["backend-repo"], "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        backend_ws = client.get("/api/workspaces").json()[-1]
+        (client.app.state.git.validate_worktree(backend_ws["worktree_path"]) / "feature.txt").write_text("backend feature\n")
+        run(backend_ws["worktree_path"], "git", "add", "."); run(backend_ws["worktree_path"], "git", "commit", "-m", "backend feature")
+    
+        r = client.post(f"/api/tasks/{tid_a}/workspaces", data={"repository_id": repos["client-repo"], "agent": "claude", "role": "Client", "base_branch": "main", "sandbox_profile": ""}, follow_redirects=False)
+        assert r.status_code == 303
+        client_ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == repos["client-repo"]][0]
+    
+        for w in (backend_ws, client_ws):
+            assert client.post(f"/api/workspaces/{w['id']}/ready", follow_redirects=False).status_code == 303
+            client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+            assert client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"}, follow_redirects=False).status_code == 303
+    
+        # unrelated Task B, must stay untouched by anything below
+&gt;       tid_b, rid_b, _, ws_b, sb_b = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-b2", "Task B unrelated", (21560, 21579))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_task_sandbox_views.py:151: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = &lt;starlette.testclient.TestClient object at 0x749b60ba4f30&gt;
+root = PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_integration_sandbox_shows0/root')
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x749b60be33d0&gt;
+repo_name = 'repo-b2', task_title = 'Task B unrelated'
+port_range = (21560, 21579)
+
+    def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, task_title, port_range):
+        """One Task with one Agent Workspace whose profile resolves to a real,
+        running sandbox -- the minimal disposable fixture every scenario below
+        builds on."""
+        repo = sandboxable_repo_factory(root, repo_name, port_range=port_range)
+        register(client, repo, repo_name)
+        rid = [r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == repo_name][0]
+        r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
+        assert r.status_code == 303
+        tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+        client.post(f"/api/tasks/{tid}/select")
+        r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
+        sb = [s for s in client.get("/api/sandboxes").json() if s["owner_type"] == "AGENT_WORKSPACE" and s["owner_id"] == ws["id"]][0]
+&gt;       assert sb["status"] == "RUNNING", sb
+E       AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 3, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_task_sandbox_views.py:50: AssertionError</failure></testcase><testcase classname="tests.test_task_sandbox_views" name="test_stopped_and_cleanup_countdown_state_consistent_everywhere" time="1.393"><failure message="AssertionError: {'id': 1, 'task_id': 1, 'repository_id': 1, 'owner_type': 'AGENT_WORKSPACE', ...}&#10;assert 'FAILED' == 'RUNNING'&#10;  &#10;  - RUNNING&#10;  + FAILED">client = &lt;starlette.testclient.TestClient object at 0x749b5bd72250&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_stopped_and_cleanup_count0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_stopped_and_cleanup_count0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x749b5ac7cd50&gt;
+cleanup_sandboxes = []
+
+    def test_stopped_and_cleanup_countdown_state_consistent_everywhere(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """Items 8 and 9 (the stop/cleanup half): a stopped sandbox and a
+        scheduled cleanup countdown must read identically in both views."""
+        root, _ = git_repo
+&gt;       tid, rid, _, ws, sb = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-stop", "Task Stop", (21580, 21599))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_task_sandbox_views.py:196: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = &lt;starlette.testclient.TestClient object at 0x749b5bd72250&gt;
+root = PosixPath('/tmp/pytest-of-kimex/pytest-1268/test_stopped_and_cleanup_count0/root')
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x749b5ac7cd50&gt;
+repo_name = 'repo-stop', task_title = 'Task Stop', port_range = (21580, 21599)
+
+    def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, task_title, port_range):
+        """One Task with one Agent Workspace whose profile resolves to a real,
+        running sandbox -- the minimal disposable fixture every scenario below
+        builds on."""
+        repo = sandboxable_repo_factory(root, repo_name, port_range=port_range)
+        register(client, repo, repo_name)
+        rid = [r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == repo_name][0]
+        r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
+        assert r.status_code == 303
+        tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+        client.post(f"/api/tasks/{tid}/select")
+        r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
+        sb = [s for s in client.get("/api/sandboxes").json() if s["owner_type"] == "AGENT_WORKSPACE" and s["owner_id"] == ws["id"]][0]
+&gt;       assert sb["status"] == "RUNNING", sb
+E       AssertionError: {'id': 1, 'task_id': 1, 'repository_id': 1, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_task_sandbox_views.py:50: AssertionError</failure></testcase><testcase classname="tests.test_task_sandbox_views" name="test_empty_states_distinguish_not_configured_from_not_yet_created" time="2.386" /></testsuite></testsuites>

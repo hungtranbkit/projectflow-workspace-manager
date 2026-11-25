@@ -1,0 +1,153 @@
+...............................F...F..........................F......... [ 84%]
+.............                                                            [100%]
+=================================== FAILURES ===================================
+_________________ test_two_agent_sandboxes_are_fully_isolated __________________
+
+client = <starlette.testclient.TestClient object at 0x73dc16bbbf00>
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_two_agent_sandboxes_are_f0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_two_agent_sandboxes_are_f0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x73dc15921d20>
+
+    def test_two_agent_sandboxes_are_fully_isolated(client, git_repo, sandboxable_repo_factory):
+        """docs section 61 Test 1: different ports, different compose project,
+        isolated network, both healthy independently."""
+        root, _ = git_repo
+        repo_a = sandboxable_repo_factory(root, "svc-a", port_range=(21100, 21149))
+        repo_b = sandboxable_repo_factory(root, "svc-b", port_range=(21150, 21199))
+        register(client, repo_a); register(client, repo_b)
+        repos = {r["repo_name"]: r["id"] for r in client.get("/api/repositories").json()}
+        client.post("/api/tasks", data={"title": "Isolation check"}, follow_redirects=False)
+        tid = client.get("/api/tasks").json()[0]["id"]
+        client.post(f"/api/tasks/{tid}/select")
+    
+        create_task_workspace(client, tid, repos["svc-a"], agent="codex", role="A")
+        create_task_workspace(client, tid, repos["svc-b"], agent="claude", role="B")
+        sandboxes = client.get("/api/sandboxes").json()
+        assert len(sandboxes) == 2
+        try:
+            assert sandboxes[0]["compose_project"] != sandboxes[1]["compose_project"]
+            for sb in sandboxes:
+>               assert sb["status"] == "RUNNING"
+E               AssertionError: assert 'FAILED' == 'RUNNING'
+E                 
+E                 - RUNNING
+E                 + FAILED
+
+tests/test_sandbox_docker.py:82: AssertionError
+_____________ test_reset_data_does_not_touch_an_unrelated_sandbox ______________
+
+client = <starlette.testclient.TestClient object at 0x73dc0554e9c0>
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_reset_data_does_not_touch0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_reset_data_does_not_touch0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x73dc055e2090>
+cleanup_sandboxes = [1, 2]
+
+    def test_reset_data_does_not_touch_an_unrelated_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        sb1 = make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, (22340, 22359), "reset-a")
+>       sb2 = make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, (22360, 22379), "reset-b")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_sandbox_reset_data.py:105: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <starlette.testclient.TestClient object at 0x73dc0554e9c0>
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_reset_data_does_not_touch0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_reset_data_does_not_touch0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x73dc055e2090>
+cleanup_sandboxes = [1, 2], port_range = (22360, 22379), name = 'reset-b'
+
+    def make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, port_range, name):
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, name, port_range=port_range)
+        register(client, repo, name)
+        rid = next(r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == name)
+        client.post("/api/tasks", data={"title": f"{name} task", "risk_profile": "LOW"}, follow_redirects=False)
+        tid = [t for t in client.get("/api/tasks").json() if t["title"] == f"{name} task"][0]["id"]
+        client.post(f"/api/tasks/{tid}/select")
+        client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        sb = [s for s in client.get("/api/sandboxes").json() if s["repository_id"] == rid][0]
+        cleanup_sandboxes.append(sb["id"])
+        row = wait_status(client, sb["id"], ("RUNNING", "UNHEALTHY", "FAILED"))
+>       assert row["status"] == "RUNNING", row
+E       AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_sandbox_reset_data.py:63: AssertionError
+___________ test_multi_repo_task_session_sandbox_soak_leaves_no_leak ___________
+
+client = <starlette.testclient.TestClient object at 0x73db84b56470>
+tmp_path = PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_multi_repo_task_session_s0')
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x73db84b894e0>
+
+    def test_multi_repo_task_session_sandbox_soak_leaves_no_leak(client, tmp_path, sandboxable_repo_factory):
+        # `client` (via the `git_repo` fixture) already created
+        # tmp_path/"root"/"demo" as the workspace root -- reuse that same
+        # root rather than re-mkdir'ing it.
+        root = client.app.state.settings.root
+        N = 3
+    
+        before_containers = _wm_container_ids()
+        worktree_root = client.app.state.git.worktree_root
+        before_worktree_dirs = set(worktree_root.glob("*")) if worktree_root.is_dir() else set()
+    
+        client.app.state.agent_sessions.launchers = {"codex": AgentLauncher("Codex", "bash", ("-c", "true"))}
+    
+        sandbox_ids, workspace_ids, session_ids = [], [], []
+        for i in range(N):
+            repo = sandboxable_repo_factory(root, f"soak-{i}", port_range=(21200 + i * 10, 21209 + i * 10))
+            rid = register(client, repo)
+            r = client.post("/api/tasks", data={"title": f"Soak task {i}"}, follow_redirects=False)
+            assert r.status_code == 303, r.text
+            tid = int(r.headers["location"].split("/")[-1])
+            client.post(f"/api/tasks/{tid}/select")
+            r = client.post(f"/api/tasks/{tid}/workspaces",
+                             data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"},
+                             follow_redirects=False)
+            assert r.status_code == 303, r.text
+            w = client.get("/api/workspaces").json()[-1]
+            workspace_ids.append(w["id"])
+    
+            sb = [s for s in client.get("/api/sandboxes").json() if s["owner_id"] == w["id"]][0]
+>           assert sb["status"] == "RUNNING", sb
+E           AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}
+E           assert 'FAILED' == 'RUNNING'
+E             
+E             - RUNNING
+E             + FAILED
+
+tests/test_soak_multi_repo_resource_leak.py:90: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_review_fix_loop.py: 308 warnings
+tests/test_runtime_dependency_staleness.py: 11 warnings
+tests/test_sandbox_dies_self_heals.py: 22 warnings
+tests/test_sandbox_docker.py: 22 warnings
+tests/test_sandbox_reset_data.py: 33 warnings
+tests/test_sandbox_stuck_busy_after_restart.py: 33 warnings
+tests/test_sidebar_nav.py: 77 warnings
+tests/test_simple_mode.py: 154 warnings
+tests/test_soak_multi_repo_resource_leak.py: 11 warnings
+tests/test_spec_compliance.py: 88 warnings
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_review_fix_loop.py::test_fix_required_creates_fix_task_transfers_worktree
+tests/test_review_fix_loop.py::test_finding_from_original_task_resolved_after_fix_task_commit
+tests/test_soak_multi_repo_resource_leak.py::test_multi_repo_task_session_sandbox_soak_leaves_no_leak
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=981294) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+tests/test_simple_mode.py::test_mode_query_param_sets_cookie_and_persists
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/starlette/testclient.py:518: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_sandbox_docker.py::test_two_agent_sandboxes_are_fully_isolated
+FAILED tests/test_sandbox_reset_data.py::test_reset_data_does_not_touch_an_unrelated_sandbox
+FAILED tests/test_soak_multi_repo_resource_leak.py::test_multi_repo_task_session_sandbox_soak_leaves_no_leak
+3 failed, 82 passed, 3 deselected, 775 warnings in 116.14s (0:01:56)

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="8.168" timestamp="2026-11-25T11:56:00.559092+07:00" hostname="kimex-HP-EliteDesk-800-G4-DM-35W-Japan"><testcase classname="tests.test_sandbox_docker" name="test_two_agent_sandboxes_are_fully_isolated" time="8.025"><failure message="AssertionError: assert 'UNHEALTHY' == 'RUNNING'&#10;  &#10;  - RUNNING&#10;  + UNHEALTHY">client = &lt;starlette.testclient.TestClient object at 0x7c515fd256a0&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1274/test_two_agent_sandboxes_are_f0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1274/test_two_agent_sandboxes_are_f0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x7c516d3a0ca0&gt;
+
+    def test_two_agent_sandboxes_are_fully_isolated(client, git_repo, sandboxable_repo_factory):
+        """docs section 61 Test 1: different ports, different compose project,
+        isolated network, both healthy independently."""
+        root, _ = git_repo
+        repo_a = sandboxable_repo_factory(root, "svc-a", port_range=(21100, 21149))
+        repo_b = sandboxable_repo_factory(root, "svc-b", port_range=(21150, 21199))
+        _configure_isolated_fixture_networks(repo_a, repo_b)
+        register(client, repo_a); register(client, repo_b)
+        repos = {r["repo_name"]: r["id"] for r in client.get("/api/repositories").json()}
+        client.post("/api/tasks", data={"title": "Isolation check"}, follow_redirects=False)
+        tid = client.get("/api/tasks").json()[0]["id"]
+        client.post(f"/api/tasks/{tid}/select")
+    
+        create_task_workspace(client, tid, repos["svc-a"], agent="codex", role="A")
+        create_task_workspace(client, tid, repos["svc-b"], agent="claude", role="B")
+        sandboxes = client.get("/api/sandboxes").json()
+        assert len(sandboxes) == 2
+        try:
+            assert sandboxes[0]["compose_project"] != sandboxes[1]["compose_project"]
+            for sb in sandboxes:
+&gt;               assert sb["status"] == "RUNNING"
+E               AssertionError: assert 'UNHEALTHY' == 'RUNNING'
+E                 
+E                 - RUNNING
+E                 + UNHEALTHY
+
+tests/test_sandbox_docker.py:123: AssertionError</failure></testcase></testsuite></testsuites>

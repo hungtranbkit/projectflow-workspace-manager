@@ -1,0 +1,159 @@
+........................................................................ [ 69%]
+...........................FF..                                          [100%]
+=================================== FAILURES ===================================
+__________ test_global_list_and_task_detail_agree_on_one_sandbox_each __________
+
+client = <starlette.testclient.TestClient object at 0x76201ef638a0>
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_global_list_and_task_deta0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_global_list_and_task_deta0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x76201dc7c250>
+cleanup_sandboxes = [1]
+
+    def test_global_list_and_task_detail_agree_on_one_sandbox_each(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """Items 1, 2, 3, 4, 5, 9, 10, plus the REAL_UI_VERIFICATION Task A / Task B split."""
+        root, _ = git_repo
+        tid_a, rid_a, _, ws_a, sb_a = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-a", "Task A", (21500, 21519))
+        cleanup_sandboxes.append(sb_a["id"])
+>       tid_b, rid_b, _, ws_b, sb_b = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-b", "Task B", (21520, 21539))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_task_sandbox_views.py:67: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <starlette.testclient.TestClient object at 0x76201ef638a0>
+root = PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_global_list_and_task_deta0/root')
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x76201dc7c250>
+repo_name = 'repo-b', task_title = 'Task B', port_range = (21520, 21539)
+
+    def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, task_title, port_range):
+        """One Task with one Agent Workspace whose profile resolves to a real,
+        running sandbox -- the minimal disposable fixture every scenario below
+        builds on."""
+        repo = sandboxable_repo_factory(root, repo_name, port_range=port_range)
+        register(client, repo, repo_name)
+        rid = [r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == repo_name][0]
+        r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
+        assert r.status_code == 303
+        tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+        client.post(f"/api/tasks/{tid}/select")
+        r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
+        sb = [s for s in client.get("/api/sandboxes").json() if s["owner_type"] == "AGENT_WORKSPACE" and s["owner_id"] == ws["id"]][0]
+>       assert sb["status"] == "RUNNING", sb
+E       AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_task_sandbox_views.py:50: AssertionError
+_____ test_integration_sandbox_shows_multiple_source_repos_in_task_detail ______
+
+client = <starlette.testclient.TestClient object at 0x76201d1d0270>
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_integration_sandbox_shows0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_integration_sandbox_shows0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x76201c884460>
+cleanup_sandboxes = []
+
+    def test_integration_sandbox_shows_multiple_source_repos_in_task_detail(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        """Item 6, plus staleness (item 7) and the C = Task A + C, Task B
+        untouched half of REAL_UI_VERIFICATION."""
+        root, _ = git_repo
+        backend = sandboxable_repo_factory(root, "backend-repo", port_range=(21540, 21559))
+        client_repo = root / "client-repo"
+        client_repo.mkdir()
+        run(client_repo, "git", "init", "-b", "main")
+        run(client_repo, "git", "config", "user.email", "t@t"); run(client_repo, "git", "config", "user.name", "t")
+        (client_repo / "PROJECT.yaml").write_text(
+            "schema_version: 1\nproject: {code: client-repo}\nsource: {root: .}\n"
+            "commands:\n  preflight: {command: 'true'}\n  test: {command: 'true'}\nci: {required: [preflight, test]}\n"
+        )
+        (client_repo / "README.md").write_text("client base\n")
+        run(client_repo, "git", "add", "."); run(client_repo, "git", "commit", "-m", "base")
+    
+        register(client, backend, "backend-repo"); register(client, client_repo, "client-repo")
+        repos = {r["repo_name"]: r["id"] for r in client.get("/api/repositories").json()}
+    
+        client.post("/api/tasks", data={"title": "Task A cross-repo"}, follow_redirects=False)
+        tid_a = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == "Task A cross-repo"][0]
+        client.post(f"/api/tasks/{tid_a}/select")
+        r = client.post(f"/api/tasks/{tid_a}/workspaces", data={"repository_id": repos["backend-repo"], "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        backend_ws = client.get("/api/workspaces").json()[-1]
+        (client.app.state.git.validate_worktree(backend_ws["worktree_path"]) / "feature.txt").write_text("backend feature\n")
+        run(backend_ws["worktree_path"], "git", "add", "."); run(backend_ws["worktree_path"], "git", "commit", "-m", "backend feature")
+    
+        r = client.post(f"/api/tasks/{tid_a}/workspaces", data={"repository_id": repos["client-repo"], "agent": "claude", "role": "Client", "base_branch": "main", "sandbox_profile": ""}, follow_redirects=False)
+        assert r.status_code == 303
+        client_ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == repos["client-repo"]][0]
+    
+        for w in (backend_ws, client_ws):
+            assert client.post(f"/api/workspaces/{w['id']}/ready", follow_redirects=False).status_code == 303
+            client.post(f"/api/workspaces/{w['id']}/start-review", data={"reviewer_agent": "claude"})
+            assert client.post(f"/api/workspaces/{w['id']}/submit-review", data={"result": "PASS"}, follow_redirects=False).status_code == 303
+    
+        # unrelated Task B, must stay untouched by anything below
+>       tid_b, rid_b, _, ws_b, sb_b = make_task_with_sandbox(client, root, sandboxable_repo_factory, "repo-b2", "Task B unrelated", (21560, 21579))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_task_sandbox_views.py:151: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <starlette.testclient.TestClient object at 0x76201d1d0270>
+root = PosixPath('/tmp/pytest-of-kimex/pytest-1272/test_integration_sandbox_shows0/root')
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x76201c884460>
+repo_name = 'repo-b2', task_title = 'Task B unrelated'
+port_range = (21560, 21579)
+
+    def make_task_with_sandbox(client, root, sandboxable_repo_factory, repo_name, task_title, port_range):
+        """One Task with one Agent Workspace whose profile resolves to a real,
+        running sandbox -- the minimal disposable fixture every scenario below
+        builds on."""
+        repo = sandboxable_repo_factory(root, repo_name, port_range=port_range)
+        register(client, repo, repo_name)
+        rid = [r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == repo_name][0]
+        r = client.post("/api/tasks", data={"title": task_title}, follow_redirects=False)
+        assert r.status_code == 303
+        tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == task_title][0]
+        client.post(f"/api/tasks/{tid}/select")
+        r = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        assert r.status_code == 303
+        ws = [w for w in client.get("/api/workspaces").json() if w["repository_id"] == rid][0]
+        sb = [s for s in client.get("/api/sandboxes").json() if s["owner_type"] == "AGENT_WORKSPACE" and s["owner_id"] == ws["id"]][0]
+>       assert sb["status"] == "RUNNING", sb
+E       AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 3, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_task_sandbox_views.py:50: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_spec_lifecycle.py: 374 warnings
+tests/test_spec_supervisor_gate.py: 88 warnings
+tests/test_state_invariants.py: 99 warnings
+tests/test_task_centric_ux.py: 132 warnings
+tests/test_task_lifecycle_engine.py: 275 warnings
+tests/test_task_sandbox_views.py: 44 warnings
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_spec_lifecycle.py::test_manual_task_and_supervisor_unaffected
+tests/test_spec_supervisor_gate.py::test_legacy_task_with_no_spec_classification_starts_unaffected
+tests/test_spec_supervisor_gate.py::test_behavior_change_with_valid_spec_linkage_starts_and_injects_spec_context
+tests/test_spec_supervisor_gate.py::test_no_spec_linkage_means_no_spec_section_in_prompt
+tests/test_state_invariants.py::test_invariant_live_session_cwd_matches_its_workspace_worktree
+tests/test_state_invariants.py::test_invariant_at_most_one_live_session_per_workspace
+tests/test_state_invariants.py::test_invariant_at_most_one_live_session_per_workspace
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=1003285) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_task_sandbox_views.py::test_global_list_and_task_detail_agree_on_one_sandbox_each
+FAILED tests/test_task_sandbox_views.py::test_integration_sandbox_shows_multiple_source_repos_in_task_detail
+2 failed, 101 passed, 6 deselected, 1031 warnings in 164.70s (0:02:44)

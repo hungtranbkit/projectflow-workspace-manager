@@ -1,0 +1,990 @@
+{
+  "scope": "pytest -q -o addopts= -k 'not real', all collected files in16 sequential fresh processes, affected batches rerun; PYTHONPATH removed, venv PATH prepended",
+  "runtime_code_head": "94164c453d6b95c6d3b1e61f565db46604ab9172",
+  "final_fixture_head": "958f351aca3d401141d1b1a28d8d70da798de460",
+  "source_note": "Batches1-8 began before final canary-policy/classification delta; affected fleet tests ran after that delta in batch10 and focused70-test rerun. No later runtime edits. Batch15/16 reruns use unified registry, real wizard cleanup and ordinary bridge fixtures; final13/14 additionally include collision-checked distinct-network fixture with platform prerequisite.",
+  "selected_tests": 1595,
+  "observed_tests": 1595,
+  "missing": [],
+  "unexpected": [],
+  "duplicates": 0,
+  "tests": 1595,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "passed": 1595,
+  "warnings": 11721,
+  "skips": [],
+  "effective_wall_seconds": 2050.854,
+  "effective_junit_seconds": 1828.634,
+  "effective_batches": [
+    {
+      "batch": 1,
+      "files": [
+        "tests/test_action_feedback.py",
+        "tests/test_agent_harness_managed.py",
+        "tests/test_agent_harness_mvp.py",
+        "tests/test_agent_harness_parent.py",
+        "tests/test_agent_harness_reconcile_cli.py",
+        "tests/test_agent_harness_terminal.py",
+        "tests/test_agent_observability.py"
+      ],
+      "exit": 0,
+      "seconds": 59.503,
+      "junit": {
+        "tests": "99",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "46.243"
+      },
+      "deselected": 3,
+      "warnings": 199,
+      "original_log_sha256": "4ef98b56bceda1e26261d6eebe3ac7e15fc608cba48651eb899cbf2907c8b4b3"
+    },
+    {
+      "batch": 2,
+      "files": [
+        "tests/test_agent_observability_p0_final.py",
+        "tests/test_agent_observability_p0_repair.py"
+      ],
+      "exit": 0,
+      "seconds": 20.724,
+      "junit": {
+        "tests": "69",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "12.104"
+      },
+      "deselected": 0,
+      "warnings": 100,
+      "original_log_sha256": "459360b18e698391ad06799ccb911eb146b89ef87ef482464357e9ea3ab0a51f"
+    },
+    {
+      "batch": 3,
+      "files": [
+        "tests/test_agent_observability_security.py"
+      ],
+      "exit": 0,
+      "seconds": 11.205,
+      "junit": {
+        "tests": "131",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.700"
+      },
+      "deselected": 0,
+      "warnings": 34,
+      "original_log_sha256": "cce7f86b3a228993b38d7ab4c5ea6a5c6ad034b60365cb82ac96c3810a8e60c4"
+    },
+    {
+      "batch": 4,
+      "files": [
+        "tests/test_agent_possibly_stuck.py",
+        "tests/test_architecture_design.py",
+        "tests/test_autonomous_execution.py",
+        "tests/test_b01_authn.py"
+      ],
+      "exit": 0,
+      "seconds": 164.175,
+      "junit": {
+        "tests": "110",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "147.525"
+      },
+      "deselected": 3,
+      "warnings": 1162,
+      "original_log_sha256": "a1d67506a0044300e26cb60dcfc3395da6b0ab210ce0a7900213eb21fcce4ad2"
+    },
+    {
+      "batch": 5,
+      "files": [
+        "tests/test_b02_organizations.py",
+        "tests/test_b03_authz.py",
+        "tests/test_b04_csrf.py",
+        "tests/test_b05_ratelimit.py",
+        "tests/test_b06_sandbox.py",
+        "tests/test_b07_secrets.py"
+      ],
+      "exit": 0,
+      "seconds": 160.555,
+      "junit": {
+        "tests": "103",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "144.345"
+      },
+      "deselected": 0,
+      "warnings": 925,
+      "original_log_sha256": "102730f986604adaafdf782a8add7f014f45e03f1bcf0be49ffab6a4cdce5ef0"
+    },
+    {
+      "batch": 6,
+      "files": [
+        "tests/test_b0_final_qualification.py",
+        "tests/test_b1_read_isolation.py",
+        "tests/test_b2_release_concurrency.py",
+        "tests/test_b3_github_app.py",
+        "tests/test_b4_github_webhook_ingestion.py",
+        "tests/test_b5_tenant_isolation_completeness.py",
+        "tests/test_b6_trusted_proxy.py",
+        "tests/test_b7_repository_identity.py",
+        "tests/test_backup_restore.py",
+        "tests/test_baseline_reproduction_duplicate_click.py",
+        "tests/test_baseline_waivers.py"
+      ],
+      "exit": 0,
+      "seconds": 138.14,
+      "junit": {
+        "tests": "101",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "122.076"
+      },
+      "deselected": 2,
+      "warnings": 936,
+      "original_log_sha256": "e3a21cf14a3753e593b9faaad5f0aeb0ee63135ca136cc1ed7b0cd6525fd09f9"
+    },
+    {
+      "batch": 7,
+      "files": [
+        "tests/test_builder_completion_vs_session.py",
+        "tests/test_builder_exec_ux.py",
+        "tests/test_builder_workspace_ux.py",
+        "tests/test_change_overview.py",
+        "tests/test_claude_structured_turns.py",
+        "tests/test_cleanup_and_restart.py",
+        "tests/test_control_plane.py",
+        "tests/test_cross_repo_integration.py",
+        "tests/test_db_locked_handled_cleanly.py",
+        "tests/test_deployment.py",
+        "tests/test_deployment_hardening.py",
+        "tests/test_deployment_stuck_after_restart.py"
+      ],
+      "exit": 0,
+      "seconds": 233.598,
+      "junit": {
+        "tests": "101",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "218.620"
+      },
+      "deselected": 2,
+      "warnings": 977,
+      "original_log_sha256": "d0c68390570a9e7ac16ebba399816e2180537ad1a487ef373e37931a444acafe"
+    },
+    {
+      "batch": 8,
+      "files": [
+        "tests/test_engineering_catalog.py",
+        "tests/test_engineering_domain.py",
+        "tests/test_engineering_lifecycle_ui.py",
+        "tests/test_execution_wave_reservation_stuck_after_restart.py",
+        "tests/test_execution_waves.py"
+      ],
+      "exit": 0,
+      "seconds": 160.493,
+      "junit": {
+        "tests": "102",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "142.815"
+      },
+      "deselected": 4,
+      "warnings": 1159,
+      "original_log_sha256": "d6625a087869381de19b8ddbeca146315ac602143a2a0abc1b3c7f41e155e909"
+    },
+    {
+      "batch": 9,
+      "files": [
+        "tests/test_exited_no_report_recovery.py",
+        "tests/test_failure_classifier.py",
+        "tests/test_fleet_admin.py",
+        "tests/test_fleet_delivery.py",
+        "tests/test_fleet_dispatch.py",
+        "tests/test_fleet_dispatch_gate.py",
+        "tests/test_fleet_git_helper.py"
+      ],
+      "exit": 0,
+      "seconds": 61.82,
+      "junit": {
+        "tests": "92",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "51.455"
+      },
+      "deselected": 0,
+      "warnings": 231,
+      "original_log_sha256": "ad50d0e76a9e8ad0b3a87e7f84d43972738fcb59af44168dcd715f90db6cdb53"
+    },
+    {
+      "batch": 10,
+      "files": [
+        "tests/test_fleet_permissions.py",
+        "tests/test_golden_e2e.py",
+        "tests/test_harness_monitor_bridge.py",
+        "tests/test_harness_monitor_canary.py",
+        "tests/test_harness_monitor_report.py",
+        "tests/test_harness_monitor_service.py",
+        "tests/test_harness_progress.py",
+        "tests/test_harness_trajectory.py",
+        "tests/test_harness_zgh_node_java_qa.py",
+        "tests/test_help_guide.py"
+      ],
+      "exit": 0,
+      "seconds": 42.939,
+      "junit": {
+        "tests": "114",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "33.300"
+      },
+      "deselected": 3,
+      "warnings": 162,
+      "original_log_sha256": "1dddbb255ddffb31b4947618e3672fcc2cc4d3ef736c10c712a8609c4b9551e6"
+    },
+    {
+      "batch": 11,
+      "files": [
+        "tests/test_incidents.py",
+        "tests/test_integration_create_idempotent.py",
+        "tests/test_integration_lock_stuck_after_restart.py",
+        "tests/test_integration_push.py",
+        "tests/test_integration_test_run_stuck_after_restart.py",
+        "tests/test_interrupted_migration_clear_error.py",
+        "tests/test_live_terminal_routing.py",
+        "tests/test_merge_reconciliation.py",
+        "tests/test_operations_stuck_after_restart.py",
+        "tests/test_performance_regression.py",
+        "tests/test_planner_service.py"
+      ],
+      "exit": 0,
+      "seconds": 211.896,
+      "junit": {
+        "tests": "99",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "195.341"
+      },
+      "deselected": 7,
+      "warnings": 1130,
+      "original_log_sha256": "9a8564363ec3126b475b8d910ac1372a5c64154f42723b588e3435e9fd7f11db"
+    },
+    {
+      "batch": 12,
+      "files": [
+        "tests/test_product_acceptance.py",
+        "tests/test_productization_audit.py",
+        "tests/test_prompt_delivery.py",
+        "tests/test_prompt_ux.py",
+        "tests/test_qa_center_sandbox_contract.py",
+        "tests/test_release_pipeline.py",
+        "tests/test_repo_rename_worktree_repair.py",
+        "tests/test_repository_runtime_sandbox.py"
+      ],
+      "exit": 0,
+      "seconds": 169.72,
+      "junit": {
+        "tests": "95",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "154.113"
+      },
+      "deselected": 8,
+      "warnings": 1053,
+      "original_log_sha256": "6cba6e66ac8dc66e918b84d5bcfacfe7bd065378fa9ee16fe14ee9f28dfe4704"
+    },
+    {
+      "batch": 13,
+      "files": [
+        "tests/test_review_fix_loop.py",
+        "tests/test_runtime_dependency_staleness.py",
+        "tests/test_sandbox_dies_self_heals.py",
+        "tests/test_sandbox_docker.py",
+        "tests/test_sandbox_reset_data.py",
+        "tests/test_sandbox_stuck_busy_after_restart.py",
+        "tests/test_service_scripts.py",
+        "tests/test_sidebar_nav.py",
+        "tests/test_simple_mode.py",
+        "tests/test_soak_multi_repo_resource_leak.py",
+        "tests/test_spec_compliance.py",
+        "tests/test_spec_gate.py"
+      ],
+      "exit": 0,
+      "seconds": 135.868,
+      "suffix": "-final",
+      "junit": {
+        "tests": "85",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "122.488"
+      },
+      "deselected": 3,
+      "warnings": 777,
+      "original_log_sha256": "a657f08bb69f898290efd0f47cdd899c1ebdb708fba92959021eab13f241a6e7"
+    },
+    {
+      "batch": 14,
+      "files": [
+        "tests/test_spec_lifecycle.py",
+        "tests/test_spec_registry.py",
+        "tests/test_spec_supervisor_gate.py",
+        "tests/test_state_invariants.py",
+        "tests/test_task_centric_ux.py",
+        "tests/test_task_lifecycle_engine.py",
+        "tests/test_task_sandbox_views.py"
+      ],
+      "exit": 0,
+      "seconds": 182.197,
+      "suffix": "-final",
+      "junit": {
+        "tests": "103",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "167.383"
+      },
+      "deselected": 6,
+      "warnings": 1031,
+      "original_log_sha256": "5b421ecc9784ade38495194aec74af259d2f11cab6140bd160be0af2ebe683b4"
+    },
+    {
+      "batch": 15,
+      "files": [
+        "tests/test_task_wizard.py",
+        "tests/test_terminal_launcher.py",
+        "tests/test_test_design.py",
+        "tests/test_transcript_tail_persistence.py",
+        "tests/test_unit.py",
+        "tests/test_user_state_view.py",
+        "tests/test_verification_ux.py",
+        "tests/test_web.py",
+        "tests/test_wizard_sandbox_picks_latest.py",
+        "tests/test_workflow_dead_anchors.py"
+      ],
+      "exit": 0,
+      "seconds": 125.594,
+      "suffix": "-rerun",
+      "junit": {
+        "tests": "101",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "110.985"
+      },
+      "deselected": 5,
+      "warnings": 905,
+      "original_log_sha256": "17a64fea58da252bb1018b58c6be0df70b3d7cb27453660e24680e14459f9b54"
+    },
+    {
+      "batch": 16,
+      "files": [
+        "tests/test_workflow_decision_ux.py",
+        "tests/test_workflow_engine.py",
+        "tests/test_workspace_branch_collision.py",
+        "tests/test_workspace_detail_ux.py",
+        "tests/test_worktree_manager.py"
+      ],
+      "exit": 0,
+      "seconds": 172.427,
+      "suffix": "-rerun",
+      "junit": {
+        "tests": "90",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "157.141"
+      },
+      "deselected": 1,
+      "warnings": 940,
+      "original_log_sha256": "8239606c76bd14e2d9d4a649eaa90377d240920db0db46d2fe02f07dcba0b827"
+    }
+  ],
+  "initial_batches": [
+    {
+      "batch": 1,
+      "files": [
+        "tests/test_action_feedback.py",
+        "tests/test_agent_harness_managed.py",
+        "tests/test_agent_harness_mvp.py",
+        "tests/test_agent_harness_parent.py",
+        "tests/test_agent_harness_reconcile_cli.py",
+        "tests/test_agent_harness_terminal.py",
+        "tests/test_agent_observability.py"
+      ],
+      "exit": 0,
+      "seconds": 59.503,
+      "junit": {
+        "tests": "99",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "46.243"
+      },
+      "deselected": 3,
+      "warnings": 199,
+      "original_log_sha256": "4ef98b56bceda1e26261d6eebe3ac7e15fc608cba48651eb899cbf2907c8b4b3"
+    },
+    {
+      "batch": 2,
+      "files": [
+        "tests/test_agent_observability_p0_final.py",
+        "tests/test_agent_observability_p0_repair.py"
+      ],
+      "exit": 0,
+      "seconds": 20.724,
+      "junit": {
+        "tests": "69",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "12.104"
+      },
+      "deselected": 0,
+      "warnings": 100,
+      "original_log_sha256": "459360b18e698391ad06799ccb911eb146b89ef87ef482464357e9ea3ab0a51f"
+    },
+    {
+      "batch": 3,
+      "files": [
+        "tests/test_agent_observability_security.py"
+      ],
+      "exit": 0,
+      "seconds": 11.205,
+      "junit": {
+        "tests": "131",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.700"
+      },
+      "deselected": 0,
+      "warnings": 34,
+      "original_log_sha256": "cce7f86b3a228993b38d7ab4c5ea6a5c6ad034b60365cb82ac96c3810a8e60c4"
+    },
+    {
+      "batch": 4,
+      "files": [
+        "tests/test_agent_possibly_stuck.py",
+        "tests/test_architecture_design.py",
+        "tests/test_autonomous_execution.py",
+        "tests/test_b01_authn.py"
+      ],
+      "exit": 0,
+      "seconds": 164.175,
+      "junit": {
+        "tests": "110",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "147.525"
+      },
+      "deselected": 3,
+      "warnings": 1162,
+      "original_log_sha256": "a1d67506a0044300e26cb60dcfc3395da6b0ab210ce0a7900213eb21fcce4ad2"
+    },
+    {
+      "batch": 5,
+      "files": [
+        "tests/test_b02_organizations.py",
+        "tests/test_b03_authz.py",
+        "tests/test_b04_csrf.py",
+        "tests/test_b05_ratelimit.py",
+        "tests/test_b06_sandbox.py",
+        "tests/test_b07_secrets.py"
+      ],
+      "exit": 0,
+      "seconds": 160.555,
+      "junit": {
+        "tests": "103",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "144.345"
+      },
+      "deselected": 0,
+      "warnings": 925,
+      "original_log_sha256": "102730f986604adaafdf782a8add7f014f45e03f1bcf0be49ffab6a4cdce5ef0"
+    },
+    {
+      "batch": 6,
+      "files": [
+        "tests/test_b0_final_qualification.py",
+        "tests/test_b1_read_isolation.py",
+        "tests/test_b2_release_concurrency.py",
+        "tests/test_b3_github_app.py",
+        "tests/test_b4_github_webhook_ingestion.py",
+        "tests/test_b5_tenant_isolation_completeness.py",
+        "tests/test_b6_trusted_proxy.py",
+        "tests/test_b7_repository_identity.py",
+        "tests/test_backup_restore.py",
+        "tests/test_baseline_reproduction_duplicate_click.py",
+        "tests/test_baseline_waivers.py"
+      ],
+      "exit": 0,
+      "seconds": 138.14,
+      "junit": {
+        "tests": "101",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "122.076"
+      },
+      "deselected": 2,
+      "warnings": 936,
+      "original_log_sha256": "e3a21cf14a3753e593b9faaad5f0aeb0ee63135ca136cc1ed7b0cd6525fd09f9"
+    },
+    {
+      "batch": 7,
+      "files": [
+        "tests/test_builder_completion_vs_session.py",
+        "tests/test_builder_exec_ux.py",
+        "tests/test_builder_workspace_ux.py",
+        "tests/test_change_overview.py",
+        "tests/test_claude_structured_turns.py",
+        "tests/test_cleanup_and_restart.py",
+        "tests/test_control_plane.py",
+        "tests/test_cross_repo_integration.py",
+        "tests/test_db_locked_handled_cleanly.py",
+        "tests/test_deployment.py",
+        "tests/test_deployment_hardening.py",
+        "tests/test_deployment_stuck_after_restart.py"
+      ],
+      "exit": 0,
+      "seconds": 233.598,
+      "junit": {
+        "tests": "101",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "218.620"
+      },
+      "deselected": 2,
+      "warnings": 977,
+      "original_log_sha256": "d0c68390570a9e7ac16ebba399816e2180537ad1a487ef373e37931a444acafe"
+    },
+    {
+      "batch": 8,
+      "files": [
+        "tests/test_engineering_catalog.py",
+        "tests/test_engineering_domain.py",
+        "tests/test_engineering_lifecycle_ui.py",
+        "tests/test_execution_wave_reservation_stuck_after_restart.py",
+        "tests/test_execution_waves.py"
+      ],
+      "exit": 0,
+      "seconds": 160.493,
+      "junit": {
+        "tests": "102",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "142.815"
+      },
+      "deselected": 4,
+      "warnings": 1159,
+      "original_log_sha256": "d6625a087869381de19b8ddbeca146315ac602143a2a0abc1b3c7f41e155e909"
+    },
+    {
+      "batch": 9,
+      "files": [
+        "tests/test_exited_no_report_recovery.py",
+        "tests/test_failure_classifier.py",
+        "tests/test_fleet_admin.py",
+        "tests/test_fleet_delivery.py",
+        "tests/test_fleet_dispatch.py",
+        "tests/test_fleet_dispatch_gate.py",
+        "tests/test_fleet_git_helper.py"
+      ],
+      "exit": 0,
+      "seconds": 61.82,
+      "junit": {
+        "tests": "92",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "51.455"
+      },
+      "deselected": 0,
+      "warnings": 231,
+      "original_log_sha256": "ad50d0e76a9e8ad0b3a87e7f84d43972738fcb59af44168dcd715f90db6cdb53"
+    },
+    {
+      "batch": 10,
+      "files": [
+        "tests/test_fleet_permissions.py",
+        "tests/test_golden_e2e.py",
+        "tests/test_harness_monitor_bridge.py",
+        "tests/test_harness_monitor_canary.py",
+        "tests/test_harness_monitor_report.py",
+        "tests/test_harness_monitor_service.py",
+        "tests/test_harness_progress.py",
+        "tests/test_harness_trajectory.py",
+        "tests/test_harness_zgh_node_java_qa.py",
+        "tests/test_help_guide.py"
+      ],
+      "exit": 0,
+      "seconds": 42.939,
+      "junit": {
+        "tests": "114",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "33.300"
+      },
+      "deselected": 3,
+      "warnings": 162,
+      "original_log_sha256": "1dddbb255ddffb31b4947618e3672fcc2cc4d3ef736c10c712a8609c4b9551e6"
+    },
+    {
+      "batch": 11,
+      "files": [
+        "tests/test_incidents.py",
+        "tests/test_integration_create_idempotent.py",
+        "tests/test_integration_lock_stuck_after_restart.py",
+        "tests/test_integration_push.py",
+        "tests/test_integration_test_run_stuck_after_restart.py",
+        "tests/test_interrupted_migration_clear_error.py",
+        "tests/test_live_terminal_routing.py",
+        "tests/test_merge_reconciliation.py",
+        "tests/test_operations_stuck_after_restart.py",
+        "tests/test_performance_regression.py",
+        "tests/test_planner_service.py"
+      ],
+      "exit": 0,
+      "seconds": 211.896,
+      "junit": {
+        "tests": "99",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "195.341"
+      },
+      "deselected": 7,
+      "warnings": 1130,
+      "original_log_sha256": "9a8564363ec3126b475b8d910ac1372a5c64154f42723b588e3435e9fd7f11db"
+    },
+    {
+      "batch": 12,
+      "files": [
+        "tests/test_product_acceptance.py",
+        "tests/test_productization_audit.py",
+        "tests/test_prompt_delivery.py",
+        "tests/test_prompt_ux.py",
+        "tests/test_qa_center_sandbox_contract.py",
+        "tests/test_release_pipeline.py",
+        "tests/test_repo_rename_worktree_repair.py",
+        "tests/test_repository_runtime_sandbox.py"
+      ],
+      "exit": 0,
+      "seconds": 169.72,
+      "junit": {
+        "tests": "95",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "154.113"
+      },
+      "deselected": 8,
+      "warnings": 1053,
+      "original_log_sha256": "6cba6e66ac8dc66e918b84d5bcfacfe7bd065378fa9ee16fe14ee9f28dfe4704"
+    },
+    {
+      "batch": 13,
+      "files": [
+        "tests/test_review_fix_loop.py",
+        "tests/test_runtime_dependency_staleness.py",
+        "tests/test_sandbox_dies_self_heals.py",
+        "tests/test_sandbox_docker.py",
+        "tests/test_sandbox_reset_data.py",
+        "tests/test_sandbox_stuck_busy_after_restart.py",
+        "tests/test_service_scripts.py",
+        "tests/test_sidebar_nav.py",
+        "tests/test_simple_mode.py",
+        "tests/test_soak_multi_repo_resource_leak.py",
+        "tests/test_spec_compliance.py",
+        "tests/test_spec_gate.py"
+      ],
+      "exit": 1,
+      "seconds": 122.464,
+      "junit": {
+        "tests": "85",
+        "failures": "4",
+        "errors": "0",
+        "skipped": "0",
+        "time": "109.128"
+      },
+      "deselected": 3,
+      "warnings": 774,
+      "original_log_sha256": "779caac19621c778814e352e8f80f23470e47bc2c5d3d3f15cacc2c3fe1aba00"
+    },
+    {
+      "batch": 14,
+      "files": [
+        "tests/test_spec_lifecycle.py",
+        "tests/test_spec_registry.py",
+        "tests/test_spec_supervisor_gate.py",
+        "tests/test_state_invariants.py",
+        "tests/test_task_centric_ux.py",
+        "tests/test_task_lifecycle_engine.py",
+        "tests/test_task_sandbox_views.py"
+      ],
+      "exit": 1,
+      "seconds": 170.959,
+      "junit": {
+        "tests": "103",
+        "failures": "6",
+        "errors": "0",
+        "skipped": "0",
+        "time": "154.537"
+      },
+      "deselected": 6,
+      "warnings": 1031,
+      "original_log_sha256": "00af2257ba00e51f1fa7e4fbda03f07ca41933813aa208c580928dd3adfeb144"
+    },
+    {
+      "batch": 15,
+      "files": [
+        "tests/test_task_wizard.py",
+        "tests/test_terminal_launcher.py",
+        "tests/test_test_design.py",
+        "tests/test_transcript_tail_persistence.py",
+        "tests/test_unit.py",
+        "tests/test_user_state_view.py",
+        "tests/test_verification_ux.py",
+        "tests/test_web.py",
+        "tests/test_wizard_sandbox_picks_latest.py",
+        "tests/test_workflow_dead_anchors.py"
+      ],
+      "exit": 1,
+      "seconds": 123.565,
+      "junit": {
+        "tests": "101",
+        "failures": "1",
+        "errors": "0",
+        "skipped": "0",
+        "time": "108.792"
+      },
+      "deselected": 5,
+      "warnings": 905,
+      "original_log_sha256": "cb91f6019c6bffae0413c223e80a85e76381093885de9c2342388de747cec110"
+    },
+    {
+      "batch": 16,
+      "files": [
+        "tests/test_workflow_decision_ux.py",
+        "tests/test_workflow_engine.py",
+        "tests/test_workspace_branch_collision.py",
+        "tests/test_workspace_detail_ux.py",
+        "tests/test_worktree_manager.py"
+      ],
+      "exit": 1,
+      "seconds": 170.803,
+      "junit": {
+        "tests": "90",
+        "failures": "1",
+        "errors": "0",
+        "skipped": "0",
+        "time": "155.569"
+      },
+      "deselected": 1,
+      "warnings": 940,
+      "original_log_sha256": "d1171b8e77def64c5a57c60631e14d37daeaa125b3acbdc5523f45dd01e1d51f"
+    }
+  ],
+  "intermediate_reruns": [
+    {
+      "batch": 13,
+      "files": [
+        "tests/test_review_fix_loop.py",
+        "tests/test_runtime_dependency_staleness.py",
+        "tests/test_sandbox_dies_self_heals.py",
+        "tests/test_sandbox_docker.py",
+        "tests/test_sandbox_reset_data.py",
+        "tests/test_sandbox_stuck_busy_after_restart.py",
+        "tests/test_service_scripts.py",
+        "tests/test_sidebar_nav.py",
+        "tests/test_simple_mode.py",
+        "tests/test_soak_multi_repo_resource_leak.py",
+        "tests/test_spec_compliance.py",
+        "tests/test_spec_gate.py"
+      ],
+      "exit": 1,
+      "seconds": 129.485,
+      "suffix": "-rerun",
+      "junit": {
+        "tests": "85",
+        "failures": "3",
+        "errors": "0",
+        "skipped": "0",
+        "time": "116.026"
+      },
+      "deselected": 3,
+      "warnings": 775,
+      "original_log_sha256": "09b83d039e0a3a64903f8c0e571d5a3f517add874ed60a7341a8b019076c7d09"
+    },
+    {
+      "batch": 14,
+      "files": [
+        "tests/test_spec_lifecycle.py",
+        "tests/test_spec_registry.py",
+        "tests/test_spec_supervisor_gate.py",
+        "tests/test_state_invariants.py",
+        "tests/test_task_centric_ux.py",
+        "tests/test_task_lifecycle_engine.py",
+        "tests/test_task_sandbox_views.py"
+      ],
+      "exit": 1,
+      "seconds": 179.935,
+      "suffix": "-rerun",
+      "junit": {
+        "tests": "103",
+        "failures": "2",
+        "errors": "0",
+        "skipped": "0",
+        "time": "164.591"
+      },
+      "deselected": 6,
+      "warnings": 1031,
+      "original_log_sha256": "ba9b58df4e2f216381015f993c91f7106c012b9e85d1cd0cb32e23a0fb777ba8"
+    },
+    {
+      "batch": 15,
+      "files": [
+        "tests/test_task_wizard.py",
+        "tests/test_terminal_launcher.py",
+        "tests/test_test_design.py",
+        "tests/test_transcript_tail_persistence.py",
+        "tests/test_unit.py",
+        "tests/test_user_state_view.py",
+        "tests/test_verification_ux.py",
+        "tests/test_web.py",
+        "tests/test_wizard_sandbox_picks_latest.py",
+        "tests/test_workflow_dead_anchors.py"
+      ],
+      "exit": 0,
+      "seconds": 125.594,
+      "suffix": "-rerun",
+      "junit": {
+        "tests": "101",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "110.985"
+      },
+      "deselected": 5,
+      "warnings": 905,
+      "original_log_sha256": "17a64fea58da252bb1018b58c6be0df70b3d7cb27453660e24680e14459f9b54"
+    },
+    {
+      "batch": 16,
+      "files": [
+        "tests/test_workflow_decision_ux.py",
+        "tests/test_workflow_engine.py",
+        "tests/test_workspace_branch_collision.py",
+        "tests/test_workspace_detail_ux.py",
+        "tests/test_worktree_manager.py"
+      ],
+      "exit": 0,
+      "seconds": 172.427,
+      "suffix": "-rerun",
+      "junit": {
+        "tests": "90",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "157.141"
+      },
+      "deselected": 1,
+      "warnings": 940,
+      "original_log_sha256": "8239606c76bd14e2d9d4a649eaa90377d240920db0db46d2fe02f07dcba0b827"
+    }
+  ],
+  "final_reruns": [
+    {
+      "batch": 13,
+      "files": [
+        "tests/test_review_fix_loop.py",
+        "tests/test_runtime_dependency_staleness.py",
+        "tests/test_sandbox_dies_self_heals.py",
+        "tests/test_sandbox_docker.py",
+        "tests/test_sandbox_reset_data.py",
+        "tests/test_sandbox_stuck_busy_after_restart.py",
+        "tests/test_service_scripts.py",
+        "tests/test_sidebar_nav.py",
+        "tests/test_simple_mode.py",
+        "tests/test_soak_multi_repo_resource_leak.py",
+        "tests/test_spec_compliance.py",
+        "tests/test_spec_gate.py"
+      ],
+      "exit": 0,
+      "seconds": 135.868,
+      "suffix": "-final",
+      "junit": {
+        "tests": "85",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "122.488"
+      },
+      "deselected": 3,
+      "warnings": 777,
+      "original_log_sha256": "a657f08bb69f898290efd0f47cdd899c1ebdb708fba92959021eab13f241a6e7"
+    },
+    {
+      "batch": 14,
+      "files": [
+        "tests/test_spec_lifecycle.py",
+        "tests/test_spec_registry.py",
+        "tests/test_spec_supervisor_gate.py",
+        "tests/test_state_invariants.py",
+        "tests/test_task_centric_ux.py",
+        "tests/test_task_lifecycle_engine.py",
+        "tests/test_task_sandbox_views.py"
+      ],
+      "exit": 0,
+      "seconds": 182.197,
+      "suffix": "-final",
+      "junit": {
+        "tests": "103",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "167.383"
+      },
+      "deselected": 6,
+      "warnings": 1031,
+      "original_log_sha256": "5b421ecc9784ade38495194aec74af259d2f11cab6140bd160be0af2ebe683b4"
+    }
+  ],
+  "limitations": [
+    "66 real/CLI/integration cases deselected by documented scope; actual product canaries recorded separately.",
+    "A prior collection inherited MCP PYTHONPATH and had43 import errors; clean-environment collection succeeded. Every bounded test runner removed PYTHONPATH.",
+    "Initial monolithic exit124 with820pass/5fail/1skip retained; five code regressions fixed before bounded run. Initial bounded Docker failures and intermediate reruns retained. Effective counts select the latest full execution of each batch, not an uninterrupted all-suite invocation.",
+    "Network isolation runs on Linux with ip route inspection; unsupported hosts explicitly skip this fixture. No Docker daemon pool mutation, global prune, or unrelated resource cleanup."
+  ],
+  "result": "PASS",
+  "per_batch_deselected": 47,
+  "collection_deselected": 66,
+  "fully_excluded_cases_not_in_batch_files": 19,
+  "package_import_regression": {
+    "passed": 168,
+    "deselected": 1,
+    "warnings": 1321,
+    "pytest_seconds": 152.02,
+    "exit": 0
+  }
+}

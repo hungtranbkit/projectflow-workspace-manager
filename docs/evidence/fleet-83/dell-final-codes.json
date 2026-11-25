@@ -1,0 +1,21 @@
+{
+  "bundle_sha256": "ff81649d1fd99ef7b4479604f61debd24c0e8174400afab36bcf35e06b1c14e0",
+  "checks": {
+    "sudo": "SUDO_REQUIRED",
+    "gh_auth": "PASS",
+    "gh_identity": "AUTH_REQUIRED",
+    "github_push": "AUTH_REQUIRED",
+    "codex_version": "PASS",
+    "claude_version": "PASS",
+    "codex_auth": "PASS",
+    "claude_auth": "PASS",
+    "docker": "PASS",
+    "repository": "TRUST_REQUIRED",
+    "git_helper": "CONFIGURED",
+    "workspace": "TRUST_REQUIRED",
+    "disk": "PASS",
+    "serial_adb": "NOT_REQUIRED",
+    "admin": "OWNER_BOOTSTRAP_REQUIRED",
+    "managed_policy": "OBSERVED"
+  }
+}

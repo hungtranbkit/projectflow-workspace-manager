@@ -1,0 +1,9 @@
+2026-11-25T03:58:18.789272+00:00 — #83 / PR84 lane acknowledgment for owner-authorized PR131 dt_d66eab914a7f4d4b
+SAFE CONTROLLER RESTART WINDOW: no active critical node_ssh transfer, send_wait, or controller mutation in #83. Dell code-only bundle transfer finished; HP/Dell normal Git deliveries and readbacks have durable receipts. Local pytest gates continue independently.
+#83 pauses new controller calls for the handoff. Scope acknowledged: terminal-mcp-http only, clean main d1c6eae containing f85356b, rollback saved, focused tests before restart via independent systemd job. Preserve all tmux PIDs and SSH profiles; no node-agent/sidecar/tunnel restart.
+Preserve dedicated #83 session nec1/pf83-v2-nec-audit (idle after completed audit); older similarly named sessions belong to other work and must not be touched. Existing worktrees/dirty sources unchanged. No authorization to delete sessions or alter credentials/SSH pins.
+Please record completion and exact service SHA/health here so #83 can resume controller calls.
+
+2026-11-25 PR131 DEPLOYMENT COMPLETE: controller PID 496294, clean d1c6eae010b1758b08636f1923c98b2cf5d0aedb from release-d1c6eae010b1. /health/live and /health/ready HTTP 200. All 5 original tmux pane PIDs and 12 SSH state file hashes preserved; sidecar/tunnel PIDs unchanged. Independent systemd restart completed. #83 may resume controller calls. Rollback: /home/kimex/.cache/terminal-mcp/rollbacks/pr131-20261125/rollback.sh. Live browser acceptance still checking Cloudflare Access authentication.
+
+2026-11-25T04:58:04.267321+00:00 — #83 ACK: controller completion received; calls resumed after owner-reported d1c6eae health200/PID496294 and preservation checks. Only own completed NEC audit subsequently checkpointed and confirm-deleted via supported exact-instance route. V2 remains on PR84/PR132, no live rollout or service restart by #83. Cloudflare authenticated browser gate remains blocked.

@@ -1,0 +1,26 @@
+........................................................................ [ 65%]
+......................................                                   [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_agent_possibly_stuck.py: 33 warnings
+tests/test_architecture_design.py: 495 warnings
+tests/test_autonomous_execution.py: 396 warnings
+tests/test_b01_authn.py: 220 warnings
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_agent_possibly_stuck.py::test_freshly_active_session_not_flagged_stuck
+tests/test_agent_possibly_stuck.py::test_stale_running_session_flagged_possibly_stuck
+tests/test_agent_possibly_stuck.py::test_exited_session_never_flagged_stuck_even_if_old
+tests/test_autonomous_execution.py::test_max_concurrency_one_launch_per_tick
+tests/test_autonomous_execution.py::test_no_duplicate_launch_for_same_task
+tests/test_autonomous_execution.py::test_manual_builder_start_unaffected
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=674019) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+110 passed, 3 deselected, 1162 warnings in 147.53s (0:02:27)

@@ -236,3 +236,51 @@ class SandboxRuntimeService:
                 return s.getsockname()[0]
         except OSError:
             return None
+
+
+def fleet_container_argv(workspace, prompt, binary, auth, image, uid, gid, name):
+    """An explicit external sandbox for hosts unable to create user namespaces.
+
+    Reuses this node's auth by a read-only bind (never copies a login file).
+    No host home, Docker socket, Git credentials or other project is mounted.
+    """
+    import re
+    from app.services.fleet_permissions import FleetError
+    if uid == 0:
+        raise FleetError("ROOT_AGENT_DENIED")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
+        raise FleetError("CLI_UNSUPPORTED: container image must be pinned by ID")
+    if any("," in str(p) for p in (workspace, binary, auth)):
+        raise FleetError("ACL_DENIED: unsupported Docker mount path")
+    return ["docker", "run", "--rm", "--name", name, "--label", "projectflow.fleet83="+name,
+            "--label", "com.docker.compose.project="+name,
+            "--user", f"{uid}:{gid}", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--read-only", "--pids-limit", "128", "--memory", "1g", "--cpus", "1",
+            "--tmpfs", f"/tmp:rw,nosuid,nodev,uid={uid},gid={gid},mode=700",
+            "--tmpfs", f"/codex:rw,nosuid,nodev,uid={uid},gid={gid},mode=700",
+            "--mount", f"type=bind,src={workspace},dst=/workspace",
+            "--mount", f"type=bind,src={binary.parent},dst=/opt/codex-bin,readonly",
+            "--mount", f"type=bind,src={auth},dst=/codex/auth.json,readonly",
+            "--env", "PATH=/opt/codex-bin:/usr/local/bin:/usr/bin:/bin",
+            "--env", "CODEX_HOME=/codex", "--env", "HOME=/tmp", "--env", "GIT_TERMINAL_PROMPT=0",
+            "--workdir", "/workspace", image, "codex", "exec", "--skip-git-repo-check", "--ephemeral",
+            "--sandbox", "danger-full-access", "-c", 'approval_policy="never"',
+            "-c", "check_for_update_on_startup=false", "--", prompt]
+
+
+
+def fleet_docker_probe(args, **kwargs):
+    """Fleet's bounded Docker execution remains in the runtime service module."""
+    from app.services.fleet_permissions import probe
+    return probe(["docker", *args], **kwargs)
+
+
+def run_fleet_canary(command, name, cwd, timeout, env):
+    from app.services.fleet_permissions import probe
+    try:
+        return probe(command, cwd=cwd, timeout=timeout, env=env)
+    finally:
+        owned = fleet_docker_probe(["inspect", "--format", '{{index .Config.Labels "projectflow.fleet83"}}', name])
+        if (owned.code == "PASS" and owned.output.strip() == name
+                and SandboxRuntimeService(timeout=12).verify_owned(name, 0)):
+            fleet_docker_probe(["stop", "--time", "2", name])

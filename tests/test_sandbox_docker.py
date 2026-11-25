@@ -1,11 +1,18 @@
 """Real Docker sandbox tests (docs section 61). Requires a working `docker`
 CLI with daemon access -- skipped otherwise rather than faked."""
 from __future__ import annotations
+import hashlib
+import ipaddress
+import json
 import shutil
 import subprocess
+import sys
 import urllib.request
 
 import pytest
+import yaml
+
+from tests.conftest import run
 
 pytestmark = pytest.mark.skipif(shutil.which("docker") is None, reason="docker CLI not on PATH")
 
@@ -33,6 +40,43 @@ def create_task_workspace(client, tid, rid, agent="codex", role="Backend", profi
     )
     assert r.status_code == 303, r.text
     return client.get("/api/workspaces").json()[-1]
+
+
+def _configure_isolated_fixture_networks(*repos):
+    """Allocate only test-owned networks without using the daemon's default pool."""
+    if sys.platform != "linux" or shutil.which("ip") is None:
+        pytest.skip("Isolated subnet fixture requires Linux ip route inspection")
+
+    def read_json(argv):
+        return json.loads(subprocess.run(argv, check=True, capture_output=True,
+                                         text=True, timeout=15).stdout)
+
+    routes = read_json(["ip", "-j", "-4", "route", "show", "table", "all"])
+    occupied = [ipaddress.ip_network(r["dst"], strict=False)
+                for r in routes if r.get("dst") not in (None, "default")]
+    ids = subprocess.run(["docker", "network", "ls", "-q"], check=True,
+                         capture_output=True, text=True, timeout=15).stdout.split()
+    for network in read_json(["docker", "network", "inspect", *ids]) if ids else []:
+        for config in network.get("IPAM", {}).get("Config") or []:
+            if config.get("Subnet"):
+                occupied.append(ipaddress.ip_network(config["Subnet"]))
+    # Benchmark-only range; refuse any overlap with current routes or Docker IPAM.
+    candidates = list(ipaddress.ip_network("198.18.0.0/15").subnets(new_prefix=28))
+    offset = int(hashlib.sha256(str(repos[0]).encode()).hexdigest()[:8], 16) % len(candidates)
+    candidates = candidates[offset:] + candidates[:offset]
+    for repo in repos:
+        subnet = next((n for n in candidates if not any(n.overlaps(o) for o in occupied
+                                                       if o.version == 4)), None)
+        assert subnet is not None, "No collision-free isolated fixture subnet"
+        occupied.append(subnet)
+        path = repo / "compose.yml"
+        compose = yaml.safe_load(path.read_text())
+        compose["services"]["app"].pop("network_mode", None)
+        compose["networks"] = {"default": {
+            "ipam": {"config": [{"subnet": str(subnet)}]}}}
+        path.write_text(yaml.safe_dump(compose))
+        run(repo, "git", "add", "compose.yml")
+        run(repo, "git", "commit", "-m", "Use isolated test network")
 
 
 def test_agent_sandbox_provisions_real_container_and_is_healthy(client, git_repo, sandboxable_repo_factory):
@@ -66,6 +110,7 @@ def test_two_agent_sandboxes_are_fully_isolated(client, git_repo, sandboxable_re
     root, _ = git_repo
     repo_a = sandboxable_repo_factory(root, "svc-a", port_range=(21100, 21149))
     repo_b = sandboxable_repo_factory(root, "svc-b", port_range=(21150, 21199))
+    _configure_isolated_fixture_networks(repo_a, repo_b)
     register(client, repo_a); register(client, repo_b)
     repos = {r["repo_name"]: r["id"] for r in client.get("/api/repositories").json()}
     client.post("/api/tasks", data={"title": "Isolation check"}, follow_redirects=False)

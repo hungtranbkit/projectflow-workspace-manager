@@ -1,0 +1,27 @@
+{
+  "bounded_runner_sha256": "bd380cea408b7833255d04a246c2ec60e13af2e5b0554394fa1b880a75ae5bdb",
+  "recovery_runner_sha256": "692462df7b4300b1b64567c2b81cb9079f8aebbfb644b814a54dac6a82710147",
+  "final_runner_sha256": "d28d3e8fcd603281c17173be8276017ffea6314edd3445121dadeb2e2c457c5a",
+  "fixture_head": "958f351",
+  "package_regression": {
+    "passed": 168,
+    "deselected": 1,
+    "warnings": 1321,
+    "pytest_seconds": 152.02,
+    "exit": 0
+  },
+  "collector_argv": [
+    "env",
+    "-u",
+    "PYTHONPATH",
+    ".venv/bin/python",
+    "-m",
+    "pytest",
+    "--collect-only",
+    "-q",
+    "-o",
+    "addopts=",
+    "-k",
+    "not real"
+  ]
+}

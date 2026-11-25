@@ -1,0 +1,648 @@
+{
+  "status": "degraded",
+  "verdict": "No concrete blocker found in bounded source review",
+  "reason": "Final platform guard resolves the test portability finding in inspected source; canonical tests.* imports address the identified package-import breakage. Full ce-code-review remains unavailable/degraded. This is bounded manual source review, not full acceptance.",
+  "captured_at": "2026-11-25T05:03:44.894030+00:00",
+  "run_id": "pf83-v2-local-review",
+  "contract": "/tmp/pf83-v2-contract.md",
+  "scope": {
+    "projectflow": {
+      "root": "/home/kimex/workspace/projectflow-fleet-permissions-83",
+      "base": "d0bcabbc1614dc5ddac19b4d17f68439fa2e676e",
+      "head_sha": "958f351aca3d401141d1b1a28d8d70da798de460",
+      "tracked_diff_sha256": "0f50daf5a3ad33619b70438c818d9ae862d6c347a6e4008fce5c7864ec279027",
+      "changed_files": [
+        {
+          "path": "app/main.py",
+          "sha256": "e8dda0a48c551b482016abe31b8e7fa7fa48cd927ea995bac5418f5521429a64"
+        },
+        {
+          "path": "app/services/agent_session_manager.py",
+          "sha256": "bd0ae32aa196ab5eae2ac59478514558b29cb029a5b1198a128eb30f0049d5c4"
+        },
+        {
+          "path": "app/services/fleet_admin.py",
+          "sha256": "f62bb40b0b101ad3373537c58fc4f5f508d6f43792729cf2df1e2f4cf6784df9"
+        },
+        {
+          "path": "app/services/fleet_delivery.py",
+          "sha256": "bedab48e5434fce99403c061fe15bae8de4a6321ccb9607ad0fff8d1718ce01d"
+        },
+        {
+          "path": "app/services/fleet_dispatch.py",
+          "sha256": "9dd2e68e0b45b1a87ceafd34340b0271adb11925b942d71288a1821d4cf57118"
+        },
+        {
+          "path": "app/services/fleet_dispatch_gate.py",
+          "sha256": "7f50a8cf8433e51a3dc461f7b305983bfc084e827e9ca5d9580d98466fb1bc76"
+        },
+        {
+          "path": "app/services/fleet_gh.py",
+          "sha256": "9a8a74b8b002817cc33abc749663bdf7121ce0ccc09712e5e5fdceb5d50a0f79"
+        },
+        {
+          "path": "app/services/fleet_permissions.py",
+          "sha256": "b60c81d4754c239fee2ba62499db99c68333a1fe07ef8fa99093e016230784de"
+        },
+        {
+          "path": "app/services/git_workspace.py",
+          "sha256": "9820dca7ccab26cbf3275be90d64ee57227bff8f5803d36e28762e90dabf6407"
+        },
+        {
+          "path": "app/services/sandbox_runtime.py",
+          "sha256": "cc752889e8f211da82474d1f99445375829dc0bec81f35bafa1d5e105fafdabd"
+        },
+        {
+          "path": "docs/FLEET_ADMIN_V2.vi.md",
+          "sha256": "d9072d7ad0ef36e181e6906d7ea2a16d73a6b1818c27734c8d01aea50332c949"
+        },
+        {
+          "path": "docs/FLEET_READY_V2.vi.md",
+          "sha256": "139ea5e0452a0d90e7ae6603dd03e5d5cd308ef8aff6bca4279fbeeeab796b01"
+        },
+        {
+          "path": "docs/evidence/fleet-83/owner-v2.md",
+          "sha256": "ffebac39da6448130d0abfebe450dfc3d2cb263e044009b5c3378941a86fc5ba"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/acceptance.md",
+          "sha256": "5786aaac4fa043b45dcc4b0cc3520bd9418c2677f4025ae4563826df9b5c0332"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/actions-observation.json",
+          "sha256": "5efddc1727a7f3fad737b61db2e653dbe511fc47720f2746bb33279bc696f60b"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/admin-live-dry-run.json",
+          "sha256": "b463233fcf5848eb240a6cd16e1f8ee96ba87a5d38c2d66df0c31d52cf5f3246"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/admin-tests.log",
+          "sha256": "b2e98bb44b10388f745ab49b626a7790980b05f856c50259dc0ad03a7fa41f5c"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/agent-report.txt",
+          "sha256": "d455277c74df9bd68e20aef57c644e454a44b852b720862bc7702f65a9b4133f"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/batch13-failure-db.json",
+          "sha256": "8299fe430ed8c1c3b1b010228a2b18e8f370167a217bcafe104d1b696e61c91a"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/batch14-failure-db.json",
+          "sha256": "53726286aafe3ade4be849a988914e9ed60cee0a2e8abe214b464b0610d53eb3"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/batch15-failure-db.json",
+          "sha256": "8916bb4e5a5bbff712306afab2bcaa0231937f664c34f3257dc323900c8a77f5"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/bounded-review.json",
+          "sha256": "e34c733c22cd1765e4db9c1ae92ffee3c40af4ba747ad3f897887ba7ab639d80"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/broad-timeout.xml",
+          "sha256": "1a3882e3217c9ed59ebee27a09722599e2f7e2dd5b2c97891818aec481e876f4"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/build.log",
+          "sha256": "9c6ed49cb243ed09ecc05dc38b218003a649564f9467a834447bf850bff78c97"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/collection-final.txt",
+          "sha256": "f60034b2dbc5d6d25ee6537d304328bca49f798ec8aaaf83d073a2f7903c6cf8"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/collection-imports-before.txt",
+          "sha256": "6baf8174ac203a9ba241c13b52ae3066df86bb4d157f552202ec0649406abfd8"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/controller-coordination.txt",
+          "sha256": "89dcb7b0ba2ab20a4998e7ddfd4d4aeb022dc248196570945d1c97f2472b45d2"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/d11-fixed-tests.xml",
+          "sha256": "64d30e4ede33d696675c6e059694b829d593b12cae060c455606033a1de48574"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/d11-resources.json",
+          "sha256": "bcbbe6331618c5850e3f713d6bb0d5115fa6b174f3c7fd664541588717fa5b94"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/delivery-tests.log",
+          "sha256": "0a11a01f3d913d10e15abba84166661ea058b7732737b5f273acd9c9052da4f5"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/dell-cli-auth.json",
+          "sha256": "e3fe7d86afd71d940aef231255bd4018457df1f6b641138d2ad5d4eb4217648a"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/dell-code-transfer.json",
+          "sha256": "56d2a1da14f76d54ff2be25561d0ee16e6c03cfcbc0f759cc2e45cf2d11ea7e6"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/dell-delivery-replay.json",
+          "sha256": "13fb22d9ebeedefbb193bb52ce5e06aab39a5a27e5f584de75643a872efc0263"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/dell-delivery.json",
+          "sha256": "13fb22d9ebeedefbb193bb52ce5e06aab39a5a27e5f584de75643a872efc0263"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/dell-inventory.json",
+          "sha256": "37a4e082cc4ecdaced8a6629d4fbcd3fb5a6fde56e5fc663b16292702524ff4e"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/dell-product-result.json",
+          "sha256": "078e41437ed3f495e31aa49f078af1c7658863cc6969a6825fce17f7a718c481"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/files.json",
+          "sha256": "3c019011a90cfcd445174bef0780abc9274130b1a807ac289628ea13a2a32a4e"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/fleet-final-nodes.json",
+          "sha256": "2986de4b07273e7f8424d7e2a4a7e8b3f1e0f2d07238c0e7d2ee37f207c430ff"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/focused-launch.log",
+          "sha256": "210dfea556bf000731dec40722671aff5e9588d328e16efac91c1cc70a1a15dc"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/focused-launch.xml",
+          "sha256": "6e9327bdfe7bfc938439d8b9d6f21a423c9f772d37d3f029a23bf142d23e8f33"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/git-final-tests.xml",
+          "sha256": "82c0908754e533a1c8f30040d51838e8ebb655d56f0f8aa87cdf1566eaab1555"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/hp-api-build-result.json",
+          "sha256": "3257d76aebc443a25d70cd5909a4288f8d25561a0238539a375f3d382853a900"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/hp-api-final.json",
+          "sha256": "4bb4e71cdf1b2cf8c6238c092e160f6c49ba0fc31ec260de87cd976db99ae96b"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/hp-delivery-replay.json",
+          "sha256": "b657818da7978ab95447f6e72858e96dc12290893301d55acc4ed5934cba9c28"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/hp-delivery.json",
+          "sha256": "b657818da7978ab95447f6e72858e96dc12290893301d55acc4ed5934cba9c28"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/hp-final-git-canary.json",
+          "sha256": "32e401b0879362309cd58321a89f5b9318fd4cb822d3b2f371ee6a0b84b20322"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/hp-helper.json",
+          "sha256": "11fb2792c5091dfa59b9e5c66af186404ed07aebb2cc0737728e30ae9e0d690a"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/hp-identity.json",
+          "sha256": "d0c6e0075adc357b34c364d985741a7ea76eb6a9ce84a25634f903c0bf7fce0c"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/isolation-after.xml",
+          "sha256": "d8579a5538072a89a86ced384ac0f77528af12540eb70515f54874d8268663af"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/isolation-before.xml",
+          "sha256": "fb2b4bd0a94861c0a045e371bdc3aa8f7d1c692402bd84fe4c867d7f3a8add09"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/m910-auth.json",
+          "sha256": "95cec31f2bcd832d7cc7c18bee32f37510dadd69b0c57d3de9c806f34dd30a67"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/m910-cli.json",
+          "sha256": "6659c0ae2776b0cbce6477dffad71e4977e7c8c3aaf7239d15a2572f140a1ce9"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/m910-inventory.json",
+          "sha256": "6dafdf113f0a78e0ba943e76926c81ee3f32fcae2706ee9a30e23aa0df5a51ef"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/mcp-checkpoint.json",
+          "sha256": "721aedede147b902fe4d480b585b92a2379a1815c1430f64bada3516d7930fe5"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/mcp-cleanenv-tests.xml",
+          "sha256": "7a5481510fe6b83bacb6fd8114b6311346786694423e93cf28f2b7905d67a417"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/mcp-delivery.json",
+          "sha256": "3728fc92941fece54ff8e2fdb0ccb075484dcf2348f2cc41127cdc3ba0769a74"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/mcp-focused-tests.xml",
+          "sha256": "f5065b2436197bc5c09bb5add6ce833fb177e2ddbbc4af7450e5925145e4d256"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/mcp-product-canary.json",
+          "sha256": "95ff0c73bdeabcda45b8228fb3cf75a2deeab0cec099d7bcb392635212323268"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/nec-auth.json",
+          "sha256": "0e435b1627101afaf261ddc9a8eae28bb611eacf3e522b679c449e781e1f4add"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/nec-checkpoint.json",
+          "sha256": "41bb2b41740639d1e775c067575cf0ae5a02a45adaf1f8a2aa8cfafbb40adfba"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/nec-close.json",
+          "sha256": "541fa6897fea6a6d7d60d665de5f0ad09eaa8cf8e9bd6755844940fecb7a0b12"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/node-audit.json",
+          "sha256": "26e698fa845c6c5d85d20b65636c81761451c57bec3aa8c4d67d5adb886662a6"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/package-imports-tests.log",
+          "sha256": "36f18ca451c7b4c015da6c6df50ff98355f35e0a8e13da38d2ef30d696343612"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/package-imports-tests.xml",
+          "sha256": "8ba744903a5787a19bd882e32c5aed1c84ba90bdea0f3c42afccefd720a71f2f"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/pr131-coordination.txt",
+          "sha256": "77a7d4d6a23f88b8282f57ec9c0bc769d7004564230103c854ece94c16b619b3"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/preflight.log",
+          "sha256": "53c41730f4187288ceb926407151168588f4ca97ffb34dda247c68b2c281edfd"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/pty-fixed-tests.xml",
+          "sha256": "09dec3eaf3799d8ae51cbb1ab9ebbbeeee4be01af92ee2f93b6a9a9b147deefc"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/quality-notes.md",
+          "sha256": "ec5edfd34e69d7d0dfb6abb10db8d98074738d2a7fe81745a7ca1b0b1b600a88"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/read-authz-tests.xml",
+          "sha256": "a454c7643f2f343faa818de63706231c59659f90931629c95076383f73ffbb65"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/ssh-status-before.json",
+          "sha256": "22b3a12f5acec4de1b7e563edbfe55f65d6b6665ec6836bc124248747bdfa0b1"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/test-cleanup-recovery.json",
+          "sha256": "ce5036bc367e3c298955682af6f4d21478e95da622ee4f12ec067cbb95c4b7b9"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/test-runner.json",
+          "sha256": "8090f48217221c318aab139a02c67662fcd653e154d4c9e65da4890d2a9da863"
+        },
+        {
+          "path": "docs/evidence/fleet-83/v2/wizard-cleanup-recovery.json",
+          "sha256": "117482db0fef3e1b5972d115d2a5cda93b75c0707c39de929372d1056e65ed6a"
+        },
+        {
+          "path": "scripts/fleet-admin.py",
+          "sha256": "981944b6f1ea6954f50ea5082dcf100daa20929c712ffe56c912953c1f317844"
+        },
+        {
+          "path": "scripts/fleet-delivery.py",
+          "sha256": "4dece6d05cce8eaf5bbcfc5bd0a2e3d410688cc2fccb324bc943ba4ab23b137a"
+        },
+        {
+          "path": "specs/features/fleet-permissions.yaml",
+          "sha256": "018cf36f965ce91be11ab37aa71d385158a9abc75dcc119818963f6e247165f2"
+        },
+        {
+          "path": "tests/__init__.py",
+          "sha256": "945c4e077c4577862ce9566ac1d6f9e546c7f219ec8fc353a7e98c22bd32e4c4"
+        },
+        {
+          "path": "tests/conftest.py",
+          "sha256": "6a052d188dc4a13a7d32567ad83ac30a648327d4873018fdab3c194e3e20b6ad"
+        },
+        {
+          "path": "tests/test_agent_observability_p0_repair.py",
+          "sha256": "328437462fbd27220ab65886f4a4cb0831e5cc7822cbe6e12c1e8353ff4ea126"
+        },
+        {
+          "path": "tests/test_b03_authz.py",
+          "sha256": "10f3e7b47f263506b87b0c81c48449606cf591bfd562b87c02dac724beb7d603"
+        },
+        {
+          "path": "tests/test_cross_repo_integration.py",
+          "sha256": "4b0092eeafa0716975449a2325c4de072c267bf58100516ec164b2ee7640eb4c"
+        },
+        {
+          "path": "tests/test_fleet_admin.py",
+          "sha256": "09cf9c6b396f033a945d4f8ae0838ddbe1dd776945d5e7cceae0cd9b370af4de"
+        },
+        {
+          "path": "tests/test_fleet_delivery.py",
+          "sha256": "52f9c3458dbc345e12c883c95b009c4d6490326dd6bbd5cc744d36b081e9146c"
+        },
+        {
+          "path": "tests/test_fleet_dispatch.py",
+          "sha256": "ae05cda3d32cdee22bb2bec91d05e3bf05f84a633d8392e54bdfe04116b2d2d9"
+        },
+        {
+          "path": "tests/test_fleet_dispatch_gate.py",
+          "sha256": "f87ae1aa7ea17c59134f44e4f425df655e25515d4454a4cda32bba3816496c87"
+        },
+        {
+          "path": "tests/test_fleet_git_helper.py",
+          "sha256": "348eab28e2112d4fcdadc37b923749c002303df2593699307ccfd8dc85f370ac"
+        },
+        {
+          "path": "tests/test_fleet_permissions.py",
+          "sha256": "7b36c7358eebb4b9fb62955728bb00f6d8968a529d38f40b2cfcb04eae8336cd"
+        },
+        {
+          "path": "tests/test_golden_e2e.py",
+          "sha256": "14ddb57ca1e92112a4cb68e2fea9430e6a35b3c6c0e54a56dc81cdbe9d6ab7a9"
+        },
+        {
+          "path": "tests/test_sandbox_docker.py",
+          "sha256": "9e3f8e24ca8602bd0711234389cc95a55d817f1fc17a17bbf8d26d3010294b15"
+        },
+        {
+          "path": "tests/test_sandbox_reset_data.py",
+          "sha256": "319f434074f2b40da083096de0196d1b397cea73a28efe33f2d728d75c5c12b2"
+        },
+        {
+          "path": "tests/test_wizard_sandbox_picks_latest.py",
+          "sha256": "a586cd596fcf535e381fcf515f7e1bf69fbc82864bced601ab7e0b6a1fa7e098"
+        }
+      ]
+    },
+    "terminal_mcp": {
+      "root": "/home/kimex/workspace/terminal-mcp-fleet-ready-83",
+      "base": "f85356b24437569a63cbbc32eadeb46ff00951b7",
+      "head_sha": "173778cadfe38e1c7aa0c7e75c5f0a8c676e3787",
+      "tracked_diff_sha256": "b7344587d61f12c283e682374be62bab7da3b97508abbe95dd0ec005c6bb2be0",
+      "changed_files": [
+        {
+          "path": "deploy/install-node-agent-macos.sh",
+          "sha256": "0c6880cc15ba3ac83ff12b34b8741ec0e64c2a592df55fc3db845b40aa1126e0"
+        },
+        {
+          "path": "deploy/install-node-agent.ps1",
+          "sha256": "a6340c917e53e58541cfcae6c9ef0d9b9c7404d478ec4e8f0a8b19bc87adf8ec"
+        },
+        {
+          "path": "deploy/install-node-agent.sh",
+          "sha256": "8a0b09f2db69e8ae1ef7619e094cd4b9d1ec673a7655cf0b22a47075c0a9bdc3"
+        },
+        {
+          "path": "docs/evidence/fleet-ready-83/README.md",
+          "sha256": "612424a1e167b80e946b058af13a7e81d3bf10fa6cd2c3a7f291d6851821287f"
+        },
+        {
+          "path": "docs/evidence/fleet-ready-83/bounded-review.json",
+          "sha256": "b18a8e4cba51cdc5c52a5a1cc6982cca5deb8a4be1b6d63789d3e27be9c8fbd9"
+        },
+        {
+          "path": "docs/evidence/fleet-ready-83/checkpoint.json",
+          "sha256": "721aedede147b902fe4d480b585b92a2379a1815c1430f64bada3516d7930fe5"
+        },
+        {
+          "path": "docs/evidence/fleet-ready-83/cleanenv-tests.xml",
+          "sha256": "7a5481510fe6b83bacb6fd8114b6311346786694423e93cf28f2b7905d67a417"
+        },
+        {
+          "path": "docs/evidence/fleet-ready-83/delivery.json",
+          "sha256": "3728fc92941fece54ff8e2fdb0ccb075484dcf2348f2cc41127cdc3ba0769a74"
+        },
+        {
+          "path": "docs/evidence/fleet-ready-83/files.json",
+          "sha256": "db1f3d8cec65db2d554e50bf401ffba7cda2d568a1ce5d8d6972af5d755efc00"
+        },
+        {
+          "path": "docs/evidence/fleet-ready-83/product-canary.json",
+          "sha256": "95ff0c73bdeabcda45b8228fb3cf75a2deeab0cec099d7bcb392635212323268"
+        },
+        {
+          "path": "docs/evidence/fleet-ready-83/tests.xml",
+          "sha256": "f5065b2436197bc5c09bb5add6ce833fb177e2ddbbc4af7450e5925145e4d256"
+        },
+        {
+          "path": "docs/fleet-readiness-v1.md",
+          "sha256": "a03ffbccacb8938da90965181857958658c1fa4ca6b0a9440cec5521af92b8ff"
+        },
+        {
+          "path": "docs/multi-node.md",
+          "sha256": "5dbd34547d72d2be487a5b02ebdfe9ed2116eb1383b0e2c72e8ed80dccd5b9c4"
+        },
+        {
+          "path": "scripts/fleet-readiness.py",
+          "sha256": "9eb69048f221d22247fed55b291d3d3e6a38e1bedebaea2bc24a35e3282e4b42"
+        },
+        {
+          "path": "terminal_mcp/agent_launch_policy.py",
+          "sha256": "3cd8263767e489b63695c9b34fa7ee89c726cd9060f9c46b8bf2ab642cef1931"
+        },
+        {
+          "path": "terminal_mcp/config.py",
+          "sha256": "aaeaa62ac704ecaaa48382b69cb38f6264ee5166dcc9c0dcc72ebb6bc170810b"
+        },
+        {
+          "path": "terminal_mcp/core.py",
+          "sha256": "594b6a82a2ac434873b0b026dd81f9d5613a7ba831c75becbfc69da081fae74b"
+        },
+        {
+          "path": "terminal_mcp/dashboard.py",
+          "sha256": "17261090c377b542365cbdf55a663987127ae4f893033c370eaed9441c89cad6"
+        },
+        {
+          "path": "terminal_mcp/fleet_readiness.py",
+          "sha256": "099bc3d89a0c8283ca3e0e4a61efd0abd41610b6bff932352afb8a4f2d22eab2"
+        },
+        {
+          "path": "terminal_mcp/headless.py",
+          "sha256": "c94a35b3f490a9cb95c461cbe4aec87aa52bf7e2844ccd8845489e58389ff05c"
+        },
+        {
+          "path": "terminal_mcp/launcher_resolution.py",
+          "sha256": "c16d719e4eb6e749b94a0d28e62114f6c31d8fcca1aef71bbfa039f7069826ac"
+        },
+        {
+          "path": "terminal_mcp/lifecycle.py",
+          "sha256": "6c4c7be047bcd5d7454edfee8604d3ae91d65260a952a0ac16ddf05a24050ee4"
+        },
+        {
+          "path": "terminal_mcp/tmux.py",
+          "sha256": "e8b99c2cf97aec8c81e41c4b1ba08060012ecb46166c809171b158effacec51d"
+        },
+        {
+          "path": "tests/test_fleet_readiness.py",
+          "sha256": "9f01679c2f6c57e63646cb06b25f25cfa7f111812921c64e1180f95fe226a384"
+        },
+        {
+          "path": "tests/test_nodes_ssh_web_browser.py",
+          "sha256": "79feaa6dc19a66a692c663bf07390fcd9e1b5c9b7fbe53840cefbdbc96cd9710"
+        },
+        {
+          "path": "tests/test_session_lifecycle.py",
+          "sha256": "f9e36dace44e1e9b9a45beed7e46062a88564b5e069533a067c7b601decadc11"
+        }
+      ]
+    },
+    "working_tree_was_changing": true,
+    "scope_rule": "Findings and observations apply to the recorded file hashes; later edits need re-verification."
+  },
+  "reviewers": [
+    "local-correctness-security-review"
+  ],
+  "findings": [],
+  "actionable_findings": [],
+  "verification_gates": [],
+  "resolved_in_current_source": [
+    {
+      "issue": "Stopping the wrapper could orphan its separately grouped native agent.",
+      "observed_fix": "probe finally terminates its own group; CLI SIGTERM/SIGINT unwind through cleanup and return EXECUTION_UNKNOWN."
+    },
+    {
+      "issue": "Docker file-only runtime accepted a delivery-required scope.",
+      "observed_fix": "preflight now blocks Docker unless scope is local; hp-delivery also blocks without a verified handoff."
+    },
+    {
+      "issue": "Mutable HEAD/prompt changed the request key and authorized replay.",
+      "observed_fix": "Request keys use workspace/task/explicit owner enrollment key; changed prompt content is rejected and per-key prompt publication uses an exclusive hard link."
+    },
+    {
+      "issue": "Wrapper creation prematurely claimed prompt delivery and output implied RUNNING.",
+      "observed_fix": "Trusted starts remain STARTING/SUBMITTED; final delivery status reads the runner receipt, and trusted resumes bypass TUI delivery."
+    },
+    {
+      "issue": "Fast wrapper exit could be overwritten by a later STARTING update.",
+      "observed_fix": "The reader thread starts only after the session is registered and initial database state is written."
+    },
+    {
+      "issue": "Renamed request journal was not directory-fsynced.",
+      "observed_fix": "private_write now fsyncs its parent directory on POSIX."
+    },
+    {
+      "issue": "Git index flags and poisoned source pycache could bypass SHA verification.",
+      "observed_fix": "MCP verifies actual bytes for the entire pinned Git tree and runs with -I -B plus a fresh private pycache prefix; it scans all non-hidden repository-root directories for unexpected importable modules and symlinks."
+    },
+    {
+      "issue": "MCP launch could precede final session grants and binding.",
+      "observed_fix": "The runner waits on a private bounded dispatch gate; MCP releases it only after actual grants, binding, and effective input authorization succeed."
+    },
+    {
+      "issue": "Ignored root Python modules escaped the original app/scripts import-surface check.",
+      "observed_fix": "Full-tree blob verification and root-recursive import-surface scanning now reject ignored root subprocess.py. Tracked hidden policy symlinks are checked as literal pinned link bytes without following them."
+    },
+    {
+      "issue": "Fleet status GET lacked the established workspace read authorization guard.",
+      "observed_fix": "GET /api/workspaces/{wid}/fleet now depends on require_read_role(workspace,wid), whose required-auth mode enforces authentication and organization membership before returning enrollment."
+    },
+    {
+      "issue": "Normal unenrolled launches unnecessarily evaluated the fleet task prompt.",
+      "observed_fix": "The conditional expression calls workspace_agent_prompt only after dispatch.enrollment returns a non-None enrollment; unenrolled launches retain the existing delivery path."
+    },
+    {
+      "issue": "Legacy push_canary deletion guard replaced the existing pre-push policy.",
+      "observed_fix": "The deletion wrapper saves original stdin, validates exactly one deletion of the expected ref/OID, then invokes the originally resolved executable policy hook with the same argv and saved stdin. A denying policy leaves cleanup BLOCKED and retains the worktree/ref."
+    },
+    {
+      "issue": "MCP source probe conflated unavailable executables, permission errors, and timeout.",
+      "observed_fix": "_git catches TimeoutExpired, PermissionError, and remaining OSError separately as STATUS_PROBE_TIMEOUT, ACL_DENIED, and CLI_UNSUPPORTED; PermissionError is handled before its OSError superclass."
+    }
+  ],
+  "positive_observations": [
+    "Admin wrapper uses fixed operation/argv allowlists, root ownership/mode/path checks, private checkpoints, and visudo validation before installing exact sudoers grants. No further concrete defect found in the inspected admin boundary.",
+    "HP delivery checks exact approved origin/push URL, base/commit/ref/changed paths, regular textual blobs, and request fingerprints; per-request/per-ref leases serialize delivery and unknown push/PR outcomes do not blindly redispatch. No further concrete defect found in these inspected delivery checks.",
+    "Latest test-only cleanup delta retains the process-local registry of exact compose starts and checks the current row project before calling cleanup. cleanup(force=True) still requires runtime.verify_owned; force bypasses status eligibility only. Function-scoped autouse teardown follows the ordinary non-autouse function fixtures in the inspected reset-data flow.",
+    "The negative ownership test restores its original compose_project in a finally block before fixture cleanup; it does not weaken the ownership rejection assertion or alter another sandbox.",
+    "Error classifier now matches explicit rate-limit 403/429 output before generic HTTP 403 and recognizes could-not-resolve-host as OFFLINE. No concrete defect found in these requested deltas."
+  ],
+  "coverage": {
+    "mode": "bounded-read-only-local",
+    "full_skill_completed": false,
+    "independent_validator": "not run: capacity exhausted",
+    "cross_model": "not run: explicitly prohibited for this bounded task; known expired provider authentication",
+    "implementation_edits": false,
+    "git_writes": false,
+    "live_actions": false,
+    "reviewer_tests_run": false,
+    "read_only_probes": [
+      "In-memory CPython bytecode validation demonstrated arbitrary bytecode can match tracked source timestamp/size; no files written or payload executed. The cache bypass is now addressed in source.",
+      "Fresh isolated interpreter module-state check confirmed subprocess/json are not loaded by the entry script initial sys/pathlib imports."
+    ],
+    "tests_inspected": [
+      "PF fleet dispatch, gate, admin, delivery, and helper fixtures",
+      "MCP source pin, cache/index flags, dispatch grant gate, and installer fixtures",
+      "MCP ignored-root-stdlib-shadow and hidden-policy-symlink regression fixtures",
+      "PF require_read_role dependency and enrolled-only task-prompt branch",
+      "PF local bare-remote canary cleanup regression with configured pre-push hook rejecting deletion",
+      "MCP parameterized source-probe timeout, permission-denied, and missing-executable fixtures",
+      "PF conftest function-scoped ownership-checked sandbox safety net and reset-data negative fixture restoration",
+      "PF rate-limit 403, rate-limit 429, and DNS classifier cases"
+    ],
+    "not_independently_verified": [
+      "Parent-reported HP and Dell-to-HP canaries, PR85/PR87, remote SHA readback, and repeat receipts",
+      "Targeted/broad test runs currently performed by parent/workers",
+      "Real Windows/macOS behavior, Claude tool permissions, NEC owner bootstrap and SSH verification",
+      "Complete V2 requirements 1-14 acceptance, visual UI gates, deployment/merge approval",
+      "Latest parent-reported 70-test run, HP canary SHA 0b314e252ec014af4a70f1da3d5cff4ae24a013f and rollback",
+      "Docker batch 13/14 address-pool diagnosis and pending reruns",
+      "Parent-reported dedicated isolation test PASS and ongoing full batch reruns",
+      "Parent-reported restored full collection and ongoing rerun of 11 affected test files"
+    ],
+    "current_code_assessment": "No concrete correctness/security blocker remains in inspected source and latest requested delta. Full ce-code-review remains unavailable/degraded. No full acceptance or release PASS is claimed.",
+    "release_review_label": "Code review: skipped (ce-code-review unavailable); bounded independent manual source review recorded separately.",
+    "latest_delta_review": {
+      "completed_at": "2026-11-25T05:03:44.894030+00:00",
+      "paths": [
+        "projectflow/tests/test_sandbox_docker.py:_configure_isolated_fixture_networks",
+        "projectflow/tests/test_b03_authz.py:23",
+        "projectflow/tests/test_agent_observability_p0_repair.py:24"
+      ],
+      "conclusion": "P2 platform prerequisite resolved by explicit skip before route probe. Both legacy imports use canonical tests.* modules; no remaining bare imports of those named modules found. No new concrete blocker in requested delta. Source inspection only."
+    }
+  },
+  "artifact_path": "/tmp/pf83-v2-review.json",
+  "resolved_findings": [
+    {
+      "#": 1,
+      "severity": "P2",
+      "title": "Ignored repository-root modules bypass the pinned runner source check",
+      "file": "/home/kimex/workspace/terminal-mcp-fleet-ready-83/terminal_mcp/fleet_readiness.py",
+      "line": 55,
+      "confidence": 75,
+      "autofix_class": "advisory",
+      "owner": "human",
+      "requires_verification": true,
+      "pre_existing": false,
+      "protected_subject": "injection",
+      "first_evidence": "verify_source restricts ls-tree and unexpected-module scanning to ('app', 'scripts').",
+      "why_it_matters": "The pinned entry script adds the repository root to sys.path[0]. An ignored root-level subprocess.py or json.py can then execute instead of the standard library while HEAD, git status, and the app/scripts blob checks all pass. The configured source SHA therefore does not constrain all code imported by the runner.",
+      "evidence": [
+        "terminal_mcp/fleet_readiness.py:55 verifies only app and scripts blobs; :69-74 scans only those directories.",
+        "ProjectFlow scripts/fleet-permissions.py:6 inserts the repository root at sys.path[0], then imports app.services.fleet_permissions, which imports subprocess and json.",
+        "Read-only fresh python3 -I check showed importing sys and pathlib does not load subprocess or json, so later imports remain subject to the inserted search path. No source code executed or files written by that check."
+      ],
+      "suggested_fix": "Constrain the repository-root import surface to verified pinned modules/packages, or isolate project imports so ignored root modules cannot shadow runtime dependencies. Add a fixture with a root-level subprocess.py ignored via .git/info/exclude and prove preflight blocks or the pinned runner cannot import it.",
+      "validation_status": "resolved-by-source-inspection",
+      "validation_reason": "Final verify_source checks every pinned tree blob and walks all non-hidden root directories, rejecting untracked importable modules and symlinks. The ignored-root-subprocess fixture asserts SOURCE_DIRTY. The reviewer inspected the regression fixture but did not execute it or obtain a separate validator."
+    },
+    {
+      "#": 2,
+      "severity": "P2",
+      "title": "Isolation test now requires Linux ip without a capability guard",
+      "file": "/home/kimex/workspace/projectflow-fleet-permissions-83/tests/test_sandbox_docker.py",
+      "line": 50,
+      "confidence": 95,
+      "validation_status": "resolved-by-source-inspection",
+      "why_it_matters": "The module only skips when Docker is unavailable. A macOS or Windows Docker host, or Linux installation without iproute2, reaches the new unconditional ip invocation and fails with FileNotFoundError before exercising isolation.",
+      "suggested_fix": "Explicitly skip this fixture when Linux route inspection is unavailable, or implement equivalent route discovery on supported platforms. Preserve fail-closed collision checking.",
+      "requires_verification": true,
+      "pre_existing": false,
+      "validation_reason": "The fixture now checks sys.platform == linux and presence of ip before invoking route inspection; unsupported hosts explicitly skip. No test execution or separate validator by reviewer."
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+WORK_STATUS:
+FIX_REQUIRED
+
+WHAT_CHANGED:
+Exact owner-enrolled ProjectFlow and Terminal MCP tasks now use bounded readiness gates and durable launch receipts. Scoped admin bootstrap and code-only HP Git delivery have independent audit, checks, checkpoints and rollback.
+
+AUTOMATED_TESTS:
+PF final bounded gate:1595 passed,0 failed/errors/skipped,66 collection-scope exclusions; effective wall2050.854s. See test-results.json for initial/intermediate/final counts,11,721 warnings and per-batch provenance. Original three broad failures reproduced and fixed; a subsequent monolithic run timed out with five regressions, then those fixes passed targeted coverage. MCP focused post-merge gate:252 passed,1 browser test deselected. Real HP PF API and MCP product canaries, Dell-to-HP code delivery and fresh normal push/readback/exact deletion passed.
+
+HOW_TO_VERIFY:
+1. Review acceptance.md and the exact source/runtime/remote SHAs; do not substitute branch names for pinned source.
+2. In an isolated test ProjectFlow database, enroll an owned task worktree with POST /api/workspaces/{wid}/fleet, scope local and an already verified runtime; use the existing Start Builder route and inspect its durable receipt and independent output.
+3. In an isolated TerminalService instance, configure the exact pinned PF source/workspace/task/binding and read_send grants; create with initial_prompt, verify file/build/test, and retry the same binding to confirm no second dispatch.
+4. Submit an owner-approved single-commit code-only bundle to fleet-delivery.py with a private exact manifest/check argv; compare source, HP and remote SHA and normal PR readback, then repeat to verify no duplicate delivery.
+5. Roll back only the task profile/helper changes matching their receipts. Admin bootstrap requires owner-admin review and the exact one-time scope described in FLEET_ADMIN_V2.vi.md.
+
+EXPECTED_RESULT:
+Authorized required capabilities either pass with independent evidence or fail before agent execution with a concrete blocker. Unknown execution is not retried. No routine security prompt is auto-answered; auth/admin/offline states do not become PASS through fallback.
+
+TEST_DATA:
+Disposable task/worktree IDs and private receipt paths are in the canary JSON files. Public proof PRs85/87/88 retain exact code commits. No production data or credentials are included.
+
+RUNTIME_REQUIREMENTS:
+HARDWARE
+
+RISKS:
+Full fleet acceptance is incomplete: node-local GitHub login, NEC admin/SSH, MacBook route/settings, M910 Codex execution permissions, Dell safe service PATH, Claude tools/connectors, authenticated browser and offline platform proof remain. Full code-review skill coverage degraded. Leave PR84/PR132 open; no live V2 rollout or historical-task replay.

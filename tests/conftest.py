@@ -1,10 +1,13 @@
 from __future__ import annotations
 import subprocess
+import warnings
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
+
+_created_test_sandboxes = {}
 
 def run(path, *args): return subprocess.run(list(args),cwd=path,text=True,capture_output=True,check=True)
 
@@ -31,6 +34,17 @@ def build_client(settings):
     c=TestClient(create_app(settings))
     c.app.state.sandboxes.spawn=lambda fn,args=():fn(*args)
     c.app.state.deployer.spawn=lambda fn,args=():fn(*args)
+    runtime = c.app.state.sandbox_runtime
+    compose_up = runtime.compose_up
+
+    def tracked_compose_up(compose_project, compose_file, env_file, cwd, services, sandbox_id, project_directory=None):
+        # Record before starting: failed compose-up can still create resources.
+        # Only actual starts from this test process are eligible for cleanup.
+        _created_test_sandboxes[compose_project] = (c.app.state.sandboxes, sandbox_id)
+        return compose_up(compose_project, compose_file, env_file, cwd, services, sandbox_id,
+                          project_directory=project_directory)
+
+    runtime.compose_up = tracked_compose_up
     return c
 
 @pytest.fixture
@@ -79,6 +93,9 @@ NGINX_COMPOSE = """
 services:
   app:
     image: nginx:1.28-alpine
+    # Most fixtures test lifecycle/HTTP behavior, not network allocation.
+    # Reuse Docker's bridge instead of consuming a host-wide default subnet.
+    network_mode: bridge
     ports:
       - "${WM_PORT_APP}:80"
 """
@@ -98,28 +115,22 @@ def sandboxable_repo_factory(tmp_path):
         return repo
     return make
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(autouse=True)
 def _docker_sandbox_safety_net():
-    """Session-end safety net for the real-Docker sandbox tests: even if an
-    individual test's own cleanup call fails to run (an assertion raised
-    before reaching its `finally`, etc.), never leave a `wm-*`-namespaced
-    container/network behind on this shared host. Narrowly scoped to the
-    exact `wm-` prefix this app always uses (docs section 15/66) -- never
-    touches any other container on the host, real or otherwise."""
+    """Clean only compose starts recorded by this test after its fixtures finish.
+
+    A prefix sweep is unsafe: another task or ProjectFlow session may own
+    another wm-* namespace. Use the runtime's existing ownership guard and
+    exact compose project; never enumerate or prune host-wide resources.
+    Releasing after each test also prevents this process from retaining
+    networks until the end of a large suite and exhausting the host pool.
+    """
     yield
-    try:
-        import subprocess as _sp
-        ids = _sp.run(
-            ["docker", "ps", "-aq", "--filter", "label=com.docker.compose.project"],
-            capture_output=True, text=True, timeout=15,
-        ).stdout.split()
-        for cid in ids:
-            name = _sp.run(["docker", "inspect", "-f", "{{.Name}}", cid], capture_output=True, text=True, timeout=5).stdout.strip().lstrip("/")
-            if name.startswith("wm-"):
-                _sp.run(["docker", "rm", "-f", cid], capture_output=True, timeout=15)
-        nets = _sp.run(["docker", "network", "ls", "--format", "{{.Name}}"], capture_output=True, text=True, timeout=15).stdout.split()
-        for net in nets:
-            if net.startswith("wm-"):
-                _sp.run(["docker", "network", "rm", net], capture_output=True, timeout=15)
-    except Exception:
-        pass  # best-effort safety net only -- never fail the test session over cleanup itself
+    for project, (manager, sandbox_id) in list(_created_test_sandboxes.items()):
+        try:
+            sandbox = manager.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
+            if sandbox and sandbox["compose_project"] == project:
+                manager.cleanup(sandbox_id, force=True)
+        except Exception as exc:
+            warnings.warn(f"Test sandbox cleanup failed for {project}: {type(exc).__name__}")
+    _created_test_sandboxes.clear()

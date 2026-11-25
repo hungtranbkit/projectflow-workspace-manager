@@ -1,0 +1,56 @@
+[
+  {
+    "id": "dell-5530",
+    "status": "offline",
+    "platform": "windows",
+    "last_error": "GET /v1/health -> URLError: timed out"
+  },
+  {
+    "id": "dell-linux",
+    "status": "online",
+    "platform": "linux",
+    "last_error": null
+  },
+  {
+    "id": "hp-linux",
+    "status": "online",
+    "platform": "linux",
+    "last_error": null
+  },
+  {
+    "id": "local",
+    "status": "offline",
+    "platform": "linux",
+    "last_error": null
+  },
+  {
+    "id": "m910",
+    "status": "online",
+    "platform": "linux",
+    "last_error": null
+  },
+  {
+    "id": "mac17-macbook-pro",
+    "status": "offline",
+    "platform": "macos",
+    "last_error": "GET /v1/health -> URLError: timed out"
+  },
+  {
+    "id": "macbook",
+    "status": "online",
+    "platform": "linux",
+    "last_error": null
+  },
+  {
+    "id": "nec1",
+    "status": "online",
+    "platform": "linux",
+    "last_error": null
+  },
+  {
+    "id": "win",
+    "status": "offline",
+    "platform": "windows",
+    "last_error": "GET /v1/health -> URLError: timed out"
+  }
+]

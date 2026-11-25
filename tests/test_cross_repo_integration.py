@@ -45,6 +45,14 @@ def test_backend_and_client_test_together_without_either_merging_to_main(client,
 
     # --- backend repo: real sandbox: contract, a feature on its own unmerged branch
     backend = sandboxable_repo_factory(root, "backend-repo", port_range=(21300, 21349))
+    # This fixture proves cross-repo source pinning and HTTP consumption, not
+    # inter-container DNS/network isolation (covered by test_sandbox_docker).
+    # Reuse Docker's existing bridge so a shared host's exhausted automatic
+    # subnet pool cannot prevent the disposable, single-service HTTP proof.
+    compose = backend / "compose.yml"
+    compose.write_text(compose.read_text().replace("    ports:\n", "    network_mode: bridge\n    ports:\n"))
+    run(backend, "git", "add", "compose.yml")
+    run(backend, "git", "commit", "-m", "use existing bridge for HTTP fixture")
     backend_main_before = head(backend)
 
     # --- client repo: no sandbox: contract of its own -- it only ever

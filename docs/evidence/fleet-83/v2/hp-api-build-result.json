@@ -1,0 +1,19 @@
+{
+  "task_id": 1,
+  "workspace_id": 1,
+  "worktree": "/home/kimex/workspace/.worktrees/projectflow-fleet-permissions-83-codex-pf83-v2-isolated-product-canary-pf83-v2-product-proof",
+  "start_status": 303,
+  "start_body": "",
+  "image": "sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b",
+  "elapsed_seconds": 33.224,
+  "session_id": 3,
+  "status": "EXITED",
+  "exit_code": 0,
+  "transcript": "{\r\n  \"code\": \"PASS\",\r\n  \"returncode\": 0,\r\n  \"elapsed_ms\": 29931,\r\n  \"execution\": \"EXITED\",\r\n  \"dispatched\": true,\r\n  \"task_outcome\": \"UNVERIFIED\",\r\n  \"runtime\": \"docker\",\r\n  \"capabilities\": \"FILE_WORK_ONLY_NO_GIT\",\r\n  \"log_path\": \"/tmp/pf83-v2-product-canary/state/fleet-v1/0c0cd2cc520258cff159.34c1128a68cd01c2b26fa79070bb6ebfe351c1153c688eaaecac674e83fd51e8.log\",\r\n  \"request_key\": \"34c1128a68cd01c2b26fa79070bb6ebfe351c1153c688eaaecac674e83fd51e8\",\r\n  \"output_sha256\": \"960bde24c96e0f5f7839b964a25bb3b29785b677f1dd29128ab86bc623efed18\"\r\n}\r\n",
+  "independent_readback": "PF83_V2_BUILD_TEST_OK\n",
+  "git_head": "fefacab4718cc7b7f4befd5ddaaad21f65548b34",
+  "rollback": {
+    "code": "PASS",
+    "changed": true
+  }
+}

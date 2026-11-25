@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "profile": "trusted-project-unattended-v1",
+  "observed_at": "2026-11-25T02:46:54Z",
+  "os": "Linux",
+  "node": "kimex-HP-EliteDesk-800-G4-DM-35W-Japan",
+  "uid": 1000,
+  "executables": {
+    "git": "/usr/bin/git",
+    "gh": "/usr/bin/gh",
+    "codex": "/home/kimex/.local/bin/codex",
+    "claude": "/home/kimex/.local/bin/claude",
+    "docker": "/usr/bin/docker",
+    "sudo": "/usr/bin/sudo"
+  },
+  "checks": {
+    "sudo": {
+      "code": "SUDO_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 3
+    },
+    "docker": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 192
+    },
+    "gh_auth": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 741
+    },
+    "gh_identity": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 706
+    },
+    "github_push": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 791
+    },
+    "codex_version": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 9,
+      "version": "0.154.0"
+    },
+    "claude_version": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 11,
+      "version": "2.1.332"
+    },
+    "codex_auth": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 56
+    },
+    "claude_auth": {
+      "code": "AUTH_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 203
+    },
+    "git_helper": {
+      "code": "CONFIGURED"
+    },
+    "workspace": {
+      "code": "PASS",
+      "dirty": true
+    },
+    "disk": {
+      "code": "PASS",
+      "free_bytes": 14389264384,
+      "free_inodes": 13214400
+    },
+    "serial_adb": {
+      "code": "NOT_REQUIRED",
+      "reason": "Git/CLI task; no device access requested"
+    },
+    "admin": {
+      "code": "OWNER_BOOTSTRAP_REQUIRED",
+      "required_for_task": false
+    },
+    "managed_policy": {
+      "code": "OBSERVED",
+      "present": [],
+      "effective": "CLI_ENFORCED_NOT_OVERRIDDEN"
+    }
+  },
+  "write_canary": "NOT_RUN",
+  "execution": "NOT_DISPATCHED"
+}

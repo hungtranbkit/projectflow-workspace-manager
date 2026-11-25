@@ -1,0 +1,9 @@
+{
+  "code": "PASS",
+  "branch": "agent/codex/pf83-canary-a4dc068d203a4cce9b4946a70d9b4104",
+  "worktree": "/home/kimex/workspace/.worktrees/pf83-canary-a4dc068d203a4cce9b4946a70d9b4104",
+  "pushed_sha": "6c9f751e036ce8b05b4fb2fd4135b8e343929b06",
+  "cleanup": "PASS",
+  "readback_sha": "6c9f751e036ce8b05b4fb2fd4135b8e343929b06",
+  "local_branch": "RETAINED_CHECKPOINT"
+}

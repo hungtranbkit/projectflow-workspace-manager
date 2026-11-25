@@ -1,0 +1,56 @@
+{
+  "source": "node-local audit captured through dedicated Terminal MCP shell; checkpoint b9bedaa",
+  "checks": {
+    "sudo": {
+      "code": "SUDO_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 3
+    },
+    "docker": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 163
+    },
+    "gh_auth": {
+      "code": "AUTH_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 138
+    },
+    "gh_identity": {
+      "code": "PROBE_FAILED",
+      "returncode": 4,
+      "elapsed_ms": 112
+    },
+    "github_push": {
+      "code": "PROBE_FAILED",
+      "returncode": 4,
+      "elapsed_ms": 143
+    },
+    "codex_version": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 21,
+      "version": "0.163.0"
+    },
+    "claude_version": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 25,
+      "version": "2.1.330"
+    },
+    "codex_auth": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 94
+    },
+    "claude_auth": {
+      "code": "AUTH_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 334
+    },
+    "git_helper": {
+      "code": "AUTH_REQUIRED"
+    }
+  },
+  "local_write_read_cleanup": "PASS"
+}
