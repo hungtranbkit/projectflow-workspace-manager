@@ -69,6 +69,14 @@ def envelope(payload):
 
 def set_fake(client, payload):
     env = envelope(payload)
+    invoker = client.app.state.planner_service.invoker
+    assert client.app.state.requirement_analysis_service.invoker is invoker
+
+    # PlannerAgentInvoker checks provider availability before calling its
+    # injectable subprocess runner. This test file's deterministic runner
+    # owns that boundary too; the sentinel is never executed because runner
+    # below intercepts every invocation.
+    invoker.which = lambda executable: "test-runner-intercepted" if executable == "claude" else None
 
     def runner(argv, cwd, timeout):
         class R:
@@ -76,7 +84,7 @@ def set_fake(client, payload):
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    invoker.runner = runner
 
 
 def create_workflow(client, cid, profile="CONTROLLED"):
@@ -98,13 +106,21 @@ def seeded_change(client, git_repo, lifecycle_env):
 
     set_fake(client, {"problem_statement": "Kiosks lose network in-store.", "functional_requirements": ["Queue offline"],
                        "actors": ["Kiosk operator"], "ambiguities": []})
-    client.post(f"/api/changes/{cid}/requirements/analyze", data={"provider": "claude"})
+    analysis_response = client.post(f"/api/changes/{cid}/requirements/analyze", data={"provider": "claude"})
+    assert analysis_response.status_code == 200, analysis_response.text
+    assert analysis_response.headers.get("content-type", "").startswith("application/json")
+    analysis = analysis_response.json()
+    assert analysis.get("outcome") == "READY" and analysis.get("work_product"), analysis
 
     set_fake(client, {"feature_id": "FEAT-KIOSK", "title": "Offline Kiosk",
                        "requirements": [{"id": "REQ-001", "text": "Queue sales offline."}, {"id": "REQ-002", "text": "Sync when online."}],
                        "acceptance_criteria": [{"id": "AC-001", "text": "Sale recorded while offline."}]})
     r = client.post(f"/api/changes/{cid}/spec-proposals", data={"provider": "claude"})
-    pid = r.json()["proposal"]["id"]
+    assert r.status_code == 200, r.text
+    assert r.headers.get("content-type", "").startswith("application/json")
+    spec_result = r.json()
+    assert spec_result.get("outcome") == "READY" and spec_result.get("proposal"), spec_result
+    pid = spec_result["proposal"]["id"]
     set_fake(client, {"verdict": "PASS", "findings": []})
     client.post(f"/api/spec-proposals/{pid}/review", data={"provider": "claude"})
     client.post(f"/api/spec-proposals/{pid}/apply")
