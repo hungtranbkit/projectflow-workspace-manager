@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "kind": "terminal-mcp-public-aggregate",
-  "observed_at": "2026-11-25T22:36:48+00:00",
+  "observed_at": "2026-11-25T22:41:51+00:00",
   "expected_refresh_seconds": 300,
   "fresh_window_seconds": 300,
   "nodes": {
     "total": 9,
-    "online": 4,
+    "online": 5,
     "offline": 4,
-    "unknown": 1,
+    "unknown": 0,
     "items": [
       {
         "label": "dell-5530",
@@ -26,7 +26,7 @@
         "label": "hp-linux",
         "status": "online",
         "open_sessions": 5,
-        "recent_activity_signals": 0
+        "recent_activity_signals": 5
       },
       {
         "label": "local",
@@ -54,7 +54,7 @@
       },
       {
         "label": "nec1",
-        "status": "unknown",
+        "status": "online",
         "open_sessions": 0,
         "recent_activity_signals": 0
       },
@@ -68,7 +68,7 @@
   },
   "sessions": {
     "open": 10,
-    "recent_activity_signals": 0,
+    "recent_activity_signals": 5,
     "running_verified": null
   },
   "acceptance": {
