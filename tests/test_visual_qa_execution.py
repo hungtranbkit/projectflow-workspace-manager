@@ -77,6 +77,9 @@ class _Git:
     def head(self, _path):
         return "fixture-head-123"
 
+    def source_state(self, _path):
+        return {"head": "fixture-head-123", "tracked_diff_sha256": "", "untracked_paths": (), "clean": True}
+
 
 class _Runner:
     def __init__(self, fail_stage: str | None = None):

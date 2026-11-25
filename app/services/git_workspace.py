@@ -91,6 +91,30 @@ class GitWorkspaceService:
         return self.git(repo, "rev-parse", "--verify", "--quiet", f"{branch}^{{commit}}", check=False).returncode == 0
     def head(self, repo, branch="HEAD"): return self.git(repo, "rev-parse", f"{branch}^{{commit}}").stdout.strip()
     def status(self, repo): return self.git(repo, "status", "--porcelain=v1").stdout
+    def source_state(self, repo):
+        """A stable observation of HEAD and tracked worktree content.
+
+        Untracked files make a run unbound to a commit, but are deliberately
+        excluded from the drift digest because test commands may create
+        disposable artifacts. Tracked changes are content-hashed so edits
+        during a run are detected even when the porcelain status stays 'M'.
+        """
+        repo = self.validate_repo(repo)
+        head_before = self.head(repo)
+        diff_before = self.git(repo, "diff", "HEAD", "--binary").stdout
+        status = self.status(repo)
+        diff_after = self.git(repo, "diff", "HEAD", "--binary").stdout
+        head_after = self.head(repo)
+        if head_before != head_after or diff_before != diff_after:
+            raise GitCommandError("Source changed while its state was being inspected")
+        return {
+            "head": head_before,
+            "tracked_diff_sha256": hashlib.sha256(diff_before.encode("utf-8")).hexdigest(),
+            "untracked_paths": tuple(sorted(
+                line[3:] for line in status.splitlines() if line.startswith("?? ")
+            )),
+            "clean": not bool(status.strip()),
+        }
     def create_agent(self, repo, agent, task, base="main"):
         repo = self.validate_repo(repo); agent, task = slugify(agent), slugify(task)
         branch = self.validate_branch(f"agent/{agent}/{task}"); path = self.validate_worktree(self.worktree_root / f"{self.repo_slug(repo)}-{agent}-{task}")

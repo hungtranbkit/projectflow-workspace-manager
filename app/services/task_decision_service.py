@@ -519,6 +519,13 @@ class TaskDecisionService:
             if visual_qa_required:
                 return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": 1, "head": head, "summary": {}}
             required = 0
+        if required:
+            try:
+                source_state = self.git.source_state(ti_repo["worktree_path"])
+            except Exception:
+                return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": required, "head": head, "summary": {}}
+            if source_state["head"] != head or not source_state["clean"]:
+                return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required, "head": head, "summary": {}}
         rows = self.db.all(
             "SELECT * FROM test_runs WHERE workspace_type='integration' AND workspace_id=? AND tested_commit=? ORDER BY id DESC",
             (iid, head))
@@ -956,6 +963,12 @@ class TaskDecisionService:
             return "NOT_RUN"
         rows = self.db.all("SELECT * FROM test_runs WHERE workspace_type='agent' AND workspace_id=? AND tested_commit=? ORDER BY id DESC", (b["id"], head))
         if not rows:
+            return "NOT_RUN"
+        try:
+            source_state = self.git.source_state(b["worktree_path"])
+        except Exception:
+            return "NOT_RUN"
+        if source_state["head"] != head or not source_state["clean"]:
             return "NOT_RUN"
         latest = {}
         for r in rows:

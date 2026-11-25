@@ -38,6 +38,9 @@ class _Git:
     def head(self, _path):
         return "fixture-sha"
 
+    def source_state(self, _path):
+        return {"head": "fixture-sha", "tracked_diff_sha256": "", "untracked_paths": (), "clean": True}
+
 
 class _Runner:
     def __init__(self, *, timeout_test=False):

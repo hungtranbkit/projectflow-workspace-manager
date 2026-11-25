@@ -191,6 +191,9 @@ def test_task_decision_requires_current_visual_qa_evidence_for_opted_in_task(tmp
         def head(self, _path):
             return "commit-123"
 
+        def source_state(self, _path):
+            return {"head": "commit-123", "tracked_diff_sha256": "", "untracked_paths": (), "clean": True}
+
     decision = TaskDecisionService(DB(), Git())
     builder = {"id": 7, "task_id": 3, "head": "commit-123", "worktree_path": str(tmp_path)}
 

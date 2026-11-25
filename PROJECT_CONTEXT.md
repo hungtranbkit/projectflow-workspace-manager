@@ -1,5 +1,13 @@
 # Project Context — ProjectFlow visual QA issue #73
 
+## 2026-11-25 PF-03b TestRunner source identity
+
+- `GitWorkspaceService.source_state()` now observes HEAD plus a SHA-256 digest of tracked/index diff; `TestRunner.start()` captures one stable identity around contract loading and uses one `tested_commit` for every stage. Dirty tracked/untracked input remains runnable for feedback but is stored with `tested_commit=NULL` and an explicit `SOURCE_NOT_COMMIT_BOUND` note.
+- Before/after runner checks reject observed HEAD/tracked-source drift and newly untracked paths during clean-source runs; shell exit 0 cannot turn that run into PASS. `TaskDecisionService` now treats a dirty current builder/integration source as `NOT_RUN`; zero-required-stage legacy integration behavior is unchanged. The existing single gate authority remains in place.
+- Regression uses real temporary Git repos, real DB, actual git state reads and synchronized actual shell commands. Before: 4 failing races / 1 prior stale-commit test passed, exit 1. After: source identity 9/9 PASS; combined runner/sandbox/merge/visual/decision suite 60/60 PASS, exit 0. Evidence/JUnit/checksum: `docs/visual-qa/evidence/issue-73/pf-03b-source-identity-20261125/REPORT.md`.
+- Mandatory sandbox test used the existing isolated Docker `--rm` runner, network none; no `wm-exec-*` container remained. No full suite, provider call, or CI run. ABA remains possible if source changes and is restored between observations; see report limits.
+- Worktree branch `agent/codex/issue-73-engineering-fixture-20261125` started at `f1d09c48de10a2c41d8dc907c9d1799df467832f`; PR #74 expected head at start was `e95e5d77b189d3774d02b37a9efd1475b4e88d2d`. A stays FAIL; B/C blocked; D is prior local evidence only; E not PASS; F preserved.
+
 ## 2026-11-25 PF-03a integration contract source
 
 - In `app/services/integration_service.py`, `verify_integrated_state()` now loads `PROJECT.yaml` from its detached probe at the exact integrated commit, instead of the mutable canonical checkout. This preserves candidate-bound gate selection and Visual QA fail-closed behavior; it does not change merge sequencing or add another decision authority.

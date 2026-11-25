@@ -1,0 +1,109 @@
+FFFF.                                                                    [100%]
+=================================== FAILURES ===================================
+_______ test_commit_change_after_queue_is_rejected_before_shell_command ________
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-566/test_commit_change_after_queue0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x71e2328908a0>
+
+    def test_commit_change_after_queue_is_rejected_before_shell_command(tmp_path, monkeypatch):
+        from app.services import test_runner as test_runner_module
+    
+        root, repo, head_a = make_repo(tmp_path)
+        db, git_service, service = runner_for(tmp_path, repo, RealSynchronizedShellRunner())
+        monkeypatch.setattr(test_runner_module.threading, "Thread", DeferredThread)
+    
+        [run_id] = service.start("agent", 7, repo)
+        head_b = commit_source(repo, "B\n")
+        assert head_b != head_a
+        DeferredThread.latest.run()
+    
+        row = db.one("SELECT * FROM test_runs WHERE id=?", (run_id,))
+        assert row["tested_commit"] == head_a
+>       assert row["status"] == "FAIL"
+E       AssertionError: assert 'PASS' == 'FAIL'
+E         
+E         - FAIL
+E         + PASS
+
+tests/test_test_runner_source_identity.py:123: AssertionError
+_ test_commit_change_during_real_shell_command_cannot_record_pass_for_queued_sha _
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-566/test_commit_change_during_real0')
+
+    def test_commit_change_during_real_shell_command_cannot_record_pass_for_queued_sha(tmp_path):
+        root, repo, head_a = make_repo(tmp_path)
+        shell = RealSynchronizedShellRunner(block=True)
+        db, git_service, service = runner_for(tmp_path, repo, shell)
+    
+        [run_id] = service.start("agent", 7, repo)
+        assert shell.entered.wait(3), "runner did not reach the real shell boundary"
+        head_b = commit_source(repo, "B\n")
+        shell.release.set()
+    
+        row = wait_terminal(db, run_id)
+        assert row["tested_commit"] == head_a
+>       assert row["status"] == "FAIL"
+E       AssertionError: assert 'PASS' == 'FAIL'
+E         
+E         - FAIL
+E         + PASS
+
+tests/test_test_runner_source_identity.py:141: AssertionError
+__________ test_dirty_tracked_source_can_run_but_is_not_commit_bound ___________
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-566/test_dirty_tracked_source_can_0')
+
+    def test_dirty_tracked_source_can_run_but_is_not_commit_bound(tmp_path):
+        root, repo, head = make_repo(tmp_path)
+        (repo / "source.txt").write_text("dirty\n", encoding="utf-8")
+        shell = RealSynchronizedShellRunner()
+        db, git_service, service = runner_for(tmp_path, repo, shell)
+    
+        [run_id] = service.start("agent", 7, repo)
+        row = wait_terminal(db, run_id)
+    
+        assert row["status"] == "PASS"
+>       assert row["tested_commit"] is None
+E       AssertionError: assert 'd2cbe757ee72d1aab99c37e504b4630930e583da' is None
+
+tests/test_test_runner_source_identity.py:159: AssertionError
+___________ test_tracked_source_drift_during_dirty_run_fails_closed ____________
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-566/test_tracked_source_drift_duri0')
+
+    def test_tracked_source_drift_during_dirty_run_fails_closed(tmp_path):
+        root, repo, head = make_repo(tmp_path)
+        (repo / "source.txt").write_text("dirty-A\n", encoding="utf-8")
+        shell = RealSynchronizedShellRunner(block=True)
+        db, git_service, service = runner_for(tmp_path, repo, shell)
+    
+        [run_id] = service.start("agent", 7, repo)
+        assert shell.entered.wait(3)
+        (repo / "source.txt").write_text("dirty-B\n", encoding="utf-8")
+        shell.release.set()
+    
+        row = wait_terminal(db, run_id)
+>       assert row["tested_commit"] is None
+E       AssertionError: assert 'd2cbe757ee72d1aab99c37e504b4630930e583da' is None
+
+tests/test_test_runner_source_identity.py:178: AssertionError
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+app/services/test_runner.py:10
+  /home/dell/workspace/.worktrees/projectflow-issue73-engineering-fixture-20261125/app/services/test_runner.py:10: PytestCollectionWarning: cannot collect test class 'TestRunner' because it has a __init__ constructor (from: tests/test_test_runner_source_identity.py)
+    class TestRunner:
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_test_runner_source_identity.py::test_commit_change_after_queue_is_rejected_before_shell_command
+FAILED tests/test_test_runner_source_identity.py::test_commit_change_during_real_shell_command_cannot_record_pass_for_queued_sha
+FAILED tests/test_test_runner_source_identity.py::test_dirty_tracked_source_can_run_but_is_not_commit_bound
+FAILED tests/test_test_runner_source_identity.py::test_tracked_source_drift_during_dirty_run_fails_closed
+EXIT_CODE=1

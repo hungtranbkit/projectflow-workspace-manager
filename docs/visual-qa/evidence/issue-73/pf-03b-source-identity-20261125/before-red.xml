@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="5" time="2.185" timestamp="2026-11-25T18:27:03.951965+07:00" hostname="dell-Latitude-5511"><testcase classname="tests.test_test_runner_source_identity" name="test_commit_change_after_queue_is_rejected_before_shell_command" time="0.170"><failure message="AssertionError: assert 'PASS' == 'FAIL'&#10;  &#10;  - FAIL&#10;  + PASS">tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-566/test_commit_change_after_queue0')
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x71e2328908a0&gt;
+
+    def test_commit_change_after_queue_is_rejected_before_shell_command(tmp_path, monkeypatch):
+        from app.services import test_runner as test_runner_module
+    
+        root, repo, head_a = make_repo(tmp_path)
+        db, git_service, service = runner_for(tmp_path, repo, RealSynchronizedShellRunner())
+        monkeypatch.setattr(test_runner_module.threading, "Thread", DeferredThread)
+    
+        [run_id] = service.start("agent", 7, repo)
+        head_b = commit_source(repo, "B\n")
+        assert head_b != head_a
+        DeferredThread.latest.run()
+    
+        row = db.one("SELECT * FROM test_runs WHERE id=?", (run_id,))
+        assert row["tested_commit"] == head_a
+&gt;       assert row["status"] == "FAIL"
+E       AssertionError: assert 'PASS' == 'FAIL'
+E         
+E         - FAIL
+E         + PASS
+
+tests/test_test_runner_source_identity.py:123: AssertionError</failure></testcase><testcase classname="tests.test_test_runner_source_identity" name="test_commit_change_during_real_shell_command_cannot_record_pass_for_queued_sha" time="0.189"><failure message="AssertionError: assert 'PASS' == 'FAIL'&#10;  &#10;  - FAIL&#10;  + PASS">tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-566/test_commit_change_during_real0')
+
+    def test_commit_change_during_real_shell_command_cannot_record_pass_for_queued_sha(tmp_path):
+        root, repo, head_a = make_repo(tmp_path)
+        shell = RealSynchronizedShellRunner(block=True)
+        db, git_service, service = runner_for(tmp_path, repo, shell)
+    
+        [run_id] = service.start("agent", 7, repo)
+        assert shell.entered.wait(3), "runner did not reach the real shell boundary"
+        head_b = commit_source(repo, "B\n")
+        shell.release.set()
+    
+        row = wait_terminal(db, run_id)
+        assert row["tested_commit"] == head_a
+&gt;       assert row["status"] == "FAIL"
+E       AssertionError: assert 'PASS' == 'FAIL'
+E         
+E         - FAIL
+E         + PASS
+
+tests/test_test_runner_source_identity.py:141: AssertionError</failure></testcase><testcase classname="tests.test_test_runner_source_identity" name="test_dirty_tracked_source_can_run_but_is_not_commit_bound" time="0.168"><failure message="AssertionError: assert 'd2cbe757ee72d1aab99c37e504b4630930e583da' is None">tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-566/test_dirty_tracked_source_can_0')
+
+    def test_dirty_tracked_source_can_run_but_is_not_commit_bound(tmp_path):
+        root, repo, head = make_repo(tmp_path)
+        (repo / "source.txt").write_text("dirty\n", encoding="utf-8")
+        shell = RealSynchronizedShellRunner()
+        db, git_service, service = runner_for(tmp_path, repo, shell)
+    
+        [run_id] = service.start("agent", 7, repo)
+        row = wait_terminal(db, run_id)
+    
+        assert row["status"] == "PASS"
+&gt;       assert row["tested_commit"] is None
+E       AssertionError: assert 'd2cbe757ee72d1aab99c37e504b4630930e583da' is None
+
+tests/test_test_runner_source_identity.py:159: AssertionError</failure></testcase><testcase classname="tests.test_test_runner_source_identity" name="test_tracked_source_drift_during_dirty_run_fails_closed" time="0.190"><failure message="AssertionError: assert 'd2cbe757ee72d1aab99c37e504b4630930e583da' is None">tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-566/test_tracked_source_drift_duri0')
+
+    def test_tracked_source_drift_during_dirty_run_fails_closed(tmp_path):
+        root, repo, head = make_repo(tmp_path)
+        (repo / "source.txt").write_text("dirty-A\n", encoding="utf-8")
+        shell = RealSynchronizedShellRunner(block=True)
+        db, git_service, service = runner_for(tmp_path, repo, shell)
+    
+        [run_id] = service.start("agent", 7, repo)
+        assert shell.entered.wait(3)
+        (repo / "source.txt").write_text("dirty-B\n", encoding="utf-8")
+        shell.release.set()
+    
+        row = wait_terminal(db, run_id)
+&gt;       assert row["tested_commit"] is None
+E       AssertionError: assert 'd2cbe757ee72d1aab99c37e504b4630930e583da' is None
+
+tests/test_test_runner_source_identity.py:178: AssertionError</failure></testcase><testcase classname="tests.test_test_runner_source_identity" name="test_clean_pass_becomes_not_run_after_head_advances" time="1.339" /></testsuite></testsuites>
