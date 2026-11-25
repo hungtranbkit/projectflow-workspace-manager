@@ -51,7 +51,9 @@ The combined run exercises merge verification, task decision behavior, and the v
 
 - PR #74 expected remote head before this work: `4164afde07276ebc07de72f22c89fcd289f0a1ad`; fetched `origin/agent/codex/visual-qa-73` still matched at pre-publication check.
 - Base: `ac288928ab559799e6a6f34ff9be1de5fdfa5af3`.
-- Local task branch at test time: `agent/codex/issue-73-engineering-fixture-20261125`, parent `4c5987f8ac4df27e7350db61c1b7ff1c541c4450` (tree `803891f39fe1d6161f933f491b4a84b6ec1cec9c`).
+- Tested local task commit: `57dcc4a431d0c9c5da26ec0c705e925bb13b9fc9`, tree `acebc5685b06073c006f1e1b17096b70ccebccb3`, on `agent/codex/issue-73-engineering-fixture-20261125`.
+- Published PR #74 commit: `a92a96b2e222946150f0c4e467b6b1c15382a9cc`, same tree `acebc5685b06073c006f1e1b17096b70ccebccb3`, parent expected head `4164afde07276ebc07de72f22c89fcd289f0a1ad`; updated with GitHub connector's non-force expected-head fast-forward.
+- Shared starting tree: `803891f39fe1d6161f933f491b4a84b6ec1cec9c`.
 - No ProjectFlow main/WIP, NovaRetail, production runtime, Docker daemon, CI setting, or provider credential was changed.
 - Rollback for the source change is a single revert of the published PF-03a commit; temporary Git repositories were pytest-owned under the system temp directory and removed by pytest.
 
