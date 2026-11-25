@@ -73,7 +73,9 @@ def test_private_ui_and_signed_transport(tmp_path, monkeypatch):
     app = create_app(Settings(root, "127.0.0.1", 8765, tmp_path / "pf.db", 10))
     client = TestClient(app, base_url="https://testserver")
     assert client.get("/api/steward").status_code == 401
-    assert "SM-G935L" not in client.get("/steward").text
+    login_page = client.get("/steward")
+    assert "SM-G935L" not in login_page.text
+    assert login_page.headers["referrer-policy"] == "same-origin"
     report = sample(int(time.time()))
     raw = (tmp_path / publish(report, tmp_path)).read_bytes()
     headers = {
@@ -111,7 +113,8 @@ def test_private_ui_and_signed_transport(tmp_path, monkeypatch):
     )
     assert (
         client.post(
-            "/steward/login", data={"code": ticket}, follow_redirects=False
+            "/steward/login", data={"code": ticket}, follow_redirects=False,
+            headers={"origin": "https://testserver", "sec-fetch-site": "same-origin"},
         ).status_code
         == 303
     )
