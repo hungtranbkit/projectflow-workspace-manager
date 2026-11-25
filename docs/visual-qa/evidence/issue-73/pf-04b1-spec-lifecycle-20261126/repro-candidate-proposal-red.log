@@ -1,0 +1,37 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.2.0, pluggy-1.7.0
+rootdir: $WORKTREE
+configfile: pyproject.toml
+plugins: anyio-4.16.0
+collected 1 item
+
+tests/test_spec_lifecycle.py F
+
+=================================== FAILURES ===================================
+_______________________ test_valid_spec_proposal_created _______________________
+tests/test_spec_lifecycle.py:183: in test_valid_spec_proposal_created
+    cid, proposal = full_change_with_proposal(client, git_repo, spec_env)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_spec_lifecycle.py:128: in full_change_with_proposal
+    author_result = do_author(client, cid, spec)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_spec_lifecycle.py:112: in do_author
+    assert r.status_code == 200, r.text
+E   AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a>
+E   assert 409 == 200
+E    +  where 409 = <Response [409 Conflict]>.status_code
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  $TEST_VENV/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_spec_lifecycle.py: 11 warnings
+  $TEST_VENV/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+--------- generated xml file: $SCRATCH_CANDIDATE/candidate-red.xml ----------
+=========================== short test summary info ============================
+FAILED tests/test_spec_lifecycle.py::test_valid_spec_proposal_created - Asser...
+======================== 1 failed, 23 warnings in 2.23s ========================

@@ -64,6 +64,25 @@ def envelope(payload):
     return {"is_error": False, "subtype": "success", "result": json.dumps(payload)}
 
 
+def set_fake_runner(client, runner):
+    """Install a deterministic fake at the complete PlannerAgentInvoker boundary.
+
+    Restricted test PATHs intentionally do not contain Claude. The invoker
+    resolves its executable before calling `runner`, so replacing only the
+    subprocess runner leaves requirement analysis on the real availability
+    check and silently prevents the fake response from being used.
+    """
+    invoker = client.app.state.planner_service.invoker
+    for service_name in (
+        "requirement_analysis_service",
+        "spec_author_service",
+        "spec_review_service",
+    ):
+        assert getattr(client.app.state, service_name).invoker is invoker
+    invoker.which = lambda name: "/test-only/claude" if name == "claude" else None
+    invoker.runner = runner
+
+
 def set_fake(client, payload):
     env = envelope(payload)
 
@@ -73,7 +92,7 @@ def set_fake(client, payload):
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    set_fake_runner(client, runner)
 
 
 def ra_payload(**overrides):
@@ -103,7 +122,9 @@ def do_analyze(client, cid, payload=None):
     set_fake(client, payload or ra_payload())
     r = client.post(f"/api/changes/{cid}/requirements/analyze", data={"provider": "claude"})
     assert r.status_code == 200, r.text
-    return r.json()
+    result = r.json()
+    assert result.get("outcome") == "READY", result
+    return result
 
 
 def do_author(client, cid, spec=None):
@@ -175,6 +196,21 @@ def test_requirement_analysis_creates_traceable_task(client, git_repo, spec_env)
     assert task["change_id"] == cid
     outputs = client.get(f"/api/tasks/{result['task_id']}/work-products").json()["outputs"]
     assert outputs[0]["id"] == result["work_product"]["id"]
+
+
+def test_requirement_analysis_fails_closed_when_provider_cli_is_unavailable(client, git_repo, spec_env):
+    cid = new_change(client, "Unavailable provider fails closed")
+    invoker = client.app.state.planner_service.invoker
+    runner_calls = []
+    invoker.which = lambda name: None
+    invoker.runner = lambda *args: runner_calls.append(args)
+
+    response = client.post(f"/api/changes/{cid}/requirements/analyze", data={"provider": "claude"})
+
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "EXECUTION_FAILED"
+    assert response.json()["work_product"] is None
+    assert runner_calls == []
 
 
 # ======================================================================= Spec Authoring
@@ -374,7 +410,7 @@ def test_bounded_refinement_loop_never_infinite(client, git_repo, spec_env):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = cycling_runner
+    set_fake_runner(client, cycling_runner)
 
     result = client.app.state.spec_lifecycle_service.run_lifecycle(cid, provider="claude", max_rounds=3)
     assert result["outcome"] == "NEEDS_REFINEMENT"
@@ -505,7 +541,7 @@ def test_plan_valid_requirement_ids_resolve(client, git_repo, spec_env):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = plan_runner
+    set_fake_runner(client, plan_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLAN_READY", r.json()
 
@@ -523,7 +559,7 @@ def test_fictional_requirement_id_rejected(client, git_repo, spec_env):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = plan_runner
+    set_fake_runner(client, plan_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLAN_INVALID"
     assert any("unknown requirement id" in e for e in r.json()["validation"]["errors"])
@@ -542,7 +578,7 @@ def test_baseline_staleness_visible(client, git_repo, spec_env):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = plan_runner
+    set_fake_runner(client, plan_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     plan_id = r.json()["plan"]["id"]
 
@@ -578,7 +614,7 @@ def test_plan_spec_drift_when_referenced_requirement_disappears(client, git_repo
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = plan_runner
+    set_fake_runner(client, plan_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     plan_id = r.json()["plan"]["id"]
     assert r.json()["outcome"] == "PLAN_READY"

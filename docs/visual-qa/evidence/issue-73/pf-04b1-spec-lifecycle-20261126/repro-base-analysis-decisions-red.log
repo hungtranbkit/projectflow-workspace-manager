@@ -1,0 +1,42 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.2.0, pluggy-1.7.0
+rootdir: $WORKTREE
+configfile: pyproject.toml
+plugins: anyio-4.16.0
+collected 2 items
+
+tests/test_spec_lifecycle.py FF
+
+=================================== FAILURES ===================================
+_________________ test_requirement_analysis_structured_result __________________
+tests/test_spec_lifecycle.py:138: in test_requirement_analysis_structured_result
+    assert result["outcome"] == "READY"
+E   AssertionError: assert 'EXECUTION_FAILED' == 'READY'
+E
+E     - READY
+E     + EXECUTION_FAILED
+______________________ test_what_decision_requires_human _______________________
+tests/test_spec_lifecycle.py:167: in test_what_decision_requires_human
+    assert client.app.state.human_decisions.pending_for_change(cid) is True
+E   assert False is True
+E    +  where False = pending_for_change(1)
+E    +    where pending_for_change = <app.services.human_decisions.HumanDecisionService object at 0x7e6d54101bd0>.pending_for_change
+E    +      where <app.services.human_decisions.HumanDecisionService object at 0x7e6d54101bd0> = <starlette.datastructures.State object at 0x7e6d541039d0>.human_decisions
+E    +        where <starlette.datastructures.State object at 0x7e6d541039d0> = <fastapi.applications.FastAPI object at 0x7e6d5430f8c0>.state
+E    +          where <fastapi.applications.FastAPI object at 0x7e6d5430f8c0> = <starlette.testclient.TestClient object at 0x7e6d541007d0>.app
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  $TEST_VENV/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_spec_lifecycle.py: 22 warnings
+  $TEST_VENV/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+---------- generated xml file: $SCRATCH_BASE/base-two-red.xml -----------
+=========================== short test summary info ============================
+FAILED tests/test_spec_lifecycle.py::test_requirement_analysis_structured_result
+FAILED tests/test_spec_lifecycle.py::test_what_decision_requires_human - asse...
+======================== 2 failed, 34 warnings in 3.22s ========================

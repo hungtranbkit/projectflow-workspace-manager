@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="2.322" timestamp="2026-11-26T01:34:39.738721+07:00" hostname="dell-Latitude-5511"><testcase classname="tests.test_spec_lifecycle" name="test_valid_spec_proposal_created" time="2.168"><failure message="AssertionError: &lt;h1&gt;Action blocked&lt;/h1&gt;&lt;pre&gt;No Requirement Analysis exists for this Change yet -- run /requirements/analyze first&lt;/pre&gt;&lt;a href='javascript:history.back()'&gt;Back&lt;/a&gt;&#10;assert 409 == 200&#10; +  where 409 = &lt;Response [409 Conflict]&gt;.status_code">tests/test_spec_lifecycle.py:183: in test_valid_spec_proposal_created
+    cid, proposal = full_change_with_proposal(client, git_repo, spec_env)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_spec_lifecycle.py:128: in full_change_with_proposal
+    author_result = do_author(client, cid, spec)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_spec_lifecycle.py:112: in do_author
+    assert r.status_code == 200, r.text
+E   AssertionError: &lt;h1&gt;Action blocked&lt;/h1&gt;&lt;pre&gt;No Requirement Analysis exists for this Change yet -- run /requirements/analyze first&lt;/pre&gt;&lt;a href='javascript:history.back()'&gt;Back&lt;/a&gt;
+E   assert 409 == 200
+E    +  where 409 = &lt;Response [409 Conflict]&gt;.status_code</failure></testcase></testsuite></testsuites>
