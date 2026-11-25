@@ -26,6 +26,7 @@
 - `PYTHONPATH=. .../.venv/bin/python -m compileall -q app tests` — PASS, exit 0. `git diff --check` — PASS, exit 0.
 - Fresh Dell filesystem sample after local tests (2026-11-25): `/home/dell/workspace`, `/dev/sda2`, total 501,809,635,328 bytes, used 361,216,229,376, available 130,357,018,624 (74%, 122 GiB); inode total 31,195,136, used 4,271,504, free 26,923,632 (14%). No agent workload was started by the capacity tests.
 - Direct call of the new production `NodeCapacityGate.evaluate_paths(['/home/dell/workspace'], node_id='dell-linux')` on 2026-11-25 returned `ALLOW`, device `dev-802`, 130,355,687,424 available bytes, 74.02% used, 13.69% inode use, fresh timestamp `2026-11-25T04:26:20.182731+00:00` (exit 0). This is a real Dell filesystem probe, not an HP/M910 or remote-dispatch canary.
+- Final hysteresis persistence adjustment logs ALLOW alongside WARN/BLOCKED so restart restoration can observe recovery. After that code change, focused capacity/dispatch plus two autonomous idempotency tests: 14 passed; compileall and diff check passed.
 - Read-only live health check at `2026-11-25T04:27:48Z`: `curl ... http://127.0.0.1:8765/` returned HTTP 200; `curl ... https://workspace.mesflow.net/` returned HTTP 200. No live unit, checkout, database or Cloudflare config was changed.
 
 ### External acceptance blockers

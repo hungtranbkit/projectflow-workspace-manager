@@ -135,7 +135,7 @@ def create_app(settings=None):
         clear_free_bytes=settings.capacity_clear_free_bytes,
     ))
     capacity_gate.restore_hysteresis(db.all(
-        "SELECT details FROM workspace_events WHERE action IN ('DISPATCH_BLOCKED_CAPACITY','DISPATCH_WARN_CAPACITY') ORDER BY id"))
+        "SELECT details FROM workspace_events WHERE action IN ('DISPATCH_BLOCKED_CAPACITY','DISPATCH_WARN_CAPACITY','DISPATCH_CAPACITY_ALLOWED') ORDER BY id"))
     git = GitWorkspaceService(settings.root, worktree_root=settings.worktree_root); launcher = TerminalLauncherService(settings, git)
     # B7.1 (docs/B7_WORKSPACE_REPOSITORY_IDENTITY.md): a bounded,
     # idempotent startup backfill -- computes git_fingerprint for any
@@ -2546,6 +2546,9 @@ def create_app(settings=None):
                      json.dumps(result.audit_fields(), sort_keys=True))
         elif result.code == "WARN_CAPACITY":
             db.event(entity_type, entity_id, "DISPATCH_WARN_CAPACITY",
+                     json.dumps(result.audit_fields(), sort_keys=True))
+        elif result.code == "ALLOW":
+            db.event(entity_type, entity_id, "DISPATCH_CAPACITY_ALLOWED",
                      json.dumps(result.audit_fields(), sort_keys=True))
         return result
 
