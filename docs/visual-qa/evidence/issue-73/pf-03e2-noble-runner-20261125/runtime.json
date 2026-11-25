@@ -1,0 +1,12 @@
+{
+  "runner": "task-owned isolated Docker container",
+  "image": "mcr.microsoft.com/playwright:v1.60.0-noble",
+  "imageDigest": "sha256:83192064c7510f7ee73dd63dc5f22a5e01a92c81a2e6a9c715d9e3fe55471fd9",
+  "os": "Ubuntu 24.04.4 LTS Noble",
+  "architecture": "linux/amd64",
+  "containerPolicy": {"network":"none","readOnlyRootFilesystem":true,"mounts":[],"memoryBytes":6442450944,"nanoCPUs":4000000000,"pidsLimit":512,"capabilitiesDropped":["ALL"],"noNewPrivileges":true},
+  "runtime": {"node":"v24.15.0","python":"3.12.3","pytest":"9.2.0","uifix":"1.2.6","uifixSourceCommit":"97c4b9d83684c7d607cb8c4b146e3f8aa5356e53","playwrightNode":"1.60.0","playwrightCore":"1.60.0","chromium":"Google Chrome for Testing 148.0.7778.96, revision 1223","chromiumExecutableSha256":"adc1c21ceed5c2a67184766376fe816ac03e556cc0ca3f782e8212235fe05c6f"},
+  "projectFlow": {"publishedPrHead":"10455bb4b0b52beb2c06fc3fbd9b339183a49fc0","tree":"4c9011ec3e0694b87e889077819b2a195e7ce6be","changedSourceBlob":"dd5db08eedda8f524a81753a35479f5575325e0f"},
+  "test": {"nodeId":"tests/test_visual_qa_runner_subprocess.py::test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_head","exitCode":0,"junit":{"tests":1,"failures":0,"errors":0,"skipped":0,"durationSeconds":6.384}},
+  "scopeLimitations": ["The real TestRunner and SandboxedCommandRunner ran in direct-host mode inside this isolated container; mandatory Docker sandbox executor path was not tested because the task container had no Docker socket or host mounts.","Synthetic fixture integration only; not NovaRetail approved-reference or product acceptance.","Full ProjectFlow suite and GitHub CI were not run by this milestone."]
+}

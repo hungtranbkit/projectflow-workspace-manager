@@ -1,0 +1,13 @@
+Executed inside the task-owned container at 2026-11-25T16:41:46Z–16:41:54Z:
+
+rm -rf /work/.runtime/visual-qa-runner-evidence-published-10455bb /work/.runtime/visual-qa-runner-evidence-published-10455bb.xml
+export PYTHONPATH=/work/site-packages
+export VISUAL_QA_PLAYWRIGHT_FROM=/work/.runtime/uifix-v1.2.6/node_modules
+export PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+export VISUAL_QA_RUNNER_EVIDENCE_DIR=.runtime/visual-qa-runner-evidence-published-10455bb
+export PF03E2_SOURCE_COMMIT=10455bb4b0b52beb2c06fc3fbd9b339183a49fc0
+export PF03E2_SOURCE_TREE=4c9011ec3e0694b87e889077819b2a195e7ce6be
+export PF03E2_PR_HEAD=10455bb4b0b52beb2c06fc3fbd9b339183a49fc0
+python3 -m pytest -q -ra /work/tests/test_visual_qa_runner_subprocess.py --junitxml=/work/.runtime/visual-qa-runner-evidence-published-10455bb.xml
+
+The only redirection was to the saved sanitized stdout/stderr log. Exit code: 0.
