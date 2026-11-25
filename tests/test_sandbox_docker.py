@@ -6,6 +6,7 @@ import ipaddress
 import json
 import shutil
 import subprocess
+import sys
 import urllib.request
 
 import pytest
@@ -43,6 +44,9 @@ def create_task_workspace(client, tid, rid, agent="codex", role="Backend", profi
 
 def _configure_isolated_fixture_networks(*repos):
     """Allocate only test-owned networks without using the daemon's default pool."""
+    if sys.platform != "linux" or shutil.which("ip") is None:
+        pytest.skip("Isolated subnet fixture requires Linux ip route inspection")
+
     def read_json(argv):
         return json.loads(subprocess.run(argv, check=True, capture_output=True,
                                          text=True, timeout=15).stdout)
