@@ -1,5 +1,13 @@
 # Project Context — ProjectFlow visual QA issue #73
 
+## 2026-11-25 PF-03a integration contract source
+
+- In `app/services/integration_service.py`, `verify_integrated_state()` now loads `PROJECT.yaml` from its detached probe at the exact integrated commit, instead of the mutable canonical checkout. This preserves candidate-bound gate selection and Visual QA fail-closed behavior; it does not change merge sequencing or add another decision authority.
+- Added `tests/test_integration_contract_probe.py`, using real temporary Git repositories and the actual GitWorkspaceService probe. Before the fix: 4 failed/exit 1, reproducing canonical command substitution, required-visual contract substitution when candidate contract is absent/invalid, and dirty canonical override. After: 4 passed. Combined merge/cross-repo, visual contract/execution, and TaskDecisionService workflow-decision tests: 51 passed, 0 skipped, exit 0.
+- Evidence and JUnit/logs: `docs/visual-qa/evidence/issue-73/pf-03a-contract-source-20261125/REPORT.md`. Python 3.14.4 / pytest 9.2.0 using existing task venv; no provider/network, full suite, build, or CI run.
+- Worktree branch `agent/codex/issue-73-engineering-fixture-20261125` was clean at parent `4c5987f8ac4df27e7350db61c1b7ff1c541c4450`; PR #74 expected remote head at pre-publication check was `4164afde07276ebc07de72f22c89fcd289f0a1ad`. Keep publication fast-forward and draft-only.
+- A remains FAIL (full suite not rerun), B/C remain blocked by approved-equivalent Nova reference/pilot, E has no qualifying exact-SHA CI proof; F preserved. Next: publish PF-03a only if expected PR head remains unchanged, then separately scope PF-03b; do not mix PF-02b/provider work into this patch.
+
 ## 2026-11-25 ProjectFlow golden-test follow-up
 
 - Follow-up branch: `agent/codex/issue-73-runtime-isolation-20261125`, based on PR #74 published source SHA `50ce031328cfaad4e976dc5507ff5e9908d18b42`. Isolated scratch only; dirty `main` (`PROJECT.yaml` and local package artifacts) and the existing visual QA WIP at `2805bcd...` were preserved.

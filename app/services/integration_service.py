@@ -87,7 +87,7 @@ class IntegrationService:
             try:
                 task = self.db.one("SELECT * FROM tasks WHERE id=?", (task_id,)) if task_id else None
                 from app.services.visual_qa_contract import task_requires_visual_qa
-                contract = load_contract(Path(repo_path), visual_qa_required=task_requires_visual_qa(task))
+                contract = load_contract(probe, visual_qa_required=task_requires_visual_qa(task))
             except ContractError:
                 if task_id:
                     task = self.db.one("SELECT * FROM tasks WHERE id=?", (task_id,))
