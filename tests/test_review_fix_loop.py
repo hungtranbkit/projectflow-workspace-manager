@@ -17,6 +17,16 @@ def envelope(payload):
     return {"is_error": False, "subtype": "success", "result": json.dumps(payload)}
 
 
+def set_fake_runner(client, runner):
+    """Inject deterministic behavior at the shared reviewer invoker boundary."""
+    code_invoker = client.app.state.code_review_service.invoker
+    security_invoker = client.app.state.security_review_service.invoker
+    planner_invoker = client.app.state.planner_service.invoker
+    assert code_invoker is security_invoker is planner_invoker
+    code_invoker.which = lambda name: "/test-only/claude" if name == "claude" else None
+    code_invoker.runner = runner
+
+
 def set_fake(client, payload):
     env = envelope(payload)
 
@@ -26,7 +36,7 @@ def set_fake(client, payload):
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.code_review_service.invoker.runner = runner
+    set_fake_runner(client, runner)
 
 
 PASS = {"verdict": "PASS", "findings": [], "summary": "looks good"}
@@ -59,6 +69,28 @@ def test_code_review_pass(client, git_repo):
     body = r.json()
     assert body["outcome"] == "REVIEWED", body
     assert body["verdict"] == "PASS"
+
+
+def test_review_unavailable_claude_fails_closed_without_fabricated_review(client, git_repo):
+    root, repo = git_repo
+    rid = register(client, repo, "demo")
+    cid = new_change(client, "Unavailable review provider", project_id=rid)
+    tid, _ = _committed_task(client, cid)
+    calls = []
+    invoker = client.app.state.code_review_service.invoker
+    invoker.which = lambda name: None
+    invoker.runner = lambda *args: calls.append(args)
+
+    body = client.post(f"/api/tasks/{tid}/review/code").json()
+
+    assert body["outcome"] == "EXECUTION_FAILED"
+    assert body["verdict"] is None
+    assert "claude CLI not found in PATH" in body["message"]
+    assert calls == []
+    assert client.app.state.db.all("SELECT * FROM review_runs WHERE task_id=?", (tid,)) == []
+    assert client.app.state.db.all(
+        "SELECT * FROM work_products WHERE task_id=? AND kind='REVIEW_REPORT'", (tid,)
+    ) == []
 
 
 def test_code_review_pass_with_findings(client, git_repo):
@@ -181,7 +213,7 @@ def test_code_review_uses_real_diff_not_builder_reasoning(client, git_repo):
             stdout = json.dumps(envelope(PASS))
             stderr = ""
         return R()
-    client.app.state.code_review_service.invoker.runner = runner
+    set_fake_runner(client, runner)
     client.post(f"/api/tasks/{tid}/review/code")
     assert "def feature():" in captured["prompt"]  # the real diff content, verbatim
     assert "feature.py" in captured["prompt"]
@@ -248,7 +280,6 @@ def test_security_review_produces_dedicated_work_product(client, git_repo):
     rid = register(client, repo, "demo")
     cid = new_change(client, "Security WP change", project_id=rid)
     tid, w = _committed_task(client, cid)
-    client.app.state.security_review_service.invoker.runner = client.app.state.code_review_service.invoker.runner
     set_fake(client, {"verdict": "PASS", "findings": []})
     body = client.post(f"/api/tasks/{tid}/review/security")
     body = body.json()
@@ -427,8 +458,7 @@ def test_security_critical_finding_blocks(client, git_repo):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.code_review_service.invoker.runner = runner
-    client.app.state.security_review_service.invoker.runner = runner
+    set_fake_runner(client, runner)
 
     client.app.state.review_fix_orchestrator.tick(tid)  # code review runs
     result = client.app.state.review_fix_orchestrator.tick(tid)  # security review runs

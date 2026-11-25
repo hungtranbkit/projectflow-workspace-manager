@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="30" time="48.850" timestamp="2026-11-26T05:54:42.603428+07:00" hostname="task-runner"><testcase classname="tests.test_review_fix_loop" name="test_code_review_pass" time="1.677" /><testcase classname="tests.test_review_fix_loop" name="test_review_unavailable_claude_fails_closed_without_fabricated_review" time="1.548" /><testcase classname="tests.test_review_fix_loop" name="test_code_review_pass_with_findings" time="1.501" /><testcase classname="tests.test_review_fix_loop" name="test_code_review_fix_required" time="1.664" /><testcase classname="tests.test_review_fix_loop" name="test_code_review_human_decision_required" time="1.534" /><testcase classname="tests.test_review_fix_loop" name="test_code_review_reject" time="1.566" /><testcase classname="tests.test_review_fix_loop" name="test_invalid_pass_with_critical_finding_rejected" time="1.684" /><testcase classname="tests.test_review_fix_loop" name="test_finding_deduplicated_across_rounds" time="1.591" /><testcase classname="tests.test_review_fix_loop" name="test_finding_resolve_requires_reference" time="1.633" /><testcase classname="tests.test_review_fix_loop" name="test_code_review_uses_real_diff_not_builder_reasoning" time="1.632" /><testcase classname="tests.test_review_fix_loop" name="test_no_managed_worktree_no_changes" time="1.163" /><testcase classname="tests.test_review_fix_loop" name="test_security_review_not_applicable_for_trivial_change" time="2.054" /><testcase classname="tests.test_review_fix_loop" name="test_security_review_required_for_auth_path_change" time="2.428" /><testcase classname="tests.test_review_fix_loop" name="test_security_review_required_by_controlled_profile" time="1.548" /><testcase classname="tests.test_review_fix_loop" name="test_security_review_produces_dedicated_work_product" time="1.337" /><testcase classname="tests.test_review_fix_loop" name="test_security_pass_no_longer_aliases_review_pass" time="1.372" /><testcase classname="tests.test_review_fix_loop" name="test_finding_auto_resolved_when_no_longer_reported_after_fix" time="1.641" /><testcase classname="tests.test_review_fix_loop" name="test_fix_required_creates_fix_task_transfers_worktree" time="1.636"><failure message="KeyError: 'fix_task_id'">client = &lt;starlette.testclient.TestClient object at 0x7044e06d5040&gt;
+git_repo = (PosixPath('$PYTEST_TMP/test_fix_required_creates_fix_0/root'), PosixPath('$PYTEST_TMP/test_fix_required_creates_fix_0/root/demo'))
+
+    def test_fix_required_creates_fix_task_transfers_worktree(client, git_repo):
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Fix loop change", project_id=rid)
+        tid, w = _committed_task(client, cid, scope_hints=["feature.py"])
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+        set_fake(client, {"verdict": "FIX_REQUIRED", "findings": [
+            {"category": "CORRECTNESS", "severity": "HIGH", "title": "wrong return value", "description": "should return 42"}]})
+        result = client.app.state.review_fix_orchestrator.tick(tid)
+        assert result["outcome"] == "CODE_REVIEW_RUN"
+        result2 = client.app.state.review_fix_orchestrator.tick(tid)
+        assert result2["outcome"] in ("FIX_BUILDER_LAUNCHED", "EXECUTION_FAILED", "FIX_BUILDER_ALREADY_RUNNING"), result2
+&gt;       fix_task_id = result2["fix_task_id"]
+                      ^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'fix_task_id'
+
+tests/test_review_fix_loop.py:347: KeyError</failure></testcase><testcase classname="tests.test_review_fix_loop" name="test_bounded_at_three_rounds" time="1.490" /><testcase classname="tests.test_review_fix_loop" name="test_finding_from_original_task_resolved_after_fix_task_commit" time="1.569"><failure message="KeyError: 'fix_task_id'">client = &lt;starlette.testclient.TestClient object at 0x7044d1bc7f00&gt;
+git_repo = (PosixPath('$PYTEST_TMP/test_finding_from_original_tas0/root'), PosixPath('$PYTEST_TMP/test_finding_from_original_tas0/root/demo'))
+
+    def test_finding_from_original_task_resolved_after_fix_task_commit(client, git_repo):
+        """Real bug caught by this phase's own real Fix-loop test: a
+        Finding created under the ORIGINAL Task's id must still be
+        resolvable once ownership transfers to a Fix Task (a different
+        task_id) -- findings_store/review lookups must span the whole
+        fix-chain (task_chain_ids), never a single task_id in isolation."""
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Chain-aware resolve change", project_id=rid)
+        tid, w = _committed_task(client, cid, scope_hints=["feature.py"])
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+        set_fake(client, {"verdict": "FIX_REQUIRED", "findings": [
+            {"category": "CORRECTNESS", "severity": "HIGH", "title": "wrong value", "description": "x"}]})
+        orch = client.app.state.review_fix_orchestrator
+        orch.tick(tid)  # code review under the ORIGINAL task_id
+        original_finding = client.get(f"/api/tasks/{tid}/findings").json()[0]
+        assert original_finding["status"] == "OPEN"
+        assert original_finding["task_id"] == tid
+
+        tick2 = orch.tick(tid)  # creates the Fix Task, transfers the worktree
+&gt;       fix_task_id = tick2["fix_task_id"]
+                      ^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'fix_task_id'
+
+tests/test_review_fix_loop.py:396: KeyError</failure></testcase><testcase classname="tests.test_review_fix_loop" name="test_human_decision_stops_loop" time="1.534" /><testcase classname="tests.test_review_fix_loop" name="test_security_critical_finding_blocks" time="1.737" /><testcase classname="tests.test_review_fix_loop" name="test_review_pass_none_falls_back_to_legacy_when_no_e9_review" time="1.664" /><testcase classname="tests.test_review_fix_loop" name="test_review_stale_after_new_commit" time="1.641" /><testcase classname="tests.test_review_fix_loop" name="test_integration_readiness_ready" time="1.819" /><testcase classname="tests.test_review_fix_loop" name="test_integration_readiness_blocked_by_conflict" time="1.732" /><testcase classname="tests.test_review_fix_loop" name="test_review_never_touches_canonical_checkout" time="1.567" /><testcase classname="tests.test_review_fix_loop" name="test_legacy_manual_review_runs_unaffected" time="1.513" /><testcase classname="tests.test_review_fix_loop" name="test_e8_autonomous_readiness_unaffected" time="0.930" /><testcase classname="tests.test_review_fix_loop" name="test_security_not_applicable_for_empty_diff_even_under_controlled" time="2.283" /></testsuite></testsuites>
