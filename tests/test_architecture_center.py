@@ -359,7 +359,8 @@ def test_source_allowlist_refuses_symlinks_and_secrets(tmp_path):
     manifest_ = runs_mod.materialize(ro, ro.resolve("HEAD"), p, runs_mod.DEFAULT_LIMITS, out)
     assert manifest_["includedCount"] == 1 and not (out / "docs").exists() and not (out / ".git").exists()
     runs_mod.make_read_only(out, writable_dirs=(out,))
-    assert not os.access(out / "app", os.W_OK) and not os.access(out / "app/a.js", os.W_OK) and os.access(out, os.W_OK)
+    mode = lambda q: (out / q).stat().st_mode & 0o777  # mode bits, not os.access: CI runs as root
+    assert mode("app") == 0o555 and mode("app/a.js") == 0o444 and mode(".") & 0o200
     assert git(src, "status", "--porcelain") == ""  # source repo untouched
 
 
