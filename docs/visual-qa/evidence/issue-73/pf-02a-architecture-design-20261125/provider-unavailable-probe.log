@@ -1,0 +1,2 @@
+PASS: unavailable provider returns PlannerAgentError before runner invocation; no provider process/network call
+EXIT=0

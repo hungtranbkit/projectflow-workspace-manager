@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="4.272" timestamp="2026-11-25T15:17:39.749984+07:00" hostname="task-runner"><testcase classname="tests.test_architecture_design" name="test_architecture_analysis_structured_result" time="1.351"><failure message="AssertionError: assert 'EXECUTION_FAILED' == 'READY'&#10;  &#10;  - READY&#10;  + EXECUTION_FAILED">client = &lt;starlette.testclient.TestClient object at 0x7f02fd9d8440&gt;
+git_repo = (PosixPath('<pytest-tmp>/pytest-515/test_architecture_analysis_str0/root'), PosixPath('<pytest-tmp>/pytest-515/test_architecture_analysis_str0/root/demo'))
+arch_env = PosixPath('<pytest-tmp>/pytest-515/test_architecture_analysis_str0/specs')
+
+    def test_architecture_analysis_structured_result(client, git_repo, arch_env):
+        cid = new_change(client, "Add internal caching module", "Speed up repeated reads.")
+        result = do_analyze(client, cid, arch_payload(affected_components=["app/services/cache.py"], classification="LOCAL_ARCHITECTURE_CHANGE"))
+&gt;       assert result["outcome"] == "READY"
+E       AssertionError: assert 'EXECUTION_FAILED' == 'READY'
+E
+E         - READY
+E         + EXECUTION_FAILED
+
+tests/test_architecture_design.py:174: AssertionError</failure></testcase><testcase classname="tests.test_architecture_design" name="test_technical_design_structured_result" time="2.764"><failure message="AssertionError: assert 'EXECUTION_FAILED' == 'READY'&#10;  &#10;  - READY&#10;  + EXECUTION_FAILED">client = &lt;starlette.testclient.TestClient object at 0x7f02fd9b1590&gt;
+git_repo = (PosixPath('<pytest-tmp>/pytest-515/test_technical_design_structur0/root'), PosixPath('<pytest-tmp>/pytest-515/test_technical_design_structur0/root/demo'))
+arch_env = PosixPath('<pytest-tmp>/pytest-515/test_technical_design_structur0/specs')
+
+    def test_technical_design_structured_result(client, git_repo, arch_env):
+        cid = new_change(client, "Design test change")
+        link_governing_feature(client, cid)
+        result = do_technical_design(client, cid)
+&gt;       assert result["outcome"] == "READY"
+E       AssertionError: assert 'EXECUTION_FAILED' == 'READY'
+E
+E         - READY
+E         + EXECUTION_FAILED
+
+tests/test_architecture_design.py:268: AssertionError</failure></testcase></testsuite></testsuites>
