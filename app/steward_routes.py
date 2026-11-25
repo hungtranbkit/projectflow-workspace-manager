@@ -16,7 +16,8 @@ from app.services.fleet_steward import Memory, VN, read_view
 COOKIE = "__Host-pf-steward"
 PRIVATE = {
     "Cache-Control": "private, no-store",
-    "Referrer-Policy": "no-referrer",
+    # Browsers need the same-site origin to submit the one-use login form.
+    "Referrer-Policy": "same-origin",
     "X-Robots-Tag": "noindex, nofollow",
 }
 
