@@ -189,7 +189,7 @@ class PlannerAgentInvoker:
             # locally, with no CLI schema tool enabled.
             if not require_toolless:
                 argv += ["--json-schema", json.dumps(schema)]
-            argv += ["--tools", "", "--max-turns", "3"]
+            argv += ["--tools", "", "--max-turns", "1" if require_toolless else "3"]
             if model is not None:
                 if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", model):
                     raise PlannerAgentError("Requested model identifier is invalid")
