@@ -1,5 +1,7 @@
 # ProjectFlow Project Context
 
+The 25 November single-blocker model probe verified Opus and zero tool calls. Its proposed action failed local validation. See the dated recovery JSON probe and RESULT.md under docs/orchestration-standard/ORCH-STD-20261123. PR #92 tracks integration, CI and rollout.
+
 ## Current handoff — ORCH-STD-20261123 supervisor closure
 
 - Work only in `/home/dell/workspace/projectflow-orchestrator-release-v1-20261123`, branch `integration/orchestrator-v1-20261123`. Pre-change checkpoint was `f072aa50c8b1c083280746db8015dbee587d0833`; do not reset or replace this worktree. The scoped V43 supervisor/goal lease integration, bounded recovery advisor, receipt hardening, tests, and dated evidence are committed locally as `42fc8b11cfe1146c95a420305b8c8cc3a29cc4bd` (`feat: add leased orchestration recovery supervisor`). Do not push this integration branch.

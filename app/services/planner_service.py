@@ -159,7 +159,8 @@ class PlannerAgentInvoker:
 
     def invoke(self, provider: str, prompt: str, schema: dict, cwd, *, model: str | None = None,
                effort: str | None = None, return_receipt: bool = False,
-               max_attempts: int | None = None, require_toolless: bool = False):
+               max_attempts: int | None = None, require_toolless: bool = False,
+               max_budget_usd: float | None = None):
         """Returns the raw JSON text the model produced (already
         json-schema-validated by the CLI itself where supported) --
         never parsed here. Raises PlannerAgentError for anything that
@@ -196,6 +197,14 @@ class PlannerAgentInvoker:
                 argv += ["--restricted", "--strict-mcp-config", "--no-chrome",
                          "--disable-slash-commands", "--no-session-persistence"]
             argv += ["--tools", "", "--max-turns", "1" if require_toolless else "3"]
+            if max_budget_usd is not None:
+                try:
+                    bounded_budget = float(max_budget_usd)
+                except (TypeError, ValueError) as exc:
+                    raise PlannerAgentError("Planner invocation budget is invalid") from exc
+                if not 0 < bounded_budget <= 1.0:
+                    raise PlannerAgentError("Planner invocation budget is outside the allowed per-call ceiling")
+                argv += ["--max-budget-usd", f"{bounded_budget:.2f}"]
             if model is not None:
                 if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", model):
                     raise PlannerAgentError("Requested model identifier is invalid")

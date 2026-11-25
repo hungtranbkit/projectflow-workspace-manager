@@ -1,7 +1,7 @@
 {
   "change_id": "ORCH-STD-20261123",
   "state": "FAILED_SAFE",
-  "captured_at_utc": "2026-11-25T07:33:00Z",
+  "captured_at_utc": "2026-11-25T08:03:00Z",
   "repository": {
     "path": "/home/dell/workspace/projectflow-orchestrator-release-v1-20261123",
     "branch": "integration/orchestrator-v1-20261123",
@@ -893,7 +893,7 @@
         "rollback": "not attempted; old 26c1d3c is not the live rollback baseline"
       },
       "local_commit": {
-        "sha": "42fc8b11cfe1146c95a420305b8c8cc3a29cc4bd",
+        "sha": "42fc8b1b92605255f4c4d933f23239f0ddca9257",
         "subject": "feat: add leased orchestration recovery supervisor",
         "branch": "integration/orchestrator-v1-20261123",
         "pushed": false
@@ -903,7 +903,8 @@
         "apply this exact delta to shared PR #92 and rerun its required CI/review",
         "classify three cleanup-fixture failures against same-environment baseline",
         "isolated end-to-end canary and independent Review",
-        "release owner validates current live SHA, backup/migration, lock and rollback before any deployment"
+        "release owner validates current live SHA, backup/migration, lock and rollback before any deployment",
+        "resolve architecture visual-check environment failure or obtain authorized browser evidence; diagram render itself passed"
       ],
       "planning_hashes_sha256": {
         "feature_spec": "3adcbe0864f2a509a5f808074b2db114bfdb899a45de3c8202e76fe758cb4130",
@@ -911,7 +912,104 @@
         "plan": "f6ff1542d436b4e0b250c9f53068dc861d3530558a366080e3f11a5b060bb20f",
         "approval": "5be8b286fd6b7f7d4daa7ed305cd913499517241d985bf260e6f62a401626708"
       },
-      "repository_checkpoint": "Source/test/evidence checkpoint committed locally; PR #92 still requires this delta and required CI/review. No deployment."
+      "repository_checkpoint": "Source/test/evidence checkpoint committed locally; PR #92 still requires this delta and required CI/review. No deployment.",
+      "architecture_artifact": {
+        "spec_path": "docs/architecture/projectflow-runtime.architecture.json",
+        "html_path": "docs/architecture/projectflow-runtime.architecture.html",
+        "source_revision": "42fc8b1b92605255f4c4d933f23239f0ddca9257",
+        "validation": "showcase PASS, 9/9 checks, zero warnings/errors",
+        "spec_sha256": "e8794483cdeb8b4c88138b005e22b0446e48b7baa57b51541a5f7b6c00bc06fd",
+        "html_sha256": "66bf0e66e040dd75fd0cfe3182bd82dc429be1bb4bfc06a4d707c581b89d96de",
+        "html_bytes": 728427,
+        "visual_check": "FAILED_ENVIRONMENT; Chrome process SIGABRT, zygote Permission denied (13), no viewports/screenshots; visual review pending",
+        "visual_check_sidecar": "docs/architecture/projectflow-runtime.architecture.visual-check.json",
+        "visual_check_sidecar_sha256": "3a4dcd0291037e1eb42a0f6e936545d9936a390a3a03b442bbd008acb427ae50"
+      }
+    },
+    {
+      "date_utc": "2026-11-25",
+      "state": "ONE_SHOT_ADVISORY_FALLBACK",
+      "base_checkpoint": "d546e48a0a624bd822fd947e47c866787b043aab",
+      "probe_path": "docs/orchestration-standard/ORCH-STD-20261123/recovery-json-probe-20261125.json",
+      "probe_id": "PROBE-ORCH-JSON-01",
+      "incident_id": "0a5ced52d2d1b5188348d22dffff705bc18348b19f40d86a2ca949ca60328de4",
+      "real_invocations": 1,
+      "model_receipt": {
+        "requested": "claude-opus-5-5",
+        "canonical": "claude-opus-5-5",
+        "provider": "claude",
+        "effort_requested": "high",
+        "turns": 1,
+        "toolless_verified": true,
+        "cost_estimate_usd": 0.0322298,
+        "per_call_budget_usd": 0.1
+      },
+      "model_json": {
+        "syntax_status": "UNKNOWN_NOT_RETAINED",
+        "proposal_locally_accepted": false,
+        "service_outcome": "AI_PROPOSAL_INVALID",
+        "raw_response_saved": false
+      },
+      "fallback": {
+        "action": "VERIFY",
+        "action_executed": false,
+        "real_task_or_production_data": false
+      },
+      "tests": {
+        "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_recovery_model_policy.py tests/test_orchestration_v2_dispatch.py::test_malformed_advisor_json_fallback_preserves_original_blocker tests/test_orchestration_v2_dispatch.py::test_recovery_advisor_error_keeps_factual_blocker_and_does_not_abort_tick",
+        "exit": 0,
+        "result": "13 passed"
+      },
+      "blocker_preservation": "A malformed fake model result remains deterministic fallback VERIFY; _recovery_block retains original PROVIDER_UNKNOWN code/action and session count. No validation was relaxed.",
+      "global_settings_changed": false,
+      "production_touched": false,
+      "commit": {
+        "sha": "0c10690c622f23abe0ee24c40760507fb8f423b5",
+        "subject": "fix: bound and receipt recovery JSON advice",
+        "branch": "integration/orchestrator-v1-20261123",
+        "pushed": false
+      },
+      "auth_and_budget_failures": {
+        "cases": [
+          "AI_BUDGET_LIMIT_REACHED",
+          "AI_AUTH_UNAVAILABLE"
+        ],
+        "result": "one attempt each; event records reason; repeat advise within cooldown does not invoke provider again"
+      },
+      "verification": [
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_recovery_model_policy.py tests/test_orchestration_v2_dispatch.py::test_malformed_advisor_json_fallback_preserves_original_blocker tests/test_orchestration_v2_dispatch.py::test_recovery_advisor_error_keeps_factual_blocker_and_does_not_abort_tick",
+          "exit": 0,
+          "result": "13 passed"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/preflight.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/build.sh",
+          "exit": 0,
+          "result": "source distribution PASS"
+        },
+        {
+          "command": "env PATH=/home/dell/workspace/projectflow-workspace-manager/.venv/bin:$PATH VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/smoke.sh",
+          "exit": 0,
+          "result": "1 passed"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m compileall -q app tests",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "git diff --check; python -m json.tool EVIDENCE.json and probe evidence",
+          "exit": 0,
+          "result": "PASS"
+        }
+      ],
+      "selection_reason": "Claude was the only provider allowed for this one-shot probe because Codex command_execution cannot be disabled per invocation; this does not assert Codex account availability.",
+      "repository_checkpoint": "JSON prompt/schema and per-call budget refinement committed locally; no PR push or production change."
     }
   ]
 }

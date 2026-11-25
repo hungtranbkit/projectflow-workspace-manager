@@ -10,7 +10,7 @@ def workspace_contract(title):
         "spec_acceptance_ids": "AC-OS-001",
         "spec_invariant_ids": "INV-OS-001",
         "implementation_prompt": f"""## OBJECTIVE
-For {title}, create exactly one owned workspace and verify its lifecycle against the task record.
+For {title}, verify that each selected repository receives exactly one owned workspace and record the task lifecycle.
 
 ## BASELINE
 The disposable demo repository has a main branch. Its first commit contains PROJECT.yaml and is created by tests/conftest.py before the task starts.
@@ -43,8 +43,13 @@ def configure_backlog_task(client, task_id, title):
         follow_redirects=False,
     )
     assert response.status_code == 303, response.text
-    trace = {key.removeprefix("spec_"): value for key, value in fields.items()
-             if key.startswith("spec_") and key != "spec_change_classification"}
-    trace["classification"] = fields["spec_change_classification"]
+    trace = {
+        "classification": fields["spec_change_classification"],
+        "feature_id": fields["spec_feature_id"],
+        "spec_version": fields["spec_version"],
+        "requirement_ids": fields["spec_requirement_ids"],
+        "acceptance_ids": fields["spec_acceptance_ids"],
+        "invariant_ids": fields["spec_invariant_ids"],
+    }
     response = client.post(f"/api/tasks/{task_id}/spec", data=trace, follow_redirects=False)
     assert response.status_code == 303, response.text

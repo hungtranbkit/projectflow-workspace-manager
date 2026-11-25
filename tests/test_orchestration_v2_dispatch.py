@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.services.spec_gate import SpecGate
 from app.services.task_contract import REQUIRED_SECTIONS, validate_task_contract
 from app.services.task_dispatch_gate import TaskDispatchGate
+from app.services.recovery_decision_service import RecoveryDecisionService
 from app.launchers import AgentLauncher
 
 
@@ -351,6 +352,27 @@ def test_recovery_advisor_error_keeps_factual_blocker_and_does_not_abort_tick(cl
     assert result["next_action"]=="Check provider auth and quota."
     assert result["advisory"]["reason"]=="AI_ADVISOR_ERROR"
     assert db.one("SELECT COUNT(*) c FROM workspace_events WHERE action='RECOVERY_AI_FAILED'")["c"]==1
+
+
+def test_malformed_advisor_json_fallback_preserves_original_blocker(client,git_repo,tmp_path):
+    _,repo=git_repo
+    db,service,change_id,task_id,_=_make_exited_v2_recovery_task(client,repo)
+    class MalformedInvoker:
+        def model_supported(self,*_args): return False
+        def advisory_toolless_capable(self,provider): return provider=="claude"
+        def invoke(self,provider,prompt,schema,cwd,**kwargs):
+            assert provider=="claude" and kwargs["require_toolless"] is True
+            return {"text":"not JSON","provider":"claude","resolved_model":"claude-opus-5-5",
+                    "effort_requested":"high","turns":1,"cost_estimate_usd":0.05,
+                    "toolless_verified":True}
+    service.recovery_advisor=RecoveryDecisionService(db,MalformedInvoker(),tmp_path,
+        provider_available=lambda provider:provider=="claude")
+    result=service._recovery_block(change_id,task_id,"PROVIDER_UNKNOWN","Check provider auth and quota.")[0]
+    assert result["outcome"]=="BLOCKED" and result["code"]=="PROVIDER_UNKNOWN"
+    assert result["next_action"]=="Check provider auth and quota."
+    assert result["advisory"]=={"source":"DETERMINISTIC_FALLBACK","allowed_action":"VERIFY",
+                               "reason":"AI_PROPOSAL_INVALID"}
+    assert db.one("SELECT COUNT(*) c FROM agent_sessions WHERE task_id=?",(task_id,))["c"]==1
 
 
 def test_recovery_backoff_prevents_immediate_second_attempt(client,git_repo):

@@ -220,3 +220,21 @@ The scoped implementation/test commit is `8581caacb18eca395d353b283dd408a4c44308
 ### Local integration checkpoint commit
 
 The scoped implementation, tests, handoff and evidence were committed locally on `integration/orchestrator-v1-20261123` as `42fc8b11cfe1146c95a420305b8c8cc3a29cc4bd` (`feat: add leased orchestration recovery supervisor`). It is not pushed. PR #92 remains the only intended review vehicle; its steward must apply this delta and run required CI/review on the new exact PR SHA. Production remains on the independently verified steward #90 runtime and was not modified.
+
+## One-shot real RecoveryDecisionService JSON probe — 2026-11-25
+
+**Result: tool-less receipt PASS; model proposal NOT ACCEPTED.** On checkpoint `d546e48a0a624bd822fd947e47c866787b043aab`, the prompt lacked the actual JSON proposal schema after removing Claude CLI `--json-schema` to avoid tool turns. The service prompt was updated to embed the schema as ordinary text, require one JSON object without fences/prose, preserve strict local validation, and cap the invocation at one turn / `$0.10` / one attempt. A real call to `RecoveryDecisionService.advise()` then ran exactly once against a temporary SQLite DB, with a synthetic sanitized blocker packet (probe ID + observation only; no task/user/path/secret data), through the existing Claude account. No production service or DB was used.
+
+- Probe ID: `PROBE-ORCH-JSON-01`; incident fingerprint: `0a5ced52d2d1b5188348d22dffff705bc18348b19f40d86a2ca949ca60328de4`; UTC window `2026-11-25T07:55:51Z`–`07:55:59Z`.
+- Receipt attests requested/canonical model `claude-opus-5-5`, provider `claude`, effort `high`, one turn, cost `$0.0322298` under the `$0.10` per-call cap. `toolless_verified=true`: the invoker accepted only `end_turn`, exactly one turn, explicit empty permission denials, present all-zero server-tool counts, and no reported command/tool activity. No raw model output or transcript was retained.
+- `RecoveryDecisionService` returned `DETERMINISTIC_FALLBACK` with `AI_PROPOSAL_INVALID`; therefore model response JSON syntax validity is recorded as `UNKNOWN_NOT_RETAINED`, and no model action was accepted or executed. The fallback action was `VERIFY` only. Do not describe this as valid model JSON or a scored decision.
+- Fixture tests passed **13/13** (exit 0), including budget/auth failure logging and single-attempt cooldown behavior. They verify the schema appears in the prompt while QA answer fields stay absent, the per-call budget/model/tool restrictions, malformed output falls back with its receipt, and the factual `PROVIDER_UNKNOWN` blocker and owner action remain intact with no added session.
+- Evidence: `recovery-json-probe-20261125.json`. No retry was made after the single invocation; no global CLI settings, production service, PR branch, push, or deployment were changed.
+
+The schema-in-prompt fix improved the request contract but this one-shot result still did not produce a locally accepted proposal. Further provider attempts require a separately authorized one-shot after examining this receipt; this task did not retry.
+
+The follow-up focused suite was rerun after adding budget/auth refusal and no-repeat coverage: **13 passed, exit 0**. Each refusal maps to a safe reason (`AI_BUDGET_LIMIT_REACHED` or `AI_AUTH_UNAVAILABLE`), records one attempted call, then cooldown prevents a second provider invocation. `compileall` and `git diff --check` are run again before the local checkpoint commit.
+
+### JSON receipt refinement commit
+
+The schema-in-prompt change, per-call `$0.10` cap, fail-reason/receipt logging, malformed-output blocker preservation tests, one-shot probe record and handoff were committed locally as `0c10690c622f23abe0ee24c40760507fb8f423b5` (`fix: bound and receipt recovery JSON advice`) on `integration/orchestrator-v1-20261123`. The commit is not pushed. Send this exact SHA to the steward for inclusion in existing PR #92; no other PR was created.
