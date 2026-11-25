@@ -1,20 +1,22 @@
 from __future__ import annotations
-import subprocess, threading
+import subprocess, threading, shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from app.services.project_contract import ContractError, load_contract
-from app.services.visual_qa_contract import task_requires_visual_qa
+from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
+from app.services.visual_qa_evidence import validate_visual_qa_run, VisualEvidenceError, ensure_private_directory
 
 def now(): return datetime.now(timezone.utc).isoformat()
 
 class TestRunner:
-    def __init__(self, db, git, runner=None):
+    def __init__(self, db, git, runner=None, visual_evidence_root: Path | None = None):
         """`runner` is a SandboxedCommandRunner (B0.6) -- optional so
         every pre-existing direct construction of TestRunner(db, git)
         (tests, scripts) keeps working unmodified, falling back to a
         real, always-direct-host runner (mandatory=False) that
         reproduces today's exact subprocess.run(shell=True) behavior."""
         self.db, self.git = db, git
+        self.visual_evidence_root = Path(visual_evidence_root).resolve() if visual_evidence_root else None
         if runner is None:
             from app.services.sandboxed_exec import SandboxedCommandRunner
             from app.services.sandbox_runtime import SandboxRuntimeService
@@ -110,7 +112,21 @@ class TestRunner:
                 continue
             self.db.execute("UPDATE test_runs SET status='RUNNING',started_at=? WHERE id=?", (now(), run_id))
             try:
-                proc = self.runner.run(command, path, working, timeout)
+                visual_tmp = None
+                visual_env = None
+                if stage == "visual_qa":
+                    visual_tmp = Path(path).absolute() / ".runtime" / "projectflow-visual-qa" / str(run_id)
+                    ensure_private_directory(visual_tmp)
+                    output_path = f"/workspace/.runtime/projectflow-visual-qa/{run_id}" if getattr(self.runner, "mandatory", False) else str(visual_tmp)
+                    visual_env = {
+                        "VISUAL_QA_RUN_ID": str(run_id),
+                        "VISUAL_QA_TESTED_COMMIT": str(source_state.get("head") or ""),
+                        "VISUAL_QA_EVIDENCE_OUTPUT": output_path,
+                    }
+                if visual_env is None:
+                    proc = self.runner.run(command, path, working, timeout)
+                else:
+                    proc = self.runner.run(command, path, working, timeout, env=visual_env)
                 try:
                     finished_source = self.git.source_state(path)
                     drift = not self._same_source(source_state, finished_source)
@@ -119,17 +135,56 @@ class TestRunner:
                 status = "PASS" if proc.returncode == 0 and not drift else "FAIL"
                 overall = overall and status == "PASS"
                 stderr = proc.stderr or ""
+                stdout = proc.stdout or ""
+                if stage == "visual_qa" and status == "PASS":
+                    try:
+                        if not source_state.get("clean") or not source_state.get("head"):
+                            raise VisualEvidenceError("visual evidence requires a clean commit-bound source")
+                        task = self._task_for(kind, entity_id)
+                        contract = load_visual_qa_contract(Path(path))
+                        if not task_requires_visual_qa(task) or contract is None:
+                            raise VisualEvidenceError("visual stage is not backed by an enabled opt-in contract")
+                        if self.visual_evidence_root is None:
+                            raise VisualEvidenceError("coordinator visual evidence storage is not configured")
+                        captured = validate_visual_qa_run(visual_tmp, run_id=run_id, tested_commit=source_state["head"], repo_root=Path(path), contract=contract)
+                        target = self.visual_evidence_root / kind / str(entity_id) / str(run_id)
+                        ensure_private_directory(target.parent)
+                        if target.exists() or target.is_symlink():
+                            raise VisualEvidenceError("coordinator evidence run path already exists")
+                        shutil.copytree(visual_tmp, target, symlinks=True)
+                        verified = validate_visual_qa_run(target, run_id=run_id, tested_commit=source_state["head"], repo_root=Path(path), contract=contract, expected_manifest_sha256=captured["manifest_sha256"])
+                        stdout = (stdout + f"\nPROJECTFLOW_VISUAL_EVIDENCE_SHA256={verified['manifest_sha256']}\n")[-50000:]
+                    except Exception as exc:
+                        status = "FAIL"
+                        overall = False
+                        stderr = (stderr + f"\nVISUAL_EVIDENCE_REJECTED: {type(exc).__name__}: {exc}").strip()
+                    finally:
+                        if visual_tmp and visual_tmp.exists() and visual_tmp.is_relative_to(Path(path).absolute() / ".runtime" / "projectflow-visual-qa"):
+                            shutil.rmtree(visual_tmp)
+                elif visual_tmp and visual_tmp.exists():
+                    allowed = Path(path).absolute() / ".runtime" / "projectflow-visual-qa"
+                    if visual_tmp.is_relative_to(allowed):
+                        shutil.rmtree(visual_tmp)
                 if drift:
                     stderr = (stderr + "\n" + self._source_drift_detail(stage, "DURING")).strip()
                 if source_state["head"] and not source_state.get("clean"):
                     stderr = (stderr + "\nSOURCE_NOT_COMMIT_BOUND: worktree was dirty when tests were queued; commit and rerun for current-SHA evidence.").strip()
-                self.db.execute("UPDATE test_runs SET status=?,finished_at=?,exit_code=?,stdout_tail=?,stderr_tail=? WHERE id=?", (status, now(), proc.returncode, proc.stdout[-50000:], stderr[-50000:], run_id))
+                self.db.execute("UPDATE test_runs SET status=?,finished_at=?,exit_code=?,stdout_tail=?,stderr_tail=? WHERE id=?", (status, now(), proc.returncode, stdout[-50000:], stderr[-50000:], run_id))
             except subprocess.TimeoutExpired as exc:
                 overall = False
                 stderr = (exc.stderr or "")
                 if not source_state.get("clean"):
                     stderr = (stderr + "\nSOURCE_NOT_COMMIT_BOUND: worktree was dirty when tests were queued; commit and rerun for current-SHA evidence.").strip()
                 self.db.execute("UPDATE test_runs SET status='TIMEOUT',finished_at=?,exit_code=124,stdout_tail=?,stderr_tail=? WHERE id=?", (now(), (exc.stdout or "")[-50000:], stderr[-50000:], run_id))
+            except Exception as exc:
+                overall = False
+                self.db.execute(
+                    "UPDATE test_runs SET status='FAIL',finished_at=?,exit_code=1,stderr_tail=? WHERE id=?",
+                    (now(), f"TEST_STAGE_ERROR: {type(exc).__name__}: {exc}"[-50000:], run_id),
+                )
+                visual_root = Path(path).absolute() / ".runtime" / "projectflow-visual-qa"
+                if visual_tmp and visual_tmp.exists() and visual_tmp.is_relative_to(visual_root):
+                    shutil.rmtree(visual_tmp)
         action = "TEST_PASS" if overall else "TEST_FAIL"; self.db.event(kind, entity_id, action)
         if kind == "integration":
             status = "TESTING" if overall else "FAILED"

@@ -167,6 +167,18 @@ def test_backend_builder_does_not_require_optional_visual_stage(tmp_path):
     assert service.builder_tests_status({"id": 9, "task_id": 1, "head": head, "worktree_path": str(repo)}) == "PASS"
 
 
+def test_exit_zero_visual_stage_without_coordinator_evidence_fails_integration_gate(tmp_path):
+    db, service, repo, head = make_fixture(tmp_path, required=("test",), visual=True)
+    add_run(db, stage="test", sha=head)
+    add_run(db, stage="visual_qa", status="PASS", sha=head, stdout="command returned zero")
+
+    result = integration(service, repo)
+
+    assert result["tests_status"] == "FAIL"
+    assert result["failures"][0]["stage"] == "visual_qa"
+    assert result["failures"][0]["classification"] != "WAIVED"
+
+
 def test_integration_without_contract_and_zero_stage_legacy_behavior_is_preserved(tmp_path):
     db, service, repo, head = make_fixture(tmp_path, contract=False)
     add_run(db, workspace_type="agent", workspace_id=9, stage="legacy", sha=head)

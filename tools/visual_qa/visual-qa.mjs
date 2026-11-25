@@ -87,6 +87,19 @@ async function main(argv) {
     throw new Error("Pinned UIFix is not installed. Run: python3 tools/visual_qa/bootstrap.py");
   }
   const args = parseArgs(argv);
+  const runId = process.env.VISUAL_QA_RUN_ID;
+  const expectedCommit = process.env.VISUAL_QA_TESTED_COMMIT;
+  const evidenceOutput = process.env.VISUAL_QA_EVIDENCE_OUTPUT;
+  if (runId || expectedCommit || evidenceOutput) {
+    if (!/^\d+$/.test(runId || "") || !/^[0-9a-f]{40}$/.test(expectedCommit || "") || !evidenceOutput) {
+      throw new Error("VISUAL_QA_RUN_ID, VISUAL_QA_TESTED_COMMIT and VISUAL_QA_EVIDENCE_OUTPUT must be provided together");
+    }
+    if (gitHead(process.cwd()) !== expectedCommit) throw new Error("VISUAL_QA_SOURCE_COMMIT_MISMATCH");
+    const runRoot = path.resolve(evidenceOutput);
+    const reserved = path.resolve(root, ".runtime", "projectflow-visual-qa");
+    if (!runRoot.startsWith(`${reserved}${path.sep}`)) throw new Error("Visual evidence output must be inside the reserved .runtime directory");
+    args.out = path.join(runRoot, `${args.viewport.width}x${args.viewport.height}`);
+  }
   const reference = await readFile(args.reference);
   const refSize = pngDimensions(reference);
   if (refSize.width !== args.viewport.width || (args.capture === "viewport" && refSize.height !== args.viewport.height)) {
@@ -189,6 +202,27 @@ async function main(argv) {
   await writeFile(path.join(args.out, "metrics.json"), JSON.stringify(metrics, null, 2) + "\n");
   const replay = `node tools/visual_qa/visual-qa.mjs --reference ${JSON.stringify(args.reference)} --url ${JSON.stringify(args.url)} --viewport ${args.viewport.width}x${args.viewport.height} --out ${JSON.stringify(args.out)} --threshold ${args.threshold} --capture ${args.capture}`;
   await writeFile(path.join(args.out, "report.md"), markdown(metrics, replay));
+  if (runId) {
+    const artifactNames = ["reference.png", "actual.png", "diff.png", "overlay.png", "metrics.json", "report.md"];
+    const artifacts = {};
+    for (const name of artifactNames) {
+      const bytes = await readFile(path.join(args.out, name));
+      artifacts[name] = { file: name, size: bytes.length, sha256: sha256(bytes) };
+    }
+    const manifest = {
+      schemaVersion: 1, runId, testedCommit: expectedCommit, sourceCommit,
+      tool: "UIFix", toolVersion: "1.2.6", toolCommit: UIFIX_SHA,
+      route: args.url, referenceSha256: metrics.referenceSha256,
+      viewport: args.viewport, deviceScaleFactor: 1, captureMode: args.capture,
+      threshold: args.threshold, passed, metrics: {
+        percentDiff: metrics.percentDiff, mismatchedPixels: metrics.mismatchedPixels,
+        totalPixels: metrics.totalPixels, ssim: metrics.ssim,
+        horizontalOverflow: metrics.horizontalOverflow, pageErrors: metrics.pageErrors,
+        blockedRequests: metrics.blockedRequests,
+      }, artifacts,
+    };
+    await writeFile(path.join(args.out, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n", { flag: "wx" });
+  }
   console.log(`${passed ? "PASS" : "FAIL"} UIFix diff ${(diff.percentDiff * 100).toFixed(3)}% at ${args.viewport.width}x${args.viewport.height}; artifacts: ${args.out}`);
   return passed ? 0 : 1;
 }

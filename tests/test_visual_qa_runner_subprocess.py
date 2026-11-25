@@ -155,7 +155,8 @@ def _run_stages(runner: _ProjectFlowTestRunner, db: Database, workspace_id: int,
 
 
 def _decision(db: Database, git: _Git, workspace_id: int, task_id: int, root: Path, head: str) -> str:
-    return TaskDecisionService(db, git).builder_tests_status({
+    evidence_root = root.parent / "coordinator-state" / "visual-qa-evidence"
+    return TaskDecisionService(db, git, visual_evidence_root=evidence_root).builder_tests_status({
         "id": workspace_id, "task_id": task_id, "head": head, "worktree_path": str(root),
     })
 
@@ -238,7 +239,8 @@ def test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_h
         "INSERT INTO repositories(repo_name,repo_path) VALUES(?,?)", ("fixture-ui", str(root))
     )
     task_id, workspace_id = _add_task_and_workspace(db, root, "UI task\nVISUAL_QA_REQUIRED: true", "ui", repo_id)
-    runner = _ProjectFlowTestRunner(db, git)  # real default SandboxedCommandRunner; mandatory=False on local test fixture
+    evidence_root = tmp_path / "coordinator-state" / "visual-qa-evidence"
+    runner = _ProjectFlowTestRunner(db, git, visual_evidence_root=evidence_root)  # real subprocess + coordinator-owned evidence
     captures: dict[str, Path] = {}
     try:
         positive_rows = _run_stages(runner, db, workspace_id, root)
@@ -246,8 +248,9 @@ def test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_h
             ("test", "PASS", 0), ("visual_qa", "PASS", 0),
         ]
         assert {r["tested_commit"] for r in positive_rows} == {positive_head}
+        visual_row = next(row for row in positive_rows if row["stage"] == "visual_qa")
         assert _decision(db, git, workspace_id, task_id, root, positive_head) == "PASS"
-        captures["positive"] = positive_out
+        captures["positive"] = evidence_root / "agent" / str(workspace_id) / str(visual_row["id"]) / "320x240"
 
         # A source commit after passing invalidates the old run by exact SHA.
         (root / "revision.txt").write_text("next source revision\n")
@@ -314,6 +317,20 @@ def test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_h
         assert [(r["stage"], r["status"], r["exit_code"]) for r in backend_rows] == [("test", "PASS", 0)]
         assert _decision(db, git, backend_workspace_id, backend_id, backend_root, unavailable_head) == "PASS"
 
+        # Exit code zero alone cannot produce visual evidence or gate PASS.
+        _write_project(root, url=f"{fixture.base_url}/same", command="true")
+        no_evidence_head = _commit(root, "PROJECT.yaml", message="exit zero without visual artifacts")
+        no_evidence_rows = _run_stages(runner, db, workspace_id, root)
+        assert [(r["stage"], r["status"], r["exit_code"]) for r in no_evidence_rows] == [
+            ("test", "PASS", 0), ("visual_qa", "FAIL", 0),
+        ]
+        assert "VISUAL_EVIDENCE_REJECTED" in (no_evidence_rows[-1]["stderr_tail"] or "")
+        assert _decision(db, git, workspace_id, task_id, root, no_evidence_head) == "FAIL"
+
+        # Revalidation at gate read detects artifact tampering after PASS.
+        (captures["positive"] / "actual.png").write_bytes(b"tampered")
+        assert _decision(db, git, workspace_id, task_id, root, positive_head) == "NOT_RUN"
+
         assert fixture.methods and all(method == "GET" for method, _path in fixture.methods)
         assert {path for _method, path in fixture.methods} <= {"/same", "/wrong"}
 
@@ -329,6 +346,7 @@ def test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_h
                 "missingReferenceHead": missing_head,
                 "unavailableServerHead": unavailable_head,
                 "backendHead": unavailable_head,
+                "exitZeroWithoutEvidenceHead": no_evidence_head,
                 "testStage": "PASS / exit 0 (real subprocess)",
                 "positiveVisualStage": "PASS / exit 0 (real pinned UIFix CLI subprocess)",
                 "negativeVisualStage": "FAIL / exit 1 (real color deviation)",
@@ -336,6 +354,8 @@ def test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_h
                 "missingReference": f"TestRunner contract rejected before dispatch: {missing_reference_error}",
                 "unavailableServer": "FAIL / exit 2 (real CLI SERVER_NOT_READY)",
                 "backendOptOut": "PASS / only test stage dispatched",
+                "exitZeroWithoutEvidence": "FAIL / exit 0 without valid run-scoped evidence",
+                "tamperedEvidence": "NOT_RUN at gate revalidation",
                 "staleEvidence": "NOT_RUN after source HEAD changed",
                 "externalRequests": [],
                 "httpMethods": sorted(set(method for method, _path in fixture.methods)),

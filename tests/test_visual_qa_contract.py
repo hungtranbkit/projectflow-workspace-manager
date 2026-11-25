@@ -199,6 +199,6 @@ def test_task_decision_requires_current_visual_qa_evidence_for_opted_in_task(tmp
 
     assert decision.builder_tests_status(builder) == "NOT_RUN"
     DB.rows.append({"stage": "visual_qa", "status": "PASS"})
-    assert decision.builder_tests_status(builder) == "PASS"
+    assert decision.builder_tests_status(builder) == "FAIL"  # exit/status row without coordinator-bound evidence is not proof
     DB.rows[1]["status"] = "FAIL"
     assert decision.builder_tests_status(builder) == "FAIL"

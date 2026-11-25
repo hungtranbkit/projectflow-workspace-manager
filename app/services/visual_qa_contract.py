@@ -53,12 +53,17 @@ def load_visual_qa_contract(repo: Path) -> dict | None:
     if not isinstance(viewports, list) or not viewports:
         raise ValueError("visual_qa.viewports must be a non-empty list")
     normalized_viewports = []
+    seen_viewports = set()
     for viewport in viewports:
         if not isinstance(viewport, dict):
             raise ValueError("each visual_qa viewport must be a mapping")
         width, height = viewport.get("width"), viewport.get("height")
         if type(width) is not int or type(height) is not int or not (320 <= width <= 3840 and 240 <= height <= 2160):
             raise ValueError("visual_qa viewport dimensions are outside the supported range")
+        key = f"{width}x{height}"
+        if key in seen_viewports:
+            raise ValueError(f"visual_qa.viewports contains duplicate dimensions: {key}")
+        seen_viewports.add(key)
         normalized_viewports.append({"width": width, "height": height})
 
     refs = block.get("references")

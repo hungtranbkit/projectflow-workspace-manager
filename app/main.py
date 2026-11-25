@@ -154,11 +154,12 @@ def create_app(settings=None):
     # self-hosted mode), mandatory ephemeral-container isolation under
     # AUTH_MODE=required (never a silent unsandboxed fallback).
     sandboxed_exec = SandboxedCommandRunner(sandbox_runtime, mandatory=(settings.auth_mode == "required"))
-    runner = TestRunner(db, git, sandboxed_exec)
+    visual_evidence_root = settings.state_dir / "visual-qa-evidence"
+    runner = TestRunner(db, git, sandboxed_exec, visual_evidence_root=visual_evidence_root)
     sandboxes = SandboxManager(db, sandbox_runtime, ports, settings.state_dir, settings.max_running_sandboxes, settings.sandbox_retention_hours)
     cleanup_worker = CleanupWorker(db, sandboxes, settings.cleanup_poll_seconds)
     agent_sessions = AgentSessionManager(db)
-    decision = TaskDecisionService(db, git)
+    decision = TaskDecisionService(db, git, visual_evidence_root=visual_evidence_root)
     gate_waivers = GateWaiverService(db, git, sandboxed_exec)
     # B0.7's first real consumer (ADR-001, simplified per-org-token
     # variant -- see github_merge_service.py's own module docstring):

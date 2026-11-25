@@ -86,7 +86,7 @@ class _Runner:
         self.commands: list[str] = []
         self.fail_stage = fail_stage
 
-    def run(self, command, _path, _working, _timeout):
+    def run(self, command, _path, _working, _timeout, env=None):
         self.commands.append(command)
         failed = command == self.fail_stage
         return subprocess.CompletedProcess(command, 1 if failed else 0, "fixture stdout", "fixture stderr" if failed else "")
@@ -109,7 +109,7 @@ def _decision(db, root: Path):
     })
 
 
-def test_opted_in_ui_task_dispatches_visual_stage_and_gate_uses_its_result(tmp_path):
+def test_opted_in_ui_task_exit_zero_without_coordinator_evidence_fails_closed(tmp_path):
     _project(tmp_path)
     db = _DB("Implement this UI screen\nVISUAL_QA_REQUIRED: true")
     runner = _Runner()
@@ -119,9 +119,9 @@ def test_opted_in_ui_task_dispatches_visual_stage_and_gate_uses_its_result(tmp_p
     assert run_ids == [1, 2]
     assert runner.commands == ["fixture-test", "fixture-visual-qa"]
     assert [(row["stage"], row["status"]) for row in db.rows] == [
-        ("test", "PASS"), ("visual_qa", "PASS")
+        ("test", "PASS"), ("visual_qa", "FAIL")
     ]
-    assert _decision(db, tmp_path) == "PASS"
+    assert _decision(db, tmp_path) == "FAIL"
 
 
 def test_visual_failure_fails_opted_in_task_decision(tmp_path):

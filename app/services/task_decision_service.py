@@ -179,9 +179,10 @@ class TaskDecisionService:
     against the source branch's current HEAD (staleness), same discipline
     `sandboxes.is_stale()` already established."""
 
-    def __init__(self, db, git):
+    def __init__(self, db, git, visual_evidence_root: Path | None = None):
         self.db = db
         self.git = git
+        self.visual_evidence_root = Path(visual_evidence_root).resolve() if visual_evidence_root else None
         # Track A1 (A1.4/A1.5) perf fix: request-scoped memoization of
         # evaluate(), NOT a global/app-lifetime cache. evaluate_workflow()
         # calls evaluate() on the same task_id several times per Change
@@ -562,6 +563,14 @@ class TaskDecisionService:
             return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required,
                      "tests_passed": sum(1 for stage in required_stages if latest.get(stage, {}).get("status") == "PASS"), "head": head, "summary": {}}
         required_rows = {stage: latest[stage] for stage in required_stages}
+        if visual_qa_required and not self._visual_evidence_valid(
+            required_rows.get("visual_qa"), "integration", iid, head, Path(ti_repo["worktree_path"]), task
+        ):
+            row = required_rows.get("visual_qa")
+            if row is not None and row["status"] == "PASS":
+                row = dict(row); row["status"] = "FAIL"; row["stderr_tail"] = "Visual QA evidence is missing, stale, or invalid."
+                required_rows["visual_qa"] = row
+                latest["visual_qa"] = row
         if any(row["status"] in ("QUEUED", "RUNNING", "SKIPPED") for row in required_rows.values()):
             return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required,
                     "tests_passed": sum(1 for row in required_rows.values() if row["status"] == "PASS"), "head": head, "summary": {}}
@@ -1016,6 +1025,13 @@ class TaskDecisionService:
             if any(stage not in latest for stage in required_stages):
                 return "NOT_RUN"
             required_rows = {stage: latest[stage] for stage in required_stages}
+        if visual_qa_required and not self._visual_evidence_valid(
+            required_rows.get("visual_qa"), "agent", b["id"], head, Path(b["worktree_path"]), task
+        ):
+            row = required_rows.get("visual_qa")
+            if row is not None and row["status"] == "PASS":
+                return "FAIL"
+            return "NOT_RUN"
         statuses = [row["status"] for row in required_rows.values()]
         if any(status in ("QUEUED", "RUNNING", "SKIPPED") for status in statuses):
             return "NOT_RUN"
@@ -1024,6 +1040,35 @@ class TaskDecisionService:
         if all(status == "PASS" for status in statuses):
             return "PASS"
         return "NOT_RUN"
+
+    def _visual_evidence_valid(self, row, workspace_type, workspace_id, head, repo_path, task):
+        """Revalidate coordinator-owned evidence whenever the authoritative gate reads a visual PASS."""
+        if row is None:
+            return False
+        if row["status"] != "PASS":
+            return True  # FAIL/TIMEOUT/pending remain governed by their existing stage states.
+        if not head or self.visual_evidence_root is None:
+            return False
+        import re
+        matches = re.findall(r"(?:^|\n)PROJECTFLOW_VISUAL_EVIDENCE_SHA256=([0-9a-f]{64})(?:\n|$)", row["stdout_tail"] or "")
+        if not matches:
+            return False
+        try:
+            from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
+            from app.services.visual_qa_evidence import validate_visual_qa_run
+            if not task_requires_visual_qa(task):
+                return False
+            contract = load_visual_qa_contract(repo_path)
+            if contract is None:
+                return False
+            run_path = self.visual_evidence_root / workspace_type / str(workspace_id) / str(row["id"])
+            validate_visual_qa_run(
+                run_path, run_id=row["id"], tested_commit=head, repo_root=repo_path,
+                contract=contract, expected_manifest_sha256=matches[-1],
+            )
+            return True
+        except Exception:
+            return False
 
     def _checklist(self, status, builders, risk, current_step, all_builders_ready, all_reviews_current_pass, qa_ok, integration_ok, all_merged):
         if status == "CANCELLED":
