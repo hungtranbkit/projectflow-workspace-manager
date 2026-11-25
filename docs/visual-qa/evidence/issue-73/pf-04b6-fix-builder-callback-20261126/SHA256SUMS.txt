@@ -1,0 +1,13 @@
+cf2926105a66608cbdfe80526f077e532465930f03da0db61e170d6bf08f2832  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/REPORT.md
+54c6555cc7225eb1aa052aa8ae58b23cf5b7d5eaf44dc28a8c85b33f32330464  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/candidate-red.log
+26e187f6d60a08a2eeb6962a868dc4c570602de9c864445ac1b98f8c6f307254  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/candidate-red.xml
+9515d756b4caebcebfa5fc220f0bc80e1bca01362b5387e730ac18f81a48f216  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/builder-orchestration.log
+54e0c0279c4f7838b7383453b1e263f9777cfa453b46ea9fb44a3cf8e7a30aa9  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/builder-orchestration.xml
+f0cd4c7b1b50320cb025718f7089726ca7cca0aeb7fc4b611b4ba0125d2ac23e  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/collect-only.log
+d9f76d9db3689b89789e29b91432b6325c4f91aa50dc6e8eab7da659b1a591c6  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/historical-node-resolution.tsv
+4037c2f83939961135fb00a12cda8113cd0ac0d52920ac068ceb35bf5230a013  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/release-visual-regressions.log
+6b3e160d8a94e2dc4f00d0bf3bd01a937b13002377bffae7c27b97187446532a  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/release-visual-regressions.xml
+dce4c2567cbe8ec7634f4ae7fc71a24d02df66a0844bb0f3dbe57f0f1d4c847a  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/review-fix-loop.log
+1dfab1f01672bda7db8364c24936b1431642159dd93af5b6b2fa4902992d5310  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/review-fix-loop.xml
+80d07d98249624620380df69454b7dc53f5870fcde8a21c5d589e2163ed32df1  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/targeted.log
+b4b66d4a67adb12e90669de4ae6b298ef1cd763d6d5dcb6c8bd4c31e72997abd  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/targeted.xml
