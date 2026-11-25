@@ -63,6 +63,7 @@ FLOORPLAN_LIMITS = [
     "Mô tả tệp là khung tự sinh; số tệp có mô tả xem ở phần phủ quét.",
     "Không nhận diện được route chưa chứng minh ứng dụng không có route.",
     "Android được quét như mã Java; không phải bằng chứng runtime trên thiết bị.",
+    "HTML nhúng thời điểm build nên SHA-256 khác giữa các lượt cùng commit; so sánh lịch sử dùng đồ thị và phủ quét.",
 ]
 ARCHIFY_CAPS = ["Sơ đồ thành phần có trích dẫn dòng mã", "Tìm kiếm và chọn tuyến", "Thẻ điều kiện nguồn"]
 

@@ -15,7 +15,6 @@
 {% else %}<p>Chưa có snapshot kiến trúc nào.</p>{% endfor %}
 
 {% else %}
-<h2 class="a-title">{{pid}}</h2>
 <nav class="s-tabs a-tabs" aria-label="Phần kiến trúc">{% for k, txt in tabs %}<a aria-current="{{'page' if k == tab else 'false'}}" href="?tab={{k}}{% if current and current.id != (snaps[0].id if snaps else '') %}&amp;snapshot={{current.id}}{% endif %}">{{txt}}</a>{% endfor %}</nav>
 {% if msg %}<p class="a-msg" role="status">{{msg}}</p>{% endif %}
 {% if not current %}<p>Chưa có snapshot cho dự án này.</p>{% else %}

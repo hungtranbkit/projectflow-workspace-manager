@@ -37,3 +37,23 @@ systemctl --user status projectflow-steward-collect.timer --no-pager
 ## Vận hành và hoàn tác
 
 Dùng SQLite online backup cho DB quản gia và bảo quản riêng cấu hình khóa công khai. Khóa ký ở lại node. Có thể thu hồi một node bằng cách bỏ khóa công khai tương ứng. Để ngừng lấy mẫu trên một node, dùng `systemctl --user disable --now projectflow-steward-collect.timer` và dừng đúng oneshot nếu đang chạy. Khi hoàn tác web, trỏ dịch vụ về bản ProjectFlow trước và giữ lại DB cùng spool. Phần quản gia không chỉnh cấu hình, triển khai hay điều khiển Zalo Hub.
+
+## Kiến trúc dự án (Archify · Floorplan)
+
+Mở `/steward/architecture` sau khi đăng nhập quản gia. Mỗi dự án (ID `owner/repo`) có Tổng quan, Archify, Floorplan, Lịch sử và Bằng chứng. Một snapshot ghim đúng một commit nguồn cho cả hai công cụ, lưu HTML gốc của công cụ cùng manifest: phiên bản và commit công cụ, image runtime, SHA-256, kích thước, phủ quét, kết quả kiểm tra, giới hạn và nguồn gốc. Snapshot không bao giờ bị sửa; nhập lại cùng nội dung không tạo bản mới. Dữ liệu nằm trong DB quản gia (bảng `arch_*`), giữ 40 snapshot gần nhất mỗi dự án.
+
+Độ mới so commit snapshot với nhánh theo dõi trong cấu hình. Cột "nguồn so với đang chạy" chỉ báo khớp khi một dịch vụ quan sát được báo đúng SHA; tên phiên bản APK không được suy ra commit.
+
+HTML do công cụ sinh chỉ được phục vụ cho iframe cùng origin với CSP `sandbox allow-scripts` (origin mờ, không cookie/lưu trữ/API), `connect-src 'none'`, không tài nguyên ngoài; trang xem đặt `frame-src 'self'` để khung không điều hướng ra ngoài. Mở trực tiếp URL artifact trả 403, sai hash 409, sai dự án 404.
+
+Cấu hình riêng `~/.config/projectflow-steward/architecture.json` (0600, có thể đổi bằng `PROJECTFLOW_ARCHITECTURE_CONFIG`): mỗi dự án khai báo kho cục bộ, ref theo dõi, tiền tố/hậu tố tệp được phép, mẫu loại trừ, IR Archify và bản đồ module Floorplan; công cụ ghim bằng commit đầy đủ và runtime ghim bằng image digest. Không có cấu hình thì không dự án nào chạy lại được.
+
+```sh
+python -m scripts.architecture_rerun import --project OWNER/REPO --commit SHA ...   # nhập đầu ra có sẵn của cả hai công cụ
+python -m scripts.architecture_rerun enqueue --project OWNER/REPO [--commit SHA] [--archify-ir FILE]
+python -m scripts.architecture_rerun status --project OWNER/REPO
+```
+
+Nút "Chạy lại" và `enqueue` đi qua `HarnessStore` (`architecture-runs.sqlite3` cạnh DB quản gia): một mục tiêu cho mỗi dự án + commit + bộ công cụ + đầu vào; lượt đã xong hoặc đang chạy không chạy lặp; lượt lỗi được thử lại tối đa 3 lần, mỗi lần là mục tiêu mới có ghi nhận; tối đa một lượt kiến trúc đồng thời; TTL 45 phút; cần còn ít nhất 5 GiB đĩa. Lượt chạy là unit user tạm thời có giới hạn thời gian/bộ nhớ. Nguồn là các blob Git của đúng commit, chỉ tệp thường trong danh sách cho phép, đặt chỉ đọc. Công cụ chạy trong container `--network none --read-only --cap-drop ALL` với giới hạn CPU/bộ nhớ/PID. IR Archify mang từ commit khác bị từ chối nếu dòng được trích dẫn đã đổi; khi đó tác tử phải soạn lại IR và gửi bằng `enqueue --archify-ir`. Browser-check nội bộ của Archify không chạy khi Chrome không có user namespace; hệ thống không tắt sandbox Chrome mà ghi `PARTIAL`.
+
+Hoàn tác: trỏ dịch vụ về bản ProjectFlow trước; bảng `arch_*` và `architecture-runs.sqlite3` được bản cũ bỏ qua, không cần xoá.
