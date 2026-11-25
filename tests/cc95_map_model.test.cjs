@@ -25,7 +25,7 @@ test("distinct names cannot collide through punctuation in composite id",()=>{
 assert.notEqual(key({node:"a:b",source:"git",name:"x"}),key({node:"a",source:"git",name:"b:x"}));
 });
 
-test("initial project survives the empty first render and opens after the API response",async()=>{
+for(const node of ["","m910"])test("initial project and node scope survive first render: "+(node||"all"),async()=>{
  const fs=require("node:fs"),vm=require("node:vm");
  class Element {
    constructor(tag){this.tagName=tag;this.children=[];this.dataset={};this.textContent="";this.value="";this.listeners={};}
@@ -35,23 +35,33 @@ test("initial project survives the empty first render and opens after the API re
    setAttribute(){}
    focus(){}
  }
- const host=new Element("section");host.dataset.project="example/repo";
+ const host=new Element("section");host.dataset.project="example/repo";host.dataset.node=node;
  const selectors=new Map();host.querySelector=s=>{if(!selectors.has(s))selectors.set(s,new Element(s));return selectors.get(s);};
  let resolve;
  const response=new Promise(r=>{resolve=r;});
- let requestPath;
+ let requestPath;let nextResponse=response;
  const sandbox={
    document:{getElementById:id=>id==="cc95-map"?host:null,createElement:tag=>new Element(tag)},
-   fetch:async(path)=>{requestPath=path;return response;},URLSearchParams,Date
+   fetch:async(path)=>{requestPath=path;return nextResponse;},URLSearchParams,Date
  };
  vm.runInNewContext(fs.readFileSync(require.resolve("../app/static/cc95-map.js"),"utf8"),sandbox);
- assert.equal(requestPath,"/api/steward?intent=now");
- assert.equal(host.querySelector(".cc-center").children[1].textContent,"Toàn bộ hệ thống");
+ const root=node?"Dự án trên "+node:"Toàn bộ hệ thống";
+ assert.equal(requestPath,"/api/steward?intent=now"+(node?"&node="+node:""));
+ assert.equal(host.querySelector(".cc-center").children[1].textContent,root);
  resolve({ok:true,json:async()=>({projects:["example/repo"],items:[item("example/repo","git","checkout")],at:1})});
  await new Promise(r=>setImmediate(r));
  assert.equal(host.querySelector(".cc-center").children[1].textContent,"example/repo");
  assert.equal(host.querySelector(".cc-branches").children.length,1);
  assert.equal(host.querySelector(".cc-branches").children[0].children[0].textContent,"Mã nguồn");
+ nextResponse=Promise.resolve({ok:false,status:401});
+ await host.querySelector(".cc-reload").listeners.click();
+ assert.equal(host.querySelector(".cc-center").children[1].textContent,root);
+ assert.equal(host.querySelector(".cc-tree").children.length,1);
+ assert.match(host.querySelector(".cc-error").textContent,/401/);
+ nextResponse=Promise.resolve({ok:true,json:async()=>({projects:["example/repo"],items:[item("example/repo","git","checkout",node||"n1")],at:2})});
+ await host.querySelector(".cc-reload").listeners.click();
+ assert.equal(host.querySelector(".cc-center").children[1].textContent,"example/repo");
+ assert.equal(host.querySelector(".cc-error").textContent,"");
  host.querySelector(".cc-up").listeners.click();
- assert.equal(host.querySelector(".cc-center").children[1].textContent,"Toàn bộ hệ thống");
+ assert.equal(host.querySelector(".cc-center").children[1].textContent,root);
 });

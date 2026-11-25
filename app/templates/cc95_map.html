@@ -1,6 +1,6 @@
 <link rel="stylesheet" href="/static/cc95-map.css">
-<section id="cc95-map" data-project="{{ v.project }}" aria-label="Bản đồ hệ thống">
-  <div class="cc-head"><div><h2>System Command Center</h2><p class="cc-status" role="status" aria-live="polite">Đang tải nguồn Quản gia…</p></div>
+<section id="cc95-map" data-project="{{ v.project }}" data-node="{{ v.node }}" aria-label="Bản đồ hệ thống">
+  <div class="cc-head"><div><h2>System Command Center</h2><p class="cc-muted">Phạm vi: {{ v.node or "Toàn bộ node" }}</p><p class="cc-status" role="status" aria-live="polite">Đang tải nguồn Quản gia…</p></div>
   <div class="cc-controls"><button type="button" class="cc-up">← Lùi cấp</button><button type="button" class="cc-expand">Toàn màn hình</button><button type="button" class="cc-reload">Làm mới</button></div></div>
   <div class="cc-controls"><input class="cc-search" type="search" aria-label="Tìm trong cấp hiện tại" placeholder="Tìm trong cấp hiện tại" maxlength="240"></div>
   <div class="cc-error" role="alert"></div>

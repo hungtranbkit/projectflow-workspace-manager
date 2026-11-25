@@ -34,6 +34,16 @@ def test_cc95_map_is_private_and_uses_steward_data(tmp_path, monkeypatch):
     assert data.headers["cache-control"] == "private, no-store"
     assert data.json()["projects"] == ["example/repo"]
     assert data.json()["items"][0]["name"] == "sample checkout"
+    memory.ingest(dict(node="dell-linux", at=int(time.time()), sources=sources, items=[
+        dict(source="git", name="other checkout", project="other/repo", state="observed", version="def", location="fixture")
+    ]))
+    scoped = client.get("/steward", params={"project": "example/repo", "node": "m910"})
+    assert scoped.status_code == 200
+    assert 'data-node="m910"' in scoped.text
+    scoped_data = client.get("/api/steward?intent=now&node=m910").json()
+    assert scoped_data["projects"] == ["example/repo"]
+    assert {row["node"] for row in scoped_data["items"]} == {"m910"}
+    assert client.get("/api/steward?intent=now&node=unknown-node").status_code == 422
     assert 'id="cc95-map"' not in client.get("/steward?intent=history").text
     client.post("/steward/logout")
     assert client.get("/api/steward").status_code == 401
