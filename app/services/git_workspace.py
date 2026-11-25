@@ -180,3 +180,115 @@ class GitWorkspaceService:
         status = self.status(path).splitlines()
         commits = self.git(path, "log", "-10", "--pretty=format:%h %s").stdout.splitlines()
         return {"head": self.head(path), "status": status, "modified": [x for x in status if not x.startswith("??")], "untracked": [x for x in status if x.startswith("??")], "commits": commits}
+
+
+SOURCE_REF = re.compile(r"^(?:[0-9a-f]{40}|[A-Za-z0-9][A-Za-z0-9._/-]{0,199})$")
+SOURCE_PATH = re.compile(r"^[A-Za-z0-9._@+-][A-Za-z0-9._@+/ -]{0,399}$")
+_READ_ONLY_ENV = {"GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": "file", "GIT_TERMINAL_PROMPT": "0",
+                  "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C"}
+
+
+class ReadOnlySource:
+    """Read immutable Git objects of one operator-configured repository.
+
+    Architecture Center (#91) only ever reads commits, trees and blobs: no
+    checkout, ref update, fetch from a remote or hook execution happens in the
+    configured repository. Every call is an argv list with shell=False.
+    """
+
+    def __init__(self, repo: str | Path, timeout: int = 60):
+        self.repo = Path(repo).resolve()
+        self.timeout = timeout
+        top = self._git("rev-parse", "--show-toplevel", check=False)
+        if top.returncode or Path(top.stdout.decode().strip()).resolve() != self.repo:
+            raise GitSafetyError("Configured source is not a git repository root")
+
+    def _git(self, *args: str, check=True, input_bytes: bytes | None = None, cwd: Path | None = None):
+        import os
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")}, **_READ_ONLY_ENV}
+        try:
+            proc = subprocess.run(["git", "--no-replace-objects", *args], cwd=cwd or self.repo, input=input_bytes,
+                                  capture_output=True, timeout=self.timeout, shell=False, env=env)
+        except subprocess.TimeoutExpired as exc:
+            raise GitCommandError("git read timed out") from exc
+        if check and proc.returncode:
+            raise GitCommandError(proc.stderr.decode(errors="replace").strip()[:300] or "git read failed")
+        return proc
+
+    def resolve(self, ref: str) -> str:
+        if not isinstance(ref, str) or not SOURCE_REF.fullmatch(ref) or ".." in ref or ref.endswith((".lock", "/")):
+            raise GitSafetyError("Unsafe source ref")
+        out = self._git("rev-parse", "--verify", "--quiet", "--end-of-options", ref + "^{commit}", check=False)
+        sha = out.stdout.decode().strip()
+        if out.returncode or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise GitSafetyError("Commit not found in configured repository")
+        return sha
+
+    def commit_info(self, sha: str) -> dict:
+        sha = self.resolve(sha)
+        out = self._git("show", "-s", "--format=%H%x00%cI%x00%P", sha).stdout.decode().strip().split("\x00")
+        return {"commit": out[0], "committed_at": out[1], "parents": out[2].split()}
+
+    def is_ancestor(self, older: str, newer: str) -> bool:
+        return self._git("merge-base", "--is-ancestor", self.resolve(older), self.resolve(newer), check=False).returncode == 0
+
+    def distance(self, older: str, newer: str) -> int | None:
+        out = self._git("rev-list", "--count", f"{self.resolve(older)}..{self.resolve(newer)}", check=False)
+        return int(out.stdout.decode().strip()) if out.returncode == 0 else None
+
+    def tree(self, sha: str) -> list[tuple[str, str, int, str]]:
+        """(mode, object, size, path) for every entry; symlinks/submodules included so callers can refuse them."""
+        sha = self.resolve(sha)
+        out = self._git("ls-tree", "-r", "-z", "--long", "--full-tree", sha).stdout
+        rows = []
+        for raw in out.split(b"\x00"):
+            if not raw:
+                continue
+            meta, path = raw.split(b"\t", 1)
+            mode, kind, obj, size = meta.decode().split()
+            rows.append((mode, obj, int(size) if size.isdigit() else -1, path.decode("utf-8", "surrogateescape")))
+        return rows
+
+    def blobs(self, objects: list[str]) -> dict[str, bytes]:
+        """Batch-read blob contents by object id (never by path or ref)."""
+        if not objects:
+            return {}
+        if any(not re.fullmatch(r"[0-9a-f]{40}", o) for o in objects):
+            raise GitSafetyError("Invalid object id")
+        out = self._git("cat-file", "--batch", input_bytes=("\n".join(objects) + "\n").encode()).stdout
+        result, cursor = {}, 0
+        for obj in objects:
+            nl = out.index(b"\n", cursor)
+            header = out[cursor:nl].decode().split()
+            if len(header) != 3 or header[0] != obj or header[1] != "blob":
+                raise GitCommandError("Unexpected object in source read")
+            size = int(header[2])
+            result[obj] = out[nl + 1: nl + 1 + size]
+            cursor = nl + 1 + size + 1
+        return result
+
+    def pin_commit(self, sha: str, dest: Path, origin_url: str | None = None) -> Path:
+        """Create a private depth-1 repository holding exactly one commit, no checkout.
+
+        Used only as a read-only mount for a renderer that verifies line
+        citations against Git objects. The source repository is read through
+        upload-pack; nothing is written to it.
+        """
+        sha = self.resolve(sha)
+        dest = Path(dest)
+        if dest.exists():
+            raise GitSafetyError("Pinned repository destination already exists")
+        self._git("init", "--quiet", str(dest), cwd=dest.parent)
+        self._git("-c", "protocol.file.allow=always", "fetch", "--quiet", "--no-tags", "--depth=1",
+                  f"--upload-pack=git -c uploadpack.allowAnySHA1InWant=true upload-pack",
+                  "file://" + str(self.repo), sha, cwd=dest)
+        self._git("update-ref", "--no-deref", "HEAD", sha, cwd=dest)
+        if origin_url:
+            if not re.fullmatch(r"https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+?(?:\.git)?", origin_url):
+                raise GitSafetyError("Unsupported origin URL")
+            # Identity metadata for evidence tools only; the pinned copy is never fetched or pushed.
+            self._git("remote", "add", "origin", origin_url, cwd=dest)
+        got = self._git("rev-parse", "HEAD", cwd=dest).stdout.decode().strip()
+        if got != sha:
+            raise GitCommandError("Pinned repository does not hold the requested commit")
+        return dest
