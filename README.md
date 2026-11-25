@@ -126,3 +126,8 @@ Open <http://127.0.0.1:8765/help> for the Vietnamese operator guide, status
 glossary, contextual examples, and a visual-only demo. The demo renders sample
 Codex/Claude/integration data but creates no repository, branch, or worktree.
 # projectflow-workspace-manager
+
+
+## Interim Fast CI on self-hosted Linux
+
+ProjectFlow has an optional, protected-`main`-only Woodpecker CLI Fast CI worker with Python 3.11, a local systemd timer, bounded logs and explicit `FAST_PASS`/`FAIL` statuses. This **does not replace** GitHub Actions PR checks or the full Docker-backed regression suite. See [the setup, evidence and security limits](docs/LOCAL_CI_FAST.md).
