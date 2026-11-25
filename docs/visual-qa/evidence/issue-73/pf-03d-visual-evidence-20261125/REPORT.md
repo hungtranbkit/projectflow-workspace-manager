@@ -17,7 +17,7 @@ Date: 2026-11-25 (ICT). PR #74 remains draft. This is a scoped milestone, not P0
 - `node --test tests/test_visual_qa_cli.mjs`: 4 passed, 0 failed/skipped, exit 0.
 - `VIRTUAL_ENV=<existing test venv> ./scripts/preflight.sh`: `preflight PASS`, exit 0.
 - `git diff --check`: exit 0 before commit.
-- Real pinned UIFix/Chromium positive+negative subprocess replay is **UNVERIFIED/BLOCKED in this worktree**: `.runtime/uifix-v1.2.6/package.json` and `dist/diff/index.js` are absent. The real browser subprocess test could not create its reference using pinned `sharp`; no fake browser result was substituted. The 77 passing tests are contract/unit/sandbox regressions, not a real screenshot acceptance.
+- Real pinned UIFix/Chromium positive+negative subprocess replay is **UNVERIFIED/BLOCKED**. The Dell task worktree lacks `.runtime/uifix-v1.2.6/package.json` and `dist/diff/index.js`; the real browser subprocess test could not create its reference using pinned `sharp`. The authorized `ssh hp` read-only prerequisite check also found no `node`, `npm`, Chrome/Chromium command or UIFix install under `/home`. HP reports 6.5 GiB free on `/tmp`, 8.1 GiB available RAM, but 3.9/4.0 GiB swap used; no install or browser launch was attempted. See `hp-prerequisite.log`. No fake browser result was substituted. The 77 passing tests are contract/unit/sandbox regressions, not screenshot acceptance.
 - No full suite, provider, CI, merge, deploy, production write, or shared daemon operation was run.
 
 ## Replay
@@ -39,7 +39,7 @@ node --test tests/test_visual_qa_cli.mjs
 ./scripts/preflight.sh
 ```
 
-The raw local logs are preserved outside the repository under the task artifact directory; repository copies are sanitized and portable. `SHA256SUMS` covers all evidence files except itself.
+The raw local logs are preserved outside the repository under the task artifact directory; repository copies are sanitized and portable. `hp-prerequisite.log` records the authorized runner preflight. `SHA256SUMS` covers all evidence files except itself.
 
 ## Gates and next action
 
