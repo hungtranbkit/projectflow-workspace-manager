@@ -1,0 +1,19 @@
+# Parallel, self-hosted replacement candidate for .github/workflows/ci.yml.
+# Keep GitHub Actions enabled until a real Woodpecker PR run is confirmed.
+# No deploy/push steps or production credentials in this workflow.
+when:
+  - event: pull_request
+  - event: push
+    branch: main
+  - event: manual
+
+steps:
+  - name: preflight-build-test-smoke
+    image: python:3.11-slim-bookworm
+    commands:
+      - apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+      - python -m pip install --disable-pip-version-check --no-cache-dir -e '.[test]'
+      - ./scripts/preflight.sh
+      - ./scripts/build.sh
+      - ./scripts/test.sh
+      - ./scripts/smoke.sh

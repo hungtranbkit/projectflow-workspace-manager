@@ -1,0 +1,26 @@
+# STAGING server only, no runner privileges on production hosts.
+# Keep secrets in an untracked, mode-600 .env file.
+name: projectflow-woodpecker-server
+services:
+  woodpecker-server:
+    image: woodpeckerci/woodpecker-server:v3.20.1
+    restart: unless-stopped
+    ports:
+      # HTTPS is terminated at a trusted proxy / Cloudflare Tunnel.
+      - "127.0.0.1:${CI_HTTP_PORT:-8179}:8000"
+      # Use an authenticated PRIVATE mesh IP (e.g. Tailscale) for an external runner.
+      # Default loopback cannot be reached by other hosts.
+      - "${CI_GRPC_BIND_IP:-127.0.0.1}:9000:9000"
+    environment:
+      WOODPECKER_HOST: ${WOODPECKER_HOST:?Set verified external HTTPS URL without trailing slash}
+      WOODPECKER_GITHUB: "true"
+      WOODPECKER_GITHUB_CLIENT: ${WOODPECKER_GITHUB_CLIENT:?Set OAuth Client ID}
+      WOODPECKER_GITHUB_SECRET: ${WOODPECKER_GITHUB_SECRET:?Set OAuth Client Secret}
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:?Set random shared secret}
+      WOODPECKER_ADMIN: ${WOODPECKER_ADMIN:-hungtranbkit}
+      WOODPECKER_REPO_OWNERS: ${WOODPECKER_REPO_OWNERS:-hungtranbkit}
+      WOODPECKER_OPEN: ${WOODPECKER_OPEN:-false}
+    volumes:
+      - woodpecker-data:/var/lib/woodpecker
+volumes:
+  woodpecker-data:
