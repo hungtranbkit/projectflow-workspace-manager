@@ -34,8 +34,8 @@
 - `gh auth status` reports an invalid configured token (secret not printed). Public fetch/read works, but push, PR creation and issue comment cannot be done. No remote PR/CI is claimed.
 - Existing ProjectFlow does not expose a verified cross-node capacity feed/dispatch transport or task pin field. This patch gates the local real Builder/worktree boundary and tests a helper selector; multi-node MacBook-first dispatch is not represented as delivered.
 - Real provider canary was not started; no provider authorization or existing remote-node availability was demonstrated. TestClient boundary tests and real local `statvfs` measurements are not a remote fleet canary.
-- Scoped local commit: `implementation commit (recorded in the evidence follow-up)` on `agent/codex/issue-86-disk-capacity`; commit contains nine intended files. Push/PR creation is blocked by invalid configured GitHub token (`gh auth status`), so no remote CI result exists.
+- Scoped local commit: `5ae41e0a6544be81380718dac5596db0ef905866` on `agent/codex/issue-86-disk-capacity`; commit contains nine intended files. Push/PR creation is blocked by invalid configured GitHub token (`gh auth status`), so no remote CI result exists.
 
 ## Final state
 
-Local code and focused tests are implemented, but issue #86 is not fully accepted. HP/M910 relief, MacBook smoke/fleet dispatch, real authorized canary and PR/CI are blocked by exact access/auth limitations above. Live service and production data were not touched. Commit `implementation commit (recorded in the evidence follow-up)` is local only; no deployment is claimed.
+Local code and focused tests are implemented, but issue #86 is not fully accepted. HP/M910 relief, MacBook smoke/fleet dispatch, real authorized canary and PR/CI are blocked by exact access/auth limitations above. Live service and production data were not touched. Commit `5ae41e0a6544be81380718dac5596db0ef905866` is local only; no deployment is claimed.
