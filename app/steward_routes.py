@@ -173,4 +173,9 @@ def register(app, render, current_user, db, decision):
             view(request, memory, q, node, project, when, intent), headers=PRIVATE
         )
 
+    from app.architecture_routes import register as register_architecture
+
+    register_architecture(
+        router, store=store, allowed=allowed, same_origin=same_origin, render=render, private=PRIVATE
+    )
     app.include_router(router)
