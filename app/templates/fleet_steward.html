@@ -3,6 +3,7 @@
 {% block content %}
 <link rel="stylesheet" href="/static/fleet-steward.css">
 <div class="steward"><h2 class="s-mobile-title">Quản gia ProjectFlow</h2>
+{% if v.mode == "now" and not v.when %}{% include "cc95_map.html" %}{% endif %}
 <form class="s-search" method="get" action="/steward"><label for="sq">Hỏi quản gia</label><div><input id="sq" name="q" value="{{q}}" placeholder="Zalo Hub đang chạy ở đâu?" maxlength="240"><button>Tra cứu</button></div>
 <div class="s-filters"><label>Node<select name="node"><option value="">Tất cả node</option>{% for n in ['dell-linux','hp-linux','m910','macbook','nec1'] %}<option {{'selected' if n==v.node}}>{{n}}</option>{% endfor %}</select></label>
 <label>Dự án<select name="project"><option value="">Tất cả dự án</option>{% for name in v.projects %}<option {{'selected' if name==v.project}}>{{name}}</option>{% endfor %}</select></label>
