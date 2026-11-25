@@ -19,6 +19,7 @@ case "$tier" in
   remaining)
     set -- tests/test_harness_zgh_node_java_qa.py \
       tests/test_harness_monitor_bridge.py \
+      tests/test_harness_monitor_dispatch.py \
       tests/test_harness_monitor_canary.py \
       tests/test_agent_harness_mvp.py \
       tests/test_agent_harness_terminal.py \
