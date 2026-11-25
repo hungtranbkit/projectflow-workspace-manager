@@ -11,12 +11,12 @@ tier="$1"; shift
 case "$tier" in
   fast)
     set -- tests/test_fleet_steward.py \
-      tests/test_cc95_map.py \
       tests/test_sidebar_nav.py \
       tests/test_harness_progress.py \
       tests/test_harness_monitor_report.py \
       tests/test_harness_trajectory.py \
       tests/test_harness_monitor_service.py \
+      tests/test_cc95_map.py \
       "$@"
     ;;
   remaining)
