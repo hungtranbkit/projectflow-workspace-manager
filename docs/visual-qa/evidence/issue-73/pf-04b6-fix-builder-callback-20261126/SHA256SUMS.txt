@@ -1,4 +1,4 @@
-cf2926105a66608cbdfe80526f077e532465930f03da0db61e170d6bf08f2832  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/REPORT.md
+de453ac05294f96954e427163af9d5e079d1ef25594a26960a37dd0aebf47a9b  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/REPORT.md
 54c6555cc7225eb1aa052aa8ae58b23cf5b7d5eaf44dc28a8c85b33f32330464  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/candidate-red.log
 26e187f6d60a08a2eeb6962a868dc4c570602de9c864445ac1b98f8c6f307254  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/candidate-red.xml
 9515d756b4caebcebfa5fc220f0bc80e1bca01362b5387e730ac18f81a48f216  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/builder-orchestration.log
@@ -11,3 +11,4 @@ dce4c2567cbe8ec7634f4ae7fc71a24d02df66a0844bb0f3dbe57f0f1d4c847a  docs/visual-qa
 1dfab1f01672bda7db8364c24936b1431642159dd93af5b6b2fa4902992d5310  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/review-fix-loop.xml
 80d07d98249624620380df69454b7dc53f5870fcde8a21c5d589e2163ed32df1  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/targeted.log
 b4b66d4a67adb12e90669de4ae6b298ef1cd763d6d5dcb6c8bd4c31e72997abd  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/targeted.xml
+19f551a492c47ac2d24285647dd0129f10a5880ff587c0e8a4c4271e937ae711  docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/replay-commands.txt
