@@ -22,6 +22,7 @@ def fleet():
     ('sudo: a password is required', 'SUDO_REQUIRED'),
     ('unexpected argument --x', 'CLI_UNSUPPORTED'),
     ('trust this folder', 'TRUST_REQUIRED'),
+    ('To get started with GitHub CLI, please run: gh auth login', 'AUTH_REQUIRED'),
 ])
 def test_failure_classification_is_not_success(text, expected):
     assert fleet().classify(1, text) == expected
@@ -152,3 +153,94 @@ def test_verified_gh_install_is_user_local_idempotent_and_reversible(tmp_path):
     assert not (tmp_path/'.local/bin/gh').exists()
     with pytest.raises(fleet().FleetError, match='CHECKSUM_MISMATCH'):
         fleet_gh.install_archive(data, '0'*64, tmp_path)
+
+
+def test_unexpected_errors_are_redacted(monkeypatch, capsys):
+    monkeypatch.setattr(fleet().FleetProfile, 'audit', lambda self: (_ for _ in ()).throw(RuntimeError('ghp_secret_message')))
+    assert fleet().main(['audit']) == 1
+    assert 'ghp_secret' not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('failure', ['AUTH_REQUIRED', 'GIT_WRITE_DENIED', 'OFFLINE', 'DISK_LOW', 'ACL_DENIED'])
+def test_preflight_failure_never_dispatches(monkeypatch, tmp_path, failure):
+    manager = fleet().FleetProfile(tmp_path)
+    monkeypatch.setattr(manager, 'check', lambda: {'code': 'PASS'})
+    checks = {k: {'code': 'PASS'} for k in ['workspace','repository','gh_auth','gh_identity','github_push','git_helper','disk','codex_auth','codex_version']}
+    checks['gh_identity'] = {'code': failure}
+    monkeypatch.setattr(manager, 'audit', lambda: {'checks': checks})
+    monkeypatch.setattr(fleet(), 'probe', lambda *a, **kw: fleet().Probe('PASS',0,0,'--sandbox --config --cd'))
+    assert manager.launch('codex', 'must not run')['execution'] == 'NOT_DISPATCHED'
+    assert not manager.path.with_suffix('.checkpoint.json').exists()
+
+
+def test_docker_refuses_managed_policy(monkeypatch, tmp_path):
+    manager = fleet().FleetProfile(tmp_path)
+    monkeypatch.setattr(manager, 'check', lambda: {'code':'PASS'})
+    checks = {k: {'code':'PASS'} for k in ['workspace','repository','gh_auth','gh_identity','github_push','git_helper','disk','codex_auth','codex_version','docker']}
+    checks['managed_policy'] = {'present':['/etc/codex/requirements.toml']}
+    monkeypatch.setattr(manager, 'audit', lambda: {'checks':checks})
+    monkeypatch.setattr(fleet(), 'probe', lambda *a, **kw: fleet().Probe('PASS',0,0,'--sandbox --config --cd --ephemeral --skip-git-repo-check'))
+    assert manager.preflight('codex', 'docker', 'sha256:'+'a'*64)['failures']['managed_policy'] == 'TRUST_REQUIRED'
+
+
+def test_windows_core_identity_rejects_admin_or_wrong_owner(monkeypatch, tmp_path):
+    monkeypatch.setattr(fleet().platform, 'system', lambda:'Windows')
+    monkeypatch.setattr(fleet(), 'probe', lambda *a, **kw: fleet().Probe('ACL_DENIED',1,1))
+    with pytest.raises(fleet().FleetError, match='ACL_DENIED'):
+        fleet().FleetProfile(tmp_path).identity()
+
+
+def test_external_config_directory_is_not_trusted(git_repo, tmp_path):
+    root, repo = git_repo
+    from app.services.git_workspace import GitWorkspaceService
+    _, wt, _ = GitWorkspaceService(root).create_agent(repo, 'codex', 'config-link')
+    external = tmp_path/'external-config'
+    external.mkdir()
+    (external/'settings.json').write_text('{}')
+    (wt/'.claude').symlink_to(external, target_is_directory=True)
+    with pytest.raises(fleet().FleetError, match='TRUST_REQUIRED'):
+        fleet().FleetProfile(wt, tmp_path/'state').identity()
+
+
+def test_gh_interrupted_link_creation_can_retry_or_rollback(tmp_path, monkeypatch):
+    import io
+    import tarfile
+    from app.services import fleet_gh
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode='w:gz') as archive:
+        member = tarfile.TarInfo('gh_2.105.0_linux_amd64/bin/gh')
+        member.size = 4
+        archive.addfile(member, io.BytesIO(b'test'))
+    data = stream.getvalue()
+    original = Path.symlink_to
+    monkeypatch.setattr(Path, 'symlink_to', lambda *a, **kw: (_ for _ in ()).throw(OSError('interrupted')))
+    with pytest.raises(OSError):
+        fleet_gh.install_archive(data, fleet().digest(data), tmp_path)
+    monkeypatch.setattr(Path, 'symlink_to', original)
+    assert fleet_gh.install_archive(data, fleet().digest(data), tmp_path)['changed']
+    (tmp_path/'.local/bin/gh').unlink()
+    assert fleet_gh.rollback(tmp_path)['changed']
+
+
+def test_canary_preserves_concurrently_advanced_remote(git_repo, monkeypatch):
+    from app.services.git_workspace import GitWorkspaceService
+    root, repo = git_repo
+    remote = root/'remote.git'
+    subprocess.run(['git','init','--bare',str(remote)],check=True,capture_output=True)
+    subprocess.run(['git','-C',str(repo),'remote','add','origin',str(remote)],check=True)
+    service = GitWorkspaceService(root)
+    original = service.git
+    advanced = {}
+    def race(path, *args, **kwargs):
+        if '--delete' in args:
+            branch = args[-1]
+            old = subprocess.check_output(['git','--git-dir',str(remote),'rev-parse',branch],text=True).strip()
+            tree = subprocess.check_output(['git','--git-dir',str(remote),'rev-parse',old+'^{tree}'],text=True).strip()
+            sha = subprocess.check_output(['git','-C',str(repo),'commit-tree',tree,'-p',old,'-m','Concurrent owned work'],text=True).strip()
+            subprocess.run(['git','-C',str(repo),'push','origin',sha+':refs/heads/'+branch],check=True,capture_output=True)
+            advanced.update(branch=branch,sha=sha)
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(service,'git',race)
+    result = service.push_canary(repo)
+    assert result['cleanup'] != 'PASS'
+    assert subprocess.check_output(['git','--git-dir',str(remote),'rev-parse',advanced['branch']],text=True).strip()==advanced['sha']

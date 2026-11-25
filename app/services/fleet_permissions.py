@@ -22,7 +22,8 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from app.services.git_workspace import GitWorkspaceService, noninteractive_git_env
+from app.services.git_workspace import GitWorkspaceService, GitSafetyError, noninteractive_git_env
+from app.services.sandbox_runtime import fleet_container_argv as container_argv, fleet_docker_probe, run_fleet_canary
 
 VERSION = 1
 PROFILE = "trusted-project-unattended-v1"
@@ -39,7 +40,7 @@ def classify(returncode, output):
     for code, needles in (
         ("STATUS_PROBE_TIMEOUT", ("status_probe_timeout",)),
         ("SUDO_REQUIRED", ("sudo:", "no new privileges")),
-        ("AUTH_REQUIRED", ("could not read username", "terminal prompts disabled", "authentication failed", "publickey", "not logged", "http 401", "login required")),
+        ("AUTH_REQUIRED", ("could not read username", "terminal prompts disabled", "authentication failed", "publickey", "not logged", "http 401", "login required", "gh auth login")),
         ("GIT_WRITE_DENIED", ("http 403", "write access", "protected branch", "permission to", "resource not accessible")),
         ("TRUST_REQUIRED", ("trust this", "not trusted", "trust dialog")),
         ("CLI_UNSUPPORTED", ("unexpected argument", "unknown option", "unrecognized", "not found")),
@@ -135,30 +136,6 @@ def execution_result(result):
             "dispatched": True, "task_outcome": "UNVERIFIED"}
 
 
-def container_argv(workspace, prompt, binary, auth, image, uid, gid, name):
-    """An explicit external sandbox for hosts unable to create user namespaces.
-
-    Reuses this node's auth by a read-only bind (never copies a login file).
-    No host home, Docker socket, Git credentials or other project is mounted.
-    """
-    if uid == 0:
-        raise FleetError("ROOT_AGENT_DENIED")
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
-        raise FleetError("CLI_UNSUPPORTED: container image must be pinned by ID")
-    if any("," in str(p) for p in (workspace, binary, auth)):
-        raise FleetError("ACL_DENIED: unsupported Docker mount path")
-    return ["docker", "run", "--rm", "--name", name, "--label", "projectflow.fleet83="+name,
-            "--user", f"{uid}:{gid}", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--read-only", "--pids-limit", "128", "--memory", "1g", "--cpus", "1",
-            "--tmpfs", f"/tmp:rw,nosuid,nodev,uid={uid},gid={gid},mode=700",
-            "--tmpfs", f"/codex:rw,nosuid,nodev,uid={uid},gid={gid},mode=700",
-            "--mount", f"type=bind,src={workspace},dst=/workspace",
-            "--mount", f"type=bind,src={binary.parent},dst=/usr/local/bin,readonly",
-            "--mount", f"type=bind,src={auth},dst=/codex/auth.json,readonly",
-            "--env", "CODEX_HOME=/codex", "--env", "HOME=/tmp", "--env", "GIT_TERMINAL_PROMPT=0",
-            "--workdir", "/workspace", image, "codex", "exec", "--skip-git-repo-check", "--ephemeral",
-            "--sandbox", "danger-full-access", "-c", 'approval_policy="never"',
-            "-c", "check_for_update_on_startup=false", "--", prompt]
 
 
 class FleetProfile:
@@ -173,6 +150,19 @@ class FleetProfile:
         self.repo = repo
 
     def identity(self, clean=False):
+        if platform.system() == "Windows":
+            env = dict(os.environ, PF83_WORKSPACE=str(self.workspace), PF83_STATE=str(self.state))
+            script = r"""$ErrorActionPreference='Stop'; $id=[Security.Principal.WindowsIdentity]::GetCurrent();
+$p=[Security.Principal.WindowsPrincipal]::new($id);
+if($p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){exit 1};
+$owner=(Get-Acl -LiteralPath $env:PF83_WORKSPACE).GetOwner([Security.Principal.SecurityIdentifier]);
+if($owner -ne $id.User){exit 1};
+if(Test-Path -LiteralPath $env:PF83_STATE){
+foreach($r in (Get-Acl -LiteralPath $env:PF83_STATE).Access){
+if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Translate([Security.Principal.SecurityIdentifier]) -ne $id.User){exit 1}}}; exit 0"""
+            guard = probe(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script], env=env)
+            if guard.code != "PASS":
+                raise FleetError("ACL_DENIED: Windows owner/elevation/private-state check failed")
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             raise FleetError("ROOT_AGENT_DENIED")
         if not self.workspace.is_dir() or not os.access(self.workspace, os.W_OK):
@@ -191,8 +181,10 @@ class FleetProfile:
         for dirname in (".codex", ".claude"):
             base = self.workspace/dirname
             if base.exists():
+                if not base.resolve().is_relative_to(self.workspace):
+                    raise FleetError("TRUST_REQUIRED: external agent configuration directory")
                 for path in sorted(base.rglob("*")):
-                    if path.is_symlink() and not path.resolve().is_relative_to(self.workspace):
+                    if not path.resolve().is_relative_to(self.workspace):
                         raise FleetError("TRUST_REQUIRED: external symlink agent configuration")
                     if path.is_file():
                         configs[str(path.relative_to(self.workspace))] = digest(path.read_bytes())
@@ -236,7 +228,6 @@ class FleetProfile:
         checks = {}
         commands = {
             "sudo": ["sudo", "-n", "true"],
-            "docker": ["docker", "info", "--format", "{{.ServerVersion}}"],
             "gh_auth": ["gh", "auth", "status", "--hostname", "github.com"],
             "gh_identity": ["gh", "api", "user", "--jq", ".login"],
             "github_push": ["gh", "api", f"repos/{self.repo}", "--jq", ".permissions.push"],
@@ -246,6 +237,7 @@ class FleetProfile:
         with ThreadPoolExecutor(max_workers=4) as executor:
             pending = {name: executor.submit(probe, argv, cwd=self.workspace) for name, argv in commands.items()}
             results = {name: future.result() for name, future in pending.items()}
+        results["docker"] = fleet_docker_probe(["info", "--format", "{{.ServerVersion}}"], cwd=self.workspace)
         for name, result in results.items():
             if name == "claude_auth":
                 try:
@@ -254,18 +246,24 @@ class FleetProfile:
                 except (ValueError, AttributeError):
                     pass
             if name == "github_push" and result.code == "PASS" and result.output.strip() != "true":
-                result.code = "GIT_WRITE_DENIED"
+                result.code = "AUTH_REQUIRED" if results["gh_identity"].code != "PASS" else "GIT_WRITE_DENIED"
             checks[name] = result.public()
             if name.endswith("_version") and result.code == "PASS":
                 version = re.search(r"\d+\.\d+\.\d+", result.output)
                 checks[name]["version"] = version.group() if version else "UNKNOWN"
+        origin = self.git.git(self.workspace, "remote", "get-url", "origin", check=False).stdout.strip()
+        accepted = (f"https://github.com/{self.repo}", f"git@github.com:{self.repo}", f"ssh://git@github.com/{self.repo}")
+        matches = origin.removesuffix(".git") in accepted
+        checks["repository"] = {"code": "PASS" if matches else "TRUST_REQUIRED"}
         helper = self.git.git(self.workspace, "config", "--get-urlmatch", "credential.helper", "https://github.com", check=False)
         checks["git_helper"] = {"code": "CONFIGURED" if helper.returncode == 0 and helper.stdout.strip() else "AUTH_REQUIRED"}
+        if matches and not origin.startswith("https://"):
+            checks["git_helper"] = {"code": "CONFIGURED", "transport": "SSH_REQUIRES_WRITE_CANARY"}
         try:
             self.identity()
             checks["workspace"] = {"code": "PASS", "dirty": bool(self.git.status(self.workspace).strip())}
         except (FleetError, ValueError, RuntimeError) as exc:
-            checks["workspace"] = {"code": str(exc).split(":")[0]}
+            checks["workspace"] = {"code": safe_error_code(exc)}
         free = shutil.disk_usage(self.workspace).free
         inodes = os.statvfs(self.workspace).f_favail if hasattr(os, "statvfs") else None
         checks["disk"] = {"code": "DISK_LOW" if free < 512*1024*1024 or inodes == 0 else "PASS", "free_bytes": free, "free_inodes": inodes}
@@ -277,7 +275,7 @@ class FleetProfile:
         if os.name == "nt":
             policy_files.append(Path(os.environ.get("ProgramFiles", "C:/Program Files"))/"ClaudeCode/managed-settings.json")
         checks["managed_policy"] = {"code": "OBSERVED", "present": [str(p) for p in policy_files if p.exists()],
-                                    "effective": "CLI_ENFORCED_NOT_OVERRIDDEN"}
+                                    "effective": "NOT_VERIFIED_BY_AUDIT"}
         return {"schema_version": VERSION, "profile": PROFILE, "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "os": platform.system(), "node": platform.node(), "uid": os.getuid() if hasattr(os, "getuid") else None,
                 "executables": {name: shutil.which(name) for name in ("git", "gh", "codex", "claude", "docker", "sudo")},
@@ -286,18 +284,22 @@ class FleetProfile:
     def preflight(self, agent, runtime="native", image=None):
         self.check()
         report = self.audit()
-        required = ["workspace", "gh_auth", "gh_identity", "github_push", "git_helper", "disk", agent + "_auth", agent + "_version"]
+        required = ["workspace", "repository", "gh_auth", "gh_identity", "github_push", "git_helper", "disk", agent + "_auth", agent + "_version"]
         failures = {key: report["checks"][key]["code"] for key in required if report["checks"][key]["code"] not in ("PASS", "CONFIGURED")}
         help_result = probe([agent, "exec", "--help"] if agent == "codex" else [agent, "--help"])
         flags = ("--sandbox", "--config", "--cd") if agent == "codex" else ("--print", "dontAsk", "--allowedTools", "--disallowedTools")
         if help_result.code != "PASS" or not all(flag in help_result.output for flag in flags):
             failures["cli_options"] = "CLI_UNSUPPORTED"
         if runtime == "docker":
+            if report["checks"].get("managed_policy", {}).get("present"):
+                failures["managed_policy"] = "TRUST_REQUIRED"
+            if not all(flag in help_result.output for flag in ("--ephemeral", "--skip-git-repo-check")):
+                failures["cli_options"] = "CLI_UNSUPPORTED"
             if agent != "codex" or platform.system() != "Linux" or not image:
                 failures["runtime"] = "CLI_UNSUPPORTED"
             elif report["checks"]["docker"]["code"] != "PASS":
                 failures["runtime"] = report["checks"]["docker"]["code"]
-            elif probe(["docker", "image", "inspect", image]).code != "PASS":
+            elif fleet_docker_probe(["image", "inspect", image]).code != "PASS":
                 failures["runtime"] = "CLI_UNSUPPORTED"
         elif agent == "codex" and platform.system() == "Linux":
             sandbox = probe(["codex", "sandbox", "--", "/bin/true"], cwd=self.workspace)
@@ -330,18 +332,28 @@ class FleetProfile:
                     raise FleetError("AUTH_REQUIRED")
                 command = container_argv(self.workspace, prompt, Path(shutil.which("codex")).resolve(),
                                          auth.resolve(), image, os.getuid(), os.getgid(), container_name)
-            try:
+            if container_name:
+                result = run_fleet_canary(command, container_name, self.workspace, timeout, env)
+            else:
                 result = probe(command, cwd=self.workspace, timeout=timeout, env=env)
-            finally:
-                if container_name:
-                    owned = probe(["docker", "inspect", "--format", '{{index .Config.Labels "projectflow.fleet83"}}', container_name])
-                    if owned.code == "PASS" and owned.output.strip() == container_name:
-                        probe(["docker", "stop", "--time", "2", container_name])
-            receipt = {**execution_result(result), "runtime": runtime}
+            receipt = {**execution_result(result), "runtime": runtime,
+                       "capabilities": "FILE_WORK_ONLY_NO_GIT" if runtime == "docker" else "NATIVE_CLI_POLICY"}
             private_write(checkpoint, json.dumps({**self.identity(), "head": self.git.head(self.workspace), **receipt}))
             return receipt
         finally:
             lock.unlink(missing_ok=True)
+
+
+def safe_error_code(exc):
+    if isinstance(exc, FleetError):
+        code = str(exc).split(":")[0]
+        if re.fullmatch(r"[A-Z][A-Z0-9_]{1,63}", code):
+            return code
+    if isinstance(exc, GitSafetyError):
+        return "TRUST_REQUIRED"
+    if isinstance(exc, PermissionError):
+        return "ACL_DENIED"
+    return "PROBE_FAILED"
 
 
 def main(argv=None):
@@ -368,6 +380,8 @@ def main(argv=None):
             result = manager.preflight(args.agent, args.runtime, args.image)
         elif args.action == "git-canary":
             manager.check()
+            if manager.audit()["checks"]["repository"]["code"] != "PASS":
+                raise FleetError("TRUST_REQUIRED: origin does not match authorized repository")
             result = manager.git.push_canary(args.workspace)
         elif args.action == "launch":
             if not args.prompt_file:
@@ -376,7 +390,7 @@ def main(argv=None):
         else:
             result = getattr(manager, args.action)()
     except (FleetError, OSError, ValueError, RuntimeError) as exc:
-        result = {"code": str(exc).split(":")[0], "execution": "BLOCKED", "dispatched": False}
+        result = {"code": safe_error_code(exc), "execution": "BLOCKED", "dispatched": False}
     print(json.dumps(result, indent=2))
     return 0 if result.get("code", "PASS") == "PASS" else 1
 

@@ -38,3 +38,22 @@ def test_launch_uses_argv_without_shell_and_validated_worktree(git_repo):
     assert popen.call_args.kwargs["cwd"]==worktree
     assert "shell" not in popen.call_args.kwargs
     with pytest.raises(Exception): svc.open_terminal(root/"outside")
+
+
+def test_trusted_launcher_blocks_before_opening_terminal(git_repo, monkeypatch):
+    from app.services.fleet_permissions import FleetProfile
+    root, repo = git_repo
+    _, wt, _ = GitWorkspaceService(root).create_agent(repo, 'codex', 'trusted-launch')
+    prompt = wt/'prompt.txt'
+    prompt.write_text('owned task')
+    popen = Mock()
+    svc = service(root, popen=popen)
+    monkeypatch.setattr(FleetProfile, 'preflight', lambda *a: {'code':'BLOCKED','failures':{'gh_auth':'AUTH_REQUIRED'}})
+    assert svc.launch_trusted_agent(wt, 'codex', prompt)['dispatched'] is False
+    popen.assert_not_called()
+    monkeypatch.setattr(FleetProfile, 'preflight', lambda *a: {'code':'PASS'})
+    assert svc.launch_trusted_agent(wt, 'codex', prompt)['result'] == 'requested'
+    argv = popen.call_args.args[0]
+    entry = next(x for x in argv if x.endswith('fleet-permissions.py'))
+    assert Path(entry).is_absolute() and Path(entry).is_file()
+    assert '--yolo' not in argv

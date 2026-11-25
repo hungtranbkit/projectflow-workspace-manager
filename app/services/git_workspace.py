@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -127,8 +128,19 @@ class GitWorkspaceService:
         result["readback_sha"] = remote_sha
         if remote_sha != sha:
             return result
-        # Ordinary exact-ref deletion. Only the unique ref created above.
-        deleted = self.git(repo, "push", "origin", "--delete", branch, check=False)
+        # Verify the server-advertised old OID in our own pre-push hook. Git
+        # sends that same old OID in the deletion request; the server rejects
+        # an intervening update. No force option or unrelated repo hook runs.
+        with tempfile.TemporaryDirectory(prefix="pf83-delete-") as hooks:
+            hook = Path(hooks)/"pre-push"
+            hook.write_text("#!/bin/sh\ncount=0\n"
+                "while read -r local_ref local_oid remote_ref remote_oid; do\n"
+                "  count=$((count + 1))\n"
+                "  case $local_oid in ''|*[!0]*) exit 1;; esac\n"
+                f"  [ \"$remote_ref\" = '{ref}' ] && [ \"$remote_oid\" = '{sha}' ] || exit 1\n"
+                "done\n[ \"$count\" -eq 1 ]\n")
+            hook.chmod(0o700)
+            deleted = self.git(repo, "-c", f"core.hooksPath={hooks}", "push", "origin", "--delete", branch, check=False)
         absent = self.git(repo, "ls-remote", "--exit-code", "origin", ref, check=False)
         if deleted.returncode or absent.returncode != 2:
             return result
