@@ -1,3 +1,10 @@
+## 2026-11-25 PF-03c required test-stage membership
+
+- `TaskDecisionService` now derives required stage names from `load_contract()` and requires a latest current-source row for every named stage; unrelated rows cannot cover missing stages. QUEUED/RUNNING/SKIPPED stays NOT_RUN; required FAIL/TIMEOUT blocks. Exact-fingerprint baseline waivers remain for ordinary stages, while visual_qa FAIL/TIMEOUT cannot be waived. No visual artifact validity is checked here (PF-03d scope).
+- Missing/valid zero-stage legacy behavior is retained: integration PASS; builder uses the prior no-contract row semantics. A present malformed contract is no longer treated as legacy PASS. UI task opt-in requires the visual stage; backend opt-out remains intact.
+- Real temporary-Git + checked-in contract + SQLite regression: before 10 failed/3 passed, exit 1; after 13/13 passed. Combined required-stage, source identity, baseline waiver, timeout, cross-repo, merge, visual contract/execution, decision and sandbox runner tests: 77 passed, 0 skipped, exit 0; preflight PASS. Full suite/provider/CI not run. Evidence: `docs/visual-qa/evidence/issue-73/pf-03c-required-stage-membership-20261125/REPORT.md`.
+- PR #74 expected head at start `dd0c96e40b463e06a7738a29522312e0756449ba`, base `ac288928ab559799e6a6f34ff9be1de5fdfa5af3`; local branch `agent/codex/issue-73-engineering-fixture-20261125`. A remains FAIL; B/C blocked; D prior-local only; E not PASS; F preserved.
+
 # Project Context — ProjectFlow visual QA issue #73
 
 ## 2026-11-25 PF-03b TestRunner source identity

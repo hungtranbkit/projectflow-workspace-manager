@@ -492,6 +492,25 @@ class TaskDecisionService:
         return "READY_FOR_MAIN"
 
     # ---- baseline-waiver failure classification (section 11) -----------
+    @staticmethod
+    def _required_test_stage_names(worktree_path, *, visual_qa_required=False):
+        """Return the contract's required stage names, or None for legacy
+        repositories with no PROJECT.yaml / no configured required stages.
+
+        A present but invalid contract is never treated as the legacy case.
+        The stage list comes from the same loader used by TestRunner.
+        """
+        contract_path = Path(worktree_path) / "PROJECT.yaml"
+        if not contract_path.is_file() and not visual_qa_required:
+            return None
+        try:
+            stages = load_contract(Path(worktree_path), visual_qa_required=visual_qa_required)
+        except ContractError as exc:
+            if not visual_qa_required and str(exc) == "PROJECT.yaml declares no required CI stages":
+                return None
+            raise
+        return [stage for stage, _command, _working_dir, _timeout in stages]
+
     def integration_gate_status(self, ti_repo, task_id):
         """Classifies one per-repo Integration Workspace's required-gate
         result at its current HEAD: PASS / FAIL / NOT_RUN /
@@ -514,11 +533,12 @@ class TaskDecisionService:
         from app.services.visual_qa_contract import task_requires_visual_qa
         visual_qa_required = task_requires_visual_qa(task)
         try:
-            required = len(load_contract(Path(ti_repo["worktree_path"]), visual_qa_required=visual_qa_required))
-        except ContractError:
-            if visual_qa_required:
-                return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": 1, "head": head, "summary": {}}
-            required = 0
+            required_stages = self._required_test_stage_names(
+                ti_repo["worktree_path"], visual_qa_required=visual_qa_required
+            )
+        except Exception:
+            return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": 1 if visual_qa_required else 0, "head": head, "summary": {}}
+        required = len(required_stages) if required_stages is not None else 0
         if required:
             try:
                 source_state = self.git.source_state(ti_repo["worktree_path"])
@@ -532,20 +552,26 @@ class TaskDecisionService:
         latest = {}
         for r in rows:
             latest.setdefault(r["stage"], r)  # first seen per stage, DESC id -> most recent
-        if required == 0:
-            # No PROJECT.yaml at all, or one that declares zero required CI
-            # stages: nothing is required, so there is nothing to wait on --
-            # NOT_RUN would otherwise be permanent (Run Integration Tests
-            # has no stages to queue, so test_runs/tested_commit rows are
-            # never written and this branch would never be left).
+        if required_stages is None or not required_stages:
+            # No PROJECT.yaml or a valid legacy contract with zero required
+            # stages keeps its pre-existing integration PASS behavior.
             return {"tests_pass": True, "tests_status": "PASS", "failures": [], "tests_required": 0,
-                     "tests_passed": 0, "head": head, "summary": {}}
-        if len(latest) < required:
+                    "tests_passed": 0, "head": head, "summary": {}}
+        missing = [stage for stage in required_stages if stage not in latest]
+        if missing:
             return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required,
-                     "tests_passed": sum(1 for v in latest.values() if v["status"] == "PASS"), "head": head, "summary": {}}
+                     "tests_passed": sum(1 for stage in required_stages if latest.get(stage, {}).get("status") == "PASS"), "head": head, "summary": {}}
+        required_rows = {stage: latest[stage] for stage in required_stages}
+        if any(row["status"] in ("QUEUED", "RUNNING", "SKIPPED") for row in required_rows.values()):
+            return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required,
+                    "tests_passed": sum(1 for row in required_rows.values() if row["status"] == "PASS"), "head": head, "summary": {}}
+        if any(row["status"] not in ("PASS", "FAIL", "TIMEOUT") for row in required_rows.values()):
+            return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required,
+                    "tests_passed": sum(1 for row in required_rows.values() if row["status"] == "PASS"), "head": head, "summary": {}}
         failures = []
         summary = {"passed": 0, "failed": 0, "skipped": 0}
-        for stage, row in latest.items():
+        for stage in required_stages:
+            row = required_rows[stage]
             if row["stage"] == "test":
                 for k, v in parse_summary(row["stdout_tail"] or "").items():
                     summary[k] = max(summary[k], v)
@@ -554,7 +580,7 @@ class TaskDecisionService:
             parsed = parse_failures(row["stdout_tail"] or "") or [{"test_identifier": stage, "reason": row["status"]}]
             for f in parsed:
                 fp = fingerprint_of(f["test_identifier"], f["reason"])
-                waiver = self.db.one(
+                waiver = None if stage == "visual_qa" else self.db.one(
                     "SELECT * FROM gate_waivers WHERE task_id=? AND integration_id=? AND gate=? AND test_identifier=? AND failure_fingerprint=? AND revoked_at IS NULL ORDER BY id DESC LIMIT 1",
                     (task_id, iid, stage, f["test_identifier"], fp))
                 evidence = self.db.one(
@@ -584,7 +610,7 @@ class TaskDecisionService:
         return {
             "tests_pass": tests_status in ("PASS", "PASS_WITH_APPROVED_BASELINE_WAIVER"),
             "tests_status": tests_status, "failures": failures, "tests_required": required,
-            "tests_passed": sum(1 for v in latest.values() if v["status"] == "PASS"),
+            "tests_passed": sum(1 for v in required_rows.values() if v["status"] == "PASS"),
             "head": head, "summary": summary,
         }
 
@@ -970,24 +996,32 @@ class TaskDecisionService:
             return "NOT_RUN"
         if source_state["head"] != head or not source_state["clean"]:
             return "NOT_RUN"
+        task = self.db.one("SELECT * FROM tasks WHERE id=?", (b.get("task_id"),)) if b.get("task_id") else None
+        from app.services.visual_qa_contract import task_requires_visual_qa
+        visual_qa_required = bool(task and task_requires_visual_qa(task))
+        try:
+            required_stages = self._required_test_stage_names(
+                b["worktree_path"], visual_qa_required=visual_qa_required
+            )
+        except Exception:
+            return "FAIL"
         latest = {}
         for r in rows:
             latest.setdefault(r["stage"], r)
-        task = self.db.one("SELECT * FROM tasks WHERE id=?", (b.get("task_id"),)) if b.get("task_id") else None
-        if task:
-            from app.services.visual_qa_contract import task_requires_visual_qa
-            if task_requires_visual_qa(task):
-                try:
-                    load_contract(Path(b["worktree_path"]), visual_qa_required=True)
-                except ContractError:
-                    return "FAIL"
-                if "visual_qa" not in latest:
-                    return "NOT_RUN"
-                if latest["visual_qa"]["status"] != "PASS":
-                    return "FAIL" if latest["visual_qa"]["status"] in ("FAIL", "TIMEOUT") else "NOT_RUN"
-        if any(r["status"] == "FAIL" for r in latest.values()):
+        if required_stages is None:
+            # Keep the historical no-contract builder behavior: existing
+            # current-SHA rows are evaluated as one legacy set.
+            required_rows = latest
+        else:
+            if any(stage not in latest for stage in required_stages):
+                return "NOT_RUN"
+            required_rows = {stage: latest[stage] for stage in required_stages}
+        statuses = [row["status"] for row in required_rows.values()]
+        if any(status in ("QUEUED", "RUNNING", "SKIPPED") for status in statuses):
+            return "NOT_RUN"
+        if any(status in ("FAIL", "TIMEOUT") for status in statuses):
             return "FAIL"
-        if all(r["status"] == "PASS" for r in latest.values()):
+        if all(status == "PASS" for status in statuses):
             return "PASS"
         return "NOT_RUN"
 
