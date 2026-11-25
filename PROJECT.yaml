@@ -22,7 +22,7 @@ commands:
   test:
     command: ./scripts/test.sh
     working_directory: .
-    timeout_seconds: 900
+    timeout_seconds: 4500
   build:
     command: ./scripts/build.sh
     working_directory: .

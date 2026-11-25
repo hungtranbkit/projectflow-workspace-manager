@@ -1,5 +1,14 @@
 # Project Context — ProjectFlow visual QA issue #73
 
+## 2026-11-25 ProjectFlow golden-test follow-up
+
+- Follow-up branch: `agent/codex/issue-73-runtime-isolation-20261125`, based on PR #74 published source SHA `50ce031328cfaad4e976dc5507ff5e9908d18b42`. Isolated scratch only; dirty `main` (`PROJECT.yaml` and local package artifacts) and the existing visual QA WIP at `2805bcd...` were preserved.
+- `tests/test_golden_e2e.py` uses `sys.executable` for its three child pytest launches, while retaining the child `PATH=/usr/bin:/bin` and bytecode restriction. HP reproduction before fix failed both golden tests because `/usr/bin/python3` lacked pytest; after the fix the child pytest commands proceed. On HP the golden flows then hit the separately missing Claude CLI in CodeReview. On Dell, the existing deterministic `set_fake` review seam allowed both golden cases to pass without a provider request.
+- `PROJECT.yaml` test timeout is now 4500 seconds (75 minutes), based on recorded suite durations of 2101s and 3137s. `tests/test_project_test_timeout.py` proves TestRunner forwards the configured value and that timeout remains TIMEOUT/exit 124/TEST_FAIL.
+- Candidate targeted verification: 21 tests passed (golden 2, timeout 2, visual contract/execution 17), exit 0, 73.98s; preflight/build/smoke each exit 0 on HP. No full suite rerun. Exact JUnit/fingerprint ledger and sanitized logs: `docs/visual-qa/evidence/issue-73/golden-timeout-repair-20261125/`.
+- Historical PR #74 suite remains FAIL at base source: 1371 passed/194 failed/20 errors/6 skips, exit 1. The 194 failures plus 20 errors have 120 status/fingerprint groups (122 including 2 skip groups); only 39 failures explicitly say Claude CLI missing. All 20 errors parse a missing-requirement HTML page as JSON. Remaining failures are not yet attributed. PR #74 has no valid CI PASS; do not treat this targeted result as Gate A.
+- Next: review and publish this scoped patch as a fast-forward of PR #74 if the expected parent SHA is unchanged; obtain an authorized Claude CLI runner for provider-dependent suite tests; diagnose other failure groups before another full-suite run. B/C visual approval and E CI remain blocked; no production/daemon/CI changes were made.
+
 Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion claim.
 
 ## Scope and safety

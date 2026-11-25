@@ -1,0 +1,57 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.2.0, pluggy-1.7.0 -- <existing-task-venv>/bin/python
+rootdir: <task-worktree>
+configfile: pyproject.toml
+plugins: anyio-4.16.0
+collecting ... collected 21 items
+
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete PASSED [  4%]
+tests/test_golden_e2e.py::test_golden_bug_closed_loop_returns_to_healthy PASSED [  9%]
+tests/test_project_test_timeout.py::test_project_test_timeout_reaches_test_runner_and_remains_bounded[False-PASS-TEST_PASS] PASSED [ 14%]
+tests/test_project_test_timeout.py::test_project_test_timeout_reaches_test_runner_and_remains_bounded[True-TIMEOUT-TEST_FAIL] PASSED [ 19%]
+tests/test_visual_qa_contract.py::test_visual_qa_contract_is_absent_by_default PASSED [ 23%]
+tests/test_visual_qa_contract.py::test_visual_qa_contract_resolves_only_repo_local_reference PASSED [ 28%]
+tests/test_visual_qa_contract.py::test_multiple_viewports_require_a_reference_for_each_size PASSED [ 33%]
+tests/test_visual_qa_contract.py::test_invalid_visual_qa_contract_fails_closed[visual_qa: []\n-must be a mapping] PASSED [ 38%]
+tests/test_visual_qa_contract.py::test_invalid_visual_qa_contract_fails_closed[block1-repo-relative] PASSED [ 42%]
+tests/test_visual_qa_contract.py::test_invalid_visual_qa_contract_fails_closed[block2-does not exist] PASSED [ 47%]
+tests/test_visual_qa_contract.py::test_invalid_visual_qa_contract_fails_closed[visual_qa:\n  enabled: true\n  reference: docs/reference.png\n  route: https://example.com\n-loopback] PASSED [ 52%]
+tests/test_visual_qa_contract.py::test_visual_qa_task_marker_is_explicit_and_backend_tasks_stay_opted_out PASSED [ 57%]
+tests/test_visual_qa_contract.py::test_visual_qa_stage_is_added_only_for_explicit_task_opt_in PASSED [ 61%]
+tests/test_visual_qa_contract.py::test_task_opt_in_without_project_contract_fails_closed PASSED [ 66%]
+tests/test_visual_qa_contract.py::test_prompt_adds_visual_qa_instructions_only_for_marked_ui_task PASSED [ 71%]
+tests/test_visual_qa_contract.py::test_marked_task_prompt_explains_missing_visual_qa_config PASSED [ 76%]
+tests/test_visual_qa_contract.py::test_test_runner_requires_visual_stage_only_for_marked_task PASSED [ 80%]
+tests/test_visual_qa_contract.py::test_task_decision_requires_current_visual_qa_evidence_for_opted_in_task PASSED [ 85%]
+tests/test_visual_qa_execution.py::test_opted_in_ui_task_dispatches_visual_stage_and_gate_uses_its_result PASSED [ 90%]
+tests/test_visual_qa_execution.py::test_visual_failure_fails_opted_in_task_decision PASSED [ 95%]
+tests/test_visual_qa_execution.py::test_backend_task_without_marker_dispatches_only_existing_test_stage PASSED [100%]
+
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  <existing-task-venv>/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_golden_e2e.py: 22 warnings
+  <existing-task-venv>/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+tests/test_golden_e2e.py::test_golden_bug_closed_loop_returns_to_healthy
+tests/test_golden_e2e.py::test_golden_bug_closed_loop_returns_to_healthy
+tests/test_golden_e2e.py::test_golden_bug_closed_loop_returns_to_healthy
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=396888) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+  <existing-task-venv>/lib/python3.14/site-packages/_pytest/python.py:191: PytestReturnNotNoneWarning: Test functions should return None, but tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete returned <class 'tuple'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /home/dell/workspace/task-artifacts/issue-73-golden-timeout-repair-20261125/targeted-junit.xml -
+================== 21 passed, 41 warnings in 73.98s (0:01:13) ==================
