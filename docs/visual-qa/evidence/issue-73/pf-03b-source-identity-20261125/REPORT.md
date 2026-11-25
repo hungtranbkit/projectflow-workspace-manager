@@ -56,6 +56,6 @@ This is a before/after observation, not an immutable filesystem snapshot or excl
 ## Identity and gates
 
 - Starting clean task branch: `agent/codex/issue-73-engineering-fixture-20261125`, parent `f1d09c48de10a2c41d8dc907c9d1799df467832f`.
-- PR #74 expected head at PF-03b start: `e95e5d77b189d3774d02b37a9efd1475b4e88d2d`; base `ac288928ab559799e6a6f34ff9be1de5fdfa5af3`.
+- PR #74 expected head at PF-03b start: `e95e5d77b189d3774d02b37a9efd1475b4e88d2d`; base `ac288928ab559799e6a6f34ff9be1de5fdfa5af3`. Tested local source commit `168abf133bdd73d57d0bc74c650b046bc3b072a5` has tree `57ba876fc124e247ce730da51d09c31b71637bb8`; published source commit `1ac2e825eebc932c5eb4cf3d67b1f8e751c27316` has the same tree and is a normal expected-head fast-forward. The tree identity, rather than local commit SHA identity, binds the recorded test run to the published source content.
 - No full suite, provider, CI, NovaRetail, production, or deploy operation was performed. Gate A remains FAIL; B/C remain blocked; D prior local evidence only; E not PASS; F preserved.
 - Rollback: revert only the PF-03b commit(s) on PR #74. No worktree, main, or WIP cleanup was performed.
