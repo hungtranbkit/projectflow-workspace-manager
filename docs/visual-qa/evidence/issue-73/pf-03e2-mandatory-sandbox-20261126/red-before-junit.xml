@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="7.032" timestamp="2026-11-26T00:28:30.725929+07:00" hostname="dell-Latitude-5511"><testcase classname="tests.test_visual_qa_mandatory_sandbox" name="test_required_auth_visual_gate_runs_inside_real_sandbox" time="6.875"><failure message="AssertionError: [{'id': 1, 'workspace_type': 'agent', 'workspace_id': 1, 'command': 'python3 -c \'print(&quot;mandatory-fixture-test-ran&quot;)\'', ...}, {'id': 2, 'workspace_type': 'agent', 'workspace_id': 1, 'command': 'set -eu; python3 tools/visual_qa/sandbox-fixture-server.py 43871 &gt; .runtime/sandbox-fixture-server.log 2&gt;&amp;1 &amp; server_pid=$!; trap \'kill &quot;$server_pid&quot; 2&gt;/dev/null || true; wait &quot;$server_pid&quot; 2&gt;/dev/null || true\' EXIT; python3 -c \'import time,urllib.request&#10;  for attempt in range(40):&#10;[+17 more lines; full report in element text]">tmp_path = PosixPath('<pytest-tmp>)
+monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x75adc741b100&gt;
+
+    def test_required_auth_visual_gate_runs_inside_real_sandbox(tmp_path, monkeypatch):
+        """AUTH_MODE=required -&gt; app wiring -&gt; mandatory runner -&gt; real Docker run.
+
+        Runs a same-container fixture server because the real sandbox network is
+        intentionally none. Artifact output uses TestRunner's private run path.
+        """
+        project_root = tmp_path / "mandatory-project"
+        project_root.mkdir(mode=0o755)
+        project_root.chmod(0o755)
+
+        # Test-only auth values are app construction inputs and are never passed to
+        # a sandbox command. They are fixed synthetic values, not credentials.
+        monkeypatch.setenv("WORKSPACE_MANAGER_AUTH_MODE", "required")
+        monkeypatch.setenv("WORKSPACE_MANAGER_ROOT", str(tmp_path))
+        monkeypatch.setenv("WORKSPACE_MANAGER_WORKTREE_ROOT", str(tmp_path / ".worktrees"))
+        monkeypatch.setenv("WORKSPACE_MANAGER_DB", str(tmp_path / "coordinator.sqlite"))
+        monkeypatch.setenv("WORKSPACE_MANAGER_STATE_DIR", str(tmp_path / "coordinator-state"))
+        session_secret = "pf03e2-test-only-session-secret-no-real-credential"
+        encryption_key = "M2RXNV3dhIR-lc1WoE8DGxt-kowfK-34xGTIcF1t8m4="
+        monkeypatch.setenv("WORKSPACE_MANAGER_SESSION_SECRET", session_secret)
+        monkeypatch.setenv("WORKSPACE_MANAGER_SECRET_ENCRYPTION_KEYS", encryption_key)
+        settings = load_settings()
+        assert settings.auth_mode == "required"
+        app = create_app(settings)
+        assert app.state.settings.auth_mode == "required"
+        assert app.state.sandboxed_exec.mandatory is True
+        assert app.state.runner.runner is app.state.sandboxed_exec
+
+        runtime = app.state.sandboxed_exec.sandbox_runtime
+        real_docker_run = runtime._run
+        runtime.recorded_argv = []
+
+        def record_actual_call(argv, cwd, timeout=None):
+            if len(argv) &gt; 1 and argv[1] == "run":
+                runtime.recorded_argv.append(list(argv))
+            return real_docker_run(argv, cwd, timeout=timeout)
+
+        monkeypatch.setattr(runtime, "_run", record_actual_call)
+        runtime.source_commit = "UNSET"
+        runtime.source_tree = "UNSET"
+        actual_runner = app.state.sandboxed_exec
+        original_run = actual_runner.run
+        capture_root = tmp_path / "mandatory-captured"
+        captures: dict[str, Path] = {}
+        decisions: dict[str, str] = {}
+
+        def observe_real_execution(command, worktree_root, working_dir, timeout, env=None):
+            result = original_run(command, worktree_root, working_dir, timeout, env=env)
+            run_id = (env or {}).get("VISUAL_QA_RUN_ID")
+            if run_id:
+                source = Path(worktree_root).absolute() / ".runtime" / "projectflow-visual-qa" / str(run_id)
+                if source.is_dir() and any(source.iterdir()):
+                    target = capture_root / str(run_id)
+                    shutil.copytree(source, target)
+                    captures[str(run_id)] = target / "320x240"
+            return result
+
+        monkeypatch.setattr(actual_runner, "run", observe_real_execution)
+
+        (project_root / ".gitignore").write_text(".runtime/\n", encoding="utf-8")
+        (project_root / "README.md").write_text("disposable mandatory visual fixture\n", encoding="utf-8")
+        cli = Path(__file__).resolve().parents[1] / "tools" / "visual_qa" / "visual-qa.mjs"
+        (project_root / "tools/visual_qa").mkdir(parents=True)
+        shutil.copyfile(cli, project_root / "tools/visual_qa/visual-qa.mjs")
+        server_script = project_root / "tools/visual_qa/sandbox-fixture-server.py"
+        server_script.write_text(_fixture_server_source(), encoding="utf-8")
+        (project_root / ".runtime/uifix-v1.2.6").parent.mkdir(parents=True)
+        shutil.copytree(Path(__file__).resolve().parents[1] / ".runtime/uifix-v1.2.6",
+                        project_root / ".runtime/uifix-v1.2.6", symlinks=True)
+        reference = project_root / "docs/reference.png"
+        reference.parent.mkdir(parents=True)
+        sharp_package = project_root / ".runtime/uifix-v1.2.6/package.json"
+        create_reference = (
+            "const {createRequire}=require('node:module');"
+            f"const sharp=createRequire({json.dumps(str(sharp_package))})('sharp');"
+            f"sharp({{create:{{width:320,height:240,channels:3,background:{{r:24,g:57,b:90}}}}}})"
+            f".png().toFile({json.dumps(str(reference))}).catch(e=&gt;{{console.error(e);process.exitCode=1}});"
+        )
+        subprocess.run(["node", "-e", create_reference], check=True, text=True, capture_output=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=project_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "qa@example.invalid"], cwd=project_root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "PF-03e2 mandatory fixture"], cwd=project_root, check=True, capture_output=True)
+        _write_contract(project_root, "/same", _visual_command("/same"))
+        subprocess.run(["git", "add", ".gitignore", "README.md", "tools/visual_qa", "docs/reference.png", "PROJECT.yaml"],
+                       cwd=project_root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "mandatory visual fixture base"], cwd=project_root,
+                       check=True, capture_output=True)
+
+        app_git = app.state.git
+        head = app_git.head(project_root)
+        task_id, workspace_id = _add_task_and_workspace(
+            app.state.db, app_git, project_root, "Synthetic UI task\nVISUAL_QA_REQUIRED: true", "mandatory-ui",
+        )
+        runtime.source_commit = head
+        runtime.source_tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=project_root,
+                                             check=True, capture_output=True, text=True).stdout.strip()
+
+        artifact_dir_env = os.environ.get("VISUAL_QA_MANDATORY_EVIDENCE_DIR")
+        evidence_output = Path(artifact_dir_env).resolve() if artifact_dir_env else tmp_path / "mandatory-evidence"
+        evidence_output.mkdir(parents=True, exist_ok=True)
+        initial_calls = 0
+        observed_rows: list[dict] = []
+        details: dict = {
+            "authMode": settings.auth_mode,
+            "mandatory": actual_runner.mandatory,
+            "uifixSha": UIFIX_SHA,
+            "referenceSha256": hashlib.sha256(reference.read_bytes()).hexdigest(),
+        }
+        try:
+            positive_rows = _run_stages(app.state.runner, app.state.db, workspace_id, project_root)
+            observed_rows += [dict(row) for row in positive_rows]
+&gt;           assert [(row["stage"], row["status"], row["exit_code"]) for row in positive_rows] == [
+                ("test", "PASS", 0), ("visual_qa", "PASS", 0),
+            ], positive_rows
+E           AssertionError: [{'id': 1, 'workspace_type': 'agent', 'workspace_id': 1, 'command': 'python3 -c \'print("mandatory-fixture-test-ran")\'', ...}, {'id': 2, 'workspace_type': 'agent', 'workspace_id': 1, 'command': 'set -eu; python3 tools/visual_qa/sandbox-fixture-server.py 43871 &gt; .runtime/sandbox-fixture-server.log 2&gt;&amp;1 &amp; server_pid=$!; trap \'kill "$server_pid" 2&gt;/dev/null || true; wait "$server_pid" 2&gt;/dev/null || true\' EXIT; python3 -c \'import time,urllib.request
+E             for attempt in range(40):
+E                 try:
+E                     urllib.request.urlopen("http://127.0.0.1:43871/health", timeout=0.2).read()
+E                     break
+E                 except Exception:
+E                     if attempt == 39: raise
+E                     time.sleep(0.1)
+E             \'; node tools/visual_qa/visual-qa.mjs --reference docs/reference.png --url http://127.0.0.1:43871/same --viewport 320x240 --out .runtime/standalone-output-is-overridden-by-TestRunner --threshold 0.08', ...}]
+E           assert [('test', 'PA...', 'FAIL', 1)] == [('test', 'PA...', 'PASS', 0)]
+E
+E             At index 1 diff: ('visual_qa', 'FAIL', 1) != ('visual_qa', 'PASS', 0)
+E
+E             Full diff: (-: missing in left side, +: extra in left side)
+E               [
+E                   (
+E                       'test',...
+E
+E             ...Full output truncated, use '-vv' to show
+
+tests/test_visual_qa_mandatory_sandbox.py:303: AssertionError</failure></testcase></testsuite></testsuites>

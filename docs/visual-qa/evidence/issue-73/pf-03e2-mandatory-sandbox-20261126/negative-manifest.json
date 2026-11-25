@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "runId": "4",
+  "testedCommit": "2ab2b9cbb684acc38a84e7bb40a1e39f0ff4bfe8",
+  "sourceCommit": "2ab2b9cbb684acc38a84e7bb40a1e39f0ff4bfe8",
+  "tool": "UIFix",
+  "toolVersion": "1.2.6",
+  "toolCommit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+  "route": "http://127.0.0.1:43871/wrong",
+  "referenceSha256": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "deviceScaleFactor": 1,
+  "captureMode": "viewport",
+  "threshold": 0.08,
+  "passed": false,
+  "metrics": {
+    "percentDiff": 1,
+    "mismatchedPixels": 76800,
+    "totalPixels": 76800,
+    "ssim": 0.9637040358126364,
+    "horizontalOverflow": false,
+    "pageErrors": [],
+    "blockedRequests": []
+  },
+  "artifacts": {
+    "reference.png": {
+      "file": "reference.png",
+      "size": 894,
+      "sha256": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e"
+    },
+    "actual.png": {
+      "file": "actual.png",
+      "size": 765,
+      "sha256": "c7c3151f51a387a2090d93f61615a1156b21c347860efbfc6d4de803f0fd4e05"
+    },
+    "diff.png": {
+      "file": "diff.png",
+      "size": 975,
+      "sha256": "b2bf173991ebaa1306e1ac7c005ff01ab20677757f87bf629e5b1d4788b16128"
+    },
+    "overlay.png": {
+      "file": "overlay.png",
+      "size": 981,
+      "sha256": "84d6b0f2ada4215477db213a93d66f9d5b6eb63e48f322766b2888a5d4016f0b"
+    },
+    "metrics.json": {
+      "file": "metrics.json",
+      "size": 949,
+      "sha256": "b0c11202f8733acee59d3c467685a1c8372bb7e92131c7291f491e704d1eada8"
+    },
+    "report.md": {
+      "file": "report.md",
+      "size": 992,
+      "sha256": "c72e5cbd438d5b4f36676b7dc787833ed10d13ce229e4a328b30f1ebede1753d"
+    }
+  }
+}
