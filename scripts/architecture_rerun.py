@@ -140,16 +140,28 @@ def run_archify(cfg, d: Path, src: ReadOnlySource, commit: str, allowed: set[str
                   ["node", "/tools/archify/bin/archify.mjs", "finalize", "architecture", "/work/ir.json", "/work/archify.html",
                    "--repo-root", "/repo", "--quality", "showcase", "--json"], cfg["limits"]["timeout_seconds"])
     (d / "archify-finalize.log").write_text(r["tail"])
-    try:
-        fin = json.loads((work / "archify.finalize.json").read_text())
-    except (OSError, ValueError):
-        fin = {}
-    gates = fin.get("gates") or {}
+    gates = finalize_gates(work, r["tail"])
     steps = [dict(step=k, result={"pass": "PASS", "fail": "FAIL"}.get(v, "NOT_RUN"), detail=v) for k, v in gates.items()]
     core = all(gates.get(k) == "pass" for k in ("validate", "deliver", "check"))
     html = work / "archify.html"
     status = "PASS" if core and gates.get("browser-check") == "pass" else "PARTIAL" if core else "FAIL"
-    return dict(ok=core and html.is_file(), status=status, exit=r["exit"], seconds=r["seconds"], steps=steps, html=html, ir=ir)
+    return dict(ok=core and html.is_file(), status=status, exit=r["exit"], seconds=r["seconds"], steps=steps, html=html, ir=ir,
+                reason="" if core else "finalize gates: " + json.dumps(gates)[:200])
+
+
+def finalize_gates(work: Path, stdout_tail: str) -> dict:
+    """Gate results from Archify's summary receipt (the full receipt does not carry them)."""
+    for candidate in (work / "archify.finalize-summary.json",):
+        try:
+            gates = json.loads(candidate.read_text()).get("gates")
+            if isinstance(gates, dict):
+                return gates
+        except (OSError, ValueError):
+            pass
+    try:
+        return json.loads(stdout_tail[stdout_tail.index("{"):]).get("gates") or {}
+    except ValueError:
+        return {}
 
 
 def build_manifest(project, src_info, origin, provenance, tools, artifacts, limitations):
@@ -179,12 +191,13 @@ def tools_meta(cfg) -> dict:
 
 
 def cmd_run(args) -> int:
+    os.umask(0o077)
     h = harness()
     task_id = args.task_id
     d = run_dir(task_id)
     req = json.loads((d / "request.json").read_text())
-    h.observe(task_id, backend_state="RUNNING", process_alive=True, at=now(), progress_at=now(), evidence_ref=f"run:{task_id}:start")
     try:
+        h.observe(task_id, backend_state="RUNNING", process_alive=True, at=now(), progress_at=now(), evidence_ref=f"run:{task_id}:start")
         cfg = load_config()
         verify_tools(cfg)
         if sha256(canonical(tool_identity(cfg)).encode())[:16] != req["toolset"]:

@@ -37,6 +37,7 @@ from app.services.architecture_center import (
 from app.services.git_workspace import GitCommandError, GitSafetyError, ReadOnlySource
 
 RUN_TTL = timedelta(minutes=45)
+MAX_ATTEMPTS = 3
 MAIN_GOAL = "architecture:"
 IMAGE_RE = re.compile(r"^[a-z0-9./_-]+@sha256:[0-9a-f]{64}$")
 DEFAULT_LIMITS = dict(
@@ -193,10 +194,15 @@ def request_rerun(project: str, commit: str | None = None, archify_ir: Path | No
     h = harness(state)
     at = now or datetime.now(timezone.utc)
     h.reconcile_due(at=at)
-    for t in h.list_tasks():
-        if t.child_goal == child:
+    tries = [t for t in h.list_tasks() if t.child_goal == child or t.child_goal.startswith(child + "#")]
+    for t in reversed(tries):
+        if t.state not in ("FAILED", "EXPIRED"):
             return dict(task_id=t.id, state=t.state, commit=sha, duplicate=True,
                         message=f"Đã có lượt chạy #{t.id} cho đúng commit và bộ công cụ này ({t.state}); không chạy lặp.")
+    if len(tries) >= MAX_ATTEMPTS:
+        raise RunRefused(f"Đã thử {len(tries)} lần cho đúng commit và bộ công cụ này; cần đổi đầu vào hoặc xử lý thủ công.")
+    if tries:
+        child += f"#retry-{len(tries)}"  # a failed attempt is retried as a new, visible child goal
     active = [t for t in h.list_tasks() if t.main_goal.startswith(MAIN_GOAL)
               and (t.state not in ("DONE_VERIFIED", "FAILED", "EXPIRED") or t.cleanup_state == "CLEANUP_PENDING")]
     if len(active) >= limits["max_active"]:
@@ -208,6 +214,7 @@ def request_rerun(project: str, commit: str | None = None, archify_ir: Path | No
     except HarnessError as exc:
         raise RunRefused(str(exc)) from exc
     d = run_dir(task.id, state)
+    os.umask(os.umask(0o077) | 0o077)
     d.mkdir(mode=0o700, parents=True, exist_ok=False)
     (d / "archify-ir.json").write_bytes(ir)
     (d / "floorplan-architecture.json").write_bytes(seed)
@@ -215,12 +222,18 @@ def request_rerun(project: str, commit: str | None = None, archify_ir: Path | No
                requested_at=int(at.timestamp()))
     (d / "request.json").write_text(canonical(req))
     unit = f"pf-arch-run-{task.id}-{sha[:10]}"
+    # The receipt (unit name) is durable BEFORE the process can start, so the
+    # runner can always record progress against a dispatched task.
+    h.dispatch(task.id, external_task_id=unit, at=at)
     try:
         (launcher or launch_unit)(task.id, unit, cfg)
     except Exception as exc:  # launch failure is recorded, never retried silently
-        h.fail(task.id, at=now or datetime.now(timezone.utc), reason="launch failed: " + str(exc)[:200])
+        at_fail = now or datetime.now(timezone.utc)
+        h.fail(task.id, at=at_fail, reason="launch failed: " + str(exc)[:200])
+        # Nothing was started: no process, container or output exists to clean.
+        h.cleanup(task.id, at=at_fail, executor_stopped=True, no_active_refs=True, dirty_worktree=False,
+                  evidence_preserved=True, deletion_verified=True)
         raise RunRefused("Không khởi chạy được lượt chạy; đã ghi nhận thất bại.") from exc
-    h.dispatch(task.id, external_task_id=unit, at=now or datetime.now(timezone.utc))
     return dict(task_id=task.id, state="DISPATCHED", commit=sha, duplicate=False,
                 message=f"Đã xếp lượt chạy #{task.id} cho commit {sha[:12]}.")
 
@@ -232,7 +245,7 @@ def launch_unit(task_id: int, unit: str, cfg: dict) -> None:
     env = {k: os.environ[k] for k in ("PROJECTFLOW_STEWARD_DB", "PROJECTFLOW_ARCHITECTURE_CONFIG") if k in os.environ}
     argv = ["systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}",
             f"--property=RuntimeMaxSec={int(lim['timeout_seconds']) + 120}", "--property=KillMode=control-group",
-            f"--property=MemoryMax={lim['memory']}", f"--working-directory={repo}",
+            f"--property=MemoryMax={str(lim['memory']).upper()}", f"--working-directory={repo}",
             *[f"--setenv={k}={v}" for k, v in env.items()],
             os.path.realpath(sys.executable), "-m", "scripts.architecture_rerun", "run", "--task-id", str(int(task_id))]
     proc = subprocess.run(argv, capture_output=True, text=True, timeout=30, shell=False)

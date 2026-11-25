@@ -325,7 +325,25 @@ def test_launch_failure_is_recorded_not_retried(tmp_path):
     with pytest.raises(runs_mod.RunRefused):
         runs_mod.request_rerun(PROJECT, cfg=cfg, state=tmp_path / "st", launcher=boom)
     run = runs_mod.runs(PROJECT, tmp_path / "st")[0]
-    assert run["state"] == "FAILED" and "launch failed" in run["events"][-1]["evidence"]["reason"]
+    assert run["state"] == "FAILED" and run["cleanup"] == "CLEANED_VERIFIED"
+    assert any("launch failed" in (e["evidence"].get("reason") or "") for e in run["events"])
+    # A failed attempt may be retried as a new visible child goal, at most MAX_ATTEMPTS times in total.
+    for _ in range(runs_mod.MAX_ATTEMPTS - 1):
+        with pytest.raises(runs_mod.RunRefused, match="Không khởi chạy"):
+            runs_mod.request_rerun(PROJECT, cfg=cfg, state=tmp_path / "st", launcher=boom)
+    with pytest.raises(runs_mod.RunRefused, match="Đã thử 3 lần"):
+        runs_mod.request_rerun(PROJECT, cfg=cfg, state=tmp_path / "st", launcher=lambda *a: None)
+    goals = [t.child_goal for t in runs_mod.harness(tmp_path / "st").list_tasks()]
+    assert len(goals) == 3 and goals[1].endswith("#retry-1") and goals[2].endswith("#retry-2")
+
+
+def test_systemd_unit_limits_are_valid(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(runs_mod.subprocess, "run", lambda argv, **k: seen.setdefault("argv", argv) and type("P", (), {"returncode": 0, "stderr": ""})())
+    runs_mod.launch_unit(7, "pf-arch-run-7-abc", {"limits": {**runs_mod.DEFAULT_LIMITS, "memory": "3g"}})
+    argv = seen["argv"]
+    assert argv[:3] == ["systemd-run", "--user", "--collect"] and "--property=MemoryMax=3G" in argv
+    assert argv[-6:] == ["-m", "scripts.architecture_rerun", "run", "--task-id", "7"][-6:] or argv[-5:] == ["-m", "scripts.architecture_rerun", "run", "--task-id", "7"]
 
 
 def test_source_allowlist_refuses_symlinks_and_secrets(tmp_path):
