@@ -38,7 +38,7 @@ RISK_GATES = {"LOW": ("REVIEW",), "NORMAL": ("REVIEW", "QA", "INTEGRATION"), "HI
 
 NEXT_ACTIONS = (
     "REVIEW_BACKLOG", "SELECT_FOR_DEVELOPMENT", "CREATE_BUILDER_WORKSPACE",
-    "START_BUILDER", "VIEW_BUILDER", "REVIEW_BUILDER_RESULT", "RUN_BUILDER_TEST",
+    "START_BUILDER", "VIEW_BUILDER", "CHECK_SESSION_LIVENESS", "REVIEW_BUILDER_RESULT", "RUN_BUILDER_TEST",
     "SUBMIT_FOR_REVIEW", "START_REVIEW", "RETURN_TO_BUILDER",
     "CREATE_SANDBOX", "SANDBOX_PROVISIONING", "SANDBOX_SETUP_REQUIRED", "RESTART_SANDBOX", "START_QA", "CREATE_INTEGRATION", "OPEN_INTEGRATOR", "RUN_INTEGRATION_TEST", "RESOLVE_CONFLICT",
     "REVIEW_BASELINE_FAILURE", "FIX_INTEGRATION_FAILURE", "PUSH_INTEGRATION", "WAIT_FOR_CI", "CONFIRM_INTEGRATION_READY",
@@ -113,6 +113,7 @@ CHECKLIST_LABELS = {
 MISSING_REQUIREMENTS = {
     "CREATE_BUILDER_WORKSPACE": ["A Builder Workspace has not been created yet"],
     "START_BUILDER": ["The agent has not been started yet"],
+    "CHECK_SESSION_LIVENESS": ["Confirm the executor process is alive or record its actual exit before retrying"],
     "REVIEW_BUILDER_RESULT": ["The agent session ended without a completion report"],
     "SUBMIT_FOR_REVIEW": ["The Builder has not submitted for review yet"],
     "START_REVIEW": ["Review has not been completed"],
@@ -291,6 +292,9 @@ class TaskDecisionService:
         # honest absence of any session row for this workspace (Workspace
         # READY must never be misread as Agent RUNNING).
         agent_status = session["status"] if session else "NOT_STARTED"
+        session_liveness=getattr(self,"session_liveness",None)
+        if session and agent_status in LIVE_SESSION_STATUSES and session_liveness and not session_liveness(session["id"]):
+            agent_status="UNKNOWN"
         return {
             "id": w["id"], "agent": w["agent"], "role": w["role"], "repo_name": w["repo_name"],
             "repository_id": w["repository_id"], "worktree_path": w["worktree_path"], "branch": w["branch"],
@@ -803,6 +807,8 @@ class TaskDecisionService:
                     # since agent_status can only be live when a session
                     # row exists -- see _builder_view above).
                     return _action("VIEW_BUILDER", f"View: {b['agent']}", "Agent is running.", f"/workspaces/{b['id']}/sessions/{b['session']['id']}")
+                if b["agent_status"] == "UNKNOWN":
+                    return _action("CHECK_SESSION_LIVENESS", "Verify executor session", "ProjectFlow cannot confirm the saved process is still alive. Verify its exit before retrying.", f"/workspaces/{b['id']}/sessions/{b['session']['id']}")
                 if b["agent_status"] in ("EXITED", "FAILED"):
                     return _action("REVIEW_BUILDER_RESULT", f"Review result: {b['agent']}", "Agent session ended without a completion report yet.", f"/workspaces/{b['id']}")
                 return _action("START_BUILDER", f"Start {b['agent'].capitalize()}: {b['role'] or b['repo_name']}", "Builder Workspace ready, agent not started yet.", f"/workspaces/{b['id']}")
@@ -1035,6 +1041,12 @@ class TaskDecisionService:
         required_merges = [m for m in merges if m["required"]]
         all_merged = bool(required_merges) and all(m["merge_status"] == "MERGED" for m in required_merges)
         integration_ok = (not self.requires_integration(risk)) or self._integration_ok(ti, ti_repos, all_merged)
+        dispatch_readiness = self.dispatch_gate.evaluate(t) if getattr(self, "dispatch_gate", None) else None
+        if dispatch_readiness and not dispatch_readiness["ready"] and status not in ("DONE", "CANCELLED"):
+            contract_blockers = dispatch_readiness.get("blockers", [])
+            reason = contract_blockers[0]["message"] if contract_blockers else "Complete the approved Spec and V2 task contract before dispatch."
+            if next_action.get("action") in ("CREATE_BUILDER_WORKSPACE", "START_BUILDER", "REVIEW_BUILDER_RESULT", "OPEN_WORKSPACE"):
+                next_action = _action("COMPLETE_TASK_CONTRACT", "Complete Spec and Task Contract", reason, f"/tasks/{t['id']}#task-contract")
         return {
             "task": t, "status": status, "stage": stage, "risk_profile": risk, "next_action": next_action,
             "blocking_reasons": blocking, "test_readiness": test_readiness, "ready_for_main": ready_for_main,
@@ -1042,6 +1054,7 @@ class TaskDecisionService:
             "merge_records": merges, "current_step": current_step,
             "integration_eligibility": integration_eligibility or {"required": self.requires_integration(risk), "eligible": integration_eligible, "exists": bool(ti)},
             "effective_task_prompt": effective_task_prompt(t), "prompt_source": prompt_source(t),
+            "dispatch_readiness": dispatch_readiness,
             "checklist": self._checklist(status, builders, risk, current_step, all_builders_ready, all_reviews_current_pass, qa_ok, integration_ok, all_merged),
             "missing_requirements": self._missing_requirements(next_action, blocking),
             "previous_step_summary": self._previous_step_summary(builders, current_step),

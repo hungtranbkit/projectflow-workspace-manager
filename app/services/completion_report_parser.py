@@ -1,20 +1,20 @@
 from __future__ import annotations
 import re
 
-"""Conservative, explicit parser for the exact agent-completion-report
-format (templates/agent-completion-report.md) as it appears in an
-AgentSession's own terminal transcript. Section 4 of the spec this
-implements is explicit: "Do NOT rely solely on scraping arbitrary
-terminal prose... make parsing conservative and explicit... Never treat
-random occurrence of the word READY as completion." This never
-auto-submits anything -- it only ever offers a detected report for a
-human to explicitly confirm via the real /verification-report route,
-which still enforces its own rules (clean worktree, etc.)."""
+"""Conservative parsers for human-submitted and executor-session reports.
 
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[=>]|[\x00-\x08\x0b\x0c\x0e-\x1f]")
+The legacy parser supports the manual report form. The strict parser
+recognizes only a complete delimited executor contract; its caller must
+still validate Git and ProjectFlow test evidence before persisting it.
+Neither parser establishes independent Review or acceptance."""
+
+ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b[=>]|[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 FIELDS = ["WORK_STATUS", "WHAT_CHANGED", "AUTOMATED_TESTS", "HOW_TO_VERIFY", "EXPECTED_RESULT", "TEST_DATA", "RUNTIME_REQUIREMENTS", "RISKS"]
 REQUIRED_FIELDS = ("WORK_STATUS", "WHAT_CHANGED")
+EXECUTOR_FIELDS = (*FIELDS, "FILES_CHANGED", "COMMIT_SHA")
+EXECUTOR_REPORT_START = "----- PROJECTFLOW EXECUTOR REPORT START -----"
+EXECUTOR_REPORT_END = "----- PROJECTFLOW EXECUTOR REPORT END -----"
 
 
 def strip_ansi(text: str) -> str:
@@ -62,33 +62,77 @@ def parse_completion_report(transcript: str) -> dict | None:
     matches = list(marker_re.finditer(clean))
     if not matches:
         return None
-    # Group consecutive marker+body pairs into blocks; a "block" is any
-    # run of markers not interrupted by >1 blank paragraph of unrelated
-    # prose containing none of the markers -- simplest robust rule: take
-    # the LAST occurrence of each field, provided WORK_STATUS's last
-    # occurrence and WHAT_CHANGED's last occurrence are within a few
-    # thousand characters of each other (the same report, not two
-    # unrelated mentions far apart in a long session).
-    last_by_field: dict[str, tuple[int, int]] = {}
-    for i, m in enumerate(matches):
-        field = m.group(1)
-        body_start = m.end()
-        body_end = matches[i + 1].start() if i + 1 < len(matches) else len(clean)
-        last_by_field[field] = (body_start, body_end)
-    if not all(f in last_by_field for f in REQUIRED_FIELDS):
+    # A transcript may end with the exact report template ProjectFlow
+    # delivered to the agent. Treat each WORK_STATUS through the next
+    # WORK_STATUS as one candidate; a placeholder/empty echoed template
+    # must not shadow the actual report printed earlier in the PTY.
+    starts = [i for i, match in enumerate(matches) if match.group(1) == "WORK_STATUS"]
+    for start_index in reversed(starts):
+        block_end = next((i for i in range(start_index + 1, len(matches))
+                          if matches[i].group(1) == "WORK_STATUS"), len(matches))
+        block = matches[start_index:block_end]
+        by_field = {}
+        for i, match in enumerate(block):
+            if match.group(1) not in by_field:
+                end = block[i + 1].start() if i + 1 < len(block) else len(clean)
+                by_field[match.group(1)] = (match.end(), end)
+        if not all(field in by_field for field in REQUIRED_FIELDS):
+            continue
+        if max(by_field[field][0] for field in REQUIRED_FIELDS) - min(by_field[field][0] for field in REQUIRED_FIELDS) > 8000:
+            continue
+        result = {field: _clean_field_body(clean[start:end])
+                  for field, (start, end) in by_field.items()}
+        work_status = (result.get("WORK_STATUS") or "").strip().upper()
+        if work_status not in ("READY", "FIX_REQUIRED") or not result.get("WHAT_CHANGED"):
+            continue
+        if re.search(r"(?i)\b(?:todo|tbd|placeholder|replace this|fill this)\b", result["WHAT_CHANGED"]):
+            continue
+        result["WORK_STATUS"] = work_status
+        return result
+    return None
+
+
+def parse_executor_completion_report(transcript: str) -> dict | None:
+    """Parse the complete machine-ingestible executor contract.
+
+    Unlike the legacy human-confirmation parser above, this rejects missing
+    or duplicate fields and cannot turn partial PTY output into evidence.
+    It still does not establish that the claimed commit/tests are true; the
+    caller must verify them against Git and ProjectFlow's evidence tables.
+    """
+    if not transcript:
         return None
-    positions = [last_by_field[f][0] for f in REQUIRED_FIELDS]
-    if max(positions) - min(positions) > 8000:
-        return None  # too far apart to plausibly be the same report
+    clean = strip_ansi(transcript).replace("\r\n", "\n").replace("\r", "\n")
+    # Parse the last explicitly delimited final report. Prompt text and
+    # earlier drafts may mention headings; only content inside the final
+    # complete block can become evidence.
+    start_at = clean.rfind(EXECUTOR_REPORT_START)
+    if start_at < 0:
+        return None
+    body_start = start_at + len(EXECUTOR_REPORT_START)
+    end_at = clean.find(EXECUTOR_REPORT_END, body_start)
+    if end_at < 0 or EXECUTOR_REPORT_START in clean[body_start:end_at]:
+        return None
+    clean = clean[body_start:end_at]
+    marker_re = re.compile(r"^([A-Z_]+):?[ \t]*$", re.MULTILINE)
+    matches = [m for m in marker_re.finditer(clean) if m.group(1) in EXECUTOR_FIELDS]
+    if not matches:
+        return None
+    # A single exact report block is required. Duplicate fields commonly
+    # indicate a redraw/partial tail or multiple drafts and are ambiguous.
+    names = [m.group(1) for m in matches]
+    if names != list(EXECUTOR_FIELDS):
+        return None
     result = {}
-    for field in FIELDS:
-        if field in last_by_field:
-            start, end = last_by_field[field]
-            result[field] = _clean_field_body(clean[start:end])
-    work_status = (result.get("WORK_STATUS") or "").strip().upper()
-    if work_status not in ("READY", "FIX_REQUIRED"):
+    for i, match in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(clean)
+        result[match.group(1)] = _clean_field_body(clean[match.end():end])
+    if result["WORK_STATUS"].upper() != "READY" or any(not result[k] for k in EXECUTOR_FIELDS):
         return None
-    if not result.get("WHAT_CHANGED"):
+    result["WORK_STATUS"] = "READY"
+    if not re.fullmatch(r"[0-9a-f]{40}", result["COMMIT_SHA"].strip(), re.I):
         return None
-    result["WORK_STATUS"] = work_status
+    if re.search(r"(?i)\b(?:todo|tbd|placeholder|fill this|n/?a)\b", "\n".join(result.values())):
+        return None
+    result["COMMIT_SHA"] = result["COMMIT_SHA"].strip().lower()
     return result

@@ -20,7 +20,10 @@ def register(client, repo, name):
 def new_task(client, title, risk="LOW"):
     r = client.post("/api/tasks", data={"title": title, "risk_profile": risk}, follow_redirects=False)
     assert r.status_code == 303
-    return [t["id"] for t in client.get("/api/tasks").json() if t["title"] == title][0]
+    task_id=[t["id"] for t in client.get("/api/tasks").json() if t["title"] == title][0]
+    # These tests model Tasks already present before the V2 migration.
+    client.app.state.db.execute("UPDATE tasks SET task_contract_version='V1' WHERE id=?",(task_id,))
+    return task_id
 
 
 def add_workspace(client, tid, rid, agent="claude", role="Backend"):

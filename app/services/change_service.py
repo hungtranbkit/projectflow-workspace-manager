@@ -53,7 +53,7 @@ class ChangeService:
 
     def create(self, *, title: str, description: str = "", change_type: str = "FEATURE",
                risk_level: str = "NORMAL", project_id: int | None = None,
-               parent_change_id: int | None = None) -> int:
+               parent_change_id: int | None = None, owner_name: str = "") -> int:
         title = (title or "").strip()
         if not title:
             raise ChangeError("Change title is required")
@@ -67,9 +67,10 @@ class ChangeService:
             raise ChangeError(f"Unknown project_id: {project_id}")
         if parent_change_id is not None and not self.get(parent_change_id):
             raise ChangeError(f"Unknown parent_change_id: {parent_change_id}")
+        owner_name = (owner_name or "").strip()[:120]
         cid = self.db.execute(
-            "INSERT INTO changes(project_id,title,description,change_type,risk_level,lifecycle_state,parent_change_id) VALUES(?,?,?,?,?,'NEW',?)",
-            (project_id, title, (description or "").strip(), change_type, risk_level, parent_change_id),
+            "INSERT INTO changes(project_id,title,description,change_type,risk_level,lifecycle_state,parent_change_id,owner_name) VALUES(?,?,?,?,?,'NEW',?,?)",
+            (project_id, title, (description or "").strip(), change_type, risk_level, parent_change_id, owner_name),
         )
         self.db.event("change", cid, "CHANGE_CREATED", f"type={change_type} risk={risk_level}"
                        + (f" parent={parent_change_id}" if parent_change_id else ""))

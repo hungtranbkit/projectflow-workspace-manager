@@ -1,0 +1,131 @@
+# Owner approved 2026-11-23. Additional scheduled-recovery/model-policy
+# criteria below were explicitly authorized by the owner on 2026-11-25.
+schema_version: 1
+id: FEAT-ORCHESTRATION-STANDARD
+title: Goal-Level Orchestration Closure and Recovery
+version: 1
+status: approved
+summary: >
+  Proposed Change/Task contract, derived goal closure, safe bounded
+  continuation after confirmed process exit, existing-service
+  reconciliation, and user-visible evidence flow. Does not replace
+  TaskDecisionService, SpecGate, existing agent execution, or review,
+  QA, CI, integration, merge, and deployment gates.
+scope:
+  includes:
+    - Seven-section coding-task contract validation at every dispatch boundary
+    - Goal-level status and next action derived from authoritative records
+    - One-owner, one-live-session continuation after confirmed exit
+    - Bounded retry with backoff and idempotency across concurrent tick/restart
+    - Feature-flagged reconciliation within AutonomousExecutionService
+    - Leased scheduled recovery action through the existing CleanupWorker
+    - Event-driven, schema-validated recovery advice using the existing provider abstraction
+    - Change/Task UI joining approved spec, plan, agent, verification, and acceptance evidence
+  excludes:
+    - New agent runner, scheduler daemon, status ledger, or unauthenticated mutation endpoint
+    - Changes to QualityGate security policy or production deployment enablement
+    - Agent self-acceptance or bypass of required human/review/QA/merge gates
+requirements:
+  - id: REQ-OS-001
+    text: >
+      Every new coding Task dispatch requires SpecGate PASS with an approved
+      feature, requirement, and acceptance trace and a meaningful unique
+      seven-section task contract; denial occurs before side effects.
+  - id: REQ-OS-002
+    text: >
+      Goal state and next action are derived from authoritative Task,
+      SpecGate, session, test, review, QA, integration, merge, and deployment
+      evidence; process exit never implies Task completion or acceptance.
+  - id: REQ-OS-003
+    text: >
+      At most one active coding session exists per goal. Retry is allowed
+      only after confirmed exit, safe workspace, no competitor, and available
+      provider, at most twice with backoff and durable attempt evidence.
+  - id: REQ-OS-004
+    text: >
+      Unknown/stale liveness, offline provider, quota, auth failure, exhausted
+      retry, or unsafe ownership yields BLOCKED/UNKNOWN with a named owner
+      and next action and never triggers an unsafe retry loop.
+  - id: REQ-OS-005
+    text: >
+      Reconciliation is integrated into the existing autonomous service,
+      feature-flagged off by default, idempotent across concurrent ticks and
+      restart, and launches only the next eligible DAG Task.
+  - id: REQ-OS-006
+    text: >
+      The authenticated mobile Change/Task view displays current spec trace,
+      prompt readiness, task/node/session, fresh liveness, evidence, gates,
+      blocker, and next action while escaping user content and excluding secrets.
+  - id: REQ-OS-007
+    text: >
+      The existing scheduled reconciliation loop performs bounded recovery
+      actions under a durable single-owner lease. An expired owner cannot
+      dispatch after successor takeover; uncertain ownership fails closed.
+  - id: REQ-OS-008
+    text: >
+      Ambiguous recovery decisions may use the existing authorized provider
+      abstraction with bounded sanitized evidence and strict structured
+      output; deterministic policy validates every proposal, unavailable
+      providers fall back safely, and model output cannot execute shell or
+      bypass existing dispatch/review/release gates.
+acceptance_criteria:
+  - id: AC-OS-001
+    text: >
+      Invalid spec links and incomplete, placeholder, duplicate-header, or
+      title-only contracts are denied at each dispatch boundary with
+      structured missing reasons and zero workspace/process/session effects;
+      historical V1 tasks remain readable.
+  - id: AC-OS-002
+    text: >
+      Concurrent tick and restart tests prove no duplicate process and
+      preserve a single owner and pinned task contract.
+  - id: AC-OS-003
+    text: >
+      An EXITED/IDLE process with missing report/tests/QA is never DONE and
+      derives VERIFY_OR_RESUME with exact missing acceptance; retries stop
+      after two attempts and unsafe provider/liveness conditions block.
+  - id: AC-OS-004
+    text: >
+      Tests, QA, review, integration, merge, deployment, and user acceptance
+      remain distinct evidence; an agent cannot self-accept.
+  - id: AC-OS-005
+    text: >
+      At 375px and 428px the authenticated view has no horizontal overflow,
+      shows real evidence/blockers/actions, and safely renders XSS test input.
+  - id: AC-OS-006
+    text: >
+      An isolated real canary demonstrates approved trace, dispatch, fresh
+      session progress, test/report evidence, recovery bound, QA outcome,
+      and no duplicate session; production remains untouched until all gates pass.
+  - id: AC-OS-007
+    text: >
+      Two controllers sharing one database, lease expiry during recovery,
+      takeover, and process restart prove only the current owner can cross
+      the dispatch boundary; the existing scheduled worker invokes one
+      bounded recovery or DAG action per tick.
+  - id: AC-OS-008
+    text: >
+      A 12-case replay evaluates identical sanitized incident inputs across
+      available strong reasoning candidates. Resolved model/version and
+      requested effort are verified from provider receipts; malformed or
+      unsafe proposals, missing provider receipt, exhausted budget, or
+      unavailable auth cause deterministic safe fallback with no duplicate
+      dispatch or gate bypass.
+invariants:
+  - id: INV-OS-001
+    text: >
+      TaskDecisionService and SpecGate remain the only authorities for
+      Task acceptance and spec dispatch authorization.
+  - id: INV-OS-002
+    text: >
+      A process exit, heartbeat, agent-authored report, or activity count
+      alone never proves accepted completion.
+  - id: INV-OS-003
+    text: >
+      Existing auth, tenant boundaries, QualityGate rules, trusted launchers,
+      and production deployment disabled configuration remain intact.
+  - id: INV-OS-004
+    text: >
+      A model is an untrusted advisor. Only deterministic code with a current
+      lease, current task state, existing authorization, and existing gate
+      evidence may execute an action; no model output is a shell command.

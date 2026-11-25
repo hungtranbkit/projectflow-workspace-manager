@@ -1,0 +1,179 @@
+# ORCH-STD-20261123 Result
+
+**Original post-approval snapshot (2026-11-23):** IN_PROGRESS — owner approval was recorded; implementation and deployment had not yet been attempted at that point.
+
+**Current state:** `FAILED_SAFE` — scoped implementation and verification are committed, but the staged canary did not produce a completion report or pass Review. Live deployment was withheld.
+
+> Historical snapshot: the FAILED_SAFE state below accurately records the earlier approval blocker and has not been rewritten as a test result. On 2026-11-23 the human owner approved the exact proposed FeatureSpec by replying “thống nhất đi”. That decision supersedes the approval blocker only. T03–T09 remain unverified until their work and gates are completed. See [APPROVAL.md](APPROVAL.md).
+
+> The gate table below is the original pre-approval snapshot. Its FAILED_SAFE blocker was superseded by the recorded owner decision; it is retained for audit and is not the current rollout status.
+
+## Gate results
+
+| Gate | Result | Evidence / reason |
+|---|---|---|
+| T01 | PASS | Correct integration branch/base and clean starting tree; existing user service active; local and public HTTP 200; DB 1,372,160 bytes, integrity `ok`; online backup drill integrity `ok`; 134G disk available; no test runner observed. See EVIDENCE.json. |
+| T02 | PASS | SPEC, PLAN, TASKS, ACCEPTANCE, RUNBOOK and PROJECT_CONTEXT created before implementation. SPEC/PLAN SHA256 recorded below. DRAFT FeatureSpec submitted with approval BLOCKED. |
+| T03 | BLOCKED | Strict seven-section V2 contract is not covered by current approved specs. `FEAT-ORCHESTRATION-STANDARD` is `draft`; SpecGate/side-effect tests not run. |
+| T04 | BLOCKED | Automatic goal recovery, durable attempts and retry scheduling exceed approved scope. No code changed. |
+| T05 | BLOCKED | Existing observability spec expressly excludes writes/retries/scheduling. New reconciliation behavior awaits approval. |
+| T06 | BLOCKED | Goal-level combined UI behavior is in the DRAFT proposal; no UI work or browser QA. |
+| T07 | BLOCKED | Staging depends on approved implementation scope; no tests/build/server/canary run. |
+| T08 | BLOCKED / NOT ATTEMPTED | T07 and rollback gates did not pass. Live checkout, DB, systemd unit, service, and Cloudflare were not changed. |
+| T09 | PARTIAL | This result, EVIDENCE.json and handoff are committed in documentation-only commit `0bdf15a` on the assigned integration branch; no application code is included. |
+
+## A1–A10
+
+| ID | State | Proof |
+|---|---|---|
+| A1 | PASS for preservation | Base is strict SHA `26c1d3c45322818d30ddff1948684e6be3d095fd`; no strict application/security code or live artifacts changed. |
+| A2 | PASS | Required documents created before code; no code was started. Hashes below. |
+| A3 | BLOCKED | DRAFT approval absent; no dispatch gate implementation/test. |
+| A4 | BLOCKED | No recovery implementation/test. |
+| A5 | BLOCKED | No recovery implementation/test. |
+| A6 | PASS for preservation only | Existing evidence/gate code was not changed; feature behavior not exercised. |
+| A7 | BLOCKED | No UI changes/browser QA. |
+| A8 | BLOCKED | No implementation, test suite, build, smoke, staging, or canary. |
+| A9 | BLOCKED / NOT ATTEMPTED | Live remains on strict release; active unit CWD `/home/dell/workspace/projectflow-qualitygate-release-20261122-strict`; public HTTPS `/` returned 200 at preflight. |
+| A10 | PARTIAL | Exact preflight evidence and rollback constraints documented. No live rollback was needed; deployment/rollback drill not run. |
+
+## Original pre-approval planning hashes
+
+- SPEC.md: `ae81e9b4f97bb4b3d8dd909e28f2b78cb8cc9f3887363fd4c7ba44502a8e5ef1`
+- PLAN.md: `f6ff1542d436b4e0b250c9f53068dc861d3530558a366080e3f11a5b060bb20f`
+
+The required OWNER_APPROVED state header changed SPEC.md after the original lock; its current SHA256 is `2370e35ca555a0c0aef792066c549ecc2b78cc6000d18af121145153cc17fa54`. PLAN.md remains unchanged.
+
+## Original blocker (superseded by owner approval)
+
+The approved feature set does not authorize the requested dispatch contract validator or automatic post-exit reconciliation. `FEAT-AGENT-OBSERVABILITY` excludes write/retry/scheduling behavior; `FEAT-AGENT-EXECUTION` specifies the existing manual lifecycle but not this new recovery policy. Per the repository's Spec-Driven Development rule, implementation must wait for the spec owner to approve `FEAT-ORCHESTRATION-STANDARD`. Do not change its `status: draft` to approved without that decision. After approval, resume at T03 in this same integration worktree, preserve the recorded hashes, and continue through T09.
+
+No test command was run; therefore no test pass is claimed. `git diff --check` flagged extra blank lines at EOF in newly added Markdown files; the locked SPEC/PLAN documents were left unchanged. There was no deployment or canary. The public site is live on the strict baseline, not on this integration branch.
+
+## Chronological approval update — 2026-11-23
+
+The human owner approved `FEAT-ORCHESTRATION-STANDARD` for implementation with the exact affirmative reply “thống nhất đi”. Only its canonical `status` changed from `draft` to `approved`; all requirement, acceptance, invariant, and scope text remains unchanged. Original DRAFT FeatureSpec SHA256: `473dec993cbfbec81ec37c862ea3801b290bea6740aa7158d4a6f9a0e615221b`; approved SHA256: `fb99357e910a39267aaf774a4e674a10ca6fc5e4fa18e955c46a78f563b639d4`. This approval does not mean any implementation or test has passed.
+
+SpecRegistry validation loaded all six requirements and six acceptance criteria, and SpecGate returned PASS for a task linked to `REQ-OS-001`, `AC-OS-001`, and `INV-OS-001`. No application code has changed.
+
+At the approval-only commit, no application code had changed. The following is the later implementation and staging result; the pre-approval tables above remain historical snapshots.
+
+## Current implementation result — 2026-11-23
+
+**Current state: `FAILED_SAFE`.** The approved feature was implemented in the assigned integration worktree. The strict live service was not changed. The isolated canary proved approved Spec/V2 dispatch, actual Codex launch, code generation, ProjectFlow recorded tests, restart recovery, retry backoff/cap, and honest blocked status. It did not produce a completion report or pass Review, so it is not an accepted Task and does not satisfy the full staged canary gate.
+
+### Current T01–T09
+
+| Gate | Result | Evidence |
+|---|---|---|
+| T01 | PASS | Integration branch and strict base verified. Live service remains active on the strict release; current local and public HTTP checks returned 200. Live DB path, size, SQLite integrity, online-backup capability, disk, sessions and competing runners were inspected before implementation. No live DB/unit/source edits. |
+| T02 | PASS | Owner approval-only commit `3965781`; canonical status changed only draft→approved. Approval and original/new SHA256 values are in `APPROVAL.md`. The pre-approval SPEC hash is locked in the OWNER_APPROVED header; current SPEC hash is `2370e35ca555a0c0aef792066c549ecc2b78cc6000d18af121145153cc17fa54`. PLAN remains byte-identical at `f6ff1542d436b4e0b250c9f53068dc861d3530558a366080e3f11a5b060bb20f`. Required docs existed before code. |
+| T03 | PASS | V2 contract and SpecGate are evaluated before workspace/session/automation side effects. New Tasks default to V2; preexisting history is tagged V1. Negative/positive gate tests pass. |
+| T04 | PASS | Existing autonomous service/cleanup worker perform single-owner reconciliation. Startup-reconciled FAILED is treated as a confirmed process loss; same Task was retried twice in staging, then `RETRY_BUDGET_EXHAUSTED` blocked further launch. Concurrent executor, restart, backoff, provider-unknown and deduplicated-block tests pass. |
+| T05 | PASS | Change and Task pages show Spec trace, prompt readiness, task/session state, fresh liveness, evidence and blocker/next step. The mobile Change page prioritizes the actual named blocker and suppresses a conflicting legacy “Not started yet” summary when Tasks exist. |
+| T06 | PASS | Existing tests/review/QA/merge/deploy evidence remain separate. Canary risk is LOW, so QA is NOT_REQUIRED; no verification report or Review PASS exists; merge remains NOT_STARTED; Task remains ACTIVE. Codex did not self-accept. |
+| T07 | FAIL | Disposable staging HTTP 48717 returned 200. Change #1 / Task #1 used approved FeatureSpec links and a full V2 contract; ProjectFlow launched real Codex. Codex committed calculator code at `48eb7fd`; ProjectFlow preflight and test rows PASS (3 tests) at that exact commit. Across two automatic retries, no completion report was produced. After the retry cap the Change is BLOCKED with owner and next action; Task is not DONE. No review report exists. This fails the required canary completion/report criterion. |
+| T08 | BLOCKED / NOT ATTEMPTED | Canary completion and Review evidence are missing, so deployment preconditions failed. Live strict service, DB, systemd unit, port, public origin, secrets and Cloudflare were left untouched. No rollback was needed. |
+| T09 | PASS after evidence commit | Current result, evidence, and handoff are included with scoped code/tests on the integration branch. No force-push, PR merge, GitHub Actions, or unrelated cleanup. |
+
+### Current A1–A10
+
+| ID | State | Proof |
+|---|---|---|
+| A1 | PASS | Strict base SHA `26c1d3c45322818d30ddff1948684e6be3d095fd`; strict QualityGate/auth/security source and live artifacts preserved. Security-focused tests passed. |
+| A2 | PASS | Pre-code Spec, Plan, Tasks, Acceptance, Runbook; locked hashes above; explicit human owner approval record. |
+| A3 | PASS | Approved feature/requirement/acceptance trace and seven-section task contract gate; side-effect-denial and V1 compatibility tests passed. |
+| A4 | PASS | One active executor per Change, concurrent dispatch test, cleanup-worker same-Task retries, startup recovery, and two-attempt cap evidence. |
+| A5 | PASS | EXITED/FAILED without report remained ACTIVE, never DONE. Staging shows two attempts then explicit retry-exhausted owner blocker, no third launch. |
+| A6 | PASS | Canary test evidence is independent from report/review/QA/merge. LOW-risk QA is explicitly NOT_REQUIRED; Review/merge remain missing. |
+| A7 | PASS | Playwright through local Chrome CDP at 400 CSS px: HTTP 200, no horizontal overflow, no page errors, accurate blocker/owner/Spec trace/next step visible; XSS regression test passed. Screenshot `/tmp/orch-final-change-mobile.png`. Browser Harness timed out and a registered Chrome DevTools tool was unavailable, so QA used Playwright/DOM and screenshot evidence. |
+| A8 | FAIL | Combined security/dispatch/recovery/UI suite and preflight/build/smoke/compile/diff checks passed, but the required real staged canary lacked completion report and Review evidence. Docker paths were skipped behind an unavailable-daemon stub and are not claimed as PASS. |
+| A9 | BLOCKED | Conditional live deployment was correctly withheld because A8/T07 did not pass. Existing live local/public HTTP remain 200 on the strict release. |
+| A10 | PASS | Evidence and implementation commit are scoped to integration; staging log/database/session/test evidence retained; two retries, no duplicate active session, live artifacts untouched, so no rollback was needed. |
+
+### Verification record
+
+- Combined focused command used the project venv and a Docker stub that returns unavailable: dispatch, SpecGate, supervisor, recovery, autonomous execution, auth, rate-limit, secrets, QualityGate and simple UI tests: **172 passed, exit 0**. Final focused updates passed: 3 recovery tests, then 2 Change UI/XSS tests. One interim test assertion failed because it counted two distinct blocker codes; the assertion was narrowed to the retry-budget event and rerun successfully.
+- Final `scripts/preflight.sh`, `scripts/build.sh`, `scripts/smoke.sh`, `python -m compileall -q app tests`, and `git diff --check`: exit 0. Build reported `source distribution app`; smoke reported 1 passed. Deprecation warnings remain from installed FastAPI/Starlette/SlowAPI and Python `pty.fork()`.
+- Staging real-provider facts: `codex login status` was authenticated before launch. The initial session, a same-Task retry, and a second same-Task retry were real PTYs. Session exit/restart evidence and exact retry events are in the disposable staging DB. ProjectFlow recorded `python -m compileall -q .` PASS and `pytest -q tests/test_calculator.py` PASS, each pinned to `48eb7fd`. No provider calls were mocked for the canary; unit edge cases use mocks.
+- A read-only pytest invocation was accidentally issued from the live strict checkout; its process handle expired before exact exit capture. The integration-only path was absent in that checkout, and subsequent inspection showed strict SHA unchanged and no tracked diff. Existing untracked `.venv/` and `rollback-before-strict-20261122/` paths were preserved.
+
+### Rollback and next actions
+
+No live deployment or rollback was attempted. The original systemd service still points at `/home/dell/workspace/projectflow-qualitygate-release-20261122-strict`; localhost and public HTTPS `/` returned 200. Three priorities: (1) owner/reviewer inspects canary commit `48eb7fd` and records the missing report/review decision through existing gates; (2) investigate why the real Codex canary exhausted retries before producing its completion report, then repeat only under the existing retry policy; (3) rerun staging and live DB migration/backup checks, then reconsider T08 only after every prerequisite passes.
+
+
+## Final scoped commit — 2026-11-23
+
+Implementation and evidence commit: `5335cbecc06b740148621d7f30faf437aa9f3f5e` (`feat: add bounded spec-gated goal orchestration`), on `integration/orchestrator-v1-20261123`. Owner approval remains separately recorded in `3965781`. The commit does not deploy the branch. Final worktree verification is recorded in `EVIDENCE.json`; live service remains on the strict release.
+
+### Completion-report follow-up — 2026-11-23
+
+Read-only inspection of the preserved staging DB and session evidence distinguishes execution from report delivery:
+
+- Session #1 was delivered at 08:49:21 UTC and exited 09:03:19 UTC without code work. Session #2 was delivered 09:03:31 UTC; its transcript was absent after the staging server restart, while the repository proves Codex committed `48eb7fdd0990d7e0b2f3318b1eb830ba2b8f6d59` at 09:04:20 UTC and ProjectFlow recorded compileall plus 3 passing calculator tests at that SHA. This is real execution, despite the prompt-delivery receipt not being a completion acknowledgement.
+- Session #3 was delivered 09:12:06 UTC and exited 09:15:24 UTC. Its archived transcript contains Codex's `state=done` UI marker, but no completion-report fields. There are zero verification reports and zero review rows. Thus the report was not emitted in session #3; session #2's output capture was separately lost on restart. Existing report parsing/API cannot recover proof that was never emitted or persisted.
+- The original footer used `TESTS_RUN` rather than the canonical `AUTOMATED_TESTS` and did not require `FILES_CHANGED` or exact commit SHA. The current normal route stamps the current HEAD on user submission; it does not bind evidence to an originating session. No agent self-approval or Task DONE was recorded.
+
+A follow-up patch now adds an exact ten-field report instruction, an opt-in strict parser, and graceful-shutdown PTY tail flushing. Parser unit cases pass (2 passed). Compileall, preflight, build, and diff-check exit 0. The broader legacy report/session/recovery suites fail before their behavioral assertions because their title-only task fixtures are correctly refused by the pre-existing V2 dispatch gate (`TASK_CONTRACT_INCOMPLETE`); these are not counted as implementation passes. `scripts/smoke.sh` exited 4 because it invokes an interpreter without FastAPI, so smoke is unverified in the specified venv. No same-environment strict-base comparison or fresh canary was run.
+
+This patch does not yet connect strict parsed reports to persisted session/task/commit/test evidence or idempotent verification-report ingestion. Therefore the follow-up remains FAILED_SAFE, no new real canary was launched, no scoped commit was made, and live service remains untouched (local and public HTTP 200). Next: wire and test evidence-bound ingestion plus restart recovery; update legacy test fixtures to valid approved Spec/V2 contracts without weakening gates; rerun focused/security suites and smoke in the project venv; then launch a fresh isolated real-Codex canary and require Review independently.
+
+
+The follow-up patch now also adds V41 nullable `source_session_id` / `report_sha256` linkage with a unique source-session index and reconciliation-time ingestion into the existing `verification_reports` table. Ingestion requires the task/session/workspace linkage, delivered prompt receipt, strict report, complete V2 contract, approved SpecGate result, exact report SHA = current clean HEAD, exact changed-file set inside the prompt SCOPE, and an existing PASS/exit-0 test row at that SHA. It does not create Review evidence. Security/AuthN/AuthZ/observability/smoke pytest subset passed (170 tests collected); V2 dispatch/SpecGate suites exited 0. This still lacks direct tests for the ingestion success/rejection/idempotency boundary, so the new canary and commit remain withheld.
+
+## Completion-report ingestion implementation and canary — 2026-11-23
+
+**Current state: `FAILED_SAFE`.** The report-ingestion implementation and local regression checks pass, but the one new real-provider canary did not emit the required report. Live deployment remains withheld.
+
+### Implementation and verification
+
+- `app/services/completion_report_parser.py` adds a strict parser for one complete, delimited, ordered ten-field report. It rejects missing/duplicate headings, incomplete blocks, placeholders, and invalid commit SHAs. The existing manual/V1 parser remains available.
+- `app/services/agent_session_manager.py` flushes the owned, redacted PTY buffer on process exit and graceful shutdown. `app/db.py` migration V41 adds nullable `source_session_id` and `report_sha256` with a unique partial source-session index.
+- `app/main.py`'s existing cleanup reconciliation now validates session/task/workspace/prompt identity, V2 and SpecGate readiness, exact clean Git HEAD, exact changed-file list and explicit in-scope paths, plus a real PASS/exit-0 ProjectFlow test row at that SHA. It atomically persists the existing `verification_reports` row and READY-for-independent-review transition. Reconciliation replay is idempotent. The agent cannot create Review, QA, merge, or acceptance evidence.
+- `tests/test_executor_report_ingestion.py` covers the complete transcript, ANSI/CRLF and partial tails, missing/duplicate fields, wrong SHA, out-of-scope paths (including a longer path sharing an allowed prefix), one-row/idempotent persistence, missing transcript after restart, real code plus passing tests without a report, and the unchanged manual report route.
+- Final focused session/dispatch/recovery/report suite: **54 passed, exit 0**. Strict AuthN/AuthZ/observability/QualityGate suite: **183 passed, 1 existing skip, exit 0**. `compileall`, preflight, build, venv smoke (1 passed), and `git diff --check` all exited 0. Full output is at `/tmp/orch-report-ingestion-verification-final-20261123.log`.
+
+### New isolated real Codex canary
+
+Staging at `http://127.0.0.1:48718` returned HTTP 200 for health, root, and Task detail. It used a new disposable DB/root and one approved V2 task (Change #1 / Task #1, Feature `FEAT-ORCHESTRATION-STANDARD`, `REQ-OS-001`, `AC-OS-001`, `INV-OS-001`). One authenticated real Codex PTY session (Session #1) produced a scoped calculator subtraction commit `15f9347621691478e8347e2dad22ca7548136017`. ProjectFlow itself recorded compileall and pytest (5 passed) at exactly that SHA.
+
+The PTY was still live but had no activity since 13:15:28 UTC and no report block. It was stopped through staging's own `/api/sessions/1/stop`; at 13:19:12 UTC it exited 0. Reconciliation recorded only the sanitized blocker `COMPLETION_REPORT_MISSING_OR_INVALID` at [app/main.py](/home/dell/workspace/projectflow-orchestrator-release-v1-20261123/app/main.py:4779), because the real Codex transcript never contained the instructed final block. The strict parser is in [completion_report_parser.py](/home/dell/workspace/projectflow-orchestrator-release-v1-20261123/app/services/completion_report_parser.py:97), and the report contract is in [agent-completion-report.md](/home/dell/workspace/projectflow-orchestrator-release-v1-20261123/templates/agent-completion-report.md:10). The staging DB has **zero** verification reports and **zero** Review rows for the canary. Task #1 remains ACTIVE, not DONE and not Review-ready. This is a real execution/test canary but a **failed report-ingestion canary**; no report was synthesized and no independent review was bypassed. The prior Change #1 / Task #1 canary in port 48717 remains separate historical evidence.
+
+### Current rollout gates and next actions
+
+The real-provider report omission fails the required end-to-end canary criterion, so A8/T07 remain FAIL and A9/T08 remain BLOCKED / NOT ATTEMPTED. Existing live service still reports active with CWD `/home/dell/workspace/projectflow-qualitygate-release-20261122-strict`; latest localhost health and public HTTPS checks both returned 200. No live source, DB, unit, secrets, Cloudflare, or Docker resources were changed; no rollback was needed.
+
+The scoped implementation and regression tests were committed on `integration/orchestrator-v1-20261123` as `a6f1420b4d5b6a5766d7e10e1d09bb0ac29d6e2d` (`fix: ingest verified executor completion reports`). The evidence/handoff finalization is committed separately after that implementation commit. This does not change the failed canary state or authorize deployment.
+
+1. Inspect the new session transcript and diagnose why Codex completed code and tests but omitted the final report.
+2. Run a new isolated one-session real-provider canary that emits a valid report, persists once at the exact commit/test SHA, and stops at REVIEW_REQUIRED.
+3. Obtain independent Review and pass the separate staging migration, backup, and rollback gates before considering live deployment.
+
+## Codex final-output handshake — 2026-11-23 15:44 UTC
+
+**State remains `FAILED_SAFE`.** The supported Codex final-message transport now works end to end through isolated staging, but the real model's final artifact was malformed and was correctly refused. No verification report or Review was created, the Task stayed `ACTIVE`, and the strict live release was not changed.
+
+### Root cause and captured boundary
+
+The prior PTY canary proved prompt delivery and code execution but had no final machine report. The new path uses the installed Codex CLI's supported `codex exec --json --output-last-message <session-file> --yolo -` interface, sends the trusted task prompt through stdin, and captures only that final-message artifact after confirmed process exit. A PTY echo is not report evidence. In the third canary, Codex produced a real final artifact and ProjectFlow captured it, but its closing delimiter was `----- PROJECTFLOW EXECUTOR REPORT END-----` (one missing space before `-----`) instead of the exact contract delimiter `----- PROJECTFLOW EXECUTOR REPORT END -----`. The strict parser rejected it as `COMPLETION_REPORT_MISSING_OR_INVALID`; this is a report-emission format failure, not missing code or tests. The artifact's captured SHA256 was `04c41934f8368db9a78c17caba4f7e257375f6a2fd6ea04141553a8fb8ca6153`.
+
+### Third isolated canary
+
+- Staging URL/port: `http://127.0.0.1:48719` (HTTP 200 while running; stopped after evidence capture).
+- New isolated Change #1 / Task #1 / Workspace #1 / Codex Session #1; one session row only. Approved FeatureSpec `FEAT-ORCHESTRATION-STANDARD`, linked requirement/acceptance, complete V2 prompt. Prompt SHA256: `a17b7477a97023f652207777fd8a97a21bb45e711fb779af1f3519e6ee23472d`.
+- Real Codex created commit `5f2839fa3cfc30e1bd51dc6b70ae9ed719b3a31b`. ProjectFlow recorded compileall and pytest rows PASS at that exact SHA; pytest reported 2 passed.
+- Session exited 0 at `2026-11-23T15:24:26.561036Z`; final artifact capture event was recorded at 15:24:26Z and the parser rejection event at 15:24:27Z. Final-output status was `CAPTURED`; the malformed ending prevented a `verification_reports` row. Review rows: 0. Task status: `ACTIVE`, never `DONE`. No retry or additional provider session was started.
+- This is a real provider invocation and artifact capture, but it is not a passing report-ingestion canary. The fake Codex adapter tests remain test fixtures only.
+
+### Code and verification
+
+Codex V2 tasks now use the allowlisted `codex exec` final-message path, with state-scoped output capture, SHA256 binding, secret-redaction refusal, exact session/task/workspace/commit and changed-file validation, and the existing idempotent `verification_reports` insertion. Successful report ingestion still creates only readiness-for-independent-review; it cannot create Review PASS, QA, merge, deploy, or DONE. Legacy V1 interactive sessions retain their manual report flow. The shared legacy display parser now skips an echoed placeholder template when an earlier valid human report is present.
+
+Using the project venv, the final focused run passed **60 tests** (exit 0), covering executor report ingestion, PTY tail persistence, V2 dispatch, exited-session recovery and V1 completion UI. The focused auth/authorization/observability/QualityGate run passed **183 tests, 1 existing skip** (exit 0). Preflight, source build, venv smoke (1 passed), compileall, and `git diff --check` each exited 0. Exact commands and output are logged at `/tmp/pf-codex-final-handshake-20261123/final-verification.log`; an earlier incorrectly wrapped invocation exited 127 and is preserved in that log before the corrected successful runs. Deprecation warnings from installed Starlette/SlowAPI and Python PTY remain. No full-suite, Docker, Playwright, or independent Review pass is claimed.
+
+### Deployment and next actions
+
+At 15:44 UTC local `/health`, local `/`, and public `https://workspace.mesflow.net/` each returned HTTP 200 on the unchanged strict release. The isolated staging process was stopped and port 48719 refused connections afterward. No production DB, systemd unit, checkout, secrets, Cloudflare or Docker state was modified; no rollback was required. T08 remains blocked because the canary has no valid report and no independent Review. Next priorities: (1) adjust the task-authored report instructions to insist on exact literal delimiters and validate that instruction in dispatch tests; (2) obtain one independently authored valid Review for a report that passes exact SHA/scope/tests, with no further real canary unless separately authorized; (3) only then run the separate DB backup/migration/rollback and release gates before considering live deployment.
+
+The scoped implementation/test commit is `8581caacb18eca395d353b283dd408a4c4430849` (`fix: capture Codex final executor report artifacts`). After the real canary revealed the one-space closing-marker error, the V2 prompt was hardened to explicitly require byte-for-byte copying and call out the exact space before the final dashes (`app/main.py:1793`). The prompt/parser/V1-echo regression check passed 3 tests after that final wording change. This instruction change was not followed by another real provider run; the canary remains FAILED_SAFE.

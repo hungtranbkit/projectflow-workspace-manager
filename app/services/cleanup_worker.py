@@ -21,6 +21,7 @@ class CleanupWorker:
         self.poll_seconds = poll_seconds
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self.on_reconcile = None
 
     def due_sandboxes(self) -> list[dict]:
         return self.db.all(
@@ -82,6 +83,11 @@ class CleanupWorker:
                 self.manager.health_check(running["id"])
             except Exception as exc:
                 self.db.event("sandbox", running["id"], "RECONCILE_HEALTH_CHECK_ERROR", str(exc))
+        if self.on_reconcile:
+            try:
+                self.on_reconcile()
+            except Exception as exc:
+                self.db.event("system", 0, "GOAL_RECONCILIATION_ERROR", type(exc).__name__)
 
     def start(self) -> None:
         self.reconcile()
