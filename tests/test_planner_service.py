@@ -38,6 +38,14 @@ def fake_envelope(plan_dict):
     return {"is_error": False, "subtype": "success", "result": json.dumps(plan_dict)}
 
 
+def set_fake_runner(client, runner):
+    """Inject deterministic behavior at the complete planner invoker boundary."""
+    invoker = client.app.state.planner_service.invoker
+    assert invoker is not None
+    invoker.which = lambda name: "/test-only/claude" if name == "claude" else None
+    invoker.runner = runner
+
+
 def set_fake_plan(client, plan_dict):
     envelope = fake_envelope(plan_dict)
 
@@ -47,7 +55,7 @@ def set_fake_plan(client, plan_dict):
             stdout = json.dumps(envelope)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = fake_runner
+    set_fake_runner(client, fake_runner)
 
 
 def minimal_valid_plan(**overrides):
@@ -178,10 +186,29 @@ def test_malformed_envelope_produces_execution_failed_no_plan_row(client, git_re
             stdout = "not json at all {{{"
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = bad_runner
+    set_fake_runner(client, bad_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLANNER_EXECUTION_FAILED"
     assert r.json()["plan"] is None
+    assert client.get(f"/api/changes/{cid}/plans").json() == []
+
+
+def test_unavailable_claude_fails_closed_before_runner_or_plan(client, git_repo):
+    root, repo = git_repo
+    rid = register(client, repo, "demo")
+    cid = new_change(client, "Unavailable planner stays fail closed", project_id=rid)
+    client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "VIBE"})
+    calls = []
+    invoker = client.app.state.planner_service.invoker
+    invoker.which = lambda name: None
+    invoker.runner = lambda *args: calls.append(args)
+
+    response = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
+
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "PLANNER_EXECUTION_FAILED"
+    assert "claude CLI not found in PATH" in response.json()["message"]
+    assert calls == []
     assert client.get(f"/api/changes/{cid}/plans").json() == []
 
 
@@ -202,7 +229,7 @@ def test_planner_reports_allowlisted_provider_usage_limit_without_raw_payload(cl
             stderr = ""
         return R()
 
-    client.app.state.planner_service.invoker.runner = limited_runner
+    set_fake_runner(client, limited_runner)
     response = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert response.status_code == 200
     assert response.json()["outcome"] == "PLANNER_EXECUTION_FAILED"
@@ -224,7 +251,7 @@ def test_malformed_inner_result_produces_output_invalid_no_plan_row(client, git_
             stdout = json.dumps(envelope)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    set_fake_runner(client, runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLANNER_OUTPUT_INVALID"
     assert client.get(f"/api/changes/{cid}/plans").json() == []
@@ -573,7 +600,7 @@ def test_planner_retries_once_with_validator_errors_and_canonical_ids(client, gi
             stdout = replies.pop(0)
         return R()
 
-    client.app.state.planner_service.invoker.runner = sequence_runner
+    set_fake_runner(client, sequence_runner)
     response = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert response.status_code == 200, response.text
     assert response.json()["outcome"] in ("PLAN_READY", "HUMAN_DECISION_REQUIRED")

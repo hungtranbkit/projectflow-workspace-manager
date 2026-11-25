@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="3" time="5.307" timestamp="2026-11-26T04:27:28.913561+07:00" hostname="task-runner"><testcase classname="tests.test_planner_service" name="test_valid_output_produces_plan_ready" time="1.348"><failure message="AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY'&#10;  &#10;  - PLAN_READY&#10;  + PLANNER_EXECUTION_FAILED">client = &lt;starlette.testclient.TestClient object at 0x713060d78c20&gt;
+git_repo = (PosixPath('$PYTEST_TMP/test_valid_output_produces_pla0/root'), PosixPath('$PYTEST_TMP/test_valid_output_produces_pla0/root/demo'))
+
+    def test_valid_output_produces_plan_ready(client, git_repo):
+        cid, r = create_and_plan(client, git_repo, profile="VIBE")
+&gt;       assert r.json()["outcome"] == "PLAN_READY"
+E       AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY'
+E
+E         - PLAN_READY
+E         + PLANNER_EXECUTION_FAILED
+
+tests/test_planner_service.py:165: AssertionError</failure></testcase><testcase classname="tests.test_planner_service" name="test_plan_create_and_revision_numbering" time="1.417"><failure message="TypeError: 'NoneType' object is not subscriptable">client = &lt;starlette.testclient.TestClient object at 0x713060d6b4d0&gt;
+git_repo = (PosixPath('$PYTEST_TMP/test_plan_create_and_revision_0/root'), PosixPath('$PYTEST_TMP/test_plan_create_and_revision_0/root/demo'))
+
+    def test_plan_create_and_revision_numbering(client, git_repo):
+        cid, r = create_and_plan(client, git_repo)
+        assert r.status_code == 200
+        plan1 = r.json()["plan"]
+&gt;       assert plan1["revision"] == 1
+               ^^^^^^^^^^^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/test_planner_service.py:77: TypeError</failure></testcase><testcase classname="tests.test_planner_service" name="test_malformed_envelope_produces_execution_failed_no_plan_row" time="2.418" /></testsuite></testsuites>

@@ -1,0 +1,46 @@
+FF.                                                                      [100%]
+=================================== FAILURES ===================================
+____________________ test_valid_output_produces_plan_ready _____________________
+
+client = <starlette.testclient.TestClient object at 0x713060d78c20>
+git_repo = (PosixPath('$PYTEST_TMP/test_valid_output_produces_pla0/root'), PosixPath('$PYTEST_TMP/test_valid_output_produces_pla0/root/demo'))
+
+    def test_valid_output_produces_plan_ready(client, git_repo):
+        cid, r = create_and_plan(client, git_repo, profile="VIBE")
+>       assert r.json()["outcome"] == "PLAN_READY"
+E       AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY'
+E
+E         - PLAN_READY
+E         + PLANNER_EXECUTION_FAILED
+
+tests/test_planner_service.py:165: AssertionError
+___________________ test_plan_create_and_revision_numbering ____________________
+
+client = <starlette.testclient.TestClient object at 0x713060d6b4d0>
+git_repo = (PosixPath('$PYTEST_TMP/test_plan_create_and_revision_0/root'), PosixPath('$PYTEST_TMP/test_plan_create_and_revision_0/root/demo'))
+
+    def test_plan_create_and_revision_numbering(client, git_repo):
+        cid, r = create_and_plan(client, git_repo)
+        assert r.status_code == 200
+        plan1 = r.json()["plan"]
+>       assert plan1["revision"] == 1
+               ^^^^^^^^^^^^^^^^^
+E       TypeError: 'NoneType' object is not subscriptable
+
+tests/test_planner_service.py:77: TypeError
+=============================== warnings summary ===============================
+../..$VENV/lib/python3.14/site-packages/fastapi/testclient.py:1
+  $VENV/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../..$VENV/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_planner_service.py: 33 warnings
+  $VENV/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_planner_service.py::test_valid_output_produces_plan_ready
+FAILED tests/test_planner_service.py::test_plan_create_and_revision_numbering
+
+COMMAND_EXIT=1
