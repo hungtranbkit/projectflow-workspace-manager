@@ -5,3 +5,6 @@ __pycache__/
 data/*.db
 data/*.db-*
 data/logs/
+
+# fast-anything generated recordings, ports, and local build caches
+.fast/
