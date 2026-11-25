@@ -1,0 +1,2 @@
+{% extends "base.html" %}{% block title %}Quản gia ProjectFlow{% endblock %}
+{% block content %}<section class="card"><h2>Truy cập quản gia</h2><form action="/steward/login" method="post"><label>Mã truy cập một lần <input name="code" type="password" autocomplete="one-time-code" required maxlength="43"></label> <button>Đăng nhập</button></form></section>{% endblock %}
