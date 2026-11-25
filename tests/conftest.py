@@ -93,6 +93,9 @@ NGINX_COMPOSE = """
 services:
   app:
     image: nginx:1.28-alpine
+    # Most fixtures test lifecycle/HTTP behavior, not network allocation.
+    # Reuse Docker's bridge instead of consuming a host-wide default subnet.
+    network_mode: bridge
     ports:
       - "${WM_PORT_APP}:80"
 """

@@ -44,7 +44,8 @@ def test_wizard_shows_the_latest_sandbox_not_an_old_closed_one(client, tmp_path)
     # First sandbox, now closed (a previous execution).
     client.post(f"/api/tasks/{tid}/workspaces/{w['id']}/create-sandbox", data={}, follow_redirects=False)
     old_sb = client.get("/api/sandboxes").json()[0]
-    client.app.state.db.execute("UPDATE sandboxes SET status='CLOSED' WHERE id=?", (old_sb["id"],))
+    client.app.state.sandboxes.cleanup(old_sb["id"], force=True)
+    assert client.app.state.db.one("SELECT status FROM sandboxes WHERE id=?", (old_sb["id"],))["status"] == "CLOSED"
 
     # A genuinely new sandbox for the same workspace (simulating Restart-
     # after-CLOSED producing a fresh row, or a rebuild flow) -- higher id,
