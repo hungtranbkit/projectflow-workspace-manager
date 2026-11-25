@@ -1,0 +1,43 @@
+{
+  "db": "/tmp/pf83-v2-d11-final-fixtures/test_backend_and_client_test_t0/test.db",
+  "operations": [
+    [
+      "PROVISION",
+      "SUCCESS",
+      0,
+      " Container wm-backend-repo-agent_workspace-1-237f1a-app-1 Creating \n Container wm-backend-repo-agent_workspace-1-237f1a-app-1 Created \n Container wm-backend-repo-agent_workspace-1-237f1a-app-1 Starting \n Container wm-backend-repo-agent_workspace-1-237f1a-app-1 Started \n"
+    ],
+    [
+      "PROVISION",
+      "SUCCESS",
+      0,
+      " Container wm-backend-repo-task_integration-1-006e83-app-1 Creating \n Container wm-backend-repo-task_integration-1-006e83-app-1 Created \n Container wm-backend-repo-task_integration-1-006e83-app-1 Starting \n Container wm-backend-repo-task_integration-1-006e83-app-1 Started \n"
+    ],
+    [
+      "CLEANUP",
+      "SUCCESS",
+      0,
+      " Container wm-backend-repo-task_integration-1-006e83-app-1 Stopping \n Container wm-backend-repo-task_integration-1-006e83-app-1 Stopped \n Container wm-backend-repo-task_integration-1-006e83-app-1 Removing \n Container wm-backend-repo-task_integration-1-006e83-app-1 Removed \n"
+    ],
+    [
+      "CLEANUP",
+      "SUCCESS",
+      0,
+      " Container wm-backend-repo-agent_workspace-1-237f1a-app-1 Stopping \n Container wm-backend-repo-agent_workspace-1-237f1a-app-1 Stopped \n Container wm-backend-repo-agent_workspace-1-237f1a-app-1 Removing \n Container wm-backend-repo-agent_workspace-1-237f1a-app-1 Removed \n"
+    ]
+  ],
+  "cleanup": [
+    {
+      "project": "wm-backend-repo-agent_workspace-1-237f1a",
+      "db_status": "CLOSED",
+      "containers": [],
+      "networks": []
+    },
+    {
+      "project": "wm-backend-repo-task_integration-1-006e83",
+      "db_status": "CLOSED",
+      "containers": [],
+      "networks": []
+    }
+  ]
+}

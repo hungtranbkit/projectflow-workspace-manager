@@ -1,11 +1,13 @@
 schema_version: 1
 id: FEAT-FLEET-PERMISSIONS
 title: Owner-scoped fleet permissions and unattended launch
-version: 1
+version: 2
 status: approved
 summary: Owner-authorized issue 83, 2026-11-25; audit, reversible user setup, isolated launch and real Git delivery evidence.
 scope:
   includes:
+    - Owner V2 requirements 1-14, issuecomment-7151985597: task-scoped product dispatch and existing onboarding
+    - Scoped admin artifacts and durable code-only HP delivery with exact scope and deduplication
     - Versioned audit, setup, check and rollback for owned agent worktrees
     - Noninteractive Git and trusted-project CLI launch with bounded preflight
     - Per-node evidence and task-owned push/readback/cleanup canaries
@@ -21,7 +23,16 @@ requirements:
     text: Launch only explicitly owned isolated worktrees using supported CLI options; checkpoint before dispatch and never infer RUNNING from submission.
   - id: REQ-FP-004
     text: Prove normal task-owned Git push, exact SHA readback and exact-ref cleanup without main writes or force pushes.
+  - id: REQ-FP-005
+    text: Actual trusted UI/API dispatch and onboarding consume the same versioned readiness contract, with task capabilities and durable no-redispatch checkpoints.
+  - id: REQ-FP-006
+    text: Owner-scoped HP delivery verifies code-only bundle, exact base/commit/repository/ref/paths and independent checks before normal push/PR with durable deduplication.
+  - id: REQ-FP-007
+    text: Prepare tested scoped admin bootstrap without installing privileges absent approved administrative access; report precise owner actions.
 acceptance_criteria:
+  - id: AC-FP-003
+    requirement_ids: [REQ-FP-005, REQ-FP-006, REQ-FP-007]
+    text: V2 owner requirements 1-14 verified with actual product canaries; unsupported auth/admin/offline states remain separately blocked and no full acceptance claimed.
   - id: AC-FP-001
     requirement_ids: [REQ-FP-001, REQ-FP-002]
     text: Local negative fixtures and repeat apply/rollback tests pass, with real per-node before/after evidence and unresolved nodes explicitly blocked or offline.

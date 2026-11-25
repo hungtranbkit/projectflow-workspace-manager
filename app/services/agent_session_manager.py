@@ -1,6 +1,7 @@
 from __future__ import annotations
 import fcntl
 import hashlib
+import json
 import os
 import pty
 import shutil
@@ -38,7 +39,7 @@ class LivePtySession:
 
     BUFFER_CAP = 200_000
 
-    def __init__(self, session_id: int, master_fd: int, pid: int, on_exit, on_activity):
+    def __init__(self, session_id: int, master_fd: int, pid: int, on_exit, on_activity, *, autostart=True):
         self.id = session_id
         self.master_fd = master_fd
         self.pid = pid
@@ -51,6 +52,10 @@ class LivePtySession:
         self.closed = False
         self.exit_code: int | None = None
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        if autostart:
+            self._thread.start()
+
+    def start_reader(self):
         self._thread.start()
 
     def _read_loop(self) -> None:
@@ -144,14 +149,14 @@ class AgentSessionManager:
         self.prompt_ready_timeout = 8.0
         self.prompt_quiet_window = 0.4
 
-    def start(self, *, task_id: int | None, workspace_id: int, agent: str, worktree_path: str | Path, mode: str = "INTERACTIVE") -> int:
+    def start(self, *, task_id: int | None, workspace_id: int, agent: str, worktree_path: str | Path, mode: str = "INTERACTIVE", trusted_launch=None) -> int:
         launcher = self.launchers.get(agent.lower())
         if not launcher:
             raise SessionError("AGENT_UNSUPPORTED", f"Agent not allowed: {agent}")
         executable = self.which(launcher.executable)
-        if not executable:
+        if not executable and trusted_launch is None:
             raise SessionError("AGENT_CLI_NOT_FOUND", f"{launcher.label} CLI chưa được cài hoặc không có trong PATH")
-        argv = [executable, *launcher.args]
+        argv = trusted_launch["argv"] if trusted_launch else [executable, *launcher.args]
         cwd = str(worktree_path)
         if not Path(cwd).is_dir():
             raise SessionError("WORKTREE_NOT_FOUND", "Worktree không còn tồn tại")
@@ -168,7 +173,8 @@ class AgentSessionManager:
         if pid == 0:
             try:
                 os.chdir(cwd)
-                os.execvpe(argv[0], argv, os.environ.copy())
+                from app.services.git_workspace import noninteractive_git_env
+                os.execvpe(argv[0], argv, noninteractive_git_env())
             finally:
                 os._exit(127)
 
@@ -180,15 +186,29 @@ class AgentSessionManager:
             # when it printed one.
             self.persist_tail(sid)
             self.db.execute("UPDATE agent_sessions SET status='EXITED',exited_at=?,exit_code=? WHERE id=?", (now(), exit_code, sid))
+            if trusted_launch:
+                try:
+                    receipt=json.loads(Path(trusted_launch['receipt']).read_text()).get('result',{})
+                    delivered=receipt.get('dispatched') is True
+                except (OSError,ValueError,KeyError):
+                    delivered=False
+                self.db.execute("UPDATE agent_sessions SET prompt_status=?,delivered_at=? WHERE id=?",
+                                ('DELIVERED' if delivered else 'FAILED',now() if delivered else None,sid))
             self._live.pop(sid, None)
 
         def on_activity():
+            # Wrapper output may be a blocker or replay receipt. It is not
+            # independent evidence that the agent accepted and ran the task.
             self.db.execute("UPDATE agent_sessions SET last_activity_at=? WHERE id=?", (now(), sid))
 
-        session = LivePtySession(sid, master_fd, pid, on_exit, on_activity)
+        session = LivePtySession(sid, master_fd, pid, on_exit, on_activity, autostart=False)
         session.mode = mode
         self._live[sid] = session
-        self.db.execute("UPDATE agent_sessions SET status='RUNNING',pid=? WHERE id=?", (pid, sid))
+        self.db.execute("UPDATE agent_sessions SET status=?,pid=? WHERE id=?", ("STARTING" if trusted_launch else "RUNNING",pid,sid))
+        if trusted_launch:
+            self.db.execute("UPDATE agent_sessions SET command_profile=?,prompt_status='SUBMITTED',prompt_sha256=?,prompt_source='TASK' WHERE id=?",
+                            (trusted_launch['profile'],hashlib.sha256(trusted_launch['prompt'].encode()).hexdigest(),sid))
+        session.start_reader()
         return sid
 
     def _wait_ready(self, session: LivePtySession) -> bool:

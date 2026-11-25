@@ -1,0 +1,54 @@
+{
+  "hp-api-build-result.json": {
+    "original_sha256": "3257d76aebc443a25d70cd5909a4288f8d25561a0238539a375f3d382853a900",
+    "published_sha256": "3257d76aebc443a25d70cd5909a4288f8d25561a0238539a375f3d382853a900"
+  },
+  "hp-delivery.json": {
+    "original_sha256": "b657818da7978ab95447f6e72858e96dc12290893301d55acc4ed5934cba9c28",
+    "published_sha256": "b657818da7978ab95447f6e72858e96dc12290893301d55acc4ed5934cba9c28"
+  },
+  "hp-delivery-replay.json": {
+    "original_sha256": "b657818da7978ab95447f6e72858e96dc12290893301d55acc4ed5934cba9c28",
+    "published_sha256": "b657818da7978ab95447f6e72858e96dc12290893301d55acc4ed5934cba9c28"
+  },
+  "dell-delivery.json": {
+    "original_sha256": "13fb22d9ebeedefbb193bb52ce5e06aab39a5a27e5f584de75643a872efc0263",
+    "published_sha256": "13fb22d9ebeedefbb193bb52ce5e06aab39a5a27e5f584de75643a872efc0263"
+  },
+  "dell-delivery-replay.json": {
+    "original_sha256": "13fb22d9ebeedefbb193bb52ce5e06aab39a5a27e5f584de75643a872efc0263",
+    "published_sha256": "13fb22d9ebeedefbb193bb52ce5e06aab39a5a27e5f584de75643a872efc0263"
+  },
+  "dell-code-transfer.json": {
+    "original_sha256": "56d2a1da14f76d54ff2be25561d0ee16e6c03cfcbc0f759cc2e45cf2d11ea7e6",
+    "published_sha256": "56d2a1da14f76d54ff2be25561d0ee16e6c03cfcbc0f759cc2e45cf2d11ea7e6"
+  },
+  "focused-launch.xml": {
+    "original_sha256": "6e9327bdfe7bfc938439d8b9d6f21a423c9f772d37d3f029a23bf142d23e8f33",
+    "published_sha256": "6e9327bdfe7bfc938439d8b9d6f21a423c9f772d37d3f029a23bf142d23e8f33"
+  },
+  "focused-launch.log": {
+    "original_sha256": "210dfea556bf000731dec40722671aff5e9588d328e16efac91c1cc70a1a15dc",
+    "published_sha256": "210dfea556bf000731dec40722671aff5e9588d328e16efac91c1cc70a1a15dc"
+  },
+  "delivery-tests.log": {
+    "original_sha256": "0a11a01f3d913d10e15abba84166661ea058b7732737b5f273acd9c9052da4f5",
+    "published_sha256": "0a11a01f3d913d10e15abba84166661ea058b7732737b5f273acd9c9052da4f5"
+  },
+  "admin-tests.log": {
+    "original_sha256": "b2e98bb44b10388f745ab49b626a7790980b05f856c50259dc0ad03a7fa41f5c",
+    "published_sha256": "b2e98bb44b10388f745ab49b626a7790980b05f856c50259dc0ad03a7fa41f5c"
+  },
+  "d11-fixed-tests.xml": {
+    "original_sha256": "64d30e4ede33d696675c6e059694b829d593b12cae060c455606033a1de48574",
+    "published_sha256": "64d30e4ede33d696675c6e059694b829d593b12cae060c455606033a1de48574"
+  },
+  "d11-resources.json": {
+    "original_sha256": "bcbbe6331618c5850e3f713d6bb0d5115fa6b174f3c7fd664541588717fa5b94",
+    "published_sha256": "bcbbe6331618c5850e3f713d6bb0d5115fa6b174f3c7fd664541588717fa5b94"
+  },
+  "controller-coordination.txt": {
+    "original_sha256": "89dcb7b0ba2ab20a4998e7ddfd4d4aeb022dc248196570945d1c97f2472b45d2",
+    "published_sha256": "89dcb7b0ba2ab20a4998e7ddfd4d4aeb022dc248196570945d1c97f2472b45d2"
+  }
+}

@@ -32,7 +32,9 @@ into one mega real-provider run would multiply cost without adding new
 coherence evidence beyond what this deterministic run already proves."""
 from __future__ import annotations
 import json
+import shlex
 import subprocess
+import sys
 
 from tests.test_autonomous_execution import register, new_change, materialize_task
 from tests.test_review_fix_loop import set_fake, PASS
@@ -70,9 +72,9 @@ engineering:
     enabled: true
 commands:
   preflight: {{command: 'true'}}
-  test: {{command: 'python3 -m pytest -q test_stock.py test_ui.py'}}
+  test: {{command: {test_command}}}
   build:
-    command: "python3 build.py"
+    command: {build_command}
     working_directory: .
     timeout_seconds: 60
   local_deploy:
@@ -102,7 +104,14 @@ def make_inventory_app(root, name="inventory", port=19300):
     (repo / "test_ui.py").write_text(
         "from ui import stock_label\n\n\ndef test_stock_label_format():\n    assert stock_label(7) == 'Stock: 7'\n")
     (repo / "build.py").write_text(BUILD_PY)
-    (repo / "PROJECT.yaml").write_text(PROJECT_YAML.format(name=name, port=port))
+    # This disposable app uses the same installed test dependencies as its
+    # parent runner; PATH may deliberately exclude the virtualenv in a child.
+    python = shlex.quote(sys.executable)
+    (repo / "PROJECT.yaml").write_text(PROJECT_YAML.format(
+        name=name, port=port,
+        test_command=json.dumps(f"{python} -m pytest -q test_stock.py test_ui.py"),
+        build_command=json.dumps(f"{python} build.py"),
+    ))
     subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "inventory app base (stock_adjustment is stubbed)"], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "remote", "add", "origin", str(repo)], cwd=repo, check=True, capture_output=True)
@@ -222,7 +231,7 @@ def test_golden_end_to_end_inventory_app_reaches_complete(client, git_repo, tmp_
     (wt_a / "stock.py").write_text("def adjust_stock(current, delta):\n    return current + delta\n")
     subprocess.run(["git", "add", "stock.py"], cwd=wt_a, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "fix adjust_stock to apply delta"], cwd=wt_a, check=True, capture_output=True)
-    r = subprocess.run(["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_stock.py"], cwd=wt_a,
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_stock.py"], cwd=wt_a,
                         capture_output=True, text=True, env={"PYTHONDONTWRITEBYTECODE": "1", "PATH": "/usr/bin:/bin"})
     assert r.returncode == 0, r.stdout + r.stderr
     # Real test_runs evidence pinned to A's exact final HEAD -- the same
@@ -233,7 +242,7 @@ def test_golden_end_to_end_inventory_app_reaches_complete(client, git_repo, tmp_
                (by_task[a]["id"], "pytest test_stock.py", "test", "PASS", client.app.state.git.head(wt_a)))
 
     wt_b = client.app.state.git.validate_worktree(by_task[b]["worktree_path"])
-    r = subprocess.run(["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_ui.py"], cwd=wt_b,
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_ui.py"], cwd=wt_b,
                         capture_output=True, text=True, env={"PYTHONDONTWRITEBYTECODE": "1", "PATH": "/usr/bin:/bin"})
     assert r.returncode == 0, r.stdout + r.stderr  # stock_label already correct -- Task B confirms, no change needed
     (wt_b / "NOTES.md").write_text("Confirmed stock_label already renders correctly; no code change needed.\n")
@@ -318,7 +327,7 @@ def test_golden_end_to_end_inventory_app_reaches_complete(client, git_repo, tmp_
         # ui.py is already correct (same real situation as the original
         # Task B) -- confirm via real pytest, then commit a real note so
         # there is an actual diff for CodeReview/Integration to act on.
-        r = subprocess.run(["python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_ui.py"], cwd=wt_c,
+        r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "test_ui.py"], cwd=wt_c,
                             capture_output=True, text=True, env={"PYTHONDONTWRITEBYTECODE": "1", "PATH": "/usr/bin:/bin"})
         assert r.returncode == 0, r.stdout + r.stderr
         (wt_c / "NOTES.md").write_text("Retry (B2): confirmed stock_label already renders correctly; no code change needed.\n")

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import signal
+import shlex
 import subprocess
 import tempfile
 import uuid
@@ -24,7 +26,18 @@ def noninteractive_git_env(base=None):
     env.update(GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="Never",
                GIT_ASKPASS="/bin/false" if os.name != "nt" else "cmd /c exit 1",
                SSH_ASKPASS="/bin/false" if os.name != "nt" else "cmd /c exit 1")
-    env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes -oConnectTimeout=10")
+    # Service managers may omit the owner's documented user-local gh install.
+    # Never introduce a directory writable by another account into tool lookup.
+    if os.name == "posix":
+        local_bin = Path.home() / ".local" / "bin"
+        try:
+            safe = all(p.stat().st_uid == os.getuid() and not p.stat().st_mode & 0o022
+                       for p in (Path.home(), local_bin.parent, local_bin))
+            if safe and local_bin.is_dir():
+                env["PATH"] = os.pathsep.join([str(local_bin), *[p for p in env.get("PATH", os.defpath).split(os.pathsep) if p != str(local_bin)]])
+        except OSError:
+            pass
+    env["GIT_SSH_COMMAND"] = "ssh -oBatchMode=yes -oStrictHostKeyChecking=yes -oConnectTimeout=10"
     return env
 
 
@@ -92,10 +105,25 @@ class GitWorkspaceService:
             return None
         return hashlib.sha256(",".join(roots).encode("utf-8")).hexdigest()
     def _run(self, argv: list[str], cwd: Path, check=True, timeout=None) -> CommandResult:
-        try: proc = subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout or self.timeout, shell=False, env=noninteractive_git_env(), stdin=subprocess.DEVNULL)
-        except subprocess.TimeoutExpired as exc: raise GitCommandError(f"Command timed out: {argv[0:2]}") from exc
-        result = CommandResult(argv, str(cwd), proc.returncode, proc.stdout, proc.stderr); self.audit.append(result)
-        if check and proc.returncode: raise GitCommandError(proc.stderr.strip() or proc.stdout.strip(), result)
+        proc = subprocess.Popen(argv, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                shell=False, env=noninteractive_git_env(), stdin=subprocess.DEVNULL,
+                                start_new_session=os.name != "nt")
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout or self.timeout)
+        except subprocess.TimeoutExpired as exc:
+            # Git can spawn SSH/helpers. Kill only this command's new process
+            # group, so timeout cannot leave an unobserved push running.
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=5)
+            else:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            proc.communicate(timeout=5)
+            raise GitCommandError(f"Command timed out: {argv[0:2]}") from exc
+        result = CommandResult(argv, str(cwd), proc.returncode, stdout, stderr); self.audit.append(result)
+        if check and proc.returncode: raise GitCommandError(stderr.strip() or stdout.strip(), result)
         return result
     def git(self, repo, *args, check=True): return self._run(["git", *args], Path(repo), check=check)
     def push_canary(self, repo):
@@ -153,6 +181,144 @@ class GitWorkspaceService:
         # -D is deliberately avoided: this task's canary branch is retained.
         result.update(code="PASS", cleanup="PASS", local_branch="RETAINED_CHECKPOINT")
         return result
+    def delivery_origin(self, repo, expected):
+        """No push unless the sole effective destination equals owner approval."""
+        fetch = self.git(repo, "remote", "get-url", "origin").stdout.strip()
+        push = self.git(repo, "remote", "get-url", "--push", "--all", "origin").stdout.splitlines()
+        if fetch != expected or push != [expected]:
+            raise GitSafetyError("DELIVERY_DESTINATION_MISMATCH")
+
+    def delivery_inspect(self, repo, base, commit, allowed_paths):
+        """One direct child commit, exact explicit code paths, regular blobs only."""
+        if not all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in (base, commit)):
+            raise GitSafetyError("DELIVERY_INVALID_SHA")
+        parents = self.git(repo, "rev-list", "--parents", "-n", "1", commit).stdout.split()
+        if parents != [commit, base]:
+            raise GitSafetyError("DELIVERY_BASE_MISMATCH")
+        paths = self.git(repo, "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", base, commit).stdout.split("\0")
+        paths = [p for p in paths if p]
+        if not paths or set(paths) != set(allowed_paths) or len(allowed_paths) != len(set(allowed_paths)):
+            raise GitSafetyError("DELIVERY_PATH_MISMATCH")
+        for name in paths:
+            parts = Path(name).parts
+            lower = name.lower()
+            if (name.startswith(("/", "-")) or ".." in parts or "\\" in name
+                or any(c in name for c in "*?[]:\n\r\t")
+                or any(p.startswith(".git") or p.startswith(".env") or p in {".ssh", ".aws", ".azure", ".codex", ".claude"} for p in (part.lower() for part in parts))
+                or re.search(r"(?:^|[/_.-])(?:credentials?|secrets?|auth|tokens?|id_rsa|id_ed25519)(?:$|[/_.-])", lower)
+                or lower.endswith((".pem", ".key", ".p12", ".pfx", ".bundle"))):
+                raise GitSafetyError("DELIVERY_SENSITIVE_PATH")
+            entry = self.git(repo, "ls-tree", commit, "--", name).stdout.strip()
+            if not entry:  # deletion of approved non-sensitive code
+                continue
+            if entry.split()[0] not in {"100644", "100755"}:
+                raise GitSafetyError("DELIVERY_NONREGULAR_FILE")
+            try:
+                blob = self.git(repo, "show", f"{commit}:{name}").stdout
+            except UnicodeError as exc:
+                raise GitSafetyError("DELIVERY_NONCODE_BLOB") from exc
+            if len(blob.encode()) > 8 * 1024 * 1024 or "\0" in blob:
+                raise GitSafetyError("DELIVERY_NONCODE_BLOB")
+            if re.search(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{24,})", blob):
+                raise GitSafetyError("DELIVERY_SECRET_PATTERN")
+        return paths
+
+    def delivery_export(self, repo, branch, base, commit, allowed_paths, bundle):
+        """Create only the approved single-commit delta; never include history."""
+        repo = self.validate_repo(repo)
+        self.validate_branch(branch)
+        if not branch.startswith("agent/") or self.head(repo, branch) != commit:
+            raise GitSafetyError("DELIVERY_SOURCE_MISMATCH")
+        self.delivery_inspect(repo, base, commit, allowed_paths)
+        target = Path(bundle).absolute()
+        if target.exists() or target.is_symlink():
+            raise GitSafetyError("DELIVERY_BUNDLE_EXISTS")
+        with tempfile.TemporaryDirectory(prefix="pf-delivery-export-") as directory:
+            temporary = Path(directory) / "code.bundle"
+            self.git(repo, "bundle", "create", "--version=2", str(temporary), branch, "^" + base)
+            data = temporary.read_bytes()
+            if len(data) > 32 * 1024 * 1024:
+                raise GitSafetyError("DELIVERY_BUNDLE_TOO_LARGE")
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+        return hashlib.sha256(data).hexdigest()
+
+    def delivery_import(self, repo, bundle, branch, base, commit, allowed_paths, key):
+        self.git(repo, "bundle", "verify", str(bundle))
+        heads = self.git(repo, "bundle", "list-heads", str(bundle)).stdout.splitlines()
+        if heads != [f"{commit} refs/heads/{branch}"]:
+            raise GitSafetyError("DELIVERY_BUNDLE_REF_MISMATCH")
+        ref = "refs/projectflow/delivery/" + key
+        existing = self.git(repo, "rev-parse", "--verify", ref, check=False)
+        if existing.returncode == 0 and existing.stdout.strip() != commit:
+            raise GitSafetyError("DELIVERY_CHECKPOINT_CONFLICT")
+        self.git(repo, "-c", "core.hooksPath=/dev/null", "fetch", "--no-tags", str(bundle), f"refs/heads/{branch}:{ref}")
+        if self.head(repo, ref) != commit:
+            raise GitSafetyError("DELIVERY_COMMIT_MISMATCH")
+        return self.delivery_inspect(repo, base, commit, allowed_paths)
+
+    def delivery_worktree(self, repo, commit, key):
+        path = self.validate_worktree(self.worktree_root / ("delivery-" + key))
+        if path.exists():
+            if self.validate_repo(path) != path or self.head(path) != commit:
+                raise GitSafetyError("DELIVERY_WORKTREE_CONFLICT")
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.git(repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", str(path), commit)
+        return path
+
+    def delivery_remote(self, repo, ref):
+        result = self.git(repo, "ls-remote", "--exit-code", "origin", ref, check=False)
+        if result.returncode == 2:
+            return None
+        if result.returncode != 0:
+            raise GitCommandError("DELIVERY_REMOTE_UNKNOWN", result)
+        fields = result.stdout.split()
+        if len(fields) != 2 or fields[1] != ref or not re.fullmatch(r"[0-9a-f]{40}", fields[0]):
+            raise GitSafetyError("DELIVERY_REMOTE_INVALID")
+        return fields[0]
+
+    def delivery_push(self, repo, commit, ref):
+        """Normal creation guarded by the server-advertised absent ref.
+
+        Delegate the existing trusted pre-push policy hook with the exact same
+        stdin/argv. Git sends the advertised zero old OID in its normal update,
+        so a subsequent concurrent creation is rejected by the server too.
+        """
+        repo = self.validate_repo(repo)
+        if not re.fullmatch(r"[0-9a-f]{40}", commit) or not ref.startswith("refs/heads/agent/"):
+            raise GitSafetyError("DELIVERY_REF_MISMATCH")
+        self.validate_branch(ref.removeprefix("refs/heads/"))
+        hook_path = Path(self.git(repo, "rev-parse", "--git-path", "hooks/pre-push").stdout.strip())
+        if not hook_path.is_absolute():
+            repo = self.validate_repo(repo)
+        if not re.fullmatch(r"[0-9a-f]{40}", commit) or not ref.startswith("refs/heads/agent/"):
+            raise GitSafetyError("DELIVERY_REF_MISMATCH")
+        self.validate_branch(ref.removeprefix("refs/heads/"))
+        hook_path = Path(repo) / hook_path
+        with tempfile.TemporaryDirectory(prefix="pf-delivery-push-") as directory:
+            hook = Path(directory) / "pre-push"
+            updates = Path(directory) / "updates"
+            # All interpolated arguments are owner-approved paths or validated
+            # exact hashes/refs; quote paths for the POSIX hook interpreter.
+            quoted_updates = shlex.quote(str(updates))
+            quoted_policy = shlex.quote(str(hook_path))
+            hook.write_text("#!/bin/sh\n"
+                f"cat > {quoted_updates} || exit 1\n"
+                "count=0\n"
+                "while read -r local_ref local_oid remote_ref remote_oid; do\n"
+                "  count=$((count + 1))\n"
+                f"  [ \"$remote_ref\" = '{ref}' ] && [ \"$local_oid\" = '{commit}' ] || exit 1\n"
+                "  case $remote_oid in ''|*[!0]*) exit 1;; esac\n"
+                f"done < {quoted_updates}\n"
+                "[ \"$count\" -le 1 ] || exit 1\n"
+                f"if [ -x {quoted_policy} ]; then {quoted_policy} \"$@\" < {quoted_updates}; exit $?; fi\n")
+            hook.chmod(0o700)
+            return self.git(repo, "-c", f"core.hooksPath={directory}", "push", "origin", f"{commit}:{ref}", check=False)
+
     def branch_exists(self, repo, branch): return self.git(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{self.validate_branch(branch)}", check=False).returncode == 0
     def base_exists(self, repo, branch):
         self.validate_branch(branch)

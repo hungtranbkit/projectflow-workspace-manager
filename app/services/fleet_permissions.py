@@ -64,8 +64,26 @@ class Probe:
         return {"code": self.code, "returncode": self.returncode, "elapsed_ms": self.elapsed_ms}
 
 
+def _stop_owned_probe(proc):
+    """Terminate only the process group created by this exact probe."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                       capture_output=True, timeout=5)
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def probe(argv, *, cwd=None, timeout=12, env=None):
     started = time.monotonic()
+    proc = None
+    communicated = False
     try:
         proc = subprocess.Popen(argv, cwd=cwd, env=noninteractive_git_env(env),
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -73,21 +91,24 @@ def probe(argv, *, cwd=None, timeout=12, env=None):
                                 start_new_session=os.name != "nt")
         try:
             output, _ = proc.communicate(timeout=timeout)
+            communicated = True
             code = classify(proc.returncode, output)
         except subprocess.TimeoutExpired:
-            if os.name == "nt":
-                # taskkill only this newly spawned probe and its descendants.
-                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                               capture_output=True, timeout=5)
-            else:
-                os.killpg(proc.pid, signal.SIGKILL)
+            _stop_owned_probe(proc)
             output, _ = proc.communicate(timeout=5)
+            communicated = True
             code = "PROBE_TIMEOUT"
         return Probe(code, proc.returncode, int((time.monotonic()-started)*1000), output)
     except FileNotFoundError:
         return Probe("CLI_UNSUPPORTED", None, int((time.monotonic()-started)*1000))
     except PermissionError:
         return Probe("ACL_DENIED", None, int((time.monotonic()-started)*1000))
+    finally:
+        # SIGTERM/SIGINT in the CLI becomes KeyboardInterrupt, which must
+        # unwind through this cleanup. The agent owns a separate session;
+        # terminating just its wrapper would otherwise orphan that agent.
+        if proc is not None and not communicated:
+            _stop_owned_probe(proc)
 
 
 def private_write(path, data):
@@ -103,6 +124,12 @@ def private_write(path, data):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temp, path)
+        if os.name == 'posix':
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
     finally:
         temp.unlink(missing_ok=True)
 
@@ -190,11 +217,13 @@ if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Translate([Securit
                         configs[str(path.relative_to(self.workspace))] = digest(path.read_bytes())
         return {"workspace": str(self.workspace), "branch": branch, "config_hashes": configs}
 
-    def apply(self, trust_owned=False):
+    def apply(self, trust_owned=False, task=None):
         if not trust_owned:
             raise FleetError("TRUST_REQUIRED: explicit --trust-owned-workspace required")
         identity = self.identity(clean=True)
         manifest = {"schema_version": VERSION, "profile": PROFILE, "repo": self.repo, **identity}
+        if task is not None:
+            manifest["task"] = task
         text = json.dumps(manifest, sort_keys=True, indent=2) + "\n"
         if self.path.exists():
             if self.path.read_text() == text:
@@ -211,7 +240,7 @@ if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Translate([Securit
             raise FleetError("ACL_DENIED: trust receipt is not private")
         manifest = json.loads(self.path.read_text())
         current = self.identity()
-        if manifest != {"schema_version": VERSION, "profile": PROFILE, "repo": self.repo, **current}:
+        if {key: value for key, value in manifest.items() if key != "task"} != {"schema_version": VERSION, "profile": PROFILE, "repo": self.repo, **current}:
             raise FleetError("TRUST_REQUIRED: workspace/branch/config changed")
         return {"code": "PASS", "profile": PROFILE}
 
@@ -283,16 +312,27 @@ if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Translate([Securit
                 "executables": {name: shutil.which(name) for name in ("git", "gh", "codex", "claude", "docker", "sudo")},
                 "checks": checks, "write_canary": "NOT_RUN", "execution": "NOT_DISPATCHED"}
 
-    def preflight(self, agent, runtime="native", image=None):
+    def preflight(self, agent, runtime="native", image=None, scope="delivery"):
+        if scope not in ("local", "delivery", "hp-delivery"):
+            raise FleetError("TRUST_REQUIRED: unknown task scope")
         self.check()
         report = self.audit()
-        required = ["workspace", "repository", "gh_auth", "gh_identity", "github_push", "git_helper", "disk", agent + "_auth", agent + "_version"]
+        required = ["workspace", "disk", agent + "_auth", agent + "_version"]
+        if scope == "delivery":
+            required += ["repository", "gh_auth", "gh_identity", "github_push", "git_helper"]
+        elif scope == "hp-delivery":
+            # A declared route is not proof of an authorized, reachable delivery
+            # service. Build locally, then submit an exact reviewed commit via
+            # FleetDelivery; never claim delivery readiness from repo identity.
+            return {"code":"BLOCKED", "failures":{"delivery":"TRUST_REQUIRED"}, "execution":"NOT_DISPATCHED"}
         failures = {key: report["checks"][key]["code"] for key in required if report["checks"][key]["code"] not in ("PASS", "CONFIGURED")}
         help_result = probe([agent, "exec", "--help"] if agent == "codex" else [agent, "--help"])
         flags = ("--sandbox", "--config", "--cd") if agent == "codex" else ("--print", "dontAsk", "--allowedTools", "--disallowedTools")
         if help_result.code != "PASS" or not all(flag in help_result.output for flag in flags):
             failures["cli_options"] = "CLI_UNSUPPORTED"
         if runtime == "docker":
+            if scope != "local":
+                failures["delivery"] = "TRUST_REQUIRED"
             if report["checks"].get("managed_policy", {}).get("present"):
                 failures["managed_policy"] = "TRUST_REQUIRED"
             if not all(flag in help_result.output for flag in ("--ephemeral", "--skip-git-repo-check")):
@@ -309,8 +349,21 @@ if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Translate([Securit
                 failures["sandbox"] = "ACL_DENIED" if "namespace" in sandbox.output else sandbox.code
         return {"code": "BLOCKED" if failures else "PASS", "failures": failures, "execution": "NOT_DISPATCHED"}
 
-    def launch(self, agent, prompt, timeout=180, runtime="native", image=None):
-        gate = self.preflight(agent, runtime, image)
+    def launch(self, agent, prompt, timeout=180, runtime="native", image=None, scope="delivery", request_key=None):
+        if not 1 <= timeout <= 3600:
+            raise FleetError("TRUST_REQUIRED: invalid timeout")
+        request = None
+        fingerprint = digest(json.dumps([agent,prompt,runtime,image,scope],sort_keys=True).encode())
+        if request_key:
+            if not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", request_key):
+                raise FleetError("TRUST_REQUIRED: invalid request key")
+            request = self.path.with_name(self.path.stem + ".request-" + request_key + ".json")
+            if request.exists():
+                prior = json.loads(request.read_text())
+                if prior.get("fingerprint") != fingerprint:
+                    raise FleetError("TRUST_REQUIRED: request key scope changed")
+                return {**prior.get("result", {"code":"EXECUTION_UNKNOWN", "execution":"UNKNOWN", "dispatched":False}), "replayed":True}
+        gate = self.preflight(agent, runtime, image, scope)
         if gate["code"] != "PASS":
             return gate
         # Exclusive lane lock. A timed-out probe kills only its own process group.
@@ -321,6 +374,10 @@ if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Translate([Securit
             raise FleetError("BLOCKED: lane already locked; inspect checkpoint before recovery")
         try:
             os.close(fd)
+            if request:
+                if request.exists():
+                    raise FleetError("EXECUTION_UNKNOWN: inspect existing request")
+                private_write(request,json.dumps({"fingerprint":fingerprint,"request_key":request_key,"state":"STARTING",**self.identity(),"head":self.git.head(self.workspace)}))
             checkpoint = self.path.with_suffix(".checkpoint.json")
             private_write(checkpoint, json.dumps({**self.identity(), "head": self.git.head(self.workspace), "state": "STARTING"}))
             env = noninteractive_git_env()
@@ -338,9 +395,17 @@ if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Translate([Securit
                 result = run_fleet_canary(command, container_name, self.workspace, timeout, env)
             else:
                 result = probe(command, cwd=self.workspace, timeout=timeout, env=env)
+            from app.services.secret_redaction import redact
+            log_path = self.path.with_name(self.path.stem + "." + (request_key or uuid.uuid4().hex) + ".log")
+            private_write(log_path, redact(result.output[-1000000:]))
             receipt = {**execution_result(result), "runtime": runtime,
                        "capabilities": "FILE_WORK_ONLY_NO_GIT" if runtime == "docker" else "NATIVE_CLI_POLICY"}
+            receipt["log_path"] = str(log_path)
+            receipt["request_key"] = request_key
+            receipt["output_sha256"] = digest(result.output.encode())
             private_write(checkpoint, json.dumps({**self.identity(), "head": self.git.head(self.workspace), **receipt}))
+            if request:
+                private_write(request,json.dumps({"fingerprint":fingerprint,"request_key":request_key,"result":receipt}))
             return receipt
         finally:
             lock.unlink(missing_ok=True)
@@ -360,7 +425,7 @@ def safe_error_code(exc):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", nargs="?", default="audit", choices=("audit", "apply", "check", "rollback", "preflight", "launch", "git-canary", "install-gh", "rollback-gh"))
+    parser.add_argument("action", nargs="?", default="audit", choices=("audit", "apply", "check", "rollback", "preflight", "launch", "git-canary", "install-gh", "rollback-gh", "repair-git", "rollback-git"))
     parser.add_argument("--workspace", type=Path, default=Path.cwd())
     parser.add_argument("--state", type=Path)
     parser.add_argument("--repo", default="hungtranbkit/projectflow-workspace-manager")
@@ -369,17 +434,30 @@ def main(argv=None):
     parser.add_argument("--prompt-file", type=Path)
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--runtime", choices=("native", "docker"), default="native")
+    parser.add_argument("--scope", choices=("local","delivery","hp-delivery"), default="delivery")
+    parser.add_argument("--request-key")
+    parser.add_argument("--dispatch-gate", type=Path)
     parser.add_argument("--image", help="Existing pinned Linux image ID; never pulls an image")
     args = parser.parse_args(argv)
+    previous_handlers = {}
+    if args.action == "launch":
+        def interrupt_owned_launch(_signum, _frame):
+            raise KeyboardInterrupt
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            previous_handlers[signum] = signal.getsignal(signum)
+            signal.signal(signum, interrupt_owned_launch)
     try:
         manager = FleetProfile(args.workspace, args.state, args.repo)
-        if args.action in ("install-gh", "rollback-gh"):
+        if args.action in ("repair-git", "rollback-git"):
+            from app.services import fleet_gh
+            result = fleet_gh.repair_helper(manager) if args.action == "repair-git" else fleet_gh.rollback_helper(manager)
+        elif args.action in ("install-gh", "rollback-gh"):
             from app.services import fleet_gh
             result = fleet_gh.install() if args.action == "install-gh" else fleet_gh.rollback()
         elif args.action == "apply":
             result = manager.apply(args.trust_owned_workspace)
         elif args.action == "preflight":
-            result = manager.preflight(args.agent, args.runtime, args.image)
+            result = manager.preflight(args.agent, args.runtime, args.image, args.scope)
         elif args.action == "git-canary":
             manager.check()
             if manager.audit()["checks"]["repository"]["code"] != "PASS":
@@ -388,11 +466,24 @@ def main(argv=None):
         elif args.action == "launch":
             if not args.prompt_file:
                 raise FleetError("PROMPT_REQUIRED")
-            result = manager.launch(args.agent, args.prompt_file.read_text(), args.timeout, args.runtime, args.image)
+            if args.dispatch_gate:
+                from app.services.fleet_dispatch_gate import wait_for_dispatch_gate, DispatchGateError
+                try:
+                    wait_for_dispatch_gate(args.dispatch_gate, args.request_key, args.workspace)
+                except DispatchGateError as exc:
+                    raise FleetError(str(exc)) from exc
+            result = manager.launch(args.agent, args.prompt_file.read_text(), args.timeout, args.runtime, args.image, args.scope, args.request_key)
         else:
             result = getattr(manager, args.action)()
+    except KeyboardInterrupt:
+        # The STARTING request/checkpoint remains durable. A retry returns
+        # EXECUTION_UNKNOWN instead of executing this task again.
+        result = {"code": "EXECUTION_UNKNOWN", "execution": "UNKNOWN", "dispatched": None}
     except (FleetError, OSError, ValueError, RuntimeError) as exc:
         result = {"code": safe_error_code(exc), "execution": "BLOCKED", "dispatched": False}
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
     print(json.dumps(result, indent=2))
     return 0 if result.get("code", "PASS") == "PASS" else 1
 

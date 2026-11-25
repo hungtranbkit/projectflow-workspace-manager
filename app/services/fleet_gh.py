@@ -4,6 +4,8 @@ import io
 import json
 import os
 import platform
+import shlex
+import shutil
 import tarfile
 import urllib.request
 from pathlib import Path
@@ -85,3 +87,70 @@ def rollback(home=Path.home()):
     binary.unlink(missing_ok=True)
     receipt.unlink()
     return {"code": "PASS", "changed": True}
+
+
+def _helper_values(profile):
+    result=profile.git.git(profile.workspace,'config','--local','--get-all','credential.https://github.com.helper',check=False)
+    if result.returncode not in (0,1):
+        raise FleetError('ACL_DENIED: cannot read repository helper')
+    return result.stdout.splitlines()
+
+
+def _set_helper_values(profile, values):
+    key='credential.https://github.com.helper'
+    result=profile.git.git(profile.workspace,'config','--local','--unset-all',key,check=False)
+    if result.returncode not in (0,5):
+        raise FleetError('ACL_DENIED: cannot update repository helper')
+    for value in values:
+        profile.git.git(profile.workspace,'config','--local','--add',key,value)
+
+
+def repair_helper(profile):
+    """Configure only this repository, after actual authenticated identity proof.
+
+    Never overwrites auth files or global configuration. The backup can contain
+    the previous helper definition, so remains private and is never reported.
+    """
+    checks=profile.audit()['checks']
+    for key in ('gh_identity','github_push','repository'):
+        if checks[key]['code'] != 'PASS':
+            raise FleetError(checks[key]['code'])
+    from app.services.git_workspace import noninteractive_git_env
+    executable=shutil.which('gh',path=noninteractive_git_env().get('PATH'))
+    if not executable:
+        raise FleetError('CLI_UNSUPPORTED')
+    binary=Path(executable).resolve()
+    if not binary.is_file() or binary.stat().st_mode & 0o022:
+        raise FleetError('ACL_DENIED: helper binary writable by other users')
+    # Git's documented shell helper needs shell quoting even though every Git
+    # operation itself is argv-only. Executable is a verified absolute path.
+    after=['','!'+shlex.quote(str(binary))+' auth git-credential']
+    receipt=profile.path.with_suffix('.git-helper.json')
+    before=_helper_values(profile)
+    if receipt.exists():
+        saved=json.loads(receipt.read_text())
+        if saved['after'] != after or before != after:
+            raise FleetError('PROFILE_CONFLICT: preserve helper edits')
+        return {'code':'PASS','changed':False}
+    if before==after:
+        return {'code':'PASS','changed':False}
+    private_write(receipt,json.dumps({'before':before,'after':after,'workspace':str(profile.workspace)}))
+    try:
+        _set_helper_values(profile,after)
+    except Exception:
+        _set_helper_values(profile,before)
+        receipt.unlink(missing_ok=True)
+        raise
+    return {'code':'PASS','changed':True,'scope':'repository','helper':'gh auth git-credential'}
+
+
+def rollback_helper(profile):
+    receipt=profile.path.with_suffix('.git-helper.json')
+    if not receipt.exists():
+        return {'code':'PASS','changed':False}
+    saved=json.loads(receipt.read_text())
+    if saved['workspace'] != str(profile.workspace) or _helper_values(profile) != saved['after']:
+        raise FleetError('ROLLBACK_CONFLICT')
+    _set_helper_values(profile,saved['before'])
+    receipt.unlink()
+    return {'code':'PASS','changed':True}
