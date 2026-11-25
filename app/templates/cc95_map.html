@@ -1,0 +1,16 @@
+<link rel="stylesheet" href="/static/cc95-map.css">
+<section id="cc95-map" data-project="{{ v.project }}" aria-label="Bản đồ hệ thống">
+  <div class="cc-head"><div><h2>System Command Center</h2><p class="cc-status" role="status" aria-live="polite">Đang tải nguồn Quản gia…</p></div>
+  <div class="cc-controls"><button type="button" class="cc-up">← Lùi cấp</button><button type="button" class="cc-expand">Toàn màn hình</button><button type="button" class="cc-reload">Làm mới</button></div></div>
+  <div class="cc-controls"><input class="cc-search" type="search" aria-label="Tìm trong cấp hiện tại" placeholder="Tìm trong cấp hiện tại" maxlength="240"></div>
+  <div class="cc-error" role="alert"></div>
+  <div class="cc-layout">
+    <nav class="cc-nav" aria-label="Cây dự án"><h3>Dự án</h3><div class="cc-tree"></div></nav>
+    <div class="cc-main"><nav class="cc-crumbs" aria-label="Đường dẫn cấp zoom"></nav><div class="cc-canvas"><div class="cc-center" tabindex="-1"></div><div class="cc-branches" aria-label="Nhánh bản đồ"></div></div>
+    <div class="cc-pagination"><button type="button" class="cc-prev">‹ Trước</button><span class="cc-page"></span><button type="button" class="cc-next">Sau ›</button></div></div>
+    <section class="cc-detail" aria-label="Chi tiết quan sát"></section>
+  </div>
+  <p class="cc-note">Lát cắt kiểm kê nguồn · Viền vàng: có bản ghi cũ. Màu nền không xác nhận sức khỏe. Bản đồ module chức năng và hoạt động agent sẽ chỉ hiển thị khi có bằng chứng ánh xạ.</p>
+  <noscript>Chế độ bản đồ cần JavaScript. Dữ liệu Quản gia bên dưới vẫn sử dụng được.</noscript>
+</section>
+<script src="/static/cc95-map.js" defer></script>
