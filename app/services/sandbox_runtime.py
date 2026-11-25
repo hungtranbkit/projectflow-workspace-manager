@@ -253,6 +253,7 @@ def fleet_container_argv(workspace, prompt, binary, auth, image, uid, gid, name)
     if any("," in str(p) for p in (workspace, binary, auth)):
         raise FleetError("ACL_DENIED: unsupported Docker mount path")
     return ["docker", "run", "--rm", "--name", name, "--label", "projectflow.fleet83="+name,
+            "--label", "com.docker.compose.project="+name,
             "--user", f"{uid}:{gid}", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--read-only", "--pids-limit", "128", "--memory", "1g", "--cpus", "1",
             "--tmpfs", f"/tmp:rw,nosuid,nodev,uid={uid},gid={gid},mode=700",
@@ -279,5 +280,6 @@ def run_fleet_canary(command, name, cwd, timeout, env):
         return probe(command, cwd=cwd, timeout=timeout, env=env)
     finally:
         owned = fleet_docker_probe(["inspect", "--format", '{{index .Config.Labels "projectflow.fleet83"}}', name])
-        if owned.code == "PASS" and owned.output.strip() == name:
+        if (owned.code == "PASS" and owned.output.strip() == name
+                and SandboxRuntimeService(timeout=12).verify_owned(name, 0)):
             fleet_docker_probe(["stop", "--time", "2", name])

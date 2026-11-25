@@ -105,6 +105,10 @@ class GitWorkspaceService:
         never target main, never remove a ref whose SHA no longer matches ours.
         """
         repo = self.validate_repo(repo)
+        fetch_url = self.git(repo, "remote", "get-url", "origin").stdout.strip()
+        push_urls = self.git(repo, "remote", "get-url", "--push", "--all", "origin").stdout.splitlines()
+        if push_urls != [fetch_url]:
+            raise GitSafetyError("Canary push destination must be the sole verified fetch destination")
         branch = self.validate_branch("agent/codex/pf83-canary-" + uuid.uuid4().hex)
         path = self.validate_worktree(self.worktree_root / branch.rsplit("/", 1)[1])
         path.parent.mkdir(parents=True, exist_ok=True)

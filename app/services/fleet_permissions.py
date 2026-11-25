@@ -254,6 +254,8 @@ if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Translate([Securit
         origin = self.git.git(self.workspace, "remote", "get-url", "origin", check=False).stdout.strip()
         accepted = (f"https://github.com/{self.repo}", f"git@github.com:{self.repo}", f"ssh://git@github.com/{self.repo}")
         matches = origin.removesuffix(".git") in accepted
+        push_urls = self.git.git(self.workspace, "remote", "get-url", "--push", "--all", "origin", check=False).stdout.splitlines()
+        matches = matches and push_urls == [origin]
         checks["repository"] = {"code": "PASS" if matches else "TRUST_REQUIRED"}
         helper = self.git.git(self.workspace, "config", "--get-urlmatch", "credential.helper", "https://github.com", check=False)
         checks["git_helper"] = {"code": "CONFIGURED" if helper.returncode == 0 and helper.stdout.strip() else "AUTH_REQUIRED"}
@@ -326,7 +328,7 @@ if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Translate([Securit
             command = agent_argv(agent, self.workspace, prompt)
             container_name = None
             if runtime == "docker":
-                container_name = "pf83-" + uuid.uuid4().hex
+                container_name = f"wm-projectflow-fleet{os.getuid()}-" + uuid.uuid4().hex
                 auth = Path(os.environ.get("CODEX_HOME", str(Path.home()/".codex")))/"auth.json"
                 if not auth.is_file() or auth.stat().st_uid != os.getuid():
                     raise FleetError("AUTH_REQUIRED")

@@ -244,3 +244,44 @@ def test_canary_preserves_concurrently_advanced_remote(git_repo, monkeypatch):
     result = service.push_canary(repo)
     assert result['cleanup'] != 'PASS'
     assert subprocess.check_output(['git','--git-dir',str(remote),'rev-parse',advanced['branch']],text=True).strip()==advanced['sha']
+
+
+def test_rejected_canary_push_preserves_local_checkpoint(git_repo):
+    from app.services.git_workspace import GitWorkspaceService
+    root, repo = git_repo
+    remote = root/'remote.git'
+    subprocess.run(['git','init','--bare',str(remote)],check=True,capture_output=True)
+    subprocess.run(['git','-C',str(repo),'remote','add','origin',str(remote)],check=True)
+    hook = remote/'hooks/pre-receive'
+    hook.write_text('#!/bin/sh\nexit 1\n')
+    hook.chmod(0o700)
+    result = GitWorkspaceService(root).push_canary(repo)
+    assert result['code'] == 'BLOCKED'
+    assert result['cleanup'] == 'NOT_RUN'
+    assert Path(result['worktree']).is_dir()
+    assert subprocess.check_output(['git','-C',result['worktree'],'rev-parse','HEAD'],text=True).strip() == result['pushed_sha']
+    assert subprocess.check_output(['git','ls-remote',str(remote)]) == b''
+
+
+def test_unsupported_cli_is_blocked_before_dispatch(monkeypatch, tmp_path):
+    manager = fleet().FleetProfile(tmp_path)
+    monkeypatch.setattr(manager,'check',lambda: {'code':'PASS'})
+    checks = {k:{'code':'PASS'} for k in ['workspace','repository','gh_auth','gh_identity','github_push','git_helper','disk','codex_auth','codex_version']}
+    monkeypatch.setattr(manager,'audit',lambda: {'checks':checks})
+    monkeypatch.setattr(fleet(),'probe',lambda *a,**kw: fleet().Probe('PASS',0,0,'old incompatible CLI'))
+    assert manager.launch('codex','must not run')['failures']['cli_options'] == 'CLI_UNSUPPORTED'
+    assert not manager.path.with_suffix('.checkpoint.json').exists()
+
+
+def test_canary_refuses_different_push_destination(git_repo):
+    from app.services.git_workspace import GitWorkspaceService, GitSafetyError
+    root, repo = git_repo
+    fetch_remote, push_remote = root/'fetch.git', root/'push.git'
+    for remote in (fetch_remote,push_remote):
+        subprocess.run(['git','init','--bare',str(remote)],check=True,capture_output=True)
+    subprocess.run(['git','-C',str(repo),'remote','add','origin',str(fetch_remote)],check=True)
+    subprocess.run(['git','-C',str(repo),'config','remote.origin.pushurl',str(push_remote)],check=True)
+    before = subprocess.check_output(['git','-C',str(repo),'branch'])
+    with pytest.raises(GitSafetyError,match='push destination'):
+        GitWorkspaceService(root).push_canary(repo)
+    assert subprocess.check_output(['git','-C',str(repo),'branch']) == before
