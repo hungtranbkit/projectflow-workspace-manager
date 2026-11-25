@@ -13,7 +13,7 @@ GIB = 1024 ** 3
 
 def snap(node="dell-linux", *, used=70, free=100*GIB, inode=20, caps=(), at=NOW, online=True):
     return CapacitySnapshot(
-        node_id=node, mount_id=f"dev-{node}", total_bytes=1000*GIB,
+        node_id=node, mount_id=f"dev-{node}", total_bytes=int(free / (1 - used / 100)),
         free_bytes=free, used_percent=used, total_inodes=1000,
         free_inodes=1000 - inode*10, inode_used_percent=inode,
         observed_at=at, capabilities=frozenset(caps), online=online,
@@ -39,6 +39,12 @@ def test_stale_offline_and_invalid_metrics_fail_closed_for_heavy_work():
     assert gate.evaluate(snap(at=NOW - timedelta(seconds=301)), now=NOW, heavy=True).code == "BLOCKED_CAPACITY"
     assert gate.evaluate(snap(online=False), now=NOW, heavy=True).code == "BLOCKED_CAPACITY"
     assert gate.evaluate(snap(free=-1), now=NOW, heavy=True).code == "BLOCKED_CAPACITY"
+    inconsistent = snap(used=20, free=100*GIB)
+    inconsistent = CapacitySnapshot(**{**inconsistent.__dict__, "used_percent": 70})
+    assert gate.evaluate(inconsistent, now=NOW, heavy=True).code == "BLOCKED_CAPACITY"
+    bad_inode = snap(inode=20)
+    bad_inode = CapacitySnapshot(**{**bad_inode.__dict__, "free_inodes": 1})
+    assert gate.evaluate(bad_inode, now=NOW, heavy=True).code == "BLOCKED_CAPACITY"
     assert gate.evaluate(snap(at=NOW - timedelta(days=1)), now=NOW, heavy=False).code == "UNKNOWN_CAPACITY"
 
 
@@ -80,6 +86,55 @@ def test_auto_selection_ranks_healthy_fallback_above_warned_preferred_node():
     selected = gate.select_node(nodes, now=NOW, required_capabilities={"non_docker"}, heavy=True)
     assert selected.node_id == "dell-linux"
     assert selected.code == "ALLOW"
+
+
+def test_issue86_reported_fleet_boundaries_are_policy_fixtures_not_live_health():
+    """Keep the reported HP/M910/MacBook/Dell limits explicit in policy tests.
+
+    Values come from issue #86 comment 7154171990 and are intentionally
+    synthetic observations at NOW. This does not attest those nodes are online.
+    """
+    gate = NodeCapacityGate(CapacityPolicy())
+    fleet = [
+        snap("hp-linux", used=95, free=13_831_671_808, inode=16,
+             caps={"non_docker", "docker"}),
+        snap("m910", used=90, free=11_876_749_312, inode=17,
+             caps={"non_docker", "docker"}),
+        snap("macbook", used=18, free=385_339_617_280, inode=20,
+             caps={"non_docker"}),
+        snap("dell-linux", used=73, free=127_906_332_672, inode=14,
+             caps={"non_docker", "docker"}),
+    ]
+
+    per_node = {item.node_id: gate.evaluate(item, now=NOW, heavy=True) for item in fleet}
+    assert per_node["hp-linux"].code == "BLOCKED_CAPACITY"
+    assert per_node["m910"].code == "BLOCKED_CAPACITY"
+    assert per_node["macbook"].code == "ALLOW"
+    assert per_node["dell-linux"].code == "ALLOW"
+
+    non_docker = gate.select_node(fleet, now=NOW, required_capabilities={"non_docker"}, heavy=True)
+    docker = gate.select_node(fleet, now=NOW, required_capabilities={"docker"}, heavy=True)
+    assert (non_docker.node_id, non_docker.code) == ("macbook", "ALLOW")
+    assert (docker.node_id, docker.code) == ("dell-linux", "ALLOW")
+
+
+def test_fleet_feed_unknown_offline_and_pinned_capacity_fail_closed():
+    gate = NodeCapacityGate(CapacityPolicy(freshness_ttl_seconds=300))
+    stale_mac = snap("macbook", used=18, caps={"non_docker"},
+                     at=NOW - timedelta(hours=1))
+    offline_mac = snap("macbook", used=18, caps={"non_docker"}, online=False)
+
+    pinned = gate.select_node([stale_mac, snap("dell-linux", caps={"non_docker"})],
+                              now=NOW, required_capabilities={"non_docker"},
+                              pinned_node="macbook", heavy=True)
+    assert pinned.code == "BLOCKED_CAPACITY"
+    assert pinned.node_id == "macbook"
+    assert not pinned.rerouted
+
+    blocked = gate.select_node([offline_mac], now=NOW,
+                               required_capabilities={"non_docker"}, heavy=True)
+    assert blocked.code == "BLOCKED_CAPACITY"
+    assert blocked.node_id is None
 
 
 def test_filesystem_probe_reports_real_target_metrics(tmp_path):

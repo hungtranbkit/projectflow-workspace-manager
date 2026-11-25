@@ -234,9 +234,15 @@ class NodeCapacityGate:
                 and snapshot.total_bytes > 0
                 and 0 <= snapshot.free_bytes <= snapshot.total_bytes
                 and 0 <= snapshot.used_percent <= 100
+                and abs(snapshot.used_percent - (
+                    100.0 * (snapshot.total_bytes - snapshot.free_bytes) / snapshot.total_bytes
+                )) <= 1.0
                 and snapshot.total_inodes > 0
                 and 0 <= snapshot.free_inodes <= snapshot.total_inodes
                 and 0 <= snapshot.inode_used_percent <= 100
+                and abs(snapshot.inode_used_percent - (
+                    100.0 * (snapshot.total_inodes - snapshot.free_inodes) / snapshot.total_inodes
+                )) <= 1.0
             )
         except (AttributeError, TypeError, ValueError):
             values_valid = False
