@@ -1,0 +1,78 @@
+.....F.................................................................. [ 80%]
+..................                                                       [100%]
+=================================== FAILURES ===================================
+____ test_missing_requirements_lists_full_remaining_set_for_create_sandbox _____
+
+client = <starlette.testclient.TestClient object at 0x774f98f64170>
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1270/test_missing_requirements_list0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1270/test_missing_requirements_list0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x774f9a128bf0>
+
+    def test_missing_requirements_lists_full_remaining_set_for_create_sandbox(client, git_repo, sandboxable_repo_factory):
+        """Section 12's exact worked example (this is the real Task #6
+        regression: a sandbox: contract exists and the workspace never opted
+        out with profile NONE, yet no sandbox exists at Runtime Verification
+        time -- in production that happened because auto-create silently hit
+        a capacity/runtime limit at Builder-Workspace-creation time
+        (auto_create_sandbox swallows SandboxError); here it is simulated
+        directly by removing the auto-created sandbox, which is
+        observationally identical to the decision layer). Create Sandbox
+        must still list 'Manual verification has not been completed'
+        alongside it, not only the one thing blocking right now."""
+        root, repo = git_repo
+        sb_repo = sandboxable_repo_factory(root, "qa-center")
+        register(client, sb_repo, "qa-center")
+        rid = client.get("/api/repositories").json()[0]["id"]
+        tid = new_task(client, "Runtime verification regression", risk="NORMAL")
+        client.post(f"/api/tasks/{tid}/select")
+        w = add_workspace(client, tid, rid, sandbox_profile=None)  # AUTO -> required
+        db = client.app.state.db
+        sb_ids = [r["id"] for r in db.all("SELECT id FROM sandboxes WHERE owner_type='AGENT_WORKSPACE' AND owner_id=?", (w["id"],))]
+        for sid in sb_ids:
+            db.execute("DELETE FROM sandbox_sources WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM sandbox_ports WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM sandbox_operations WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM manual_verifications WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM sandboxes WHERE id=?", (sid,))
+        submit_for_review(client, w)
+        review(client, w, "PASS")
+        d = decision(client, tid)
+        assert d["current_step"] == "TEST_QA"
+        assert d["next_action"]["action"] == "CREATE_SANDBOX"
+        assert d["missing_requirements"] == ["A Sandbox has not been created", "Manual verification has not been completed"]
+        assert d["next_action"]["target"] == f"/api/tasks/{tid}/workspaces/{w['id']}/create-sandbox"
+        assert d["next_action"]["method"] == "POST"
+    
+        # Successful action must advance the UI (section 6): once created,
+        # Create Sandbox never lingers as the primary action again.
+        r = client.post(d["next_action"]["target"], follow_redirects=False)
+        assert r.status_code == 303
+        d2 = decision(client, tid)
+        assert d2["next_action"]["action"] != "CREATE_SANDBOX"
+>       assert d2["next_action"]["action"] in ("SANDBOX_PROVISIONING", "START_QA")
+E       AssertionError: assert 'REBUILD_SANDBOX' in ('SANDBOX_PROVISIONING', 'START_QA')
+
+tests/test_workflow_decision_ux.py:186: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_workflow_decision_ux.py: 121 warnings
+tests/test_workflow_engine.py: 451 warnings
+tests/test_workspace_branch_collision.py: 22 warnings
+tests/test_workspace_detail_ux.py: 110 warnings
+tests/test_worktree_manager.py: 209 warnings
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_workflow_engine.py: 6 warnings
+tests/test_workspace_detail_ux.py: 7 warnings
+tests/test_worktree_manager.py: 2 warnings
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=952034) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_workflow_decision_ux.py::test_missing_requirements_lists_full_remaining_set_for_create_sandbox
+1 failed, 89 passed, 1 deselected, 940 warnings in 155.66s (0:02:35)

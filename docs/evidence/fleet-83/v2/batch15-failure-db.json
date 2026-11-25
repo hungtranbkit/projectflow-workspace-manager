@@ -1,0 +1,22 @@
+{
+  "/tmp/pytest-of-kimex/pytest-1269/test_closed_sandbox_restarts_i0/test.db": [
+    {
+      "operation_type": "PROVISION",
+      "status": "FAILED",
+      "exit_code": 1,
+      "stderr_tail": " Network wm-closed-test-agent_workspace-1-f6a749_default Creating \n Network wm-closed-test-agent_workspace-1-f6a749_default Creating \n Network wm-closed-test-agent_workspace-1-f6a749_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-closed-test-agent_workspace-1-f6a749_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-closed-test-agent_workspace-1-f6a749-app-1 Creating \nfailed to create network wm-closed-test-agent_workspace-1-f6a749_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+    },
+    {
+      "operation_type": "PROVISION",
+      "status": "FAILED",
+      "exit_code": 1,
+      "stderr_tail": " Network wm-closed-test-agent_workspace-1-f6a749_default Creating \n Network wm-closed-test-agent_workspace-1-f6a749_default Creating \n Network wm-closed-test-agent_workspace-1-f6a749_default Error Error response from daemon: all predefined address pools have been fully subnetted\n network:default failed to create network wm-closed-test-agent_workspace-1-f6a749_default: Error response from daemon: all predefined address pools have been fully subnetted \n Container wm-closed-test-agent_workspace-1-f6a749-app-1 Creating \nfailed to create network wm-closed-test-agent_workspace-1-f6a749_default: Error response from daemon: all predefined address pools have been fully subnetted\n"
+    },
+    {
+      "operation_type": "CLEANUP",
+      "status": "SUCCESS",
+      "exit_code": 0,
+      "stderr_tail": ""
+    }
+  ]
+}

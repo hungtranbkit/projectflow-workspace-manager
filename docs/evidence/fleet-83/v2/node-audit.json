@@ -1,0 +1,57 @@
+{
+  "source": "/tmp/pf83-v2-node-audit.json",
+  "nodes": {
+    "dell-linux": {
+      "node": "dell-Latitude-5511",
+      "uid": 1000,
+      "path": "/usr/bin:/home/dell/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin",
+      "gh": "/usr/bin/gh",
+      "git": "/usr/bin/git",
+      "local_gh": false,
+      "identity": {
+        "code": "AUTH_REQUIRED",
+        "exit": 1,
+        "value": "{\n  \"message\": \"Requires authentication\",\n  \"documentation_url\": \"https://docs.github.com/rest\",\n  \"status\": \"401\"\n}"
+      },
+      "push": {
+        "exit": 0,
+        "value": null,
+        "raw_probe_code": "PASS",
+        "code": "UNVERIFIED",
+        "interpretation": "exit 0 with no true permission value does not establish push permission"
+      },
+      "sudo": {
+        "code": "FAIL",
+        "exit": 1,
+        "value": null
+      },
+      "admin_wrapper_present": false,
+      "sshd": true
+    },
+    "m910": {
+      "node": "mesflow-ThinkCentre-M910q",
+      "uid": 1000,
+      "path": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin",
+      "gh": null,
+      "git": "/usr/bin/git",
+      "local_gh": true,
+      "identity": {
+        "code": "FileNotFoundError"
+      },
+      "push": {
+        "raw_probe_code": "FileNotFoundError",
+        "code": "UNVERIFIED",
+        "interpretation": "exit 0 with no true permission value does not establish push permission"
+      },
+      "sudo": {
+        "code": "FAIL",
+        "exit": 1,
+        "value": null
+      },
+      "admin_wrapper_present": false,
+      "sshd": true
+    }
+  },
+  "later_absolute_m910_identity": "m910-auth.json",
+  "admin_note": "Initial audit checked /usr/local/sbin/projectflow-admin. Later inventory also checked actual /usr/local/sbin/projectflow-owned-admin; both absent on Dell/M910."
+}

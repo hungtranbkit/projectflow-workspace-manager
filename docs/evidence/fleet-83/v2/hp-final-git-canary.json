@@ -1,0 +1,118 @@
+{
+  "task": "83-v2-final-git-canary",
+  "started_at": 1795580882.8770063,
+  "apply": {
+    "code": "PASS",
+    "changed": true,
+    "profile": "trusted-project-unattended-v1"
+  },
+  "before": {
+    "schema_version": 1,
+    "profile": "trusted-project-unattended-v1",
+    "observed_at": "2026-11-25T04:28:03Z",
+    "os": "Linux",
+    "node": "kimex-HP-EliteDesk-800-G4-DM-35W-Japan",
+    "uid": 1000,
+    "executables": {
+      "git": "/usr/bin/git",
+      "gh": "/usr/bin/gh",
+      "codex": "/home/kimex/.local/bin/codex",
+      "claude": "/home/kimex/.local/bin/claude",
+      "docker": "/usr/bin/docker",
+      "sudo": "/usr/bin/sudo"
+    },
+    "checks": {
+      "sudo": {
+        "code": "SUDO_REQUIRED",
+        "returncode": 1,
+        "elapsed_ms": 6
+      },
+      "gh_auth": {
+        "code": "PASS",
+        "returncode": 0,
+        "elapsed_ms": 528
+      },
+      "gh_identity": {
+        "code": "PASS",
+        "returncode": 0,
+        "elapsed_ms": 529
+      },
+      "github_push": {
+        "code": "PASS",
+        "returncode": 0,
+        "elapsed_ms": 626
+      },
+      "codex_version": {
+        "code": "PASS",
+        "returncode": 0,
+        "elapsed_ms": 13,
+        "version": "0.154.0"
+      },
+      "claude_version": {
+        "code": "PASS",
+        "returncode": 0,
+        "elapsed_ms": 109,
+        "version": "2.1.332"
+      },
+      "codex_auth": {
+        "code": "PASS",
+        "returncode": 0,
+        "elapsed_ms": 53
+      },
+      "claude_auth": {
+        "code": "AUTH_REQUIRED",
+        "returncode": 1,
+        "elapsed_ms": 228
+      },
+      "docker": {
+        "code": "PASS",
+        "returncode": 0,
+        "elapsed_ms": 60
+      },
+      "repository": {
+        "code": "PASS"
+      },
+      "git_helper": {
+        "code": "CONFIGURED"
+      },
+      "workspace": {
+        "code": "PASS",
+        "dirty": false
+      },
+      "disk": {
+        "code": "PASS",
+        "free_bytes": 13877415936,
+        "free_inodes": 13197644
+      },
+      "serial_adb": {
+        "code": "NOT_REQUIRED",
+        "reason": "Git/CLI task; no device access requested"
+      },
+      "admin": {
+        "code": "OWNER_BOOTSTRAP_REQUIRED",
+        "required_for_task": false
+      },
+      "managed_policy": {
+        "code": "OBSERVED",
+        "present": [],
+        "effective": "NOT_VERIFIED_BY_AUDIT"
+      }
+    },
+    "write_canary": "NOT_RUN",
+    "execution": "NOT_DISPATCHED"
+  },
+  "result": {
+    "code": "PASS",
+    "branch": "agent/codex/pf83-canary-3dfb2e77b84446a1b1fdb1ef672250cb",
+    "worktree": "/home/kimex/workspace/.worktrees/.worktrees/pf83-canary-3dfb2e77b84446a1b1fdb1ef672250cb",
+    "pushed_sha": "0b314e252ec014af4a70f1da3d5cff4ae24a013f",
+    "cleanup": "PASS",
+    "readback_sha": "0b314e252ec014af4a70f1da3d5cff4ae24a013f",
+    "local_branch": "RETAINED_CHECKPOINT"
+  },
+  "rollback": {
+    "code": "PASS",
+    "changed": true
+  },
+  "elapsed_seconds": 6.888
+}

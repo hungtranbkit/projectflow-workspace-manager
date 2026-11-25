@@ -15,7 +15,7 @@ Windows PowerShell:
 .\scripts\fleet-permissions.ps1 -Action audit -Workspace C:\exact\owned\task-worktree
 ```
 
-Windows/macOS offline: đây là gói và hướng dẫn chuẩn bị; runtime vẫn UNKNOWN/OFFLINE. Không dùng bootstrap Debian trên các nền tảng đó. Installer Terminal MCP hiện có nhận `--fleet-readiness-config readiness.json --fleet-workspace /exact/worktree`; Windows nhận `-FleetReadinessConfig readiness.json -FleetWorkspace C:\exact\worktree`. Các mode audit/apply/check/rollback thoát trước pairing, token hoặc service update. Xem tài liệu `docs/fleet-readiness-v1.md` trong PR Terminal MCP phối hợp để pin source SHA và task_id.
+Windows/macOS offline: đây là gói và hướng dẫn chuẩn bị; runtime vẫn UNKNOWN/OFFLINE. Không dùng bootstrap Debian trên các nền tảng đó. Installer Terminal MCP hiện có nhận `--fleet-readiness-config readiness.json --fleet-workspace /exact/worktree`; Windows nhận `-FleetReadinessConfig readiness.json -FleetWorkspace C:\exact\worktree`. Các mode audit/apply/check/rollback thoát trước pairing, token hoặc service update. Xem tài liệu `docs/fleet-readiness-v1.md` trong [PR Terminal MCP #132](https://github.com/hungtranbkit/terminal-mcp/pull/132) để pin source SHA và task_id.
 
 ## Opt-in một task qua ProjectFlow đang chạy
 
@@ -64,7 +64,7 @@ python3 scripts/fleet-delivery.py --repo /exact/HP/repo --state /private/deliver
 
 Manifest schema 1: request_key, task_id, source_node, repo, origin_url, source_branch, base_sha, commit_sha, remote_ref, allowed_paths, bundle_sha256. remote_ref phải là refs/heads/ của cùng task branch agent/. Origin fetch và effective push URL phải đúng owner destination. HP import vào ref/worktree riêng, kiểm tra exact bytes/commit/paths, chạy owner argv, identity + repo push, normal push, SHA readback, normal PR và readback. Existing policy pre-push hook vẫn chạy; advertised remote tip phải absent. Không force hoặc ghi main.
 
-Receipt có source/HP/remote SHA và PR; lease theo request lẫn repo/ref; retry cùng input chỉ reconcile. Unknown push/PR không được gửi lại mù. Giữ code/source worktree và receipt làm checkpoint; không xóa published ref/PR khi rollback. Ví dụ thực tế đã chứng minh: HP product API → PR #85; Dell source → HP → PR #87. Dell-origin delivery PASS không có nghĩa Dell-local Git auth PASS.
+Receipt có source/HP/remote SHA và PR; lease theo request lẫn repo/ref; retry cùng input chỉ reconcile. Unknown push/PR không được gửi lại mù. Giữ code/source worktree và receipt làm checkpoint; không xóa published ref/PR khi rollback. Ví dụ thực tế đã chứng minh: HP product API → PR #85; Dell source → HP → PR #87; actual MCP create → HP → PR #88. Dell-origin delivery PASS không có nghĩa Dell-local Git auth PASS.
 
 ## Admin / SSH: owner action còn thiếu
 

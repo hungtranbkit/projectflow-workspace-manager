@@ -1,0 +1,11 @@
+{
+  "node": "hp-linux",
+  "exit": 2,
+  "result": {
+    "status": "BLOCKED",
+    "reason": "UNTRUSTED_PATH"
+  },
+  "artifact_sha256": "f62bb40b0b101ad3373537c58fc4f5f508d6f43792729cf2df1e2f4cf6784df9",
+  "changes": false,
+  "interpretation": "Host trusted-path ownership guard blocks; unit fixture PASS does not establish live ADMIN_READY."
+}

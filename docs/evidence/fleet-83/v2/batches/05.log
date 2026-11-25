@@ -1,0 +1,19 @@
+........................................................................ [ 69%]
+...............................                                          [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_b02_organizations.py: 286 warnings
+tests/test_b03_authz.py: 154 warnings
+tests/test_b04_csrf.py: 121 warnings
+tests/test_b05_ratelimit.py: 88 warnings
+tests/test_b06_sandbox.py: 22 warnings
+tests/test_b07_secrets.py: 242 warnings
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+103 passed, 925 warnings in 144.43s (0:02:24)

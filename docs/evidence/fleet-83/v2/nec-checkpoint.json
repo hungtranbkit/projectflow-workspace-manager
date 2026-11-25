@@ -1,0 +1,14 @@
+{
+  "task_id": "83-v2-nec-audit",
+  "target": "nec1/pf83-v2-nec-audit",
+  "repo": null,
+  "branch": null,
+  "sha": null,
+  "cwd": "/home/rag/workspace",
+  "dirty": "NOT_A_REPOSITORY",
+  "state": "IDLE",
+  "result": "AUTH_REQUIRED; SSH_NEEDS_ADMIN",
+  "log": "/tmp/pf83-v2-nec-before-close.json",
+  "resume": "Audit complete. After node-local owner login/admin bootstrap, create a new dedicated audit session; do not replay historical tasks.",
+  "timestamp": "2026-11-25T04:16:49.129251+00:00"
+}

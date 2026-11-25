@@ -1,0 +1,23 @@
+{
+  "captured_at": "2026-11-25T05:04:55.546073+00:00",
+  "prs": [
+    {
+      "headRefOid": "8918c52c34c4ce345194287eac3e4d0c6e767a20",
+      "number": 85,
+      "state": "OPEN",
+      "url": "https://github.com/hungtranbkit/projectflow-workspace-manager/pull/85"
+    },
+    {
+      "headRefOid": "4d548f2041df55e95d4ddee2b29e6b1e94759b44",
+      "number": 87,
+      "state": "OPEN",
+      "url": "https://github.com/hungtranbkit/projectflow-workspace-manager/pull/87"
+    },
+    {
+      "headRefOid": "129b171f437dd92e1feaf5af72da246e8985fd0b",
+      "number": 88,
+      "state": "OPEN",
+      "url": "https://github.com/hungtranbkit/projectflow-workspace-manager/pull/88"
+    }
+  ]
+}

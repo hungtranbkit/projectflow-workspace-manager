@@ -1,0 +1,8 @@
+{
+  "project": "wm-wizard-sandbox-test-agent_workspace-1-04903b",
+  "backup": "/home/kimex/.local/state/projectflow/pf83-v2-checkpoints/batch15-wizard-db.sqlite",
+  "restored": "Only deliberate fixture corruption, matched original PROVISION record and sandbox slug",
+  "cleanup_status": "CLOSED",
+  "containers": [],
+  "networks": []
+}

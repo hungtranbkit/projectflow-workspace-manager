@@ -1,0 +1,30 @@
+........................................................................ [ 63%]
+..........................................                               [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_golden_e2e.py: 22 warnings
+tests/test_help_guide.py: 121 warnings
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+tests/test_golden_e2e.py::test_golden_bug_closed_loop_returns_to_healthy
+tests/test_golden_e2e.py::test_golden_bug_closed_loop_returns_to_healthy
+tests/test_golden_e2e.py::test_golden_bug_closed_loop_returns_to_healthy
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=830099) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+  /home/kimex/workspace/projectflow-fleet-permissions-83/.venv/lib/python3.14/site-packages/_pytest/python.py:191: PytestReturnNotNoneWarning: Test functions should return None, but tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete returned <class 'tuple'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+114 passed, 3 deselected, 162 warnings in 33.39s

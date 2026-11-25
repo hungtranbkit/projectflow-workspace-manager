@@ -1,0 +1,36 @@
+{
+  "observed_at": "2026-11-25T04:35:29.778Z",
+  "queries": [
+    {
+      "repo": "hungtranbkit/projectflow-workspace-manager",
+      "branch": "agent/codex/fleet-permissions-83",
+      "exit": 0,
+      "runs": []
+    },
+    {
+      "repo": "hungtranbkit/projectflow-workspace-manager",
+      "branch": "agent/codex/pf83-v2-isolated-product-canary-pf83-v2-product-proof",
+      "exit": 0,
+      "runs": []
+    },
+    {
+      "repo": "hungtranbkit/projectflow-workspace-manager",
+      "branch": "agent/codex/pf83-v2-dell-delivery-20261125",
+      "exit": 0,
+      "runs": []
+    },
+    {
+      "repo": "hungtranbkit/projectflow-workspace-manager",
+      "branch": "agent/codex/pf83-v2-mcp-product",
+      "exit": 0,
+      "runs": []
+    },
+    {
+      "repo": "hungtranbkit/terminal-mcp",
+      "branch": "agent/codex/fleet-ready-83",
+      "exit": 0,
+      "runs": []
+    }
+  ],
+  "note": "Read-only queries of own task/proof branches; no Actions run dispatched, enabled or observed."
+}

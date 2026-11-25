@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="85" time="116.026" timestamp="2026-11-25T11:50:40.054273+07:00" hostname="kimex-HP-EliteDesk-800-G4-DM-35W-Japan"><testcase classname="tests.test_review_fix_loop" name="test_code_review_pass" time="1.432" /><testcase classname="tests.test_review_fix_loop" name="test_code_review_pass_with_findings" time="1.426" /><testcase classname="tests.test_review_fix_loop" name="test_code_review_fix_required" time="1.439" /><testcase classname="tests.test_review_fix_loop" name="test_code_review_human_decision_required" time="1.449" /><testcase classname="tests.test_review_fix_loop" name="test_code_review_reject" time="1.405" /><testcase classname="tests.test_review_fix_loop" name="test_invalid_pass_with_critical_finding_rejected" time="1.453" /><testcase classname="tests.test_review_fix_loop" name="test_finding_deduplicated_across_rounds" time="1.444" /><testcase classname="tests.test_review_fix_loop" name="test_finding_resolve_requires_reference" time="1.414" /><testcase classname="tests.test_review_fix_loop" name="test_no_managed_worktree_no_changes" time="0.969" /><testcase classname="tests.test_review_fix_loop" name="test_security_review_not_applicable_for_trivial_change" time="1.458" /><testcase classname="tests.test_review_fix_loop" name="test_security_review_required_for_auth_path_change" time="1.415" /><testcase classname="tests.test_review_fix_loop" name="test_security_review_required_by_controlled_profile" time="1.327" /><testcase classname="tests.test_review_fix_loop" name="test_security_review_produces_dedicated_work_product" time="1.478" /><testcase classname="tests.test_review_fix_loop" name="test_security_pass_no_longer_aliases_review_pass" time="1.345" /><testcase classname="tests.test_review_fix_loop" name="test_finding_auto_resolved_when_no_longer_reported_after_fix" time="1.503" /><testcase classname="tests.test_review_fix_loop" name="test_fix_required_creates_fix_task_transfers_worktree" time="2.457" /><testcase classname="tests.test_review_fix_loop" name="test_bounded_at_three_rounds" time="1.880" /><testcase classname="tests.test_review_fix_loop" name="test_finding_from_original_task_resolved_after_fix_task_commit" time="3.038" /><testcase classname="tests.test_review_fix_loop" name="test_human_decision_stops_loop" time="1.942" /><testcase classname="tests.test_review_fix_loop" name="test_security_critical_finding_blocks" time="1.688" /><testcase classname="tests.test_review_fix_loop" name="test_review_pass_none_falls_back_to_legacy_when_no_e9_review" time="1.482" /><testcase classname="tests.test_review_fix_loop" name="test_review_stale_after_new_commit" time="1.534" /><testcase classname="tests.test_review_fix_loop" name="test_integration_readiness_ready" time="1.631" /><testcase classname="tests.test_review_fix_loop" name="test_integration_readiness_blocked_by_conflict" time="1.670" /><testcase classname="tests.test_review_fix_loop" name="test_review_never_touches_canonical_checkout" time="1.606" /><testcase classname="tests.test_review_fix_loop" name="test_legacy_manual_review_runs_unaffected" time="1.614" /><testcase classname="tests.test_review_fix_loop" name="test_e8_autonomous_readiness_unaffected" time="1.472" /><testcase classname="tests.test_review_fix_loop" name="test_security_not_applicable_for_empty_diff_even_under_controlled" time="1.722" /><testcase classname="tests.test_runtime_dependency_staleness" name="test_runtime_dependency_commit_move_does_not_mark_sandbox_stale" time="1.111" /><testcase classname="tests.test_sandbox_dies_self_heals" name="test_reconcile_detects_a_container_killed_outside_projectflow" time="5.265" /><testcase classname="tests.test_sandbox_dies_self_heals" name="test_reconcile_leaves_a_genuinely_healthy_sandbox_running" time="2.595" /><testcase classname="tests.test_sandbox_docker" name="test_two_agent_sandboxes_are_fully_isolated" time="3.046"><failure message="AssertionError: assert 'FAILED' == 'RUNNING'&#10;  &#10;  - RUNNING&#10;  + FAILED">client = &lt;starlette.testclient.TestClient object at 0x73dc16bbbf00&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_two_agent_sandboxes_are_f0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_two_agent_sandboxes_are_f0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x73dc15921d20&gt;
+
+    def test_two_agent_sandboxes_are_fully_isolated(client, git_repo, sandboxable_repo_factory):
+        """docs section 61 Test 1: different ports, different compose project,
+        isolated network, both healthy independently."""
+        root, _ = git_repo
+        repo_a = sandboxable_repo_factory(root, "svc-a", port_range=(21100, 21149))
+        repo_b = sandboxable_repo_factory(root, "svc-b", port_range=(21150, 21199))
+        register(client, repo_a); register(client, repo_b)
+        repos = {r["repo_name"]: r["id"] for r in client.get("/api/repositories").json()}
+        client.post("/api/tasks", data={"title": "Isolation check"}, follow_redirects=False)
+        tid = client.get("/api/tasks").json()[0]["id"]
+        client.post(f"/api/tasks/{tid}/select")
+    
+        create_task_workspace(client, tid, repos["svc-a"], agent="codex", role="A")
+        create_task_workspace(client, tid, repos["svc-b"], agent="claude", role="B")
+        sandboxes = client.get("/api/sandboxes").json()
+        assert len(sandboxes) == 2
+        try:
+            assert sandboxes[0]["compose_project"] != sandboxes[1]["compose_project"]
+            for sb in sandboxes:
+&gt;               assert sb["status"] == "RUNNING"
+E               AssertionError: assert 'FAILED' == 'RUNNING'
+E                 
+E                 - RUNNING
+E                 + FAILED
+
+tests/test_sandbox_docker.py:82: AssertionError</failure></testcase><testcase classname="tests.test_sandbox_docker" name="test_sandbox_capacity_limit_blocks_a_new_sandbox" time="2.878" /><testcase classname="tests.test_sandbox_reset_data" name="test_reset_data_preserves_identity_and_port_and_recreates_healthy" time="4.111" /><testcase classname="tests.test_sandbox_reset_data" name="test_reset_data_refuses_unowned_sandbox" time="2.618" /><testcase classname="tests.test_sandbox_reset_data" name="test_reset_data_does_not_touch_an_unrelated_sandbox" time="3.131"><failure message="AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}&#10;assert 'FAILED' == 'RUNNING'&#10;  &#10;  - RUNNING&#10;  + FAILED">client = &lt;starlette.testclient.TestClient object at 0x73dc0554e9c0&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_reset_data_does_not_touch0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_reset_data_does_not_touch0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x73dc055e2090&gt;
+cleanup_sandboxes = [1, 2]
+
+    def test_reset_data_does_not_touch_an_unrelated_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes):
+        sb1 = make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, (22340, 22359), "reset-a")
+&gt;       sb2 = make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, (22360, 22379), "reset-b")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_sandbox_reset_data.py:105: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = &lt;starlette.testclient.TestClient object at 0x73dc0554e9c0&gt;
+git_repo = (PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_reset_data_does_not_touch0/root'), PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_reset_data_does_not_touch0/root/demo'))
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x73dc055e2090&gt;
+cleanup_sandboxes = [1, 2], port_range = (22360, 22379), name = 'reset-b'
+
+    def make_sandbox(client, git_repo, sandboxable_repo_factory, cleanup_sandboxes, port_range, name):
+        root, _ = git_repo
+        repo = sandboxable_repo_factory(root, name, port_range=port_range)
+        register(client, repo, name)
+        rid = next(r["id"] for r in client.get("/api/repositories").json() if r["repo_name"] == name)
+        client.post("/api/tasks", data={"title": f"{name} task", "risk_profile": "LOW"}, follow_redirects=False)
+        tid = [t for t in client.get("/api/tasks").json() if t["title"] == f"{name} task"][0]["id"]
+        client.post(f"/api/tasks/{tid}/select")
+        client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "base_branch": "main", "sandbox_profile": "backend"}, follow_redirects=False)
+        sb = [s for s in client.get("/api/sandboxes").json() if s["repository_id"] == rid][0]
+        cleanup_sandboxes.append(sb["id"])
+        row = wait_status(client, sb["id"], ("RUNNING", "UNHEALTHY", "FAILED"))
+&gt;       assert row["status"] == "RUNNING", row
+E       AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}
+E       assert 'FAILED' == 'RUNNING'
+E         
+E         - RUNNING
+E         + FAILED
+
+tests/test_sandbox_reset_data.py:63: AssertionError</failure></testcase><testcase classname="tests.test_sandbox_stuck_busy_after_restart" name="test_sandbox_left_busy_by_a_dead_process_is_unrecoverable_before_fix_class" time="2.798" /><testcase classname="tests.test_sandbox_stuck_busy_after_restart" name="test_restart_reconciliation_recovers_a_sandbox_stuck_busy_by_a_dead_process" time="3.696" /><testcase classname="tests.test_service_scripts" name="test_systemd_security_and_restart_policy" time="0.000" /><testcase classname="tests.test_service_scripts" name="test_start_script_enforces_local_bind_and_has_identity_check" time="0.000" /><testcase classname="tests.test_service_scripts" name="test_project_service_contract" time="0.003" /><testcase classname="tests.test_sidebar_nav" name="test_advanced_submenu_has_four_distinct_links_with_correct_hrefs" time="1.008" /><testcase classname="tests.test_sidebar_nav" name="test_advanced_submenu_items_are_block_level_not_a_horizontal_row" time="0.963" /><testcase classname="tests.test_sidebar_nav" name="test_no_duplicate_nav_items_anywhere_on_the_page" time="0.981" /><testcase classname="tests.test_sidebar_nav" name="test_advanced_expands_and_highlights_active_child_on_matching_route" time="0.996" /><testcase classname="tests.test_sidebar_nav" name="test_advanced_collapsed_by_default_on_a_non_advanced_route" time="1.009" /><testcase classname="tests.test_sidebar_nav" name="test_top_level_active_item_highlighted" time="1.096" /><testcase classname="tests.test_sidebar_nav" name="test_sidebar_renders_on_task_detail_workspace_and_sandbox_pages_without_error" time="1.385" /><testcase classname="tests.test_simple_mode" name="test_changes_page_default_mode_is_advanced" time="0.969" /><testcase classname="tests.test_simple_mode" name="test_mode_query_param_sets_cookie_and_persists" time="1.013" /><testcase classname="tests.test_simple_mode" name="test_change_detail_simple_vs_advanced_rendering" time="1.962" /><testcase classname="tests.test_simple_mode" name="test_simple_view_api_matches_service" time="1.439" /><testcase classname="tests.test_simple_mode" name="test_lifecycle_mapping_only_from_workflow_truth" time="1.175" /><testcase classname="tests.test_simple_mode" name="test_lifecycle_no_workflow_yet_is_not_shown_as_done" time="1.204" /><testcase classname="tests.test_simple_mode" name="test_human_attention_no_action_needed_by_default" time="1.410" /><testcase classname="tests.test_simple_mode" name="test_human_attention_surfaces_pending_decision" time="1.207" /><testcase classname="tests.test_simple_mode" name="test_backend_only_change_no_product_url_no_fabrication" time="1.217" /><testcase classname="tests.test_simple_mode" name="test_no_release_change_deploy_section_honest" time="1.157" /><testcase classname="tests.test_simple_mode" name="test_incidents_surfaced_in_history" time="1.208" /><testcase classname="tests.test_simple_mode" name="test_active_agents_simple_text_no_raw_session_fields" time="1.200" /><testcase classname="tests.test_simple_mode" name="test_waiting_human_change_status_language" time="1.044" /><testcase classname="tests.test_simple_mode" name="test_simple_create_change_form" time="0.971" /><testcase classname="tests.test_soak_multi_repo_resource_leak" name="test_multi_repo_task_session_sandbox_soak_leaves_no_leak" time="3.390"><failure message="AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}&#10;assert 'FAILED' == 'RUNNING'&#10;  &#10;  - RUNNING&#10;  + FAILED">client = &lt;starlette.testclient.TestClient object at 0x73db84b56470&gt;
+tmp_path = PosixPath('/tmp/pytest-of-kimex/pytest-1271/test_multi_repo_task_session_s0')
+sandboxable_repo_factory = &lt;function sandboxable_repo_factory.&lt;locals&gt;.make at 0x73db84b894e0&gt;
+
+    def test_multi_repo_task_session_sandbox_soak_leaves_no_leak(client, tmp_path, sandboxable_repo_factory):
+        # `client` (via the `git_repo` fixture) already created
+        # tmp_path/"root"/"demo" as the workspace root -- reuse that same
+        # root rather than re-mkdir'ing it.
+        root = client.app.state.settings.root
+        N = 3
+    
+        before_containers = _wm_container_ids()
+        worktree_root = client.app.state.git.worktree_root
+        before_worktree_dirs = set(worktree_root.glob("*")) if worktree_root.is_dir() else set()
+    
+        client.app.state.agent_sessions.launchers = {"codex": AgentLauncher("Codex", "bash", ("-c", "true"))}
+    
+        sandbox_ids, workspace_ids, session_ids = [], [], []
+        for i in range(N):
+            repo = sandboxable_repo_factory(root, f"soak-{i}", port_range=(21200 + i * 10, 21209 + i * 10))
+            rid = register(client, repo)
+            r = client.post("/api/tasks", data={"title": f"Soak task {i}"}, follow_redirects=False)
+            assert r.status_code == 303, r.text
+            tid = int(r.headers["location"].split("/")[-1])
+            client.post(f"/api/tasks/{tid}/select")
+            r = client.post(f"/api/tasks/{tid}/workspaces",
+                             data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "backend"},
+                             follow_redirects=False)
+            assert r.status_code == 303, r.text
+            w = client.get("/api/workspaces").json()[-1]
+            workspace_ids.append(w["id"])
+    
+            sb = [s for s in client.get("/api/sandboxes").json() if s["owner_id"] == w["id"]][0]
+&gt;           assert sb["status"] == "RUNNING", sb
+E           AssertionError: {'id': 2, 'task_id': 2, 'repository_id': 2, 'owner_type': 'AGENT_WORKSPACE', ...}
+E           assert 'FAILED' == 'RUNNING'
+E             
+E             - RUNNING
+E             + FAILED
+
+tests/test_soak_multi_repo_resource_leak.py:90: AssertionError</failure></testcase><testcase classname="tests.test_spec_compliance" name="test_compliance_is_incomplete_before_any_review" time="1.285" /><testcase classname="tests.test_spec_compliance" name="test_compliance_passes_for_a_legacy_task_with_no_spec_linkage" time="1.432" /><testcase classname="tests.test_spec_compliance" name="test_compliance_fails_when_review_reports_fix_required" time="1.483" /><testcase classname="tests.test_spec_compliance" name="test_compliance_is_incomplete_when_spec_required_but_unmet" time="1.294" /><testcase classname="tests.test_spec_compliance" name="test_compliance_requires_traced_evidence_for_a_spec_linked_task" time="1.281" /><testcase classname="tests.test_spec_compliance" name="test_compliance_passes_with_traced_evidence_for_a_spec_linked_task" time="1.695" /><testcase classname="tests.test_spec_compliance" name="test_compliance_reports_spec_drift_when_linkage_becomes_invalid" time="1.692" /><testcase classname="tests.test_spec_compliance" name="test_evidence_store_returns_empty_shape_for_an_untouched_task" time="1.255" /><testcase classname="tests.test_spec_gate" name="test_no_classification_is_not_applicable" time="0.003" /><testcase classname="tests.test_spec_gate" name="test_no_behavior_change_passes_without_any_linkage" time="0.003" /><testcase classname="tests.test_spec_gate" name="test_ambiguous_is_spec_required" time="0.003" /><testcase classname="tests.test_spec_gate" name="test_unknown_classification_is_spec_required" time="0.003" /><testcase classname="tests.test_spec_gate" name="test_gated_classification_without_feature_id_is_spec_required" time="0.003" /><testcase classname="tests.test_spec_gate" name="test_unapproved_feature_is_spec_not_approved" time="0.006" /><testcase classname="tests.test_spec_gate" name="test_missing_requirement_or_acceptance_mapping_is_traceability_missing" time="0.006" /><testcase classname="tests.test_spec_gate" name="test_unknown_feature_id_is_spec_reference_invalid" time="0.006" /><testcase classname="tests.test_spec_gate" name="test_unknown_requirement_id_is_spec_reference_invalid" time="0.006" /><testcase classname="tests.test_spec_gate" name="test_requirement_from_a_different_feature_is_spec_reference_invalid" time="0.005" /><testcase classname="tests.test_spec_gate" name="test_valid_linkage_passes" time="0.003" /><testcase classname="tests.test_spec_gate" name="test_valid_linkage_accepts_a_plain_python_list_too" time="0.003" /><testcase classname="tests.test_spec_gate" name="test_broken_spec_tree_surfaces_as_spec_reference_invalid_not_a_crash" time="0.001" /><testcase classname="tests.test_spec_gate" name="test_every_classification_is_covered" time="0.001" /></testsuite></testsuites>
