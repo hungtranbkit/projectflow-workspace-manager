@@ -2568,7 +2568,8 @@ def create_app(settings=None):
         from app.services.fleet_dispatch import FleetDispatch
         from app.services.fleet_permissions import FleetError
         try:
-            trusted = FleetDispatch(settings).prepare(w,workspace_agent_prompt(w))
+            dispatch = FleetDispatch(settings)
+            trusted = dispatch.prepare(w,workspace_agent_prompt(w)) if dispatch.enrollment(w) is not None else None
         except FleetError as exc:
             raise GitSafetyError(str(exc)) from exc
         launch_options = {"trusted_launch":trusted} if trusted else {}
@@ -2713,7 +2714,7 @@ def create_app(settings=None):
             except Exception: pass
 
     @app.get("/api/workspaces/{wid}/fleet")
-    def fleet_status(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
+    def fleet_status(wid:int, _authz: None = Depends(require_read_role("workspace", "wid"))):
         from app.services.fleet_dispatch import FleetDispatch
         from app.services.fleet_permissions import FleetError
         try:
