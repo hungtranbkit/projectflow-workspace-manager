@@ -20,11 +20,28 @@ import pytest
 
 from tests.test_autonomous_execution import register as _register_repo, new_change, materialize_task
 from tests.test_worktree_manager import _select_and_create_workspace
-from tests.test_review_fix_loop import envelope, set_fake, PASS
+from tests.test_review_fix_loop import envelope, PASS
 
 
 def run(path, *args):
     return subprocess.run(list(args), cwd=path, text=True, capture_output=True, check=True)
+
+
+def set_fake(client, payload):
+    """Set the deterministic E10 fake at the complete shared invoker boundary."""
+    invoker = client.app.state.code_review_service.invoker
+    assert client.app.state.planner_service.invoker is invoker
+    env = envelope(payload)
+
+    def runner(argv, cwd, timeout):
+        class R:
+            returncode = 0
+            stdout = json.dumps(env)
+            stderr = ""
+        return R()
+
+    invoker.which = lambda name: "/test-only/claude" if name == "claude" else None
+    invoker.runner = runner
 
 
 @dataclass
