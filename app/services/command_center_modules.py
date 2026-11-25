@@ -40,7 +40,9 @@ def _id(value):
 
 def _label(value):
     _require(isinstance(value, str) and 0 < len(value) <= 160
-             and bool(value.strip()) and not any(ord(c) < 32 or ord(c) == 127 for c in value),
+             and bool(value.strip()) and not any(
+                 ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF
+                 for c in value),
              "module: invalid label")
     return value
 

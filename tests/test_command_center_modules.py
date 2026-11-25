@@ -82,3 +82,18 @@ def test_empty_and_deep_tree_without_recursion():
     m["modules"] = [dict(id="m"+str(i), label=str(i), parent="m"+str(i-1) if i else None,
                          presence="unknown") for i in range(1000)]
     assert len(valid(m)["modules"]) == 1000
+
+@pytest.mark.parametrize("point", [0xD800, 0xDFFF])
+def test_unicode_label_rejects_unpaired_surrogate(point):
+    m = sample()
+    m["modules"][0]["label"] = "Queue" + chr(point)
+    with pytest.raises(ModuleManifestError, match="invalid label"):
+        canonical_json(m, expected_project=PROJECT, expected_commit=SHA)
+
+
+def test_unicode_label_roundtrips_canonical_utf8():
+    m = sample()
+    m["modules"][0]["label"] = "Điều phối " + chr(0x1F680)
+    raw = canonical_json(m, expected_project=PROJECT, expected_commit=SHA).encode("utf-8")
+    assert json.loads(raw)["modules"][0]["label"] == m["modules"][0]["label"]
+    assert canonical_json(json.loads(raw), expected_project=PROJECT, expected_commit=SHA).encode("utf-8") == raw
