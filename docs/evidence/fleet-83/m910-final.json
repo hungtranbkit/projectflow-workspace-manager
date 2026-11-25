@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "profile": "trusted-project-unattended-v1",
+  "observed_at": "2026-11-25T02:58:59Z",
+  "os": "Linux",
+  "node": "mesflow-ThinkCentre-M910q",
+  "uid": 1000,
+  "executables": {
+    "git": "/usr/bin/git",
+    "gh": "/home/mesflow/.local/bin/gh",
+    "codex": "/home/mesflow/.local/bin/codex",
+    "claude": "/home/mesflow/.local/bin/claude",
+    "docker": "/usr/bin/docker",
+    "sudo": "/usr/bin/sudo"
+  },
+  "checks": {
+    "sudo": {
+      "code": "SUDO_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 9
+    },
+    "gh_auth": {
+      "code": "AUTH_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 79
+    },
+    "gh_identity": {
+      "code": "AUTH_REQUIRED",
+      "returncode": 4,
+      "elapsed_ms": 75
+    },
+    "github_push": {
+      "code": "AUTH_REQUIRED",
+      "returncode": 4,
+      "elapsed_ms": 59
+    },
+    "codex_version": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 81,
+      "version": "0.165.0"
+    },
+    "claude_version": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 18,
+      "version": "2.1.326"
+    },
+    "codex_auth": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 137
+    },
+    "claude_auth": {
+      "code": "AUTH_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 303
+    },
+    "docker": {
+      "code": "ACL_DENIED",
+      "returncode": 1,
+      "elapsed_ms": 63
+    },
+    "repository": {
+      "code": "TRUST_REQUIRED"
+    },
+    "git_helper": {
+      "code": "AUTH_REQUIRED"
+    },
+    "workspace": {
+      "code": "TRUST_REQUIRED"
+    },
+    "disk": {
+      "code": "PASS",
+      "free_bytes": 12572864512,
+      "free_inodes": 6512328
+    },
+    "serial_adb": {
+      "code": "NOT_REQUIRED",
+      "reason": "Git/CLI task; no device access requested"
+    },
+    "admin": {
+      "code": "OWNER_BOOTSTRAP_REQUIRED",
+      "required_for_task": false
+    },
+    "managed_policy": {
+      "code": "OBSERVED",
+      "present": [],
+      "effective": "NOT_VERIFIED_BY_AUDIT"
+    }
+  },
+  "write_canary": "NOT_RUN",
+  "execution": "NOT_DISPATCHED"
+}

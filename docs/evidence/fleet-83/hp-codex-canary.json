@@ -1,0 +1,10 @@
+{
+  "code": "PASS",
+  "returncode": 0,
+  "elapsed_ms": 16980,
+  "execution": "EXITED",
+  "dispatched": true,
+  "write_readback": "FAIL",
+  "task_outcome": "BLOCKED",
+  "reason": "ACL_DENIED: native user namespaces"
+}

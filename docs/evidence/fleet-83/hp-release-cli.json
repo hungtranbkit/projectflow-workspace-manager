@@ -1,0 +1,13 @@
+{
+  "code": "PASS",
+  "returncode": 0,
+  "elapsed_ms": 15243,
+  "execution": "EXITED",
+  "dispatched": true,
+  "task_outcome": "UNVERIFIED",
+  "runtime": "docker",
+  "capabilities": "FILE_WORK_ONLY_NO_GIT",
+  "source_commit": "47ed370",
+  "write_readback": "PASS",
+  "artifact_sha256": "02697bdb39656c49d636a62450a8d1046258525bb63c73307300869d5edff555"
+}

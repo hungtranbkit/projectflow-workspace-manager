@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "profile": "trusted-project-unattended-v1",
+  "observed_at": "2026-11-25T02:57:33Z",
+  "os": "Linux",
+  "node": "kimex-HP-EliteDesk-800-G4-DM-35W-Japan",
+  "uid": 1000,
+  "executables": {
+    "git": "/usr/bin/git",
+    "gh": "/usr/bin/gh",
+    "codex": "/home/kimex/.local/bin/codex",
+    "claude": "/home/kimex/.local/bin/claude",
+    "docker": "/usr/bin/docker",
+    "sudo": "/usr/bin/sudo"
+  },
+  "checks": {
+    "sudo": {
+      "code": "SUDO_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 2
+    },
+    "gh_auth": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 480
+    },
+    "gh_identity": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 527
+    },
+    "github_push": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 657
+    },
+    "codex_version": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 10,
+      "version": "0.154.0"
+    },
+    "claude_version": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 12,
+      "version": "2.1.332"
+    },
+    "codex_auth": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 48
+    },
+    "claude_auth": {
+      "code": "AUTH_REQUIRED",
+      "returncode": 1,
+      "elapsed_ms": 215
+    },
+    "docker": {
+      "code": "PASS",
+      "returncode": 0,
+      "elapsed_ms": 55
+    },
+    "repository": {
+      "code": "PASS"
+    },
+    "git_helper": {
+      "code": "CONFIGURED"
+    },
+    "workspace": {
+      "code": "PASS",
+      "dirty": true
+    },
+    "disk": {
+      "code": "PASS",
+      "free_bytes": 14296272896,
+      "free_inodes": 13211649
+    },
+    "serial_adb": {
+      "code": "NOT_REQUIRED",
+      "reason": "Git/CLI task; no device access requested"
+    },
+    "admin": {
+      "code": "OWNER_BOOTSTRAP_REQUIRED",
+      "required_for_task": false
+    },
+    "managed_policy": {
+      "code": "OBSERVED",
+      "present": [],
+      "effective": "NOT_VERIFIED_BY_AUDIT"
+    }
+  },
+  "write_canary": "NOT_RUN",
+  "execution": "NOT_DISPATCHED"
+}

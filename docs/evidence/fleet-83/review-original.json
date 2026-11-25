@@ -1,0 +1,636 @@
+{
+  "status": "complete",
+  "verdict": "Ready with fixes",
+  "scope": {
+    "base": "c1c9718913483ab71e4bd3ddd94339ba018cf4bc",
+    "branch": "agent/codex/fleet-permissions-83",
+    "head_sha": "c1c9718913483ab71e4bd3ddd94339ba018cf4bc",
+    "pr_url": null,
+    "files_changed": 9,
+    "mode": "standalone",
+    "reviewed_tree": "/tmp/compound-engineering-1000/ce-code-review/20261125-issue83-7u8cgegi/reviewed-tree",
+    "description": "Original staged snapshot: 767 insertions and 1 deletion; excludes subsequent owner fixes."
+  },
+  "intent": "Implement versioned reversible fleet audit/setup/rollback and trusted-worktree noninteractive agent launch with bounded Git and permission checks. Preserve credentials, unrelated WIP, managed policy, and branch protections; report actual blocked states and exact-ref Git delivery evidence.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "security",
+    "testing",
+    "reliability",
+    "project-standards",
+    "maintainability",
+    "adversarial",
+    "agent-native"
+  ],
+  "findings": [
+    {
+      "#": 1,
+      "autofix_class": "manual",
+      "confidence": 100,
+      "evidence": [
+        "AGENTS.md:32-37 requires SandboxRuntimeService and its verified wm-<repo>-<owner>-<suffix> namespace; fleet_permissions.py:327-339 instead launches and stops a pf83 container directly."
+      ],
+      "file": "app/services/fleet_permissions.py",
+      "first_evidence": "app/services/fleet_permissions.py:150 -- return [\"docker\", \"run\", \"--rm\", \"--name\", name, \"--label\", \"projectflow.fleet83=\"+name,",
+      "independent_reviewers": [
+        "project-standards"
+      ],
+      "line": 150,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "project-standards"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Move the Docker runtime launch, inspection, and timeout cleanup into `SandboxRuntimeService` (extending it for this pinned image/auth bind if necessary), and have FleetProfile call that service using its verified `wm-<repo>-<owner>-<suffix>` ownership convention.",
+      "title": "Route Docker launch through sandbox runtime",
+      "why_it_matters": "Direct Docker launch and cleanup bypass SandboxRuntimeService, its ownership verification, and the required wm-<repo>-<owner>-<suffix> namespace.",
+      "validation_status": "confirmed",
+      "validation_reason": "When the new Docker launch path runs, fleet_permissions.py:327-339 creates and stops its own pf83 container directly instead of using SandboxRuntimeService and its ownership convention, contradicting AGENTS.md:32-37; the dispatch path is explicit in the new code, although operational incidence was not measured.",
+      "protected_subject": "authorization-authentication"
+    },
+    {
+      "#": 2,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "fleet_permissions.py:154-160 omits host managed policy mounts; :279-280 labels policy enforced, while :289-301 does not require equivalent container policy. Validator in-memory probe returned PASS despite reported host requirements and no policy mount."
+      ],
+      "file": "app/services/fleet_permissions.py",
+      "first_evidence": "app/services/fleet_permissions.py:158 --             \"--env\", \"CODEX_HOME=/codex\", \"--env\", \"HOME=/tmp\", \"--env\", \"GIT_TERMINAL_PROMPT=0\",",
+      "independent_reviewers": [
+        "security"
+      ],
+      "line": 158,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "security"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Fail Docker preflight when host Codex managed policy is present until equivalent enforcement inside the selected image is verified. Alternatively bind the applicable requirements and managed configuration read-only at their supported container locations and let conflicting danger-full-access/approval flags block launch; do not label policy enforced based only on host file existence. Add a negative fixture with requirements forbidding danger-full-access.",
+      "title": "CWE-284 Docker launch drops host-managed Codex policy",
+      "why_it_matters": "A host policy forbidding full access can pass preflight while the container omits that policy and requests danger-full-access. Audit nevertheless reports CLI_ENFORCED_NOT_OVERRIDDEN; filesystem isolation does not preserve the missing approval, network, command, or feature restrictions.",
+      "validation_status": "confirmed",
+      "validation_reason": "For a host with local Codex requirements and an image lacking equivalent policy, fleet_permissions.py:154-160 omits those files while requesting danger-full-access and :289-301 never gates their absence, consistent with the documented local policy locations (https://learn.chatgpt.com/docs/enterprise/managed-configuration#locations-and-precedence); an independent in-memory probe of the frozen source returned PASS with host requirements reported present and no policy mount, while operational incidence was not measured.",
+      "protected_subject": "authorization-authentication"
+    },
+    {
+      "#": 3,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "fleet_permissions.py:176-181 checks only POSIX UID APIs; scripts/fleet-permissions.py:7-10 invokes main directly, bypassing Windows checks in scripts/fleet-permissions.ps1:12-16. Validator identity probe without UID APIs passed."
+      ],
+      "file": "app/services/fleet_permissions.py",
+      "first_evidence": "app/services/fleet_permissions.py:176 --         if hasattr(os, \"geteuid\") and os.geteuid() == 0:",
+      "independent_reviewers": [
+        "security"
+      ],
+      "line": 176,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "security"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Move Windows elevation and workspace-owner validation into a shared core guard called by identity/apply/check/launch, using the Windows process token and ACL owner SID; fail closed when these checks cannot run. Keep the PowerShell checks as early diagnostics rather than the only enforcement, and cover direct Python entry from elevated and foreign-owned-workspace fixtures.",
+      "title": "CWE-284 Windows Python entry bypasses ownership and elevation guards",
+      "why_it_matters": "Direct Windows Python entry skips POSIX-only UID checks, allowing elevated or foreign-owned writable worktrees to reach trust and launch. The optional PowerShell wrapper is the only Windows enforcement.",
+      "validation_status": "confirmed",
+      "validation_reason": "On direct Windows Python entry with an elevated process or writable foreign-owned worktree, fleet_permissions.py:176-181 skips both POSIX-only checks and scripts/fleet-permissions.py:7-10 never invokes the PowerShell guards at :12-16; an independent in-memory identity probe without UID APIs passed, while actual Windows incidence was not measured.",
+      "protected_subject": "authorization-authentication"
+    },
+    {
+      "#": 4,
+      "autofix_class": "manual",
+      "confidence": 100,
+      "evidence": [
+        "fleet_gh.py:36-42 creates the final binary before the receipt and symlink; :61-62 makes rollback a no-op without a receipt. Reviewer failure-injection fixture observed the leftover binary, absent receipt, failed retry, and unchanged rollback."
+      ],
+      "file": "app/services/fleet_gh.py",
+      "first_evidence": "app/services/fleet_gh.py:39 -- private_write(receipt, json.dumps({\"version\": VERSION, \"archive_sha256\": expected_sha,",
+      "independent_reviewers": [
+        "adversarial",
+        "reliability"
+      ],
+      "line": 39,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial",
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Journal or stage installation before publishing final artifacts, recover matching partial files on retry or rollback, and clean up only newly created files when later steps fail. Add receipt-write and symlink-write failure tests that verify retry and rollback recover while preserving conflicting files.",
+      "title": "Interrupted gh setup cannot retry or roll back",
+      "why_it_matters": "Failure writing the receipt leaves a binary that blocks retry with FileExistsError. Rollback sees no receipt and reports unchanged, violating reversible, idempotent setup.",
+      "validation_status": "confirmed",
+      "validation_reason": "If receipt writing fails after binary creation, fleet_gh.py:36-42 leaves the final binary without a receipt, the next invocation reaches O_EXCL again, and rollback at :61-62 returns unchanged, violating the new idempotent setup requirement; the exception path is reachable through an unwritable state directory, though its incidence was not measured."
+    },
+    {
+      "#": 5,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "fleet_permissions.py:262-263 queries an HTTPS credential helper; :289-290 requires it for every launch. Validator preflight probe reproduced this sole blocker with all other checks passing."
+      ],
+      "file": "app/services/fleet_permissions.py",
+      "first_evidence": "app/services/fleet_permissions.py:263 --         checks[\"git_helper\"] = {\"code\": \"CONFIGURED\" if helper.returncode == 0 and helper.stdout.strip() else \"AUTH_REQUIRED\"}",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 263,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Keep credential.helper as diagnostic information and gate Git authentication using a bounded noninteractive probe of the actual configured origin through GitWorkspaceService. Classify its real transport failure, and retain the separate task-owned write canary for proof of push permission; do not require an HTTPS helper for SSH remotes.",
+      "title": "SSH Git authentication is rejected without HTTPS credential helper",
+      "why_it_matters": "A working SSH origin is blocked when an HTTPS credential helper is absent, even with valid GitHub CLI authentication and push permission.",
+      "validation_status": "confirmed",
+      "validation_reason": "For a working SSH origin without an HTTPS credential helper, fleet_permissions.py:262-263 produces AUTH_REQUIRED and :289-290 unconditionally blocks it despite GitWorkspaceService supporting noninteractive SSH at :26; an independent in-memory preflight probe reproduced that sole blocker with every other required check passing, while fleet incidence was not measured.",
+      "protected_subject": "authorization-authentication"
+    },
+    {
+      "#": 6,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "git_workspace.py:128-134 implements mismatch and failed-cleanup paths; repository-wide test inspection found only the success-path push_canary call at tests/test_fleet_permissions.py:100-112."
+      ],
+      "file": "app/services/git_workspace.py",
+      "first_evidence": "app/services/git_workspace.py:128 -- if remote_sha != sha:",
+      "independent_reviewers": [
+        "testing"
+      ],
+      "line": 128,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "testing"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Add focused push_canary tests that simulate a different ls-remote SHA and a failed deletion/absence check; assert code remains BLOCKED, cleanup stays NOT_RUN, and the created worktree and remote ref are retained. Keep the existing real-bare-remote success test for the normal delivery proof.",
+      "title": "Canary recovery branches lack tests",
+      "why_it_matters": "The sole canary test covers success. It cannot catch deletion of evidence or worktrees after SHA mismatch or cleanup failure, despite the exact-ref recovery guarantee.",
+      "validation_status": "confirmed",
+      "validation_reason": "The newly added mismatch and failed-cleanup paths at git_workspace.py:128-134 require remote SHA divergence or deletion/absence failure, but repository-wide test inspection found only the success-path push_canary call in tests/test_fleet_permissions.py:100-112, confirming the specific missing recovery coverage without asserting an observed production failure.",
+      "protected_subject": "data-loss"
+    },
+    {
+      "#": 7,
+      "autofix_class": "manual",
+      "confidence": 75,
+      "evidence": [
+        "git_workspace.py:125-131 separates SHA readback from unconditional deletion; :132-138 can report PASS after deleting a newer tip, contradicting the preservation contract at :104."
+      ],
+      "file": "app/services/git_workspace.py",
+      "first_evidence": "app/services/git_workspace.py:131 -- deleted = self.git(repo, \"push\", \"origin\", \"--delete\", branch, check=False)",
+      "independent_reviewers": [
+        "adversarial"
+      ],
+      "line": 131,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Make remote cleanup an atomic compare-and-delete against the recorded canary SHA. If the available Git mechanism would violate the explicit no-force policy, fail closed by retaining the remote ref and reporting cleanup BLOCKED with the branch and expected SHA, rather than issuing an unconditional deletion. Add a fixture that advances the ref after readback and verifies the newer tip survives.",
+      "title": "Concurrent ref advancement is deleted by canary cleanup",
+      "why_it_matters": "Another writer can advance the remote ref between readback and unconditional deletion. Cleanup then deletes the newer tip and reports PASS.",
+      "validation_status": "confirmed",
+      "validation_reason": "If another writer advances the unique canary ref after readback and before the deletion push connects, git_workspace.py:125-131 has no atomic expected-SHA condition and :132-138 can report PASS after deleting that newer tip, contrary to :104; the ordering is permitted by the two separate Git operations, although concurrent incidence was not measured.",
+      "protected_subject": "data-loss"
+    },
+    {
+      "#": 8,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "terminal_launcher.py:83-95 implements the entry point; repository-wide test inspection found no calls to it. tests/test_fleet_permissions.py:85-89 exercises FleetProfile.launch only."
+      ],
+      "file": "app/services/terminal_launcher.py",
+      "first_evidence": "app/services/terminal_launcher.py:88 -- gate = FleetProfile(path, state).preflight(agent)",
+      "independent_reviewers": [
+        "testing"
+      ],
+      "line": 88,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "testing"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Add TerminalLauncherService tests with injected FleetProfile/preflight and popen fakes: assert a blocked gate returns dispatched false and never invokes _launch, and a passing gate invokes the fleet-permissions.py launch command with the validated workspace, agent, prompt-file, and supplied --state.",
+      "title": "Trusted terminal launch lacks integration coverage",
+      "why_it_matters": "Tests never call launch_trusted_agent, so they do not verify blocked preflight prevents terminal dispatch or passing preflight forwards the validated workspace, prompt, agent, and state.",
+      "validation_status": "confirmed",
+      "validation_reason": "For calls to the new launch_trusted_agent entry with blocked or passing preflight, terminal_launcher.py:83-95 supplies the security gate and runner arguments, but repository-wide inspection found no test calling this entry and tests/test_fleet_permissions.py:85-89 exercises only FleetProfile.launch, confirming the stated integration coverage gap without asserting a current gate bypass.",
+      "protected_subject": "authorization-authentication"
+    }
+  ],
+  "actionable_findings": [
+    {
+      "#": 1,
+      "autofix_class": "manual",
+      "confidence": 100,
+      "evidence": [
+        "AGENTS.md:32-37 requires SandboxRuntimeService and its verified wm-<repo>-<owner>-<suffix> namespace; fleet_permissions.py:327-339 instead launches and stops a pf83 container directly."
+      ],
+      "file": "app/services/fleet_permissions.py",
+      "first_evidence": "app/services/fleet_permissions.py:150 -- return [\"docker\", \"run\", \"--rm\", \"--name\", name, \"--label\", \"projectflow.fleet83=\"+name,",
+      "independent_reviewers": [
+        "project-standards"
+      ],
+      "line": 150,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "project-standards"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Move the Docker runtime launch, inspection, and timeout cleanup into `SandboxRuntimeService` (extending it for this pinned image/auth bind if necessary), and have FleetProfile call that service using its verified `wm-<repo>-<owner>-<suffix>` ownership convention.",
+      "title": "Route Docker launch through sandbox runtime",
+      "why_it_matters": "Direct Docker launch and cleanup bypass SandboxRuntimeService, its ownership verification, and the required wm-<repo>-<owner>-<suffix> namespace.",
+      "validation_status": "confirmed",
+      "validation_reason": "When the new Docker launch path runs, fleet_permissions.py:327-339 creates and stops its own pf83 container directly instead of using SandboxRuntimeService and its ownership convention, contradicting AGENTS.md:32-37; the dispatch path is explicit in the new code, although operational incidence was not measured.",
+      "protected_subject": "authorization-authentication"
+    },
+    {
+      "#": 2,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "fleet_permissions.py:154-160 omits host managed policy mounts; :279-280 labels policy enforced, while :289-301 does not require equivalent container policy. Validator in-memory probe returned PASS despite reported host requirements and no policy mount."
+      ],
+      "file": "app/services/fleet_permissions.py",
+      "first_evidence": "app/services/fleet_permissions.py:158 --             \"--env\", \"CODEX_HOME=/codex\", \"--env\", \"HOME=/tmp\", \"--env\", \"GIT_TERMINAL_PROMPT=0\",",
+      "independent_reviewers": [
+        "security"
+      ],
+      "line": 158,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "security"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Fail Docker preflight when host Codex managed policy is present until equivalent enforcement inside the selected image is verified. Alternatively bind the applicable requirements and managed configuration read-only at their supported container locations and let conflicting danger-full-access/approval flags block launch; do not label policy enforced based only on host file existence. Add a negative fixture with requirements forbidding danger-full-access.",
+      "title": "CWE-284 Docker launch drops host-managed Codex policy",
+      "why_it_matters": "A host policy forbidding full access can pass preflight while the container omits that policy and requests danger-full-access. Audit nevertheless reports CLI_ENFORCED_NOT_OVERRIDDEN; filesystem isolation does not preserve the missing approval, network, command, or feature restrictions.",
+      "validation_status": "confirmed",
+      "validation_reason": "For a host with local Codex requirements and an image lacking equivalent policy, fleet_permissions.py:154-160 omits those files while requesting danger-full-access and :289-301 never gates their absence, consistent with the documented local policy locations (https://learn.chatgpt.com/docs/enterprise/managed-configuration#locations-and-precedence); an independent in-memory probe of the frozen source returned PASS with host requirements reported present and no policy mount, while operational incidence was not measured.",
+      "protected_subject": "authorization-authentication"
+    },
+    {
+      "#": 3,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "fleet_permissions.py:176-181 checks only POSIX UID APIs; scripts/fleet-permissions.py:7-10 invokes main directly, bypassing Windows checks in scripts/fleet-permissions.ps1:12-16. Validator identity probe without UID APIs passed."
+      ],
+      "file": "app/services/fleet_permissions.py",
+      "first_evidence": "app/services/fleet_permissions.py:176 --         if hasattr(os, \"geteuid\") and os.geteuid() == 0:",
+      "independent_reviewers": [
+        "security"
+      ],
+      "line": 176,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "security"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Move Windows elevation and workspace-owner validation into a shared core guard called by identity/apply/check/launch, using the Windows process token and ACL owner SID; fail closed when these checks cannot run. Keep the PowerShell checks as early diagnostics rather than the only enforcement, and cover direct Python entry from elevated and foreign-owned-workspace fixtures.",
+      "title": "CWE-284 Windows Python entry bypasses ownership and elevation guards",
+      "why_it_matters": "Direct Windows Python entry skips POSIX-only UID checks, allowing elevated or foreign-owned writable worktrees to reach trust and launch. The optional PowerShell wrapper is the only Windows enforcement.",
+      "validation_status": "confirmed",
+      "validation_reason": "On direct Windows Python entry with an elevated process or writable foreign-owned worktree, fleet_permissions.py:176-181 skips both POSIX-only checks and scripts/fleet-permissions.py:7-10 never invokes the PowerShell guards at :12-16; an independent in-memory identity probe without UID APIs passed, while actual Windows incidence was not measured.",
+      "protected_subject": "authorization-authentication"
+    },
+    {
+      "#": 4,
+      "autofix_class": "manual",
+      "confidence": 100,
+      "evidence": [
+        "fleet_gh.py:36-42 creates the final binary before the receipt and symlink; :61-62 makes rollback a no-op without a receipt. Reviewer failure-injection fixture observed the leftover binary, absent receipt, failed retry, and unchanged rollback."
+      ],
+      "file": "app/services/fleet_gh.py",
+      "first_evidence": "app/services/fleet_gh.py:39 -- private_write(receipt, json.dumps({\"version\": VERSION, \"archive_sha256\": expected_sha,",
+      "independent_reviewers": [
+        "adversarial",
+        "reliability"
+      ],
+      "line": 39,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial",
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Journal or stage installation before publishing final artifacts, recover matching partial files on retry or rollback, and clean up only newly created files when later steps fail. Add receipt-write and symlink-write failure tests that verify retry and rollback recover while preserving conflicting files.",
+      "title": "Interrupted gh setup cannot retry or roll back",
+      "why_it_matters": "Failure writing the receipt leaves a binary that blocks retry with FileExistsError. Rollback sees no receipt and reports unchanged, violating reversible, idempotent setup.",
+      "validation_status": "confirmed",
+      "validation_reason": "If receipt writing fails after binary creation, fleet_gh.py:36-42 leaves the final binary without a receipt, the next invocation reaches O_EXCL again, and rollback at :61-62 returns unchanged, violating the new idempotent setup requirement; the exception path is reachable through an unwritable state directory, though its incidence was not measured."
+    },
+    {
+      "#": 5,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "fleet_permissions.py:262-263 queries an HTTPS credential helper; :289-290 requires it for every launch. Validator preflight probe reproduced this sole blocker with all other checks passing."
+      ],
+      "file": "app/services/fleet_permissions.py",
+      "first_evidence": "app/services/fleet_permissions.py:263 --         checks[\"git_helper\"] = {\"code\": \"CONFIGURED\" if helper.returncode == 0 and helper.stdout.strip() else \"AUTH_REQUIRED\"}",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 263,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Keep credential.helper as diagnostic information and gate Git authentication using a bounded noninteractive probe of the actual configured origin through GitWorkspaceService. Classify its real transport failure, and retain the separate task-owned write canary for proof of push permission; do not require an HTTPS helper for SSH remotes.",
+      "title": "SSH Git authentication is rejected without HTTPS credential helper",
+      "why_it_matters": "A working SSH origin is blocked when an HTTPS credential helper is absent, even with valid GitHub CLI authentication and push permission.",
+      "validation_status": "confirmed",
+      "validation_reason": "For a working SSH origin without an HTTPS credential helper, fleet_permissions.py:262-263 produces AUTH_REQUIRED and :289-290 unconditionally blocks it despite GitWorkspaceService supporting noninteractive SSH at :26; an independent in-memory preflight probe reproduced that sole blocker with every other required check passing, while fleet incidence was not measured.",
+      "protected_subject": "authorization-authentication"
+    },
+    {
+      "#": 6,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "git_workspace.py:128-134 implements mismatch and failed-cleanup paths; repository-wide test inspection found only the success-path push_canary call at tests/test_fleet_permissions.py:100-112."
+      ],
+      "file": "app/services/git_workspace.py",
+      "first_evidence": "app/services/git_workspace.py:128 -- if remote_sha != sha:",
+      "independent_reviewers": [
+        "testing"
+      ],
+      "line": 128,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "testing"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Add focused push_canary tests that simulate a different ls-remote SHA and a failed deletion/absence check; assert code remains BLOCKED, cleanup stays NOT_RUN, and the created worktree and remote ref are retained. Keep the existing real-bare-remote success test for the normal delivery proof.",
+      "title": "Canary recovery branches lack tests",
+      "why_it_matters": "The sole canary test covers success. It cannot catch deletion of evidence or worktrees after SHA mismatch or cleanup failure, despite the exact-ref recovery guarantee.",
+      "validation_status": "confirmed",
+      "validation_reason": "The newly added mismatch and failed-cleanup paths at git_workspace.py:128-134 require remote SHA divergence or deletion/absence failure, but repository-wide test inspection found only the success-path push_canary call in tests/test_fleet_permissions.py:100-112, confirming the specific missing recovery coverage without asserting an observed production failure.",
+      "protected_subject": "data-loss"
+    },
+    {
+      "#": 7,
+      "autofix_class": "manual",
+      "confidence": 75,
+      "evidence": [
+        "git_workspace.py:125-131 separates SHA readback from unconditional deletion; :132-138 can report PASS after deleting a newer tip, contradicting the preservation contract at :104."
+      ],
+      "file": "app/services/git_workspace.py",
+      "first_evidence": "app/services/git_workspace.py:131 -- deleted = self.git(repo, \"push\", \"origin\", \"--delete\", branch, check=False)",
+      "independent_reviewers": [
+        "adversarial"
+      ],
+      "line": 131,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Make remote cleanup an atomic compare-and-delete against the recorded canary SHA. If the available Git mechanism would violate the explicit no-force policy, fail closed by retaining the remote ref and reporting cleanup BLOCKED with the branch and expected SHA, rather than issuing an unconditional deletion. Add a fixture that advances the ref after readback and verifies the newer tip survives.",
+      "title": "Concurrent ref advancement is deleted by canary cleanup",
+      "why_it_matters": "Another writer can advance the remote ref between readback and unconditional deletion. Cleanup then deletes the newer tip and reports PASS.",
+      "validation_status": "confirmed",
+      "validation_reason": "If another writer advances the unique canary ref after readback and before the deletion push connects, git_workspace.py:125-131 has no atomic expected-SHA condition and :132-138 can report PASS after deleting that newer tip, contrary to :104; the ordering is permitted by the two separate Git operations, although concurrent incidence was not measured.",
+      "protected_subject": "data-loss"
+    },
+    {
+      "#": 8,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "terminal_launcher.py:83-95 implements the entry point; repository-wide test inspection found no calls to it. tests/test_fleet_permissions.py:85-89 exercises FleetProfile.launch only."
+      ],
+      "file": "app/services/terminal_launcher.py",
+      "first_evidence": "app/services/terminal_launcher.py:88 -- gate = FleetProfile(path, state).preflight(agent)",
+      "independent_reviewers": [
+        "testing"
+      ],
+      "line": 88,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "testing"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Add TerminalLauncherService tests with injected FleetProfile/preflight and popen fakes: assert a blocked gate returns dispatched false and never invokes _launch, and a passing gate invokes the fleet-permissions.py launch command with the validated workspace, agent, prompt-file, and supplied --state.",
+      "title": "Trusted terminal launch lacks integration coverage",
+      "why_it_matters": "Tests never call launch_trusted_agent, so they do not verify blocked preflight prevents terminal dispatch or passing preflight forwards the validated workspace, prompt, agent, and state.",
+      "validation_status": "confirmed",
+      "validation_reason": "For calls to the new launch_trusted_agent entry with blocked or passing preflight, terminal_launcher.py:83-95 supplies the security gate and runner arguments, but repository-wide inspection found no test calling this entry and tests/test_fleet_permissions.py:85-89 exercises only FleetProfile.launch, confirming the stated integration coverage gap without asserting a current gate bypass.",
+      "protected_subject": "authorization-authentication"
+    }
+  ],
+  "triage_groups": [
+    {
+      "title": "Docker policy and lifecycle enforcement",
+      "findings": [
+        1,
+        2
+      ],
+      "type": "decision-gate",
+      "context": "Decision gate: integrate Docker ownership and policy enforcement through the required sandbox service.",
+      "preferred_resolution": "Enforce managed policy for #2 and integrate that enforcement into the owned sandbox runtime for #1.",
+      "why": "One container launch path should preserve policy and use the required ownership-aware lifecycle."
+    },
+    {
+      "title": "Exact-ref canary recovery",
+      "findings": [
+        6,
+        7
+      ],
+      "type": "decision-gate",
+      "context": "Decision gate: choose conditional cleanup compatible with the no-force policy, or retain the ref and report BLOCKED.",
+      "preferred_resolution": "Fix the conditional cleanup behavior in #7, then add the failed-readback and failed-deletion coverage in #6.",
+      "why": "The safety invariant and recovery tests cover the same destructive operation."
+    }
+  ],
+  "pre_existing_findings": [],
+  "requirements_completeness": null,
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [],
+  "testing_gaps": [
+    {
+      "finding": 6,
+      "gap": "The sole canary test covers success. It cannot catch deletion of evidence or worktrees after SHA mismatch or cleanup failure, despite the exact-ref recovery guarantee."
+    },
+    {
+      "finding": 8,
+      "gap": "Tests never call launch_trusted_agent, so they do not verify blocked preflight prevents terminal dispatch or passing preflight forwards the validated workspace, prompt, agent, and state."
+    }
+  ],
+  "coverage": {
+    "depth": "full",
+    "reviewer_selection": [
+      {
+        "reviewer": "correctness",
+        "tier": "session",
+        "reason": "always-on"
+      },
+      {
+        "reviewer": "security",
+        "tier": "session",
+        "reason": "workspace permission and policy boundaries"
+      },
+      {
+        "reviewer": "testing",
+        "tier": "mid-tier",
+        "reason": "meaningful runtime branches and tests"
+      },
+      {
+        "reviewer": "reliability",
+        "tier": "mid-tier",
+        "reason": "bounded probes, rollback, external I/O"
+      },
+      {
+        "reviewer": "project-standards",
+        "tier": "mid-tier",
+        "reason": "AGENTS.md criteria fallback"
+      },
+      {
+        "reviewer": "maintainability",
+        "tier": "mid-tier",
+        "reason": "581 non-test executable changed lines"
+      },
+      {
+        "reviewer": "adversarial",
+        "tier": "session",
+        "reason": "partial failures and permission gate fidelity"
+      },
+      {
+        "reviewer": "agent-native",
+        "tier": "mid-tier",
+        "reason": "unattended agent launcher CLI"
+      }
+    ],
+    "notes": [
+      "Full review of original staged 9-file 767-insertion snapshot; source frozen at /tmp/compound-engineering-1000/ce-code-review/20261125-issue83-7u8cgegi/reviewed-tree. Subsequent owner fixes require separate verification.",
+      "Project standards applied AGENTS.md instruction-file fallback. No plan document found; approved feature specification provides intent.",
+      "No peer job outstanding; terminal job directory deleted.",
+      "adversarial lens: in-process fallback (cross-model peer not run: provider-capable Claude ACP launch failed because OAuth session expired and could not be refreshed; requested claude-opus-5-5 high; no independent model corroboration).",
+      "Semantic reconciliation merged one duplicate partial GitHub CLI installation finding; same-model agreement did not raise confidence.",
+      "Rejected the canary orchestration relocation preference: no demonstrated defect or material maintenance failure requires moving it out of the established Git service boundary.",
+      "The owner explicitly scoped Docker to an isolated file-work canary. The review therefore does not require Git metadata or Git authentication inside that container; this does not establish Docker Git delivery, current runtime success, or approval of later changes. Capability labeling and scope enforcement in owner fixes are outside this original snapshot receipt.",
+      "Settlement suppression against a discovered plan was not evaluated because no plan was discovered. Owner-provided scope constraints were honored.",
+      "Confidence suppression: 0; malformed findings: 0; malformed returns: 0; quote-gate demotions: 0; first_evidence_backfilled: 0; mode-aware demotions: 0.",
+      "Validator shortcuts: 0. No quote-anchored cross-model corroboration exists; all eight remaining actionable findings are selected for one deterministic validator batch.",
+      "Source inspection and test-coverage searches used the frozen reviewed-tree only. Synthesis did not run tests or mutate project files; fixture outcomes quoted in findings are originating reviewer evidence."
+    ],
+    "suppressed_by_confidence": {},
+    "mode_aware_demotions": 0,
+    "quote_gate_demotions": 0,
+    "first_evidence_backfilled": 0,
+    "malformed_findings": 0,
+    "malformed_returns": 0,
+    "semantic_merges": 1,
+    "synthesis_rejections": [
+      {
+        "title": "Information Leakage: fleet canary in Git service",
+        "reason": "Unproven relocation preference; no current failure or concrete maintenance problem established."
+      },
+      {
+        "title": "Container launch loses linked-worktree Git metadata",
+        "reason": "Owner clarified container runtime is isolated file-work canary only; requiring in-container Git workflow would widen the intended contract. Later capability labels and enforcement are outside this original snapshot review."
+      }
+    ],
+    "cross_model": {
+      "selected": true,
+      "target": "claude",
+      "route": "claude",
+      "preference_source": "default",
+      "outcome": "in-process-fallback",
+      "artifact": null,
+      "coverage": "adversarial lens: in-process fallback (cross-model peer not run: provider-capable Claude ACP launch failed because OAuth session expired and could not be refreshed; requested claude-opus-5-5 high; no independent model corroboration)."
+    },
+    "validator": {
+      "outcome": "verdicts",
+      "batch_count": 1,
+      "selected": 8,
+      "confirmed": 8,
+      "rejected": 0,
+      "unresolved": 0,
+      "malformed": 0,
+      "failed": 0,
+      "shortcut_skipped": 0,
+      "bound_exceeded": false,
+      "reason": "One bounded validator batch returned all eight verdicts; no independent cross-model evidence permitted shortcuts.",
+      "protected_subject_reclassifications": [
+        {
+          "#": 6,
+          "protected_subject": "data-loss",
+          "reason": "Recovery tests guard preservation of remote refs and worktrees."
+        },
+        {
+          "#": 8,
+          "protected_subject": "authorization-authentication",
+          "reason": "Integration tests guard the trusted launch permission boundary."
+        }
+      ],
+      "degraded_blockers": []
+    },
+    "failed_reviewers": [],
+    "timed_out_reviewers": [],
+    "compound_packs": {
+      "roots": [],
+      "errors": [],
+      "warnings": []
+    },
+    "settlement_suppression_evaluated": false,
+    "verification_limit": "Read-only snapshot review. Validator used source inspection and in-memory probes; no current fleet, Windows, Docker, or remote Git operational success is established. Later owner fixes and operational documentation require separate verification."
+  },
+  "verdict_reason": "The original snapshot has three confirmed P1 findings in Docker lifecycle/policy enforcement and Windows ownership/elevation checks, plus five P2 defects or test gaps. Address the permission boundaries first. All eight remain actionable; this receipt does not assess subsequent fixes or authorize merge/deployment.",
+  "fix_order": [
+    2,
+    1,
+    3,
+    7,
+    6,
+    4,
+    5,
+    8
+  ],
+  "artifact_path": "/tmp/compound-engineering-1000/ce-code-review/20261125-issue83-7u8cgegi",
+  "run_id": "20261125-issue83-7u8cgegi"
+}
