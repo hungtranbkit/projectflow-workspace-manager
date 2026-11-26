@@ -1,5 +1,6 @@
 from __future__ import annotations
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
@@ -28,6 +29,10 @@ def build_client(settings):
     existing assertion made right after calling one of these methods
     still sees the already-finished real result; docker itself is
     still 100% real either way, only the thread scheduling differs."""
+    # All test-managed repositories/worktrees are rooted under pytest's
+    # small /tmp tmpfs. Keep unrelated integration tests healthy there;
+    # production thresholds are tested directly in test_node_capacity.
+    settings = replace(settings, capacity_block_free_bytes=1, capacity_clear_free_bytes=1)
     c=TestClient(create_app(settings))
     c.app.state.sandboxes.spawn=lambda fn,args=():fn(*args)
     c.app.state.deployer.spawn=lambda fn,args=():fn(*args)
@@ -39,7 +44,13 @@ def client(git_repo,tmp_path):
     # configured_state_dir is test-isolated (tmp_path), not the real host
     # ~/.local/state/projectflow-workspace-manager/ -- sandbox env files
     # must never leak into (or be polluted by) a real user's state dir.
-    settings=Settings(root,"127.0.0.1",8765,tmp_path/"test.db",30,configured_state_dir=tmp_path/"state")
+    settings=Settings(root,"127.0.0.1",8765,tmp_path/"test.db",30,
+                      configured_state_dir=tmp_path/"state",
+                      # Test repos/worktrees are on pytest's small /tmp
+                      # tmpfs. Capacity boundary tests use production
+                      # policy explicitly; unrelated app tests need a
+                      # healthy disposable-filesystem fixture.
+                      capacity_block_free_bytes=1, capacity_clear_free_bytes=1)
     return build_client(settings)
 
 def make_repo(root, name, project_yaml_extra=""):

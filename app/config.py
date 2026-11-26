@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,6 +60,19 @@ class Settings:
     # not hand-rolled), which only honors X-Forwarded-For/-Proto when
     # the DIRECT connecting peer is itself in this list.
     trusted_proxy_ips: tuple[str, ...] = ()
+    # FEAT-NODE-DISK-CAPACITY. The gate is on by default; setting the
+    # explicit rollback flag to false restores the prior local dispatch.
+    node_id: str = "local"
+    disk_capacity_enabled: bool = True
+    capacity_block_used_percent: float = 90.0
+    capacity_warn_used_percent: float = 80.0
+    capacity_block_free_bytes: int = 20 * 1024 ** 3
+    capacity_block_inode_used_percent: float = 90.0
+    capacity_warn_inode_used_percent: float = 80.0
+    capacity_freshness_ttl_seconds: int = 300
+    capacity_clear_used_percent: float = 85.0
+    capacity_clear_inode_used_percent: float = 85.0
+    capacity_clear_free_bytes: int = 24 * 1024 ** 3
 
     @property
     def worktree_root(self) -> Path:
@@ -111,4 +125,15 @@ def load_settings() -> Settings:
         github_webhook_secret=os.getenv("WORKSPACE_MANAGER_GITHUB_WEBHOOK_SECRET") or None,
         trusted_proxy_ips=tuple(
             k.strip() for k in os.getenv("WORKSPACE_MANAGER_TRUSTED_PROXY_IPS", "").split(",") if k.strip()),
+        node_id=os.getenv("WORKSPACE_MANAGER_NODE_ID", socket.gethostname().lower()).strip(),
+        disk_capacity_enabled=os.getenv("WORKSPACE_MANAGER_DISK_CAPACITY_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"},
+        capacity_block_used_percent=float(os.getenv("WORKSPACE_MANAGER_CAPACITY_BLOCK_USED_PERCENT", "90")),
+        capacity_warn_used_percent=float(os.getenv("WORKSPACE_MANAGER_CAPACITY_WARN_USED_PERCENT", "80")),
+        capacity_block_free_bytes=int(os.getenv("WORKSPACE_MANAGER_CAPACITY_BLOCK_FREE_GIB", "20")) * 1024 ** 3,
+        capacity_block_inode_used_percent=float(os.getenv("WORKSPACE_MANAGER_CAPACITY_BLOCK_INODE_PERCENT", "90")),
+        capacity_warn_inode_used_percent=float(os.getenv("WORKSPACE_MANAGER_CAPACITY_WARN_INODE_PERCENT", "80")),
+        capacity_freshness_ttl_seconds=int(os.getenv("WORKSPACE_MANAGER_CAPACITY_FRESHNESS_TTL_SECONDS", "300")),
+        capacity_clear_used_percent=float(os.getenv("WORKSPACE_MANAGER_CAPACITY_CLEAR_USED_PERCENT", "85")),
+        capacity_clear_inode_used_percent=float(os.getenv("WORKSPACE_MANAGER_CAPACITY_CLEAR_INODE_PERCENT", "85")),
+        capacity_clear_free_bytes=int(os.getenv("WORKSPACE_MANAGER_CAPACITY_CLEAR_FREE_GIB", "24")) * 1024 ** 3,
     )

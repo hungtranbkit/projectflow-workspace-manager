@@ -1,0 +1,93 @@
+schema_version: 1
+id: FEAT-NODE-DISK-CAPACITY
+title: Node Disk Capacity Dispatch Gate
+version: 1
+status: approved
+summary: >
+  Protect eligible execution nodes from disk and inode exhaustion by
+  measuring the actual target filesystems at dispatch, applying configurable
+  freshness-aware thresholds and hysteresis, and routing only to a compatible
+  eligible node. This scope was owner-authorized by the explicit request to
+  execute issue #86 and its acceptance criteria.
+scope:
+  includes:
+    - Fresh byte, usage, inode, timestamp, mount, node and capability evidence
+      for the actual worktree, state and configured build/cache filesystems
+    - Fail-closed capacity gate before new heavy Builder/worktree dispatch
+    - Warning/ranking band and hysteresis for capacity recovery
+    - Explicit pinned-node blockage and compatible auto-selection when
+      capacity observations exist
+    - Sanitized capacity decision audit evidence and operator-readable reason
+    - Safe, evidence-based cleanup eligibility assessment for managed Git
+      worktrees without deleting worktrees or branches automatically
+  excludes:
+    - Disk cleanup outside registered managed worktrees
+    - Docker volume, log, backup, database, cache or CI-directory deletion
+    - Partitioning, formatting, mounting or privilege escalation
+    - SSH ACL changes or credential/bootstrap changes (issue #83)
+    - Code intelligence indexing behavior (issue #80)
+    - Agent output/session cleanup or observability behavior (issue #75)
+    - Changing production service policy or stopping running work
+requirements:
+  - id: REQ-NDC-001
+    text: >
+      Before a new heavy dispatch, collect fresh measurements from each
+      configured target filesystem: available bytes, used percentage, inode
+      percentage, observation time, mount identity, node identity and
+      capabilities. Missing, stale, malformed, offline or incompatible data
+      must never be represented as healthy.
+  - id: REQ-NDC-002
+    text: >
+      At or above the configured block-used threshold, below the configured
+      minimum free bytes, or at or above the block-inode threshold, block new
+      heavy work. At or above warning thresholds, warn and rank lower. Keep
+      running work and read-only/maintenance access unaffected.
+  - id: REQ-NDC-003
+    text: >
+      Never silently reroute an explicitly pinned task. Return BLOCKED_CAPACITY
+      with sanitized current evidence when its target is offline, stale,
+      incompatible or over threshold. Auto-selected work may use only fresh,
+      healthy, capability-compatible nodes and follows configured preference.
+  - id: REQ-NDC-004
+    text: >
+      Apply the decision at the authoritative process/worktree dispatch
+      boundary before creating a worktree or process, not only in a UI. Keep
+      policy thresholds, freshness TTL and recovery hysteresis configurable.
+  - id: REQ-NDC-005
+    text: >
+      Worktree cleanup assessment must require a non-main named branch, clean
+      worktree including untracked/ignored state, merged branch, at least the
+      configured inactivity age, no process/session/open-file or production/
+      deployment reference, and verified ProjectFlow registration. The
+      assessment and dry-run never delete; any missing evidence denies removal.
+acceptance_criteria:
+  - id: AC-NDC-001
+    text: >
+      Boundary tests cover exact block/warn thresholds, free-byte and inode
+      thresholds, stale/unknown/offline observations, hysteresis recovery and
+      malformed metrics.
+  - id: AC-NDC-002
+    text: >
+      Pinned over-capacity or stale targets return BLOCKED_CAPACITY and never
+      select a different node; auto-selection excludes incompatible nodes and
+      follows the configured MacBook/non-Docker then Dell fallback order.
+  - id: AC-NDC-003
+    text: >
+      Dispatch tests show the gate runs before worktree/process side effects;
+      existing running work is not stopped or mutated.
+  - id: AC-NDC-004
+    text: >
+      A cleanup candidate is only reported after every proof in REQ-NDC-005
+      is present; dry-run performs no removal and records exact reasons.
+  - id: AC-NDC-005
+    text: >
+      At least one real, authorized non-Docker MacBook smoke uses its target
+      filesystem and existing approved access path; unavailable access is
+      recorded as blocked and is never replaced with mocked acceptance.
+invariants:
+  - id: INV-NDC-001
+    text: No running, production, pinned or unverified node task is silently moved or stopped.
+  - id: INV-NDC-002
+    text: Missing capacity evidence is UNKNOWN/BLOCKED for heavy work, never fabricated as healthy.
+  - id: INV-NDC-003
+    text: The gate and its assessment cannot delete branches, worktrees or data; cleanup is separately reviewed.

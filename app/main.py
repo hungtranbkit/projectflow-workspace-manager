@@ -6,6 +6,7 @@ import json
 import logging
 import secrets
 import sqlite3
+import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -102,6 +103,7 @@ from app.services.incident_service import (
 )
 from app.services.parallel_safety_service import ParallelSafetyService
 from app.services.execution_wave_service import ExecutionWaveService, ExecutionWaveError
+from app.services.node_capacity import CapacityPolicy, NodeCapacityGate
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
@@ -121,6 +123,19 @@ def create_app(settings=None):
             "`python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"`) "
             "before this app will start.")
     secrets_service = SecretsService(db, list(settings.secret_encryption_keys))
+    capacity_gate = NodeCapacityGate(CapacityPolicy(
+        block_used_percent=settings.capacity_block_used_percent,
+        block_free_bytes=settings.capacity_block_free_bytes,
+        block_inode_used_percent=settings.capacity_block_inode_used_percent,
+        warn_used_percent=settings.capacity_warn_used_percent,
+        warn_inode_used_percent=settings.capacity_warn_inode_used_percent,
+        freshness_ttl_seconds=settings.capacity_freshness_ttl_seconds,
+        clear_used_percent=settings.capacity_clear_used_percent,
+        clear_inode_used_percent=settings.capacity_clear_inode_used_percent,
+        clear_free_bytes=settings.capacity_clear_free_bytes,
+    ))
+    capacity_gate.restore_hysteresis(db.all(
+        "SELECT details FROM workspace_events WHERE action IN ('DISPATCH_BLOCKED_CAPACITY','DISPATCH_WARN_CAPACITY','DISPATCH_CAPACITY_ALLOWED') ORDER BY id"))
     git = GitWorkspaceService(settings.root, worktree_root=settings.worktree_root); launcher = TerminalLauncherService(settings, git)
     # B7.1 (docs/B7_WORKSPACE_REPOSITORY_IDENTITY.md): a bounded,
     # idempotent startup backfill -- computes git_fingerprint for any
@@ -361,6 +376,7 @@ def create_app(settings=None):
     templates.env.globals["pf_t"] = simple_t
     app.mount("/static", StaticFiles(directory=base / "static"), name="static")
     app.state.settings, app.state.db, app.state.git, app.state.runner, app.state.launcher = settings, db, git, runner, launcher
+    app.state.node_capacity_gate = capacity_gate
     app.state.sandboxed_exec = sandboxed_exec
     app.state.secrets_service = secrets_service
     app.state.sandboxes, app.state.ports, app.state.sandbox_runtime, app.state.cleanup_worker = sandboxes, ports, sandbox_runtime, cleanup_worker
@@ -2511,6 +2527,31 @@ def create_app(settings=None):
             return agent_sessions.deliver_prompt(sid,prompt,source,t["brief_version"])
         except Exception:
             return False  # snapshot/delivery is best-effort audit, never raises into the caller
+    def _check_builder_capacity(paths, *, entity_type, entity_id):
+        """Gate new Builder resource allocation against every trusted target FS.
+
+        Existing processes are never inspected or stopped here. The check
+        runs synchronously before either creating a worktree or a PTY/session.
+        """
+        if not settings.disk_capacity_enabled:
+            return None
+        targets = [*paths, settings.worktree_root, settings.state_dir, Path.home() / ".cache"]
+        capabilities = {"non_docker"}
+        if shutil.which("docker"):
+            capabilities.add("docker")
+        result = capacity_gate.evaluate_paths(
+            targets, node_id=settings.node_id, capabilities=capabilities, heavy=True)
+        if result.code in {"BLOCKED_CAPACITY", "UNKNOWN_CAPACITY"}:
+            db.event(entity_type, entity_id, "DISPATCH_BLOCKED_CAPACITY",
+                     json.dumps(result.audit_fields(), sort_keys=True))
+        elif result.code == "WARN_CAPACITY":
+            db.event(entity_type, entity_id, "DISPATCH_WARN_CAPACITY",
+                     json.dumps(result.audit_fields(), sort_keys=True))
+        elif result.code == "ALLOW":
+            db.event(entity_type, entity_id, "DISPATCH_CAPACITY_ALLOWED",
+                     json.dumps(result.audit_fields(), sort_keys=True))
+        return result
+
     def _start_builder_session(w,mode="INTERACTIVE",note_exited_without_report=False):
         """The one place 'Start Builder' actually happens: validates
         (Task exists, Builder Workspace exists, worktree path is the
@@ -2564,6 +2605,12 @@ def create_app(settings=None):
             gate=spec_gate.evaluate(t)
             if gate["outcome"] not in ("PASS","NOT_APPLICABLE"):
                 raise GitSafetyError(f"SpecGate {gate['outcome']}: {gate['reason']}")
+        capacity = _check_builder_capacity(
+            [Path(w["worktree_path"]), Path(repo(w["repository_id"])["repo_path"])],
+            entity_type="agent", entity_id=w["id"])
+        if capacity and not capacity.allowed:
+            evidence=json.dumps(capacity.audit_fields(), sort_keys=True)
+            raise GitSafetyError(f"BLOCKED_CAPACITY: {capacity.reason}; evidence={evidence}")
         mode="VIEW_ONLY" if mode=="VIEW_ONLY" else "INTERACTIVE"
         sid=agent_sessions.start(task_id=w["task_id"],workspace_id=w["id"],agent=w["agent"],worktree_path=w["worktree_path"],mode=mode)
         db.event("agent",w["id"],"SESSION_STARTED",f"session={sid} mode={mode}")
@@ -2726,6 +2773,12 @@ def create_app(settings=None):
         live=latest_session_for_workspace(wid)
         if live and live["status"] in LIVE_SESSION_STATUSES:
             return JSONResponse({"ok":False,"code":"ACTIVE_SESSION_EXISTS","message":f"An AgentSession is already {live['status']} for this workspace -- open it instead of starting a second, untracked agent process.","session_id":live["id"]},status_code=409)
+        capacity = _check_builder_capacity(
+            [Path(w["worktree_path"]), Path(repo(w["repository_id"])["repo_path"])],
+            entity_type="agent", entity_id=wid)
+        if capacity and not capacity.allowed:
+            return JSONResponse({"ok": False, "code": "BLOCKED_CAPACITY",
+                                 "message": capacity.reason, "evidence": capacity.audit_fields()}, status_code=409)
         try:
             result=launcher.launch_agent(w["worktree_path"],w["agent"]); db.event("agent",wid,"AGENT_LAUNCHED",f"agent={w['agent']} path={result['worktree']} terminal={result['terminal']} result=requested")
             return {"ok":True,"message":f"{result['agent']} terminal đã được yêu cầu mở.",**result}
@@ -2747,6 +2800,12 @@ def create_app(settings=None):
         if not ids: raise GitSafetyError("Select at least one agent workspace")
         r=repo(repository_id); sources=[agent_row(x) for x in ids]
         if any(x["repository_id"]!=repository_id for x in sources): raise GitSafetyError("All sources must belong to integration repository")
+        capacity = _check_builder_capacity(
+            [Path(r["repo_path"]), *[Path(s["worktree_path"]) for s in sources]],
+            entity_type="repository", entity_id=repository_id)
+        if capacity and not capacity.allowed:
+            evidence = json.dumps(capacity.audit_fields(), sort_keys=True)
+            raise GitSafetyError(f"BLOCKED_CAPACITY: {capacity.reason}; evidence={evidence}")
         branch,path,commit=git.create_integration(r["repo_path"],name,base)
         iid=db.execute("INSERT INTO integration_workspaces(repository_id,name,branch,worktree_path,base_branch,base_commit,status) VALUES(?,?,?,?,?,?,?)",(repository_id,name,branch,str(path),base,commit,"MERGING")); db.event("integration",iid,"INTEGRATION_CREATED",branch)
         for source in sources:
@@ -4480,6 +4539,11 @@ def create_app(settings=None):
         except HTTPException as exc: return {"ok":False,"error":str(exc.detail)}
         agent_s=slugify(agent)
         if agent_s not in settings.agents: return {"ok":False,"error":f"Agent not allowed: {agent}"}
+        capacity = _check_builder_capacity(
+            [Path(r["repo_path"])], entity_type="task", entity_id=tid)
+        if capacity and not capacity.allowed:
+            evidence=json.dumps(capacity.audit_fields(), sort_keys=True)
+            return {"ok":False,"error":f"BLOCKED_CAPACITY: {capacity.reason}; evidence={evidence}"}
         # Branch/worktree name must include the repo, not just the task slug
         # (matches the same qualification already used for Integration
         # Workspaces below) -- agent_workspaces.branch is UNIQUE across the
