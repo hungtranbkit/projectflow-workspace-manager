@@ -33,7 +33,7 @@
 <div class="a-grid">{% for kind in kinds %}{% set a = current.artifacts.get(kind) %}
 <article><h4>{{kind|capitalize}}</h4>{% if a %}<p><strong>{{label[a.status]}}</strong> · {{current.tools[kind].version}} · {{(a.size/1024)|round(0)|int}} KB</p>
 <p><a href="?tab={{kind}}&amp;snapshot={{current.id}}">Mở sơ đồ</a></p>{% else %}<p>Không có trong snapshot này.</p>{% endif %}</article>{% endfor %}</div>
-{% if dep.runtime %}<details><summary>Quan sát runtime ({{dep.runtime|length}})</summary>{% for r in dep.runtime %}<p>{{r.node}} · {{r.source}} · {{r.name}} · {{r.state}} · <code>{{r.version or 'không có phiên bản'}}</code>{% if r.matches %} · khớp commit{% elif not r.has_sha %} · không có SHA{% endif %}</p>{% endfor %}</details>{% endif %}
+{% if dep.runtime %}<details><summary>Quan sát runtime ({{dep.runtime|length}})</summary>{% for r in dep.runtime %}<p>{{r.node}} · {{r.source}} · {{r.name}} · {{r.state}} · <code>{{r.version or 'không có phiên bản'}}</code>{% if not r.fresh %} · Dữ liệu cũ / chưa xác minh{% elif not r.running %} · Chưa xác minh đang chạy{% elif not r.has_sha %} · không có SHA{% elif r.matches %} · khớp commit{% else %} · khác commit{% endif %}</p>{% endfor %}</details>{% endif %}
 {% if dep.same_checkouts %}<details><summary>Checkout ở đúng commit ({{dep.same_checkouts|length}})</summary>{% for r in dep.same_checkouts %}<p>{{r.node}} · {{r.name}}</p>{% endfor %}</details>{% endif %}
 {% if current.limitations %}<h3>Giới hạn</h3><ul>{% for l in current.limitations %}<li>{{l}}</li>{% endfor %}</ul>{% endif %}
 <h3>Chạy lại</h3>

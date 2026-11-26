@@ -135,7 +135,7 @@ def _keys(obj, field, required, optional=()):
     missing = set(required) - set(obj)
     extra = set(obj) - set(required) - set(optional)
     if missing or extra:
-        raise ArtifactRejected(f"{field}: fields {sorted(missing)} missing, {sorted(extra)} not allowed")
+        raise ArtifactRejected(f"{field}: required fields missing or unexpected fields not allowed")
 
 
 def validate_project(project: str) -> str:
@@ -243,7 +243,9 @@ def validate_manifest(m: dict) -> dict:
             raise ArtifactRejected(f + ".coverage: object required")
         for k, v in cov.items():
             _text(k, f + ".coverage key", limit=80)
-            if not (type(v) is int or (isinstance(v, str) and len(v) <= 120)):
+            if isinstance(v, str):
+                _text(v, f + ".coverage value", empty=True, limit=120)
+            elif type(v) is not int:
                 raise ArtifactRejected(f + ".coverage: int or short text values")
         _texts(a["capabilities"], f + ".capabilities")
         _texts(a["limitations"], f + ".limitations")
@@ -536,22 +538,34 @@ def freshness(snap: dict, tracked: dict | None, now: int | None = None) -> dict:
 
 
 def deployment_view(snap: dict, observations: list[dict]) -> dict:
-    """Source-vs-observed revisions from steward inventory, exact SHA equality only."""
+    """Compare exact revisions only for fresh, explicitly running observations."""
     commit = snap["source"]["commit"]
+    running_states = {"android": "process-present", "systemd-user": "active",
+                      "systemd-system": "active", "docker": "running"}
     same, other, runtime = [], [], []
     for r in observations:
         v = r.get("version") or ""
         if r["source"] == "git":
             (same if v == commit else other).append(r)
-        elif r["source"] in ("android", "systemd-user", "systemd-system", "docker"):
-            runtime.append(dict(r, matches=v == commit, has_sha=bool(SHA1_RE.fullmatch(v))))
-    if any(r["matches"] for r in runtime):
-        state, reason = "MATCH", "Một dịch vụ đang chạy báo đúng commit của snapshot."
-    elif any(r["has_sha"] for r in runtime):
-        state, reason = "DIFFERENT", "Dịch vụ đang chạy báo commit khác snapshot."
-    elif runtime:
-        state, reason = ("UNKNOWN",
-                         "Bản đang chạy chỉ báo tên phiên bản, không có SHA hay biên nhận build; không suy đoán commit.")
+        elif r["source"] in running_states:
+            fresh = r.get("fresh") is True
+            running = r.get("state") == running_states[r["source"]]
+            has_sha = bool(SHA1_RE.fullmatch(v))
+            comparable = fresh and running and has_sha
+            runtime.append(dict(r, fresh=fresh, running=running, has_sha=has_sha,
+                                comparable=comparable, matches=comparable and v == commit))
+    verified = [r for r in runtime if r["comparable"]]
+    different = sum(not r["matches"] for r in verified)
+    matching = len(verified) - different
+    unknown = len(runtime) - len(verified)
+    if different:
+        state = "DIFFERENT"
+        reason = f"{different} quan sát mới đang chạy có commit khác snapshot; {matching} khớp."
+    elif matching:
+        state = "MATCH"
+        reason = f"{matching} quan sát mới đang chạy báo đúng commit của snapshot."
     else:
-        state, reason = "UNKNOWN", "Chưa có quan sát runtime cho dự án này."
+        state, reason = "UNKNOWN", "Chưa có bằng chứng mới về dịch vụ đang chạy với SHA đầy đủ."
+    if unknown:
+        reason += f" {unknown} quan sát cũ, không chạy hoặc thiếu SHA; chưa xác minh."
     return dict(state=state, reason=reason, same_checkouts=same, other_checkouts=len(other), runtime=runtime)

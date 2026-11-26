@@ -170,7 +170,7 @@ def test_history_diff_freshness_and_deployment_never_guess(tmp_path):
            dict(source="git", name="/w/demo", project=PROJECT, state="checkout", version="d" * 40, location="", node="dell-linux")]
     dep = deployment_view(snap, obs)
     assert dep["state"] == "UNKNOWN" and len(dep["same_checkouts"]) == 1  # versionName is never mapped to a SHA
-    obs.append(dict(source="systemd-user", name="demo.service", project=PROJECT, state="active", version="d" * 40, location="", node="hp-linux"))
+    obs.append(dict(source="systemd-user", name="demo.service", project=PROJECT, state="active", version="d" * 40, location="", node="hp-linux", fresh=True))
     assert deployment_view(snap, obs)["state"] == "MATCH"
 
 
@@ -415,3 +415,67 @@ def test_committed_at_is_canonical_utc(tmp_path):
             store.put(m, {"archify": ARCHIFY, "floorplan": FLOORPLAN})
     snap, _ = store.put(manifest(), {"archify": ARCHIFY, "floorplan": FLOORPLAN})
     assert store.snapshot(PROJECT, snap)["source"]["committed_at"].endswith("Z")
+
+@pytest.mark.parametrize("source,state,fresh,expected", [
+    ("systemd-user", "active", True, "MATCH"),
+    ("systemd-system", "inactive", True, "UNKNOWN"),
+    ("systemd-user", "active", False, "UNKNOWN"),
+    ("systemd-user", "active", None, "UNKNOWN"),
+    ("docker", "exited", True, "UNKNOWN"),
+    ("docker", "running", True, "MATCH"),
+    ("android", "installed", True, "UNKNOWN"),
+    ("android", "process-present", True, "MATCH"),
+])
+def test_runtime_truth_requires_fresh_running_proof(source, state, fresh, expected):
+    snap = {"source": {"commit": COMMIT}}
+    obs = dict(source=source, name="demo", state=state, version=COMMIT)
+    if fresh is not None:
+        obs["fresh"] = fresh
+    result = deployment_view(snap, [obs])
+    assert result["state"] == expected
+    assert result["runtime"][0]["matches"] is (expected == "MATCH")
+
+
+def test_runtime_truth_mixed_versions_do_not_report_match():
+    snap = {"source": {"commit": COMMIT}}
+    rows = [dict(source="docker", state="running", version=v, fresh=True)
+            for v in (COMMIT, "d" * 40)]
+    assert deployment_view(snap, rows)["state"] == "DIFFERENT"
+
+
+def test_runtime_truth_route_distinguishes_stale_and_current(steward):
+    memory, client = steward
+    ArchitectureStore(memory.path).put(manifest(), {"archify": ARCHIFY, "floorplan": FLOORPLAN})
+    login(memory, client)
+    sources = dict.fromkeys(SOURCES, "ok")
+    row = dict(source="systemd-user", name="demo.service", project=PROJECT,
+               state="active", version=COMMIT, location="")
+    now = int(time.time())
+    memory.ingest(dict(node="hp-linux", at=now-1800, sources=sources, items=[row]))
+    path = f"/steward/architecture/{PROJECT}"
+    stale = client.get(path)
+    assert stale.status_code == 200 and "a-state a-unknown" in stale.text
+    assert "Dữ liệu cũ / chưa xác minh" in stale.text
+    memory.ingest(dict(node="hp-linux", at=now-10, sources=sources, items=[row]))
+    current = client.get(path)
+    assert current.status_code == 200 and "a-state a-match" in current.text
+
+
+def test_manifest_coverage_rejects_credential_shaped_text(tmp_path):
+    value = "ghp_" + "z" * 36
+    bad = manifest()
+    bad["artifacts"]["archify"]["coverage"]["notes"] = value
+    store = ArchitectureStore(tmp_path / "coverage.db")
+    with pytest.raises(ArtifactRejected, match="credential") as exc:
+        store.put(bad, {"archify": ARCHIFY, "floorplan": FLOORPLAN})
+    assert value not in str(exc.value)
+    assert store.snapshots(PROJECT) == []
+
+
+def test_manifest_unknown_key_error_does_not_echo_value(tmp_path):
+    key = "ghp_" + "z" * 36
+    bad = manifest()
+    bad[key] = True
+    with pytest.raises(ArtifactRejected, match="not allowed") as exc:
+        ArchitectureStore(tmp_path / "keys.db").put(bad, {"archify": ARCHIFY, "floorplan": FLOORPLAN})
+    assert key not in str(exc.value)

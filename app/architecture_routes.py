@@ -78,11 +78,13 @@ def register(router: APIRouter, *, store, allowed, same_origin, render, private)
 
     def observations(memory, project):
         out = []
+        now = int(time.time())
         for n in NODES:
-            at, body = memory.report(n, int(time.time()))
+            at, body = memory.report(n, now)
+            fresh = bool(at and 0 <= now - at <= 900)  # same 15-minute window as Steward
             for r in body.get("items", []):
                 if r["project"] == project:
-                    out.append(dict(r, node=n, at=at))
+                    out.append(dict(r, node=n, at=at, fresh=fresh))
         return out
 
     @router.get("/steward/architecture")
