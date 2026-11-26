@@ -5665,6 +5665,8 @@ def create_app(settings=None):
         op_id=sandboxes._op_start(sid,"FIRMWARE_BUILD"); sandboxes._op_finish(op_id,"SUCCESS" if result.returncode==0 else "FAILED",result.returncode,result.stdout,result.stderr)
         return RedirectResponse(f"/sandboxes/{sid}",303)
 
+    from app.steward_routes import register as register_steward
+    register_steward(app, render, current_user, db, decision)
     return app
 
 app=create_app()

@@ -1,0 +1,20 @@
+schema_version: 1
+id: FEAT-FLEET-STEWARD
+title: Private operator inventory and operational memory
+version: 1
+status: approved
+summary: Operator-requested scope in issue 89 for five nodes and the Zalo Hub pilot.
+scope:
+  includes: [Private node and project inventory, attributed observation history, evidence-based next actions]
+  excludes: [Public inventory, collecting product content, remote command execution from the UI]
+requirements:
+  - {id: REQ-FS-001, text: Distinguish source checkouts from observed running instances and name the probe.}
+  - {id: REQ-FS-002, text: Keep replay-safe persistent evidence with measurement times and coverage.}
+  - {id: REQ-FS-003, text: Answer operator questions by time and subject with sources and outstanding work.}
+acceptance_criteria:
+  - {id: AC-FS-001, text: Five node reports retain partial coverage and two phone models are distinguishable.}
+  - {id: AC-FS-002, text: Duplicate and late reports preserve historical and current state across restart.}
+  - {id: AC-FS-003, text: Anonymous requests reveal no inventory. A private browser can query Zalo Hub and follow evidence.}
+invariants:
+  - {id: INV-FS-001, text: No secret values or chat contents in the inventory.}
+  - {id: INV-FS-002, text: An unobserved source cannot prove service removal.}
