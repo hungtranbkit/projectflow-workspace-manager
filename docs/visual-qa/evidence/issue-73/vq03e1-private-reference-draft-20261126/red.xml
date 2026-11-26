@@ -6,7 +6,7 @@ git_repo = (PosixPath('$PYTEST_TMPDIR/pytest-778/test_task_upload_creates_priva0
         tid, wid, worktree, head = _task_workspace(client, repo, opted_in=False)
         before_contract = _git(worktree, "rev-parse", "HEAD:PROJECT.yaml")
         result = _upload(client, tid, wid)
-    
+
 &gt;       assert result.status_code == 303
 E       assert 404 == 303
 E        +  where 404 = &lt;Response [404 Not Found]&gt;.status_code
