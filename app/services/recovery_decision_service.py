@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
+from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 
 from app.services.planner_service import PlannerAgentError, PlannerAgentInvoker
@@ -76,42 +78,128 @@ class RecoveryDecisionService:
         self.db.event("task" if task_id else "system", int(task_id or 0), action,
                       json.dumps({"fingerprint": fingerprint, **payload}, sort_keys=True, separators=(",", ":")))
 
-    def advise(self, incident: dict, evidence_refs: list[str]) -> dict:
-        fingerprint = self.fingerprint(incident)
-        task_id = incident.get("task_id")
-        prior = self.db.all(
+    @staticmethod
+    def _history(conn):
+        rows = conn.execute(
             "SELECT action,details,created_at FROM workspace_events WHERE entity_type IN ('system','task') "
             "AND action IN ('RECOVERY_AI_ATTEMPT','RECOVERY_AI_PROPOSAL','RECOVERY_AI_FALLBACK') ORDER BY id DESC")
-        same = []
-        for row in prior:
-            try:
-                event = json.loads(row["details"])
-            except (ValueError, TypeError):
-                continue
-            if event.get("fingerprint") == fingerprint:
-                same.append((row, event))
-        for row, event in same:
+        result = []
+        for row in rows:
+            event = json.loads(row["details"])
+            if not isinstance(event, dict) or not isinstance(event.get("fingerprint"), str):
+                raise ValueError("invalid recovery ledger entry")
+            stamp = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+            stamp = (stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None
+                     else stamp.astimezone(timezone.utc))
+            result.append((row, event, stamp))
+        return result
+
+    @staticmethod
+    def _fallback(reason):
+        return {"source": "DETERMINISTIC_FALLBACK", "allowed_action": "VERIFY", "reason": reason}
+
+    @staticmethod
+    def _lease_matches(conn, lease_owner):
+        if lease_owner is None:
+            return True  # Explicit/manual advice remains compatible.
+        if not isinstance(lease_owner, str) or not lease_owner:
+            return False
+        row = conn.execute(
+            "SELECT owner_id,expires_at FROM orchestration_leases "
+            "WHERE lease_key='projectflow-supervisor'").fetchone()
+        return bool(row and row["owner_id"] == lease_owner
+                    and isinstance(row["expires_at"], (int, float))
+                    and datetime.now(timezone.utc).timestamp() < row["expires_at"] < float("inf"))
+
+    def _publish_proposal(self, fingerprint, task_id, decision_id, payload, lease_owner):
+        """Fence durable advisory publication, not just the returned value."""
+        try:
+            with self.db.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if not self._lease_matches(conn, lease_owner):
+                    return "SUPERVISOR_LEASE_LOST"
+                conn.execute(
+                    "INSERT INTO workspace_events(entity_type,entity_id,action,details,created_at) VALUES(?,?,?,?,?)",
+                    ("task" if task_id else "system", int(task_id or 0), "RECOVERY_AI_PROPOSAL",
+                     json.dumps({"fingerprint": fingerprint, "decision_id": decision_id, **payload},
+                                sort_keys=True, separators=(",", ":")), datetime.now(timezone.utc).isoformat()))
+            return None
+        except (sqlite3.Error, ValueError, TypeError, AttributeError, OverflowError):
+            return "AI_ATTEMPT_LEDGER_UNAVAILABLE"
+
+    def _reserve_attempt(self, fingerprint, task_id, decision_id, payload, lease_owner):
+        """Serialize fresh budget and incident claims; commit before invoking the provider."""
+        try:
+            with self.db.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                now = datetime.now(timezone.utc)
+                if not self._lease_matches(conn, lease_owner):
+                    return "SUPERVISOR_LEASE_LOST"
+                history = self._history(conn)
+                attempts = 0
+                for row, event, stamp in history:
+                    if row["action"] == "RECOVERY_AI_ATTEMPT" and stamp >= now - timedelta(days=1):
+                        attempts += 1
+                    if event["fingerprint"] != fingerprint:
+                        continue
+                    if row["action"] == "RECOVERY_AI_PROPOSAL":
+                        receipt = event.get("provider_receipt")
+                        if isinstance(receipt, dict) and receipt.get("toolless_verified") is True:
+                            return "AI_PROPOSAL_ALREADY_STORED"
+                    if row["action"] == "RECOVERY_AI_ATTEMPT":
+                        if event.get("decision_id") == decision_id:
+                            if event.get("provider") == payload["provider"]:
+                                return "AI_DUPLICATE_PROVIDER_ATTEMPT"
+                        elif stamp >= now - timedelta(seconds=self.cooldown_seconds):
+                            return "AI_COOLDOWN"
+                if attempts >= self.daily_call_limit:
+                    return "AI_DAILY_BUDGET_EXHAUSTED"
+                conn.execute(
+                    "INSERT INTO workspace_events(entity_type,entity_id,action,details,created_at) VALUES(?,?,?,?,?)",
+                    ("task" if task_id else "system", int(task_id or 0), "RECOVERY_AI_ATTEMPT",
+                     json.dumps({"fingerprint": fingerprint, "decision_id": decision_id, **payload},
+                                sort_keys=True, separators=(",", ":")), now.isoformat()))
+            return None
+        except (sqlite3.Error, ValueError, TypeError, AttributeError, OverflowError):
+            return "AI_ATTEMPT_LEDGER_UNAVAILABLE"
+
+    def advise(self, incident: dict, evidence_refs: list[str], *, lease_owner=None) -> dict:
+        fingerprint = self.fingerprint(incident)
+        task_id = incident.get("task_id")
+        decision_id = uuid4().hex
+        try:
+            with self.db.connect() as conn:
+                if not self._lease_matches(conn, lease_owner):
+                    return self._fallback("SUPERVISOR_LEASE_LOST")
+                prior = self._history(conn)
+        except (sqlite3.Error, ValueError, TypeError, AttributeError, OverflowError):
+            return self._fallback("AI_ATTEMPT_LEDGER_UNAVAILABLE")
+        same = [(row, event, stamp) for row, event, stamp in prior if event["fingerprint"] == fingerprint]
+        now = datetime.now(timezone.utc)
+        for row, event, stamp in same:
             if row["action"] == "RECOVERY_AI_PROPOSAL":
                 stored_receipt = event.get("provider_receipt") or {}
-                if stored_receipt.get("toolless_verified") is not True:
+                if not isinstance(stored_receipt, dict) or stored_receipt.get("toolless_verified") is not True:
                     continue
-                return {"source": "CACHED_MODEL_PROPOSAL", **event.get("proposal", {}),
+                proposal = event.get("proposal")
+                if not isinstance(proposal, dict):
+                    return self._fallback("AI_ATTEMPT_LEDGER_UNAVAILABLE")
+                try:
+                    with self.db.connect() as conn:
+                        if not self._lease_matches(conn, lease_owner):
+                            return self._fallback("SUPERVISOR_LEASE_LOST")
+                except (sqlite3.Error, ValueError, TypeError, AttributeError, OverflowError):
+                    return self._fallback("AI_ATTEMPT_LEDGER_UNAVAILABLE")
+                return {"source": "CACHED_MODEL_PROPOSAL", **proposal,
                         "provider_receipt": stored_receipt}
             if row["action"] == "RECOVERY_AI_FALLBACK":
-                stamp = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
-                if datetime.now(timezone.utc) - stamp < timedelta(seconds=self.cooldown_seconds):
-                    return {"source": "DETERMINISTIC_FALLBACK", "allowed_action": "VERIFY",
-                            "reason": event.get("reason", "AI_UNAVAILABLE")}
-        if same:
-            stamp = datetime.fromisoformat(same[0][0]["created_at"].replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) - stamp < timedelta(seconds=self.cooldown_seconds):
-                return {"source": "DETERMINISTIC_FALLBACK", "allowed_action": "VERIFY",
-                        "reason": "AI_COOLDOWN"}
-        since = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        attempts = sum(1 for row in prior if row["action"] == "RECOVERY_AI_ATTEMPT" and row["created_at"] >= since)
-        if attempts >= self.daily_call_limit:
-            self._event("RECOVERY_AI_FALLBACK", fingerprint, {"reason": "AI_DAILY_BUDGET_EXHAUSTED"}, task_id)
-            return {"source": "DETERMINISTIC_FALLBACK", "allowed_action": "VERIFY", "reason": "AI_DAILY_BUDGET_EXHAUSTED"}
+                if now - stamp < timedelta(seconds=self.cooldown_seconds):
+                    return self._fallback(event.get("reason", "AI_UNAVAILABLE"))
+        if same and now - same[0][2] < timedelta(seconds=self.cooldown_seconds):
+            return self._fallback("AI_COOLDOWN")
+        if sum(1 for row, _, stamp in prior if row["action"] == "RECOVERY_AI_ATTEMPT"
+               and stamp >= now - timedelta(days=1)) >= self.daily_call_limit:
+            return self._fallback("AI_DAILY_BUDGET_EXHAUSTED")
 
         allowed_refs = sorted(set(evidence_refs))[:12]
         packet = {k: self._bounded(incident.get(k)) for k in (
@@ -148,15 +236,13 @@ class RecoveryDecisionService:
         fallback_reason = "PREFERRED_MODEL_RECEIPT_UNAVAILABLE"
         receipt = None
         for provider, model, effort, selection_reason in candidates:
-            if attempts >= self.daily_call_limit:
-                fallback_reason = "AI_DAILY_BUDGET_EXHAUSTED"
-                break
             if not self.provider_available(provider):
                 fallback_reason = f"{provider.upper()}_PROVIDER_UNAVAILABLE"
                 continue
-            self._event("RECOVERY_AI_ATTEMPT", fingerprint, {"provider": provider,
-                "requested_model": model, "effort": effort, "selection_reason": selection_reason}, task_id)
-            attempts += 1
+            denied = self._reserve_attempt(fingerprint, task_id, decision_id, {"provider": provider,
+                "requested_model": model, "effort": effort, "selection_reason": selection_reason}, lease_owner)
+            if denied:
+                return self._fallback(denied)
             try:
                 receipt = self.invoker.invoke(provider, prompt, RECOVERY_DECISION_SCHEMA, self.cwd,
                     model=model, effort=effort, return_receipt=True, max_attempts=1,
@@ -217,7 +303,9 @@ class RecoveryDecisionService:
                      "toolless_verified": True}
             event["provider_receipt"] = {k: receipt.get(k) for k in
                 ("provider", "resolved_model", "effort_requested", "turns", "cost_estimate_usd", "toolless_verified")}
-            self._event("RECOVERY_AI_PROPOSAL", fingerprint, event, task_id)
+            denied = self._publish_proposal(fingerprint, task_id, decision_id, event, lease_owner)
+            if denied:
+                return self._fallback(denied)
             return {"source": "MODEL_ADVISORY", **proposal, "provider_receipt": {
                 k: receipt.get(k) for k in ("provider", "resolved_model", "effort_requested", "turns", "cost_estimate_usd", "toolless_verified")}}
         except Exception as exc:

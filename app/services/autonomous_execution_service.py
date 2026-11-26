@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import sqlite3
 import threading
 import time
 import uuid
@@ -326,12 +327,19 @@ class AutonomousExecutionService:
         return self.db.release_lease("projectflow-supervisor", owner_id)
 
     def _supervisor_lease_is_current(self, owner_id: str | None = None) -> bool:
-        owner_id = owner_id or _SUPERVISOR_LEASE_OWNER.get()
-        if not owner_id:
+        owner_id = _SUPERVISOR_LEASE_OWNER.get() if owner_id is None else owner_id
+        if owner_id is None:
             return True  # Explicit, human-directed legacy start remains compatible.
-        row = self.db.one(
-            "SELECT owner_id,expires_at FROM orchestration_leases WHERE lease_key='projectflow-supervisor'")
-        return bool(row and row["owner_id"] == owner_id and row["expires_at"] > time.time())
+        if not owner_id:
+            return False
+        try:
+            # The request memo is not authoritative for fencing across processes.
+            with self.db.connect() as conn:
+                row = conn.execute(
+                    "SELECT owner_id,expires_at FROM orchestration_leases WHERE lease_key='projectflow-supervisor'").fetchone()
+                return bool(row and row["owner_id"] == owner_id and row["expires_at"] > time.time())
+        except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+            return False
 
     def scheduled_reconcile_tick(self) -> dict:
         """Single action entrypoint shared by the existing periodic worker.
@@ -444,6 +452,12 @@ class AutonomousExecutionService:
         return [{"change_id":change_id,"outcome":"NO_RECOVERY_REQUIRED"}]
 
     def _recovery_block(self,change_id:int,task_id:int,code:str,action:str)->list[dict]:
+        lease_owner = _SUPERVISOR_LEASE_OWNER.get()
+        def lease_lost():
+            return [{"change_id":change_id,"task_id":task_id,"outcome":"LEASE_LOST",
+                     "code":"SUPERVISOR_LEASE_LOST","next_action":"Successor owns reconciliation; no advice requested."}]
+        if not self._supervisor_lease_is_current(lease_owner):
+            return lease_lost()
         detail=f"code={code} owner=Change owner next_action={action}"
         latest=self.db.one(
             "SELECT action,details FROM workspace_events WHERE entity_type='task' AND entity_id=? "
@@ -466,6 +480,8 @@ class AutonomousExecutionService:
             tests=self.db.one("SELECT status,tested_commit,finished_at FROM test_runs WHERE workspace_type='agent' "
                               "AND workspace_id=(SELECT id FROM agent_workspaces WHERE task_id=? ORDER BY id DESC LIMIT 1) "
                               "ORDER BY id DESC LIMIT 1",(task_id,)) or {}
+            if not self._supervisor_lease_is_current(lease_owner):
+                return lease_lost()
             try:
                 result["advisory"]=self.recovery_advisor.advise({
                     "task_id":task_id,"change_id":change_id,"failure":code,
@@ -479,7 +495,11 @@ class AutonomousExecutionService:
                     "prior_attempts":len(self.db.all("SELECT id FROM workspace_events WHERE entity_type='task' "
                         "AND entity_id=? AND action='GOAL_RESUME_ATTEMPT'",(task_id,))),
                     "test_state":tests.get("status","UNKNOWN"),"last_progress_at":session.get("finished_at") or session.get("started_at")
-                },refs)
+                },refs,lease_owner=lease_owner)
+                # An adviser may take longer than the lease TTL; never expose its
+                # proposal to this stale supervisor as a usable recommendation.
+                if not self._supervisor_lease_is_current(lease_owner):
+                    return lease_lost()
             except Exception as exc:
                 self.db.event("system",0,"RECOVERY_AI_FAILED",f"failure={code} error={type(exc).__name__}")
                 result["advisory"]={"source":"DETERMINISTIC_FALLBACK","allowed_action":"VERIFY",
