@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -3026,6 +3026,100 @@ def create_app(settings=None):
         row=db.one("SELECT * FROM test_runs WHERE id=?",(rid,));
         if not row: raise HTTPException(404)
         return f"STDOUT (tail)\n{row['stdout_tail']}\n\nSTDERR (tail)\n{row['stderr_tail']}"
+    @app.get("/test-runs/{rid}/visual/{viewport}/{artifact}")
+    def visual_run_image(rid: int, viewport: str, artifact: str,
+                         _authz: None = Depends(require_read_role("test_run", "rid"))):
+        """Serve one validated PNG from an opted-in Task's current visual run."""
+        from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
+        from app.services.visual_qa_evidence import read_verified_visual_png
+
+        denied = HTTPException(404, "Visual evidence unavailable")
+        row = db.one(
+            "SELECT * FROM test_runs WHERE id=? AND workspace_type='agent' "
+            "AND stage='visual_qa' AND status='PASS'", (rid,)
+        )
+        if not row:
+            raise denied
+        workspace = db.one(
+            "SELECT w.*,r.repo_path AS registered_repo_path,r.git_fingerprint AS registered_git_fingerprint "
+            "FROM agent_workspaces w "
+            "JOIN repositories r ON r.id=w.repository_id WHERE w.id=?",
+            (row["workspace_id"],),
+        )
+        if not workspace or not workspace["task_id"] or not row["tested_commit"]:
+            raise denied
+        task = db.one("SELECT * FROM tasks WHERE id=?", (workspace["task_id"],))
+        if not task or not task_requires_visual_qa(task):
+            raise denied
+
+        try:
+            repo_path = Path(workspace["registered_repo_path"]).resolve(strict=True)
+            worktree_path = git.validate_worktree(workspace["worktree_path"])
+            if not repo_path.is_dir() or not worktree_path.is_dir():
+                raise denied
+            repo_fingerprint = git.repo_fingerprint(repo_path)
+            worktree_fingerprint = git.repo_fingerprint(worktree_path)
+            if (not repo_fingerprint or repo_fingerprint != worktree_fingerprint
+                    or (workspace["registered_git_fingerprint"]
+                        and workspace["registered_git_fingerprint"] != repo_fingerprint)):
+                raise denied
+            source = git.source_state(worktree_path)
+            if not source["clean"] or source["head"] != row["tested_commit"]:
+                raise denied
+            latest = db.one(
+                "SELECT id FROM test_runs WHERE workspace_type='agent' AND workspace_id=? "
+                "AND stage='visual_qa' AND tested_commit=? ORDER BY id DESC LIMIT 1",
+                (workspace["id"], row["tested_commit"]),
+            )
+            if not latest or latest["id"] != row["id"]:
+                raise denied
+
+            contract = load_visual_qa_contract(worktree_path)
+            if contract is None:
+                raise denied
+            builder = {
+                "id": workspace["id"], "head": source["head"],
+                "worktree_path": str(worktree_path), "task_id": task["id"],
+            }
+            if decision.builder_tests_status(builder) != "PASS":
+                raise denied
+            verified = decision._visual_evidence_result(
+                row, "agent", workspace["id"], source["head"], worktree_path, task
+            )
+            if verified is None:
+                raise denied
+            image = read_verified_visual_png(
+                visual_evidence_root / "agent" / str(workspace["id"]) / str(row["id"]),
+                run_id=row["id"], tested_commit=source["head"], repo_root=worktree_path,
+                contract=contract, expected_manifest_sha256=verified["manifest_sha256"],
+                viewport=viewport, artifact=artifact,
+            )
+            after = git.source_state(worktree_path)
+            if not after["clean"] or after["head"] != source["head"]:
+                raise denied
+            if decision.builder_tests_status(builder) != "PASS":
+                raise denied
+            still_latest = db.one(
+                "SELECT id,status,tested_commit FROM test_runs WHERE workspace_type='agent' "
+                "AND workspace_id=? AND stage='visual_qa' AND tested_commit=? ORDER BY id DESC LIMIT 1",
+                (workspace["id"], source["head"]),
+            )
+            if (not still_latest or still_latest["id"] != rid or still_latest["status"] != "PASS"
+                    or still_latest["tested_commit"] != row["tested_commit"]):
+                raise denied
+        except HTTPException:
+            raise
+        except Exception:
+            # Do not expose tenant paths, manifest details, or filesystem errors.
+            raise denied
+        return Response(
+            content=image, media_type="image/png",
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store",
+                "Content-Disposition": f"inline; filename=\"{artifact}\"",
+            },
+        )
     @app.get("/settings",response_class=HTMLResponse)
     def settings_page(request:Request): return render(request,"settings.html",launchers=launcher.status())
 

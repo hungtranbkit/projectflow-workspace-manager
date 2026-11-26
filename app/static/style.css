@@ -11,6 +11,10 @@
 .wz-step.done{background:#dff4ea;color:#08734a}.wz-step.current{background:var(--blue);color:#fff}.wz-step.skipped{opacity:.45}
 .wz-step small{display:block;font-weight:400;text-transform:none;letter-spacing:0}
 .wizard-panel{border:2px solid var(--blue)}
+.visual-qa-previews{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:12px;margin:14px 0}
+.visual-qa-previews figure{min-width:0;margin:0;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.visual-qa-previews figcaption{margin-bottom:8px;font-size:12px;font-weight:700;color:var(--muted)}
+.visual-qa-previews img{display:block;width:100%;height:auto;max-height:420px;object-fit:contain;background:#eef2f5;border-radius:5px}
 .primary-action{margin:16px 0;display:flex;gap:10px;flex-wrap:wrap}
 .primary-action form{display:inline}
 button.big,.button.big{font-size:16px;padding:14px 26px}

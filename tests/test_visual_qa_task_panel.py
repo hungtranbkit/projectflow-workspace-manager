@@ -6,6 +6,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from tests.test_visual_qa_evidence import create_run, png
 
 
@@ -13,7 +15,7 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=repo, check=True, text=True, capture_output=True).stdout.strip()
 
 
-def _task_workspace(client, repo: Path, *, opted_in: bool):
+def _task_workspace(client, repo: Path, *, opted_in: bool, repository_id: int | None = None):
     reference = repo / "docs" / "order.png"
     reference.parent.mkdir(parents=True, exist_ok=True)
     reference.write_bytes(png(430, 932))
@@ -31,13 +33,14 @@ def _task_workspace(client, repo: Path, *, opted_in: bool):
 
     db = client.app.state.db
     task_id = db.execute(
-        "INSERT INTO tasks(slug,title,status,implementation_prompt) VALUES(?,?,?,?)",
-        ("visual-panel", "Visual panel task", "ACTIVE", "UI preview" + ("\nVISUAL_QA_REQUIRED: true" if opted_in else "")),
+        "INSERT INTO tasks(slug,title,status,implementation_prompt,repo_scope_id) VALUES(?,?,?,?,?)",
+        ("visual-panel", "Visual panel task", "ACTIVE", "UI preview" + ("\nVISUAL_QA_REQUIRED: true" if opted_in else ""), repository_id),
     )
-    repository_id = db.execute(
-        "INSERT INTO repositories(repo_name,repo_path,default_branch) VALUES(?,?,?)",
-        ("visual-panel-fixture", str(repo), "main"),
-    )
+    if repository_id is None:
+        repository_id = db.execute(
+            "INSERT INTO repositories(repo_name,repo_path,default_branch) VALUES(?,?,?)",
+            ("visual-panel-fixture", str(repo), "main"),
+        )
     branch, worktree, commit = client.app.state.git.create_agent(repo, "codex", f"visual-panel-{task_id}", "main")
     workspace_id = db.execute(
         "INSERT INTO agent_workspaces(repository_id,agent,task_name,branch,worktree_path,base_branch,base_commit,last_commit,status,task_id,role,sandbox_profile) "
@@ -200,3 +203,197 @@ def test_task_detail_escapes_untrusted_title_in_visual_panel_page(client, git_re
     assert response.status_code == 200
     assert "<script>alert(1)</script>" not in response.text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in response.text
+
+
+@pytest.mark.parametrize("artifact", ["reference.png", "actual.png", "diff.png", "overlay.png"])
+def test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers(client, git_repo, artifact):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_run(client, workspace_id, worktree, head)
+    expected = (client.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                / str(workspace_id) / str(run_id) / "430x932" / artifact).read_bytes()
+
+    response = client.get(f"/test-runs/{run_id}/visual/430x932/{artifact}")
+
+    assert response.status_code == 200
+    assert response.content == expected
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert "attachment" not in response.headers.get("content-disposition", "")
+
+
+@pytest.mark.parametrize("viewport,artifact", [
+    ("../430x932", "actual.png"), ("430x932", "../../metrics.json"),
+    ("9999x9999", "actual.png"), ("430x932", "report.md"),
+])
+def test_visual_artifact_route_rejects_unlisted_viewport_and_artifact(client, git_repo, viewport, artifact):
+    _root, repo = git_repo
+    _task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_run(client, workspace_id, worktree, head)
+
+    response = client.get(f"/test-runs/{run_id}/visual/{viewport}/{artifact}")
+
+    assert response.status_code == 404
+
+
+def test_visual_artifact_route_fails_closed_for_tamper_stale_dirty_and_opt_out(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_run(client, workspace_id, worktree, head)
+    evidence = client.app.state.settings.state_dir / "visual-qa-evidence" / "agent" / str(workspace_id) / str(run_id) / "430x932" / "actual.png"
+    evidence.write_bytes(b"tampered")
+    assert client.get(f"/test-runs/{run_id}/visual/430x932/actual.png").status_code == 404
+
+    evidence.write_bytes(png(430, 932))
+    (worktree / "README.md").write_text("dirty tracked source\n", encoding="utf-8")
+    assert client.get(f"/test-runs/{run_id}/visual/430x932/actual.png").status_code == 404
+    (worktree / "README.md").write_text("base\n", encoding="utf-8")
+
+    client.app.state.db.execute("UPDATE tasks SET implementation_prompt='backend only' WHERE id=?", (task_id,))
+    assert client.get(f"/test-runs/{run_id}/visual/430x932/actual.png").status_code == 404
+
+
+def test_visual_artifact_route_rejects_symlink_and_missing_manifest_digest(client, git_repo, tmp_path):
+    _root, repo = git_repo
+    _task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_run(client, workspace_id, worktree, head)
+    artifact = (client.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                / str(workspace_id) / str(run_id) / "430x932" / "actual.png")
+    outside = tmp_path / "not-owned.png"
+    outside.write_bytes(artifact.read_bytes())
+    artifact.unlink()
+    artifact.symlink_to(outside)
+    assert client.get(f"/test-runs/{run_id}/visual/430x932/actual.png").status_code == 404
+
+    artifact.unlink()
+    artifact.write_bytes(png(430, 932))
+    client.app.state.db.execute("UPDATE test_runs SET stdout_tail='' WHERE id=?", (run_id,))
+    assert client.get(f"/test-runs/{run_id}/visual/430x932/actual.png").status_code == 404
+
+
+def test_visual_artifact_route_rejects_newer_failed_run_and_clean_stale_sha(client, git_repo):
+    _root, repo = git_repo
+    _task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_run(client, workspace_id, worktree, head)
+    client.app.state.db.execute(
+        "INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit,exit_code) "
+        "VALUES('agent',?,'true','visual_qa','FAIL',?,1)", (workspace_id, head),
+    )
+    assert client.get(f"/test-runs/{run_id}/visual/430x932/actual.png").status_code == 404
+
+    # The prior PASS is not served after a new clean source commit.
+    client.app.state.db.execute("DELETE FROM test_runs WHERE workspace_id=? AND stage='visual_qa' AND status='FAIL'", (workspace_id,))
+    (worktree / "README.md").write_text("next committed source\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(worktree), "add", "README.md"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(worktree), "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "new visual source"], check=True, capture_output=True)
+    assert client.get(f"/test-runs/{run_id}/visual/430x932/actual.png").status_code == 404
+
+
+def test_task_page_embeds_only_authenticated_urls_for_current_verified_visual_images(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_run(client, workspace_id, worktree, head)
+
+    response = client.get(f"/tasks/{task_id}")
+
+    assert response.status_code == 200
+    for artifact in ("reference.png", "actual.png", "diff.png", "overlay.png"):
+        assert f"/test-runs/{run_id}/visual/430x932/{artifact}" in response.text
+    assert 'alt="Actual 430x932"' in response.text
+    assert 'alt="Diff 430x932"' in response.text
+
+
+def test_image_route_uses_the_exact_run_workspace_within_a_task(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_run(client, workspace_id, worktree, head)
+    branch, other_worktree, commit = client.app.state.git.create_agent(
+        repo, "claude", f"visual-panel-other-{task_id}", "main"
+    )
+    other_id = client.app.state.db.execute(
+        "INSERT INTO agent_workspaces(repository_id,agent,task_name,branch,worktree_path,base_branch,base_commit,last_commit,status,task_id,role,sandbox_profile) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        (client.app.state.db.one("SELECT id FROM repositories WHERE repo_path=?", (str(repo),))["id"],
+         "claude", "visual-panel-other", branch, str(other_worktree), "main", commit, commit,
+         "CREATED", task_id, "UI", "NONE"),
+    )
+    other_run_id = _add_visual_run(client, other_id, Path(other_worktree), commit)
+    other_actual = png(430, 932, color=(200, 10, 30))
+    other_actual_path = (client.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                         / str(other_id) / str(other_run_id) / "430x932" / "actual.png")
+    other_actual_path.write_bytes(other_actual)
+    # Rebuild valid manifest/metrics for the distinct workspace artifact.
+    exp = {
+        "run_id": other_run_id, "tested_commit": commit, "repo_root": Path(other_worktree),
+        "contract": {"reference": {"430x932": "docs/order.png"}, "route": "http://127.0.0.1:4173/orders",
+                     "viewports": [{"width": 430, "height": 932}], "threshold": 0.08},
+    }
+    from tests.test_visual_qa_evidence import create_run
+    import shutil
+    shutil.rmtree(other_actual_path.parent)
+    create_run(other_actual_path.parent.parent, exp,
+               manifest_overrides={"runId": str(other_run_id)},
+               artifact_overrides={"actual.png": other_actual})
+    from app.services.visual_qa_evidence import validate_visual_qa_run
+    checked = validate_visual_qa_run(other_actual_path.parent.parent, **exp)
+    client.app.state.db.execute(
+        "UPDATE test_runs SET stdout_tail=? WHERE id=?",
+        (f"PROJECTFLOW_VISUAL_EVIDENCE_SHA256={checked['manifest_sha256']}\n", other_run_id),
+    )
+
+    first = client.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
+    second = client.get(f"/test-runs/{other_run_id}/visual/430x932/actual.png")
+
+    assert first.status_code == second.status_code == 200
+    assert first.content != second.content
+    assert second.content == other_actual
+
+
+def test_visual_image_route_reuses_required_authz_and_denies_other_tenant(git_repo, tmp_path):
+    import logging
+    from fastapi.testclient import TestClient
+    from tests.test_b03_authz import (
+        _accept, _bootstrap, _create_org, _invite, _link_repo, _second_repo, auth_client,
+    )
+
+    _root, repo = git_repo
+    captured = []
+    class Capture(logging.Handler):
+        def emit(self, record):
+            captured.append(record.getMessage())
+    handler = Capture()
+    loggers = [logging.getLogger("projectflow.auth"), logging.getLogger("projectflow.email")]
+    for logger in loggers:
+        logger.addHandler(handler)
+    try:
+        auth_root = tmp_path / "auth-mode-required"
+        auth_root.mkdir()
+        owner = auth_client(_root, auth_root)
+        _bootstrap(owner, captured)
+        org_a = _create_org(owner, "Visual A")
+        repository_id = _link_repo(owner, org_a, repo, "visual-a")
+        task_id, workspace_id, worktree, head = _task_workspace(
+            owner, repo, opted_in=True, repository_id=repository_id
+        )
+        run_id = _add_visual_run(owner, workspace_id, worktree, head)
+        outsider_org = _create_org(owner, "Visual B")
+        repo_b = _second_repo(_root, "visual-b-repo")
+        _link_repo(owner, outsider_org, repo_b, "visual-b")
+        invitation = _invite(owner, outsider_org, "visual-outsider@example.test", "OWNER", captured)
+        outsider = _accept(owner.app, invitation)
+        anonymous = TestClient(owner.app)
+        expected = (owner.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                    / str(workspace_id) / str(run_id) / "430x932" / "actual.png").read_bytes()
+
+        allowed = owner.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
+        unauthenticated = anonymous.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
+        foreign_tenant = outsider.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
+
+        assert allowed.status_code == 200 and allowed.content == expected
+        assert unauthenticated.status_code == 401
+        assert foreign_tenant.status_code == 404
+        assert task_id > 0
+    finally:
+        for logger in loggers:
+            logger.removeHandler(handler)

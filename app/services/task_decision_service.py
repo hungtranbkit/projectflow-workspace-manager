@@ -327,6 +327,7 @@ class TaskDecisionService:
             "run": None,
             "evidence_state": "NOT_REQUIRED" if not required else "NOT_RUN",
             "metrics": [],
+            "previews": [],
         }
         if not required:
             return panel
@@ -407,6 +408,23 @@ class TaskDecisionService:
 
         panel["evidence_state"] = "VALID"
         panel["metrics"] = verified["metrics"]
+        labels = {
+            "reference.png": "Reference",
+            "actual.png": "Actual",
+            "diff.png": "Diff",
+            "overlay.png": "Overlay",
+        }
+        panel["previews"] = [
+            {
+                "viewport": viewport,
+                "artifact": artifact,
+                "label": labels[artifact],
+                "url": f"/test-runs/{row['id']}/visual/{viewport}/{artifact}",
+                "alt": f"{labels[artifact]} {viewport}",
+            }
+            for viewport in verified["viewports"]
+            for artifact in labels
+        ]
         return panel
 
     # ---- Runtime Verification sandbox gating (section 12-15) ------------

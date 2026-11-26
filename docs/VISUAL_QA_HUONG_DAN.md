@@ -164,7 +164,8 @@ Mở trang chi tiết của Task. Panel **Visual QA** đọc contract trong `PRO
 - Nếu prompt Task không có `VISUAL_QA_REQUIRED: true`, panel ghi **Không bắt buộc**. Chỉ có block trong `PROJECT.yaml` không tự bật gate.
 - Nếu đã opt-in, panel hiện route loopback, viewport/reference, SHA-256 reference, ngưỡng, SHA source đã đo và trạng thái run. Nguồn thiết kế không có trường approval thì UI ghi rõ **Chưa ghi nhận — không đồng nghĩa đã được duyệt**.
 - Metrics chỉ xuất hiện sau khi verifier của ProjectFlow xác minh lại evidence theo đúng run, source SHA, reference, route, viewport và contract. Thiếu/sai evidence sẽ không hiện metric như một kết quả hợp lệ; run SHA cũ hiện **STALE**.
-- **Run Test** trong panel gọi đúng endpoint TestRunner hiện có cho workspace. **Xem log run này** dùng route log hiện có và vẫn qua read authorization. Panel không phục vụ PNG/Markdown trực tiếp, không nhận upload/URL/command.
+- Với run hiện tại PASS và source còn sạch, panel hiện thumbnail **Reference / Actual / Diff / Overlay** cho từng viewport. Ảnh tải từ route GET có authz theo test run; manifest và digest được kiểm tra lại trước khi trả byte. Run stale, source dirty, sai tenant, opt-out hoặc artifact bị sửa đều không được phục vụ.
+- **Run Test** trong panel gọi đúng endpoint TestRunner hiện có cho workspace. **Xem log run này** dùng route log hiện có và vẫn qua read authorization. Chỉ bốn PNG cố định được phục vụ qua route GET có authz; report/Markdown không được mở, và panel không nhận upload/URL/command.
 
 Opt-in qua prompt Task hiện có: mở **Task Prompt → Edit**, thêm đúng dòng sau, lưu prompt rồi dùng **Run Test** trên Builder workspace:
 

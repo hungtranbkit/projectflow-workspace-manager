@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import stat
 import struct
@@ -21,6 +22,7 @@ UIFIX_VERSION = "1.2.6"
 UIFIX_COMMIT = "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53"
 ARTIFACT_NAMES = {"reference.png", "actual.png", "diff.png", "overlay.png", "metrics.json", "report.md"}
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
+VISUAL_IMAGE_ARTIFACTS = frozenset({"reference.png", "actual.png", "diff.png", "overlay.png"})
 
 
 class VisualEvidenceError(ValueError):
@@ -227,6 +229,7 @@ def validate_visual_qa_run(
 
     manifest_hashes = []
     metrics_by_viewport = []
+    artifact_hashes_by_viewport = {}
     for key, spec in expected_by_key.items():
         directory = evidence_root / key
         _safe_directory(directory)
@@ -315,6 +318,10 @@ def validate_visual_qa_run(
             "total_pixels": total,
             "passed": True,
         })
+        artifact_hashes_by_viewport[key] = {
+            name: manifest["artifacts"][name]["sha256"]
+            for name in VISUAL_IMAGE_ARTIFACTS
+        }
         manifest_hashes.append(f"{key}:{manifest_hash}")
     digest = _sha("\n".join(manifest_hashes).encode())
     if expected_manifest_sha256 is not None and digest != expected_manifest_sha256:
@@ -325,4 +332,61 @@ def validate_visual_qa_run(
         "viewports": sorted(expected_by_key),
         "manifest_sha256": digest,
         "metrics": metrics_by_viewport,
+        "artifact_sha256": artifact_hashes_by_viewport,
     }
+
+
+def read_verified_visual_png(
+    evidence_root: Path, *, run_id: int, tested_commit: str, repo_root: Path,
+    contract: dict, expected_manifest_sha256: str, viewport: str, artifact: str,
+) -> bytes:
+    """Return one bounded PNG only if its exact bytes remain manifest-valid.
+
+    Validate before and after the no-follow descriptor read. The response is
+    an in-memory copy whose digest must match both verified summaries, so a
+    file replacement between validation and response cannot substitute bytes.
+    """
+    if artifact not in VISUAL_IMAGE_ARTIFACTS:
+        raise VisualEvidenceError("visual image name is not allowed")
+    if not re.fullmatch(r"[0-9]{1,4}x[0-9]{1,4}", viewport):
+        raise VisualEvidenceError("visual viewport is malformed")
+    expected_viewports = {f"{item['width']}x{item['height']}" for item in contract.get("viewports", [])}
+    if viewport not in expected_viewports:
+        raise VisualEvidenceError("visual viewport is not in the configured contract")
+
+    before = validate_visual_qa_run(
+        evidence_root, run_id=run_id, tested_commit=tested_commit,
+        repo_root=repo_root, contract=contract,
+        expected_manifest_sha256=expected_manifest_sha256,
+    )
+    expected_hash = before["artifact_sha256"][viewport][artifact]
+    artifact_path = Path(evidence_root).absolute() / viewport / artifact
+    _safe_directory(artifact_path.parent)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(artifact_path, flags)
+    except OSError as exc:
+        raise VisualEvidenceError("visual image is unavailable") from exc
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_ARTIFACT_BYTES:
+            raise VisualEvidenceError("visual image is not a bounded regular file")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            data = stream.read(MAX_ARTIFACT_BYTES + 1)
+    finally:
+        os.close(descriptor)
+    digest = _sha(data)
+    if len(data) > MAX_ARTIFACT_BYTES or digest != expected_hash:
+        raise VisualEvidenceError("visual image bytes changed after validation")
+
+    after = validate_visual_qa_run(
+        evidence_root, run_id=run_id, tested_commit=tested_commit,
+        repo_root=repo_root, contract=contract,
+        expected_manifest_sha256=expected_manifest_sha256,
+    )
+    if after["artifact_sha256"].get(viewport, {}).get(artifact) != digest:
+        raise VisualEvidenceError("visual image is no longer the verified run artifact")
+    spec = next(item for item in contract["viewports"] if f"{item['width']}x{item['height']}" == viewport)
+    if _png_dimensions(data, artifact) != (spec["width"], spec["height"]):
+        raise VisualEvidenceError("visual image dimensions do not match the contract")
+    return data

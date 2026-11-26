@@ -135,7 +135,8 @@
 {% else %}<p class="empty">Chưa chạy Visual QA trên workspace này.</p>{% endif %}
 {% if w.visual_qa.evidence_state == 'VALID' and w.visual_qa.metrics %}
 <ul aria-label="Visual QA metrics">{% for metric in w.visual_qa.metrics %}<li>{{metric.viewport}}: {{'%.3f%%'|format(metric.percent_diff * 100)}} pixel mismatch · {{metric.mismatched_pixels}} / {{metric.total_pixels}} pixels</li>{% endfor %}</ul>
-<p class="success">Evidence đã xác minh lại bằng verifier hiện có. Artifact chỉ được hiển thị trạng thái và metric; panel không phục vụ file.</p>
+<div class="visual-qa-previews" aria-label="Visual QA image evidence">{% for preview in w.visual_qa.previews %}<figure><figcaption>{{preview.label}} · {{preview.viewport}}</figcaption><img src="{{preview.url}}" alt="{{preview.alt}}" loading="lazy" decoding="async"></figure>{% endfor %}</div>
+<p class="success">Evidence đã xác minh lại bằng verifier hiện có. Ảnh PNG dùng route read-only có kiểm tra quyền; report và metrics file không được phục vụ trực tiếp.</p>
 {% elif w.visual_qa.evidence_state == 'INVALID' %}<div class="warning">Bằng chứng thiếu hoặc không hợp lệ; không hiển thị metric và không coi stage PASS là gate PASS.</div>
 {% elif w.visual_qa.evidence_state == 'STALE' %}<div class="warning">Run này thuộc SHA cũ; chạy lại bằng nút Test hiện có để tạo evidence cho source hiện tại.</div>
 {% elif w.visual_qa.required and w.visual_qa.evidence_state in ['FAIL','TIMEOUT','QUEUED','RUNNING','SKIPPED','BLOCKED'] %}<div class="warning">Chưa có evidence PASS hợp lệ cho run này: {{w.visual_qa.evidence_state}}.</div>{% endif %}
