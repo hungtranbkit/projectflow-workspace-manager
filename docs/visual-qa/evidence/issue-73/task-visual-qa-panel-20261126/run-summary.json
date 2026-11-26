@@ -1,0 +1,43 @@
+{
+  "milestone": "PF-04b13 Task Visual QA panel",
+  "source_head_before": "ffe2165734835006413a6e285edb0b05a98e89d4",
+  "source_tree_before": "da59c305a27bceddb746ff308938e821a6be383e",
+  "source_head_after": "ffe2165734835006413a6e285edb0b05a98e89d4",
+  "source_tree_after": "da59c305a27bceddb746ff308938e821a6be383e",
+  "branch": "agent/codex/issue-73-docker-test-ownership-20261126",
+  "command": [
+    "/tmp/pf-vq-panel-venv-20261126/bin/python",
+    "-m",
+    "pytest",
+    "-p",
+    "no:cacheprovider",
+    "-q",
+    "-ra",
+    "--junitxml=docs/visual-qa/evidence/issue-73/task-visual-qa-panel-20261126/focused-regressions.xml",
+    "tests/test_visual_qa_task_panel.py",
+    "tests/test_visual_qa_evidence.py",
+    "tests/test_visual_qa_contract.py",
+    "tests/test_visual_qa_execution.py",
+    "tests/test_task_decision_required_stages.py",
+    "tests/test_test_runner_source_identity.py",
+    "tests/test_b1_read_isolation.py",
+    "tests/test_b03_authz.py",
+    "tests/test_engineering_lifecycle_ui.py::test_existing_task_detail_page_still_works"
+  ],
+  "docker_host": "unix://<task-local-nonexistent-socket>",
+  "exit_code": 0,
+  "counts": {
+    "tests": 95,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "started_utc": "2026-11-26T07:30:55.175383+00:00",
+  "ended_utc": "2026-11-26T07:31:48.571790+00:00",
+  "started_ict": "2026-11-26T14:30:55.175383+07:00",
+  "ended_ict": "2026-11-26T14:31:48.571790+07:00",
+  "log": "focused-regressions.log",
+  "junit": "focused-regressions.xml",
+  "log_sha256": "8e5cdf0b3bcf20f1967dd3115926b426b68f678a10b960be3b6611efb13748b9",
+  "junit_sha256": "da83c3e4be6dd481bb3707b623148ae0ee2080feb066dc198095fe7a43c4b400"
+}

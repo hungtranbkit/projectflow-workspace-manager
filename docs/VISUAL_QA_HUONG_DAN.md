@@ -156,3 +156,20 @@ Bằng chứng local trong bundle ProjectFlow dispatch runtime cho thấy editor
 Ví dụ replay bằng giao diện ProjectFlow: **Task UI → Builder → agent sửa source → Run tests → xem Test Runs và SHA hiện tại**. CLI chạy manual ngoài Builder chỉ kiểm tra tool/provider trực tiếp và không chứng minh ProjectFlow đã dispatch. Nếu chưa có login provider được ủy quyền, dừng ở **UNVERIFIED**; không tự lấy token, không giả kết quả và không retry quota-limited provider.
 
 Lần chạy synthetic được ghi tại `docs/visual-qa/evidence/issue-73/projectflow-dispatch-runtime-20261124/`: regression UIFix 26.680849% FAIL tại SHA `8913bda32a647bfb399f13497e273cbab424307f`; một lần Claude Builder repair; stage cùng SHA sửa PASS 5.784358% tại `d308d481441eaea23e151e0126a92dfa4b596cd2`; stale SHA trả `NOT_RUN`; backend opt-out chỉ có stage `test`. Reference là POS proposal chưa duyệt — đây là tool/runtime acceptance, không phải product-design approval.
+
+## 10. Xem Visual QA trên Task hiện có
+
+Mở trang chi tiết của Task. Panel **Visual QA** đọc contract trong `PROJECT.yaml` của từng Builder workspace và run `visual_qa` đã ghi trong `test_runs`; panel không tạo dashboard, stage, status hay lệnh thực thi riêng.
+
+- Nếu prompt Task không có `VISUAL_QA_REQUIRED: true`, panel ghi **Không bắt buộc**. Chỉ có block trong `PROJECT.yaml` không tự bật gate.
+- Nếu đã opt-in, panel hiện route loopback, viewport/reference, SHA-256 reference, ngưỡng, SHA source đã đo và trạng thái run. Nguồn thiết kế không có trường approval thì UI ghi rõ **Chưa ghi nhận — không đồng nghĩa đã được duyệt**.
+- Metrics chỉ xuất hiện sau khi verifier của ProjectFlow xác minh lại evidence theo đúng run, source SHA, reference, route, viewport và contract. Thiếu/sai evidence sẽ không hiện metric như một kết quả hợp lệ; run SHA cũ hiện **STALE**.
+- **Run Test** trong panel gọi đúng endpoint TestRunner hiện có cho workspace. **Xem log run này** dùng route log hiện có và vẫn qua read authorization. Panel không phục vụ PNG/Markdown trực tiếp, không nhận upload/URL/command.
+
+Opt-in qua prompt Task hiện có: mở **Task Prompt → Edit**, thêm đúng dòng sau, lưu prompt rồi dùng **Run Test** trên Builder workspace:
+
+```text
+VISUAL_QA_REQUIRED: true
+```
+
+Kết quả nhìn thấy trên panel chỉ là phần hiển thị của decision/evidence hiện có; không thay thế review hành vi/accessibility, approval thiết kế, hoặc yêu cầu CI.

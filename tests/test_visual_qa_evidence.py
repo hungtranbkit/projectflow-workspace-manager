@@ -105,6 +105,10 @@ def test_valid_fixture_artifact_set_is_accepted_and_digest_is_returned(tmp_path)
     assert result["tested_commit"] == "a" * 40
     assert len(result["manifest_sha256"]) == 64
     assert result["viewports"] == ["320x240"]
+    assert result["metrics"] == [{
+        "viewport": "320x240", "percent_diff": 0.0,
+        "mismatched_pixels": 0, "total_pixels": 320 * 240, "passed": True,
+    }]
 
 
 @pytest.mark.parametrize(

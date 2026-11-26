@@ -226,6 +226,7 @@ def validate_visual_qa_run(
         raise VisualEvidenceError("evidence viewport set does not match contract")
 
     manifest_hashes = []
+    metrics_by_viewport = []
     for key, spec in expected_by_key.items():
         directory = evidence_root / key
         _safe_directory(directory)
@@ -307,6 +308,13 @@ def validate_visual_qa_run(
                 raise VisualEvidenceError(f"PNG dimensions mismatch: {name}")
         if _sha(file_bytes["reference.png"]) != spec["reference_sha256"]:
             raise VisualEvidenceError("stored reference does not match configured reference")
+        metrics_by_viewport.append({
+            "viewport": key,
+            "percent_diff": percent,
+            "mismatched_pixels": mismatched,
+            "total_pixels": total,
+            "passed": True,
+        })
         manifest_hashes.append(f"{key}:{manifest_hash}")
     digest = _sha("\n".join(manifest_hashes).encode())
     if expected_manifest_sha256 is not None and digest != expected_manifest_sha256:
@@ -316,4 +324,5 @@ def validate_visual_qa_run(
         "tested_commit": tested_commit,
         "viewports": sorted(expected_by_key),
         "manifest_sha256": digest,
+        "metrics": metrics_by_viewport,
     }

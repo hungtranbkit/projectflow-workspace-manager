@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -292,7 +293,7 @@ class TaskDecisionService:
         # honest absence of any session row for this workspace (Workspace
         # READY must never be misread as Agent RUNNING).
         agent_status = session["status"] if session else "NOT_STARTED"
-        return {
+        view = {
             "id": w["id"], "agent": w["agent"], "role": w["role"], "repo_name": w["repo_name"],
             "repository_id": w["repository_id"], "worktree_path": w["worktree_path"], "branch": w["branch"],
             "base_commit": w["base_commit"], "task_id": w["task_id"],
@@ -303,6 +304,110 @@ class TaskDecisionService:
             "builder_instructions": w.get("builder_instructions") or "",
             "sandbox_state": self.builder_sandbox_state(w, head),
         }
+        # Keep the Task detail's evidence panel inside this same evaluated
+        # view model. The panel exposes the existing TestRunner row and the
+        # same run verifier used by builder_tests_status; it does not create
+        # another gate or decision source.
+        view["tests_status"] = self.builder_tests_status(view)
+        view["visual_qa"] = self._visual_qa_panel(w, head)
+        return view
+
+    def _visual_qa_panel(self, workspace, head):
+        """Read-only, task-scoped presentation data for the existing UI gate."""
+        from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
+
+        task = self.db.one("SELECT * FROM tasks WHERE id=?", (workspace.get("task_id"),)) if workspace.get("task_id") else None
+        required = task_requires_visual_qa(task)
+        panel = {
+            "required": required,
+            "repo_name": workspace.get("repo_name") or "Repository",
+            "tested_commit": head,
+            "contract_state": "NOT_REQUIRED" if not required else "MISSING",
+            "contract": None,
+            "run": None,
+            "evidence_state": "NOT_REQUIRED" if not required else "NOT_RUN",
+            "metrics": [],
+        }
+        if not required:
+            return panel
+
+        repo_path = Path(workspace["worktree_path"])
+        from app.services.visual_qa_evidence import MAX_ARTIFACT_BYTES
+        contract = None
+        try:
+            contract = load_visual_qa_contract(repo_path)
+        except Exception:
+            panel["contract_state"] = "INVALID"
+            panel["evidence_state"] = "BLOCKED"
+        if contract is not None:
+            references = []
+            try:
+                for viewport in contract["viewports"]:
+                    key = f"{viewport['width']}x{viewport['height']}"
+                    relative_path = contract["reference"][key]
+                    reference_path = repo_path / relative_path
+                    if reference_path.is_symlink() or not reference_path.is_file():
+                        raise ValueError("reference must be a regular repository file")
+                    if reference_path.stat().st_size > MAX_ARTIFACT_BYTES:
+                        raise ValueError("reference exceeds the evidence size limit")
+                    reference_bytes = reference_path.read_bytes()
+                    references.append({
+                        "viewport": key,
+                        "path": relative_path,
+                        "sha256": hashlib.sha256(reference_bytes).hexdigest(),
+                    })
+            except Exception:
+                contract = None
+                panel["contract_state"] = "INVALID"
+                panel["evidence_state"] = "BLOCKED"
+            else:
+                panel["contract_state"] = "VALID"
+                panel["contract"] = {
+                    "route": contract["route"],
+                    "threshold": contract["threshold"],
+                    "references": references,
+                    "approval": "NOT_RECORDED",
+                }
+        row = self.db.one(
+            "SELECT * FROM test_runs "
+            "WHERE workspace_type='agent' AND workspace_id=? AND stage='visual_qa' AND tested_commit=? ORDER BY id DESC LIMIT 1",
+            (workspace["id"], head),
+        ) if head else None
+        if row is None:
+            row = self.db.one(
+                "SELECT * FROM test_runs "
+                "WHERE workspace_type='agent' AND workspace_id=? AND stage='visual_qa' ORDER BY id DESC LIMIT 1",
+                (workspace["id"],),
+            )
+        if row is None:
+            return panel
+        is_current = bool(head and row["tested_commit"] == head)
+        panel["run"] = {
+            "id": row["id"], "status": row["status"],
+            "tested_commit": row["tested_commit"], "is_current": is_current,
+            "exit_code": row["exit_code"], "finished_at": row["finished_at"],
+            "log_url": f"/test-runs/{row['id']}/log",
+        }
+        if not is_current:
+            panel["evidence_state"] = "STALE"
+            return panel
+        if contract is None:
+            panel["evidence_state"] = "BLOCKED"
+            return panel
+        if row["status"] != "PASS":
+            panel["evidence_state"] = row["status"]
+            return panel
+
+        verified = self._visual_evidence_result(
+            row, "agent", workspace["id"], head, repo_path, task
+        )
+        if verified is None:
+            panel["evidence_state"] = "INVALID"
+            return panel
+
+        panel["evidence_state"] = "VALID"
+        panel["metrics"] = verified["metrics"]
+        return panel
 
     # ---- Runtime Verification sandbox gating (section 12-15) ------------
     def builder_sandbox_state(self, w, head=None):
@@ -993,6 +1098,8 @@ class TaskDecisionService:
         20): PASS only if every automated test stage run FOR THE BUILDER'S
         EXACT CURRENT HEAD passed -- a test run against an older commit
         proves nothing about the current one."""
+        if "tests_status" in b:
+            return b["tests_status"]
         head = b.get("head")
         if not head:
             return "NOT_RUN"
@@ -1043,32 +1150,35 @@ class TaskDecisionService:
 
     def _visual_evidence_valid(self, row, workspace_type, workspace_id, head, repo_path, task):
         """Revalidate coordinator-owned evidence whenever the authoritative gate reads a visual PASS."""
+        return self._visual_evidence_result(row, workspace_type, workspace_id, head, repo_path, task) is not None
+
+    def _visual_evidence_result(self, row, workspace_type, workspace_id, head, repo_path, task):
+        """Return the verifier's validated summary, never rereading unverified metrics for display."""
         if row is None:
-            return False
+            return None
         if row["status"] != "PASS":
-            return True  # FAIL/TIMEOUT/pending remain governed by their existing stage states.
+            return {"not_applicable": True}  # FAIL/TIMEOUT/pending remain governed by their existing stage states.
         if not head or self.visual_evidence_root is None:
-            return False
+            return None
         import re
         matches = re.findall(r"(?:^|\n)PROJECTFLOW_VISUAL_EVIDENCE_SHA256=([0-9a-f]{64})(?:\n|$)", row["stdout_tail"] or "")
         if not matches:
-            return False
+            return None
         try:
             from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
             from app.services.visual_qa_evidence import validate_visual_qa_run
             if not task_requires_visual_qa(task):
-                return False
+                return None
             contract = load_visual_qa_contract(repo_path)
             if contract is None:
-                return False
+                return None
             run_path = self.visual_evidence_root / workspace_type / str(workspace_id) / str(row["id"])
-            validate_visual_qa_run(
+            return validate_visual_qa_run(
                 run_path, run_id=row["id"], tested_commit=head, repo_root=repo_path,
                 contract=contract, expected_manifest_sha256=matches[-1],
             )
-            return True
         except Exception:
-            return False
+            return None
 
     def _checklist(self, status, builders, risk, current_step, all_builders_ready, all_reviews_current_pass, qa_ok, integration_ok, all_merged):
         if status == "CANCELLED":
@@ -1138,6 +1248,7 @@ class TaskDecisionService:
 
     def _result(self, t, status, stage, next_action, blocking, test_readiness, integration_eligible, ready_for_main,
                 builders, qa, ti, ti_repos, merges, risk, integration_eligibility=None, current_step=None):
+        from app.services.visual_qa_contract import task_requires_visual_qa
         all_builders_ready = bool(builders) and all(b["ready"] for b in builders)
         all_reviews_current_pass = bool(builders) and all(b["review_status"] == "PASS" for b in builders)
         qa_ok = (not self.requires_qa(risk)) or (qa is not None and qa["status"] == "PASS" and self._qa_current(qa, t))
@@ -1151,6 +1262,7 @@ class TaskDecisionService:
             "merge_records": merges, "current_step": current_step,
             "integration_eligibility": integration_eligibility or {"required": self.requires_integration(risk), "eligible": integration_eligible, "exists": bool(ti)},
             "effective_task_prompt": effective_task_prompt(t), "prompt_source": prompt_source(t),
+            "visual_qa_required": task_requires_visual_qa(t),
             "checklist": self._checklist(status, builders, risk, current_step, all_builders_ready, all_reviews_current_pass, qa_ok, integration_ok, all_merged),
             "missing_requirements": self._missing_requirements(next_action, blocking),
             "previous_step_summary": self._previous_step_summary(builders, current_step),

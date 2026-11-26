@@ -104,6 +104,47 @@
 
 <h2>{{t.title}}</h2>
 
+<section class="panel" id="visual-qa" aria-labelledby="visual-qa-title">
+<div class="row"><div><h3 id="visual-qa-title">Visual QA</h3><small>Kết quả từ TestRunner và TaskDecisionService hiện có.</small></div>
+<span class="badge {{'pending' if decision.visual_qa_required else ''}}">{{'Bắt buộc theo Task' if decision.visual_qa_required else 'Không bắt buộc'}}</span></div>
+{% if not decision.visual_qa_required %}
+<p>Task này đang opt-out. Cấu hình <code>visual_qa</code> trong <code>PROJECT.yaml</code> không tự bật gate. Muốn bật, thêm dòng <code>VISUAL_QA_REQUIRED: true</code> vào prompt Task hiện có rồi chạy lại test của Builder.</p>
+{% else %}
+<p>Gate chỉ áp dụng vì prompt Task có <code>VISUAL_QA_REQUIRED: true</code>. Opt-in chỉ yêu cầu đo kiểm; agent Builder và nút Run Test hiện có vẫn là luồng thực thi.</p>
+{% if not workspaces %}<div class="warning">Chưa có Builder workspace để đọc contract hoặc chạy Visual QA.</div>{% endif %}
+{% for w in workspaces %}
+<div class="nested" data-visual-qa-workspace="{{w.id}}">
+<div class="row"><b>{{w.repo_name}}</b><span class="badge">Automated tests: {{w.tests_status}}</span></div>
+{% if w.visual_qa.contract_state == 'INVALID' %}
+<div class="warning">Contract Visual QA không hợp lệ. Gate không được coi là PASS.</div>
+{% elif w.visual_qa.contract_state == 'MISSING' %}
+<div class="warning">Task đã opt-in nhưng repo chưa có contract Visual QA hợp lệ trong <code>PROJECT.yaml</code>.</div>
+{% elif w.visual_qa.contract_state == 'VALID' %}
+<dl class="facts">
+<div class="wide"><dt>Route loopback</dt><dd><code>{{w.visual_qa.contract.route}}</code></dd></div>
+<div><dt>Ngưỡng</dt><dd>{{'%.1f%%'|format(w.visual_qa.contract.threshold * 100)}}</dd></div>
+<div><dt>Phê duyệt thiết kế</dt><dd>Chưa ghi nhận — không đồng nghĩa đã được duyệt.</dd></div>
+{% for ref in w.visual_qa.contract.references %}<div class="wide"><dt>Reference {{ref.viewport}}</dt><dd><code>{{ref.path}}</code><br><small>SHA-256 <code>{{ref.sha256}}</code></small></dd></div>{% endfor %}
+</dl>
+{% endif %}
+{% if w.visual_qa.run %}
+<div class="row"><div><small>Visual QA run #{{w.visual_qa.run.id}}</small><br><small>SHA đã đo</small> <code>{{w.visual_qa.run.tested_commit or '—'}}</code></div>
+<span class="badge {{'failed' if w.visual_qa.evidence_state in ['FAIL','TIMEOUT','INVALID','BLOCKED'] else ('ready' if w.visual_qa.evidence_state == 'VALID' else 'pending')}}">{{w.visual_qa.evidence_state}}{% if not w.visual_qa.run.is_current %} · STALE{% endif %}</span></div>
+<p>Stage: <b>{{w.visual_qa.run.status}}</b> · Exit: <code>{{w.visual_qa.run.exit_code if w.visual_qa.run.exit_code is not none else '—'}}</code> · SHA hiện tại: <code>{{w.visual_qa.tested_commit or '—'}}</code></p>
+<a class="ghost" href="{{w.visual_qa.run.log_url}}">Xem log run này</a>
+{% else %}<p class="empty">Chưa chạy Visual QA trên workspace này.</p>{% endif %}
+{% if w.visual_qa.evidence_state == 'VALID' and w.visual_qa.metrics %}
+<ul aria-label="Visual QA metrics">{% for metric in w.visual_qa.metrics %}<li>{{metric.viewport}}: {{'%.3f%%'|format(metric.percent_diff * 100)}} pixel mismatch · {{metric.mismatched_pixels}} / {{metric.total_pixels}} pixels</li>{% endfor %}</ul>
+<p class="success">Evidence đã xác minh lại bằng verifier hiện có. Artifact chỉ được hiển thị trạng thái và metric; panel không phục vụ file.</p>
+{% elif w.visual_qa.evidence_state == 'INVALID' %}<div class="warning">Bằng chứng thiếu hoặc không hợp lệ; không hiển thị metric và không coi stage PASS là gate PASS.</div>
+{% elif w.visual_qa.evidence_state == 'STALE' %}<div class="warning">Run này thuộc SHA cũ; chạy lại bằng nút Test hiện có để tạo evidence cho source hiện tại.</div>
+{% elif w.visual_qa.required and w.visual_qa.evidence_state in ['FAIL','TIMEOUT','QUEUED','RUNNING','SKIPPED','BLOCKED'] %}<div class="warning">Chưa có evidence PASS hợp lệ cho run này: {{w.visual_qa.evidence_state}}.</div>{% endif %}
+<form method="post" action="/api/workspaces/{{w.id}}/test"><button class="ghost">Run Test</button></form>
+</div>
+{% endfor %}
+{% endif %}
+</section>
+
 {% if current_step == 'TASK' %}
 <!-- STEP 1: TASK -->
 <section class="panel wizard-panel">
