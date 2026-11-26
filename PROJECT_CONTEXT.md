@@ -155,3 +155,9 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
 - Exact candidate-start-tree red reproduced before the callback: both residual tests got `EXECUTION_FAILED` with missing Codex CLI and then `KeyError` for `fix_task_id`. No base comparison is claimed in PF-04b6. Production is untouched.
 - Verification: focused tests 3/3 pass; full Review Fix Loop module 31/31 pass, no skips; all 17 historical failed IDs map PASS. Release pipeline + visual regressions 46/46 pass; builder failure/prompt delivery selected regressions 3/3 pass. No full suite or provider call. Evidence: `docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/REPORT.md`.
 - Existing task branch start tree equalled PR #74 head `59b255557e399cd0b59a12ca1e0018a711224884` / `c2bafb79eca763f08f2629ce2a56d97d498893ae`; only test/evidence/context scope. A and E remain not PASS.
+
+## 2026-11-26 PF-04b7 B2 release-concurrency residual verification
+
+- On the existing task branch/worktree, remote PR #74 head `5e4ab28c05b922bccc6e2fd7e207a29d61718b85` and local commit `e443d603e3e90f5c43b71a80ab51abc231e693f3` had identical tree `7ea8df1d08e802406d6415dafe22ab931fa36b74`; B2 test blob matched exact remote (`a6fc9b1689211ba64ba10e7430d5724a09316df5`).
+- `PATH=/usr/bin:/bin` full `tests/test_b2_release_concurrency.py` run: 4/4 passed, 0 skipped, exit 0 (Python 3.14.4 / pytest 9.2.0). Three historical provider-CLI failure nodes now pass with the PF-04b5/6 test seam; actual threaded SQLite release operations, Git fixture, uniqueness/error/no-orphan assertions, and XSS route assertion were exercised. No source code changed.
+- Evidence/log/JUnit/node mapping/checksum: `docs/visual-qa/evidence/issue-73/pf-04b7-b2-concurrency-20261126/REPORT.md`. Full suite and CI not run; A remains FAIL and E NOT PASS.
