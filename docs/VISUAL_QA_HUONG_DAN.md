@@ -64,6 +64,8 @@ VISUAL_QA_REQUIRED: true
 
 ProjectFlow sẽ chèn reference/route/viewports/lệnh vào prompt; `TestRunner` chạy `visual_qa` và ghi kết quả vào `test_runs` ở SHA hiện tại. `TaskDecisionService` chỉ coi automated tests PASS khi có dòng `visual_qa` PASS tại current HEAD. Integration cũng yêu cầu stage đó khi Task được đánh dấu. Không có bảng visual status riêng. Reference config thiếu/sai sẽ fail closed.
 
+Trước khi preview hoặc chạy gate, `PROJECT.yaml` và từng PNG reference phải là file thường đã được commit đúng vào SHA đang kiểm tra; byte trong worktree phải trùng blob Git và index không được đánh dấu `skip-worktree`/`assume-unchanged`. File ignored, untracked, symlink, stale hoặc bị thay đổi sẽ không được preview và không thể tạo Visual QA PASS. Sau khi thay reference/config, commit thay đổi rồi chạy lại test trên SHA mới. Các file cache/build khác vẫn có thể ignored như thường lệ.
+
 ### Chạy stage trong sandbox khi AUTH_MODE=required
 
 Khi `WORKSPACE_MANAGER_AUTH_MODE=required`, ProjectFlow dùng Docker sandbox thật cho các lệnh của TestRunner. Container chạy bằng UID/GID của chủ sở hữu worktree để ghi được vào thư mục evidence riêng có quyền `0700`; giới hạn network, capability, memory/CPU/PID và mount worktree vẫn được giữ. Vì sandbox dùng `--network none`, `localhost` bên trong lệnh không trỏ về server trên host. Với test fixture, khởi động server loopback trong chính command/container rồi dừng bằng `trap`; không mở cổng ra host và không đổi cấu hình sandbox để kết nối server ngoài.

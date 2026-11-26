@@ -290,16 +290,16 @@ def _validate_visual_qa_run(
         reference_name = contract["reference"].get(key)
         if not reference_name:
             raise VisualEvidenceError(f"contract reference missing for viewport {key}")
-        reference_path = repo_root / reference_name
-        if reference_path.is_symlink() or not reference_path.is_file():
-            raise VisualEvidenceError(f"configured reference is not a regular repo file: {key}")
-        reference_bytes = reference_path.read_bytes()
+        reference_bytes = read_configured_reference_png(repo_root, reference_name, viewport)
         if _png_dimensions(reference_bytes, f"reference {key}") != (viewport["width"], viewport["height"]):
             raise VisualEvidenceError(f"configured reference dimensions mismatch: {key}")
+        reference_sha256 = (contract.get("_reference_sha256") or {}).get(key)
+        if reference_sha256 is not None and _sha(reference_bytes) != reference_sha256:
+            raise VisualEvidenceError(f"configured reference bytes differ from tested commit: {key}")
         expected_by_key[key] = {
             "viewport": viewport,
             "reference_name": reference_name,
-            "reference_sha256": _sha(reference_bytes),
+            "reference_sha256": reference_sha256 or _sha(reference_bytes),
         }
     try:
         children = list(evidence_root.iterdir())

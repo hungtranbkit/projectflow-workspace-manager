@@ -138,8 +138,45 @@ def test_marked_task_prompt_explains_missing_visual_qa_config(tmp_path):
     assert any("no enabled visual_qa contract" in line for line in lines)
 
 
+def test_visual_qa_prompt_does_not_reference_bytes_hidden_from_git_status(tmp_path):
+    import subprocess
+    from app.services.git_workspace import GitWorkspaceService
+    from tests.test_visual_qa_evidence import png
+
+    write_contract(
+        tmp_path,
+        "visual_qa:\n"
+        "  enabled: true\n"
+        "  reference: docs/reference.png\n"
+        "  route: http://127.0.0.1:4173/orders\n"
+        "  viewports: [{width: 430, height: 932}]\n"
+        "  threshold: 0.08\n",
+    )
+    (tmp_path / "docs/reference.png").write_bytes(png(430, 932))
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Visual QA Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "visual-qa-test@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "PROJECT.yaml", "docs/reference.png"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "commit prompt reference"], cwd=tmp_path, check=True, capture_output=True)
+    git = GitWorkspaceService(tmp_path)
+    task = {"implementation_prompt": "UI task\nVISUAL_QA_REQUIRED: true"}
+    lines = visual_qa_prompt_lines(task, tmp_path, git=git)
+    assert any("Immutable references by viewport" in line for line in lines)
+
+    subprocess.run(["git", "update-index", "--skip-worktree", "docs/reference.png"], cwd=tmp_path, check=True)
+    (tmp_path / "docs/reference.png").write_bytes(png(430, 932, color=(0, 0, 0)))
+    assert git.source_state(tmp_path)["clean"] is True
+    rejected = visual_qa_prompt_lines(task, tmp_path, git=git)
+
+    assert any("contract is invalid" in line for line in rejected)
+    assert not any("Immutable references by viewport" in line for line in rejected)
+
+
 def test_test_runner_requires_visual_stage_only_for_marked_task(tmp_path):
+    import subprocess
+    from app.services.git_workspace import GitWorkspaceService
     from app.services.test_runner import TestRunner
+    from tests.test_visual_qa_evidence import png
 
     write_contract(
         tmp_path,
@@ -150,6 +187,12 @@ def test_test_runner_requires_visual_stage_only_for_marked_task(tmp_path):
         "  viewports: [{width: 430, height: 932}]\n"
         "  threshold: 0.08\n",
     )
+    (tmp_path / "docs/reference.png").write_bytes(png(430, 932))
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Visual QA Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "visual-qa-test@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "PROJECT.yaml", "docs/reference.png"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "commit visual contract fixture"], cwd=tmp_path, check=True, capture_output=True)
 
     class DB:
         task = {"implementation_prompt": "UI task\nVISUAL_QA_REQUIRED: true"}
@@ -157,15 +200,61 @@ def test_test_runner_requires_visual_stage_only_for_marked_task(tmp_path):
         def one(self, sql, _params):
             return self.task if "agent_workspaces" in sql else None
 
-    runner = TestRunner(DB(), git=None, runner=None)
+    runner = TestRunner(DB(), git=GitWorkspaceService(tmp_path), runner=None)
 
     assert [row[0] for row in runner.stages_for("agent", 1, tmp_path)] == ["test", "visual_qa"]
     DB.task = {"implementation_prompt": "Backend task"}
     assert [row[0] for row in runner.stages_for("agent", 1, tmp_path)] == ["test"]
 
 
+@pytest.mark.parametrize("ignored_path", ["PROJECT.yaml", "docs/reference.png"])
+def test_test_runner_rejects_visual_inputs_absent_from_tested_git_tree(tmp_path, ignored_path):
+    import subprocess
+    from app.services.git_workspace import GitWorkspaceService
+    from app.services.project_contract import ContractError
+    from app.services.test_runner import TestRunner
+    from tests.test_visual_qa_evidence import png
+
+    write_contract(
+        tmp_path,
+        "visual_qa:\n"
+        "  enabled: true\n"
+        "  reference: docs/reference.png\n"
+        "  route: http://127.0.0.1:4173/orders\n"
+        "  viewports: [{width: 430, height: 932}]\n"
+        "  threshold: 0.08\n",
+    )
+    reference = tmp_path / "docs/reference.png"
+    reference.write_bytes(png(430, 932))
+    (tmp_path / ".gitignore").write_text(ignored_path + "\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Visual QA Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "visual-qa-test@example.invalid"], cwd=tmp_path, check=True)
+    if ignored_path == "PROJECT.yaml":
+        subprocess.run(["git", "add", ".gitignore", "docs/reference.png"], cwd=tmp_path, check=True)
+    else:
+        subprocess.run(["git", "add", ".gitignore", "PROJECT.yaml"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "commit visual QA source fixture"], cwd=tmp_path, check=True, capture_output=True)
+    if ignored_path == "docs/reference.png":
+        reference.write_bytes(png(430, 932))
+
+    class DB:
+        task = {"implementation_prompt": "UI task\nVISUAL_QA_REQUIRED: true"}
+
+        def one(self, sql, _params):
+            return self.task if "agent_workspaces" in sql else None
+
+    assert GitWorkspaceService(tmp_path).source_state(tmp_path)["clean"] is True
+    runner = TestRunner(DB(), GitWorkspaceService(tmp_path), runner=None)
+    with pytest.raises(ContractError):
+        runner.stages_for("agent", 1, tmp_path)
+
+
 def test_task_decision_requires_current_visual_qa_evidence_for_opted_in_task(tmp_path):
+    import subprocess
+    from app.services.git_workspace import GitWorkspaceService
     from app.services.task_decision_service import TaskDecisionService
+    from tests.test_visual_qa_evidence import png
 
     write_contract(
         tmp_path,
@@ -176,6 +265,13 @@ def test_task_decision_requires_current_visual_qa_evidence_for_opted_in_task(tmp
         "  viewports: [{width: 430, height: 932}]\n"
         "  threshold: 0.08\n",
     )
+    (tmp_path / "docs/reference.png").write_bytes(png(430, 932))
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Visual QA Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "visual-qa-test@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "PROJECT.yaml", "docs/reference.png"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "commit visual decision fixture"], cwd=tmp_path, check=True, capture_output=True)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, text=True, capture_output=True).stdout.strip()
 
     class DB:
         task = {"implementation_prompt": "UI task\nVISUAL_QA_REQUIRED: true"}
@@ -187,15 +283,8 @@ def test_task_decision_requires_current_visual_qa_evidence_for_opted_in_task(tmp
         def all(self, _sql, _params):
             return self.rows
 
-    class Git:
-        def head(self, _path):
-            return "commit-123"
-
-        def source_state(self, _path):
-            return {"head": "commit-123", "tracked_diff_sha256": "", "untracked_paths": (), "clean": True}
-
-    decision = TaskDecisionService(DB(), Git())
-    builder = {"id": 7, "task_id": 3, "head": "commit-123", "worktree_path": str(tmp_path)}
+    decision = TaskDecisionService(DB(), GitWorkspaceService(tmp_path))
+    builder = {"id": 7, "task_id": 3, "head": head, "worktree_path": str(tmp_path)}
 
     assert decision.builder_tests_status(builder) == "NOT_RUN"
     DB.rows.append({"stage": "visual_qa", "status": "PASS"})

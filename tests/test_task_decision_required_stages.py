@@ -9,6 +9,7 @@ import pytest
 from app.db import Database
 from app.services.git_workspace import GitWorkspaceService
 from app.services.task_decision_service import TaskDecisionService, fingerprint_of
+from tests.test_visual_qa_evidence import png
 
 
 def git(repo: Path, *args: str) -> str:
@@ -32,7 +33,7 @@ def make_fixture(tmp_path: Path, required=("test", "build"), *, visual=False, co
             encoding="utf-8",
         )
         if visual:
-            (repo / "reference.png").write_bytes(b"test reference")
+            (repo / "reference.png").write_bytes(png(430, 932))
     (repo / "source.txt").write_text("committed source\n", encoding="utf-8")
     git(repo, "add", ".")
     git(repo, "commit", "-m", "fixture source")
@@ -177,6 +178,23 @@ def test_exit_zero_visual_stage_without_coordinator_evidence_fails_integration_g
     assert result["tests_status"] == "FAIL"
     assert result["failures"][0]["stage"] == "visual_qa"
     assert result["failures"][0]["classification"] != "WAIVED"
+
+
+def test_visual_integration_gate_does_not_trust_ignored_project_yaml(tmp_path):
+    db, service, repo, _head = make_fixture(tmp_path, required=("test",), visual=True)
+    git(repo, "rm", "--cached", "-f", "PROJECT.yaml")
+    (repo / ".gitignore").write_text("PROJECT.yaml\n", encoding="utf-8")
+    git(repo, "add", ".gitignore")
+    git(repo, "commit", "-m", "remove committed visual contract")
+    head = git(repo, "rev-parse", "HEAD")
+    assert service.git.source_state(repo)["clean"] is True
+    add_run(db, stage="test", sha=head)
+    add_run(db, stage="visual_qa", status="PASS", sha=head, stdout="PROJECTFLOW_VISUAL_EVIDENCE_SHA256=" + "a" * 64)
+
+    result = integration(service, repo)
+
+    assert result["tests_pass"] is False
+    assert result["tests_status"] == "UNKNOWN"
 
 
 def test_integration_without_contract_and_zero_stage_legacy_behavior_is_preserved(tmp_path):

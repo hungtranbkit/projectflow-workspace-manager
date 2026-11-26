@@ -1761,7 +1761,8 @@ def create_app(settings=None):
                 if instr: parts+=["## BUILDER INSTRUCTIONS (this workspace only)",instr,""]
             parts+=_spec_context_section(t)
             if repo_row:
-                parts+=visual_qa_prompt_lines(t, Path(repo_row["repo_path"]))
+                visual_repo = Path(workspace["worktree_path"]) if workspace else Path(repo_row["repo_path"])
+                parts+=visual_qa_prompt_lines(t, visual_repo, git=git)
             # E8.8/E8.9: bounded architecture/design/test-contract slice
             # for THIS Task's own governing PlanItem/requirement ids --
             # never the whole project's engineering state. A Task with
@@ -3031,8 +3032,9 @@ def create_app(settings=None):
     def task_visual_reference(tid: int, wid: int, tested_commit: str, viewport: str,
                               _authz: None = Depends(require_read_role("task", "tid"))):
         """Serve only the current, committed reference configured for this Task's workspace."""
-        from app.services.visual_qa_contract import load_visual_qa_contract
-        from app.services.visual_qa_evidence import read_configured_reference_png
+        from app.services.visual_qa_contract import (
+            load_committed_visual_qa_contract, read_committed_visual_reference_png,
+        )
 
         denied = HTTPException(404, "Configured visual reference unavailable")
         if not re.fullmatch(r"[0-9a-f]{40}", tested_commit):
@@ -3058,7 +3060,7 @@ def create_app(settings=None):
             before = git.source_state(worktree_path)
             if not before["clean"] or before["head"] != tested_commit:
                 raise denied
-            contract = load_visual_qa_contract(worktree_path)
+            contract = load_committed_visual_qa_contract(worktree_path, git, tested_commit)
             if contract is None or viewport not in contract["reference"]:
                 raise denied
             viewport_spec = next(
@@ -3068,9 +3070,7 @@ def create_app(settings=None):
             )
             if viewport_spec is None:
                 raise denied
-            image = read_configured_reference_png(
-                worktree_path, contract["reference"][viewport], viewport_spec,
-            )
+            image = read_committed_visual_reference_png(worktree_path, git, tested_commit, contract, viewport)
             after = git.source_state(worktree_path)
             if (not after["clean"] or after["head"] != before["head"]
                     or after["tracked_diff_sha256"] != before["tracked_diff_sha256"]):
@@ -3092,7 +3092,7 @@ def create_app(settings=None):
     def visual_run_image(rid: int, viewport: str, artifact: str,
                          _authz: None = Depends(require_read_role("test_run", "rid"))):
         """Serve one validated PNG from an opted-in Task's current visual run."""
-        from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
+        from app.services.visual_qa_contract import task_requires_visual_qa, load_committed_visual_qa_contract
         from app.services.visual_qa_evidence import (
             read_verified_visual_diagnostic_png, read_verified_visual_png,
         )
@@ -3138,7 +3138,7 @@ def create_app(settings=None):
             if not latest or latest["id"] != row["id"]:
                 raise denied
 
-            contract = load_visual_qa_contract(worktree_path)
+            contract = load_committed_visual_qa_contract(worktree_path, git, row["tested_commit"])
             if contract is None:
                 raise denied
             builder = {

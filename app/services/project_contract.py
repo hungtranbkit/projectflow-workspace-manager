@@ -75,14 +75,22 @@ def load_exec_sandbox(repo: Path) -> dict:
     }
 
 
-def load_contract(repo: Path, *, visual_qa_required: bool = False):
-    data = _read(repo)
+def load_contract(repo: Path, *, visual_qa_required: bool = False, project_bytes: bytes | None = None):
+    if project_bytes is None:
+        data = _read(repo)
+    else:
+        try:
+            data = yaml.safe_load(project_bytes.decode("utf-8")) or {}
+        except (UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise ContractError("PROJECT.yaml is not valid UTF-8 YAML") from exc
+        if not isinstance(data, dict):
+            raise ContractError("PROJECT.yaml must be a mapping")
     commands = data.get("commands") or {}; required = (data.get("ci") or {}).get("required") or [x for x in ("preflight", "test") if x in commands]
     if not required: raise ContractError("PROJECT.yaml declares no required CI stages")
     if visual_qa_required:
         from app.services.visual_qa_contract import load_visual_qa_contract
         try:
-            visual_contract = load_visual_qa_contract(repo)
+            visual_contract = load_visual_qa_contract(repo, config_bytes=project_bytes)
         except ValueError as exc:
             raise ContractError(str(exc)) from exc
         if visual_contract is None:

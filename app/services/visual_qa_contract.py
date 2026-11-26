@@ -3,6 +3,7 @@ from __future__ import annotations
 from ipaddress import ip_address
 from pathlib import Path
 import re
+import hashlib
 from urllib.parse import urlsplit
 
 import yaml
@@ -22,12 +23,15 @@ def task_requires_visual_qa(task: dict | None) -> bool:
     return bool(_TASK_MARKER.search(text))
 
 
-def load_visual_qa_contract(repo: Path) -> dict | None:
+def load_visual_qa_contract(repo: Path, *, config_bytes: bytes | None = None) -> dict | None:
     """Read and validate the optional, local-only visual QA configuration."""
     project_file = repo / "PROJECT.yaml"
-    if not project_file.is_file():
-        return None
-    data = yaml.safe_load(project_file.read_text(encoding="utf-8")) or {}
+    if config_bytes is None:
+        if not project_file.is_file():
+            return None
+        data = yaml.safe_load(project_file.read_text(encoding="utf-8")) or {}
+    else:
+        data = yaml.safe_load(config_bytes.decode("utf-8")) or {}
     if not isinstance(data, dict):
         raise ValueError("PROJECT.yaml must be a mapping")
     block = data.get("visual_qa")
@@ -110,15 +114,84 @@ def load_visual_qa_contract(repo: Path) -> dict | None:
     }
 
 
-def visual_qa_prompt_lines(task: dict, repo: Path) -> list[str]:
+def load_committed_visual_qa_contract(repo: Path, git, tested_commit: str,
+                                      *, project_bytes: bytes | None = None) -> dict | None:
+    """Validate an enabled Visual QA contract from exact tracked HEAD blobs.
+
+    Only PROJECT.yaml and the reference PNGs selected by that committed
+    contract are required to match HEAD; ignored build/cache outputs remain
+    allowed. The caller still checks its broader source-state policy.
+    """
+    from app.services.visual_qa_evidence import MAX_ARTIFACT_BYTES, _png_dimensions
+
+    if project_bytes is None:
+        try:
+            project_bytes = git.read_committed_file(
+                repo, tested_commit, "PROJECT.yaml", max_bytes=1024 * 1024,
+            )
+        except FileNotFoundError:
+            # An ignored/untracked PROJECT.yaml cannot define a repository contract.
+            return None
+    else:
+        tracked_bytes = git.read_committed_file(
+            repo, tested_commit, "PROJECT.yaml", max_bytes=1024 * 1024,
+        )
+        if tracked_bytes != project_bytes:
+            raise ValueError("PROJECT.yaml bytes differ from the tested commit")
+    contract = load_visual_qa_contract(repo, config_bytes=project_bytes)
+    if contract is None:
+        return None
+    reference_hashes = {}
+    for viewport in contract["viewports"]:
+        key = f"{viewport['width']}x{viewport['height']}"
+        relative_path = contract["reference"][key]
+        image = git.read_committed_file(
+            repo, tested_commit, relative_path, max_bytes=MAX_ARTIFACT_BYTES,
+        )
+        if _png_dimensions(image, "committed reference") != (viewport["width"], viewport["height"]):
+            raise ValueError("Committed reference PNG dimensions differ from its configured viewport")
+        reference_hashes[key] = hashlib.sha256(image).hexdigest()
+    source = git.source_state(repo)
+    if not source["clean"] or source["head"] != tested_commit:
+        raise ValueError("Visual QA contract source is no longer clean at the tested commit")
+    contract["_reference_sha256"] = reference_hashes
+    return contract
+
+
+def read_committed_visual_reference_png(repo: Path, git, tested_commit: str,
+                                        contract: dict, viewport_key: str) -> bytes:
+    """Return the exact tracked reference bytes selected by a validated contract."""
+    from app.services.visual_qa_evidence import MAX_ARTIFACT_BYTES, _png_dimensions
+
+    viewport = next((item for item in contract.get("viewports", [])
+                     if f"{item['width']}x{item['height']}" == viewport_key), None)
+    relative_path = contract.get("reference", {}).get(viewport_key)
+    if viewport is None or not isinstance(relative_path, str):
+        raise ValueError("Visual QA viewport is not present in the committed contract")
+    image = git.read_committed_file(
+        repo, tested_commit, relative_path, max_bytes=MAX_ARTIFACT_BYTES,
+    )
+    if _png_dimensions(image, "committed reference") != (viewport["width"], viewport["height"]):
+        raise ValueError("Committed reference PNG dimensions differ from its configured viewport")
+    return image
+
+
+def visual_qa_prompt_lines(task: dict, repo: Path, *, git=None, tested_commit: str | None = None) -> list[str]:
     if not task_requires_visual_qa(task):
         return []
     try:
-        contract = load_visual_qa_contract(repo)
-    except (OSError, ValueError, yaml.YAMLError) as exc:
+        if git is None:
+            contract = load_visual_qa_contract(repo)
+        else:
+            source = git.source_state(repo)
+            tested_commit = tested_commit or source["head"]
+            if not source["clean"] or source["head"] != tested_commit:
+                raise ValueError("Visual QA prompt requires a clean current commit")
+            contract = load_committed_visual_qa_contract(repo, git, tested_commit)
+    except Exception:
         return [
             "## VISUAL QA (required by this Task)",
-            f"- The repo-local visual_qa contract is invalid: {exc}",
+            "- The repo-local visual_qa contract is invalid or not bound to the tested commit.",
             "- Do not claim visual QA passed; report the configuration error as a blocker.",
             "",
         ]

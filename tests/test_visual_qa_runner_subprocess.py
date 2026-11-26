@@ -283,7 +283,7 @@ def test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_h
         positive_rows = _run_stages(runner, db, workspace_id, root)
         assert [(r["stage"], r["status"], r["exit_code"]) for r in positive_rows] == [
             ("test", "PASS", 0), ("visual_qa", "PASS", 0),
-        ]
+        ], positive_rows[-1]["stderr_tail"]
         assert {r["tested_commit"] for r in positive_rows} == {positive_head}
         visual_row = next(row for row in positive_rows if row["stage"] == "visual_qa")
         decisions["positive"] = _decision(db, git, workspace_id, task_id, root, positive_head)

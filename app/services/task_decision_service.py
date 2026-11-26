@@ -314,7 +314,10 @@ class TaskDecisionService:
 
     def _visual_qa_panel(self, workspace, head):
         """Read-only, task-scoped contract preview and existing gate data."""
-        from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
+        from app.services.visual_qa_contract import (
+            task_requires_visual_qa, load_committed_visual_qa_contract,
+            read_committed_visual_reference_png,
+        )
 
         task = self.db.one("SELECT * FROM tasks WHERE id=?", (workspace.get("task_id"),)) if workspace.get("task_id") else None
         required = task_requires_visual_qa(task)
@@ -333,10 +336,15 @@ class TaskDecisionService:
             return panel
 
         repo_path = Path(workspace["worktree_path"])
-        from app.services.visual_qa_evidence import read_configured_reference_png
         contract = None
         try:
-            contract = load_visual_qa_contract(repo_path)
+            source = self.git.source_state(repo_path)
+            if not source["clean"] or source["head"] != head:
+                panel["contract_state"] = "SOURCE_NOT_CLEAN"
+                if required:
+                    panel["evidence_state"] = "BLOCKED"
+                return panel
+            contract = load_committed_visual_qa_contract(repo_path, self.git, head)
         except Exception:
             panel["contract_state"] = "INVALID"
             if required:
@@ -347,24 +355,13 @@ class TaskDecisionService:
             if required:
                 panel["evidence_state"] = "BLOCKED"
             return panel
-        try:
-            source = self.git.source_state(repo_path)
-            if not source["clean"] or source["head"] != head:
-                panel["contract_state"] = "SOURCE_NOT_CLEAN"
-                if required:
-                    panel["evidence_state"] = "BLOCKED"
-                return panel
-        except Exception:
-            panel["contract_state"] = "INVALID"
-            if required:
-                panel["evidence_state"] = "BLOCKED"
         if contract is not None:
             references = []
             try:
                 for viewport in contract["viewports"]:
                     key = f"{viewport['width']}x{viewport['height']}"
                     relative_path = contract["reference"][key]
-                    reference_bytes = read_configured_reference_png(repo_path, relative_path, viewport)
+                    reference_bytes = read_committed_visual_reference_png(repo_path, self.git, head, contract, key)
                     references.append({
                         "viewport": key,
                         "path": relative_path,
@@ -659,8 +656,7 @@ class TaskDecisionService:
         return "READY_FOR_MAIN"
 
     # ---- baseline-waiver failure classification (section 11) -----------
-    @staticmethod
-    def _required_test_stage_names(worktree_path, *, visual_qa_required=False):
+    def _required_test_stage_names(self, worktree_path, *, visual_qa_required=False, tested_commit=None):
         """Return the contract's required stage names, or None for legacy
         repositories with no PROJECT.yaml / no configured required stages.
 
@@ -671,7 +667,25 @@ class TaskDecisionService:
         if not contract_path.is_file() and not visual_qa_required:
             return None
         try:
-            stages = load_contract(Path(worktree_path), visual_qa_required=visual_qa_required)
+            if visual_qa_required:
+                from app.services.visual_qa_contract import load_committed_visual_qa_contract
+                source = self.git.source_state(worktree_path)
+                tested_commit = tested_commit or source["head"]
+                if not source["clean"] or source["head"] != tested_commit:
+                    raise ContractError("Required Visual QA source is not clean at its tested commit")
+                project_bytes = self.git.read_committed_file(
+                    worktree_path, tested_commit, "PROJECT.yaml", max_bytes=1024 * 1024,
+                )
+                visual_contract = load_committed_visual_qa_contract(
+                    Path(worktree_path), self.git, tested_commit, project_bytes=project_bytes,
+                )
+                if visual_contract is None:
+                    raise ContractError("Task requires visual QA, but tested commit has no enabled visual contract")
+                stages = load_contract(
+                    Path(worktree_path), visual_qa_required=True, project_bytes=project_bytes,
+                )
+            else:
+                stages = load_contract(Path(worktree_path), visual_qa_required=False)
         except ContractError as exc:
             if not visual_qa_required and str(exc) == "PROJECT.yaml declares no required CI stages":
                 return None
@@ -701,7 +715,7 @@ class TaskDecisionService:
         visual_qa_required = task_requires_visual_qa(task)
         try:
             required_stages = self._required_test_stage_names(
-                ti_repo["worktree_path"], visual_qa_required=visual_qa_required
+                ti_repo["worktree_path"], visual_qa_required=visual_qa_required, tested_commit=head,
             )
         except Exception:
             return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": 1 if visual_qa_required else 0, "head": head, "summary": {}}
@@ -1178,7 +1192,7 @@ class TaskDecisionService:
         visual_qa_required = bool(task and task_requires_visual_qa(task))
         try:
             required_stages = self._required_test_stage_names(
-                b["worktree_path"], visual_qa_required=visual_qa_required
+                b["worktree_path"], visual_qa_required=visual_qa_required, tested_commit=head,
             )
         except Exception:
             return "FAIL"
@@ -1226,11 +1240,11 @@ class TaskDecisionService:
         if not matches:
             return None
         try:
-            from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
+            from app.services.visual_qa_contract import task_requires_visual_qa, load_committed_visual_qa_contract
             from app.services.visual_qa_evidence import validate_visual_qa_run
             if not task_requires_visual_qa(task):
                 return None
-            contract = load_visual_qa_contract(repo_path)
+            contract = load_committed_visual_qa_contract(repo_path, self.git, head)
             if contract is None:
                 return None
             run_path = self.visual_evidence_root / workspace_type / str(workspace_id) / str(row["id"])
@@ -1254,14 +1268,14 @@ class TaskDecisionService:
         if not matches:
             return None
         try:
-            from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
+            from app.services.visual_qa_contract import task_requires_visual_qa, load_committed_visual_qa_contract
             from app.services.visual_qa_evidence import validate_visual_qa_diagnostic_run
             source = self.git.source_state(repo_path)
             if not source.get("clean") or source.get("head") != head:
                 return None
             if not task_requires_visual_qa(task):
                 return None
-            contract = load_visual_qa_contract(repo_path)
+            contract = load_committed_visual_qa_contract(repo_path, self.git, head)
             if contract is None:
                 return None
             run_path = self.visual_evidence_root / workspace_type / str(workspace_id) / str(row["id"])

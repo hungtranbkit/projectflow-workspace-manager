@@ -3,7 +3,9 @@ import subprocess, threading, shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from app.services.project_contract import ContractError, load_contract
-from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
+from app.services.visual_qa_contract import (
+    task_requires_visual_qa, load_committed_visual_qa_contract,
+)
 from app.services.visual_qa_evidence import (
     validate_visual_qa_diagnostic_run, validate_visual_qa_run,
     VisualEvidenceError, ensure_private_directory,
@@ -65,7 +67,26 @@ class TestRunner:
 
     def stages_for(self, kind: str, entity_id: int, path: Path):
         task = self._task_for(kind, entity_id)
-        return load_contract(path, visual_qa_required=task_requires_visual_qa(task))
+        required = task_requires_visual_qa(task)
+        if not required:
+            return load_contract(path, visual_qa_required=False)
+        try:
+            source = self.git.source_state(path)
+            if not source["clean"] or not source["head"]:
+                raise ContractError("Required Visual QA needs a clean commit-bound source.")
+            project_bytes = self.git.read_committed_file(
+                path, source["head"], "PROJECT.yaml", max_bytes=1024 * 1024,
+            )
+            visual_contract = load_committed_visual_qa_contract(
+                path, self.git, source["head"], project_bytes=project_bytes,
+            )
+            if visual_contract is None:
+                raise ContractError("Task requires visual QA, but the tested commit has no enabled visual_qa contract")
+            return load_contract(path, visual_qa_required=True, project_bytes=project_bytes)
+        except ContractError:
+            raise
+        except Exception as exc:
+            raise ContractError(f"Could not validate commit-bound Visual QA contract: {type(exc).__name__}.") from exc
 
     def _task_for(self, kind: str, entity_id: int):
         if kind == "agent":
@@ -113,6 +134,19 @@ class TestRunner:
                 self.db.execute("UPDATE test_runs SET status='FAIL',finished_at=?,stderr_tail=? WHERE id=?",
                                 (now(), source_error[-50000:], run_id))
                 continue
+            if stage == "visual_qa":
+                try:
+                    task = self._task_for(kind, entity_id)
+                    contract = load_committed_visual_qa_contract(Path(path), self.git, source_state["head"])
+                    if not task_requires_visual_qa(task) or contract is None:
+                        raise VisualEvidenceError("visual stage has no enabled contract in the tested commit")
+                except Exception as exc:
+                    overall = False
+                    self.db.execute(
+                        "UPDATE test_runs SET status='FAIL',finished_at=?,stderr_tail=? WHERE id=?",
+                        (now(), f"VISUAL_CONTRACT_REJECTED: {type(exc).__name__}", run_id),
+                    )
+                    continue
             self.db.execute("UPDATE test_runs SET status='RUNNING',started_at=? WHERE id=?", (now(), run_id))
             try:
                 visual_tmp = None
@@ -144,7 +178,7 @@ class TestRunner:
                         if not source_state.get("clean") or not source_state.get("head"):
                             raise VisualEvidenceError("visual evidence requires a clean commit-bound source")
                         task = self._task_for(kind, entity_id)
-                        contract = load_visual_qa_contract(Path(path))
+                        contract = load_committed_visual_qa_contract(Path(path), self.git, source_state["head"])
                         if not task_requires_visual_qa(task) or contract is None:
                             raise VisualEvidenceError("visual stage is not backed by an enabled opt-in contract")
                         if self.visual_evidence_root is None:
@@ -175,7 +209,7 @@ class TestRunner:
                         if not source_state.get("clean") or not source_state.get("head"):
                             raise VisualEvidenceError("diagnostic evidence requires a clean commit-bound source")
                         task = self._task_for(kind, entity_id)
-                        contract = load_visual_qa_contract(Path(path))
+                        contract = load_committed_visual_qa_contract(Path(path), self.git, source_state["head"])
                         if not task_requires_visual_qa(task) or contract is None:
                             raise VisualEvidenceError("diagnostic evidence requires an enabled opt-in contract")
                         if self.visual_evidence_root is None:

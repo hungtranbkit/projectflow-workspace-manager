@@ -15,7 +15,8 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=repo, check=True, text=True, capture_output=True).stdout.strip()
 
 
-def _task_workspace(client, repo: Path, *, opted_in: bool, repository_id: int | None = None):
+def _task_workspace(client, repo: Path, *, opted_in: bool, repository_id: int | None = None,
+                    ignore_reference: bool = False, ignore_contract: bool = False):
     reference = repo / "docs" / "order.png"
     reference.parent.mkdir(parents=True, exist_ok=True)
     reference.write_bytes(png(430, 932))
@@ -27,7 +28,22 @@ def _task_workspace(client, repo: Path, *, opted_in: bool, repository_id: int | 
         "  route: http://127.0.0.1:4173/orders\n  viewports: [{width: 430, height: 932}]\n  threshold: 0.08\n",
         encoding="utf-8",
     )
-    _git(repo, "add", "PROJECT.yaml", "docs/order.png")
+    if ignore_reference or ignore_contract:
+        ignored = []
+        if ignore_reference:
+            ignored.append("docs/order.png")
+        if ignore_contract:
+            ignored.append("PROJECT.yaml")
+        (repo / ".gitignore").write_text("\n".join(ignored) + "\n", encoding="utf-8")
+        _git(repo, "add", ".gitignore")
+        if ignore_contract:
+            _git(repo, "rm", "--cached", "-f", "PROJECT.yaml")
+        if not ignore_contract:
+            _git(repo, "add", "PROJECT.yaml")
+        if not ignore_reference:
+            _git(repo, "add", "docs/order.png")
+    else:
+        _git(repo, "add", "PROJECT.yaml", "docs/order.png")
     _git(repo, "commit", "-m", "add visual QA panel fixture contract")
     head = _git(repo, "rev-parse", "HEAD")
 
@@ -42,6 +58,20 @@ def _task_workspace(client, repo: Path, *, opted_in: bool, repository_id: int | 
             ("visual-panel-fixture", str(repo), "main"),
         )
     branch, worktree, commit = client.app.state.git.create_agent(repo, "codex", f"visual-panel-{task_id}", "main")
+    if ignore_reference:
+        ignored_reference = Path(worktree) / "docs" / "order.png"
+        ignored_reference.parent.mkdir(parents=True, exist_ok=True)
+        ignored_reference.write_bytes(png(430, 932))
+    if ignore_contract:
+        (Path(worktree) / "PROJECT.yaml").write_text(
+            "schema_version: 1\nproject: {code: visual-panel}\nsource: {root: .}\n"
+            "commands:\n  preflight: {command: 'true'}\n  test: {command: 'true'}\n  visual_qa: {command: 'true'}\n"
+            "ci: {required: [preflight, test]}\n"
+            "visual_qa:\n  enabled: true\n  reference: docs/order.png\n"
+            "  route: http://127.0.0.1:4173/orders\n"
+            "  viewports: [{width: 430, height: 932}]\n  threshold: 0.08\n",
+            encoding="utf-8",
+        )
     workspace_id = db.execute(
         "INSERT INTO agent_workspaces(repository_id,agent,task_name,branch,worktree_path,base_branch,base_commit,last_commit,status,task_id,role,sandbox_profile) "
         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -178,6 +208,86 @@ def test_opted_out_task_can_preview_committed_reference_without_running_gate(cli
     assert image.headers["cache-control"] == "private, no-store"
     assert client.app.state.decision.evaluate(task_id)["visual_qa_required"] is False
     assert client.app.state.db.one("SELECT COUNT(*) AS n FROM test_runs WHERE workspace_id=?", (workspace_id,))["n"] == 0
+
+
+def test_ignored_reference_not_in_head_cannot_be_previewed_or_linked(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(
+        client, repo, opted_in=True, ignore_reference=True,
+    )
+    source = client.app.state.git.source_state(worktree)
+    assert source["clean"] is True
+    assert "docs/order.png" not in _git(worktree, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+
+    page = client.get(f"/tasks/{task_id}")
+    image = client.get(f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932")
+
+    assert page.status_code == 200
+    assert f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932" not in page.text
+    assert image.status_code == 404
+
+
+def test_source_state_failure_keeps_visual_panel_invalid_without_preview_link(client, git_repo, monkeypatch):
+    _root, repo = git_repo
+    task_id, workspace_id, _worktree, head = _task_workspace(client, repo, opted_in=True)
+
+    def unavailable(_repo):
+        raise RuntimeError("test source state unavailable")
+
+    monkeypatch.setattr(client.app.state.git, "source_state", unavailable)
+    page = client.get(f"/tasks/{task_id}")
+
+    assert page.status_code == 200
+    assert f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932" not in page.text
+
+
+def test_skip_worktree_reference_bytes_cannot_be_previewed(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    original = (worktree / "docs/order.png").read_bytes()
+    _git(worktree, "update-index", "--skip-worktree", "docs/order.png")
+    (worktree / "docs/order.png").write_bytes(png(430, 932, color=(0, 0, 0)))
+    assert client.app.state.git.source_state(worktree)["clean"] is True, _git(worktree, "status", "--porcelain=v1", "--ignored")
+    assert (worktree / "docs/order.png").read_bytes() != original
+
+    page = client.get(f"/tasks/{task_id}")
+    image = client.get(f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932")
+
+    assert page.status_code == 200
+    assert f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932" not in page.text
+    assert image.status_code == 404
+
+
+def test_ignored_project_yaml_cannot_define_visual_reference(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(
+        client, repo, opted_in=True, ignore_contract=True,
+    )
+    assert client.app.state.git.source_state(worktree)["clean"] is True, _git(worktree, "status", "--porcelain=v1", "--ignored")
+    assert "PROJECT.yaml" not in _git(worktree, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+
+    page = client.get(f"/tasks/{task_id}")
+    image = client.get(f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932")
+
+    assert page.status_code == 200
+    assert f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932" not in page.text
+    assert image.status_code == 404
+
+
+@pytest.mark.parametrize("flag", ["--skip-worktree", "--assume-unchanged"])
+def test_index_hidden_reference_change_is_rejected(client, git_repo, flag):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    _git(worktree, "update-index", flag, "docs/order.png")
+    (worktree / "docs/order.png").write_bytes(png(430, 932, color=(0, 0, 0)))
+    assert client.app.state.git.source_state(worktree)["clean"] is True
+
+    page = client.get(f"/tasks/{task_id}")
+    image = client.get(f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932")
+
+    assert page.status_code == 200
+    assert f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932" not in page.text
+    assert image.status_code == 404
 
 
 def test_reference_preview_rejects_stale_sha_dirty_worktree_and_unconfigured_viewport(client, git_repo):
@@ -398,6 +508,8 @@ def test_stale_run_and_invalid_contract_are_spelled_out(client, git_repo):
     assert "STALE" in stale.text
 
     (worktree / "PROJECT.yaml").write_text("visual_qa: []\n", encoding="utf-8")
+    _git(worktree, "add", "PROJECT.yaml")
+    _git(worktree, "commit", "-m", "commit invalid visual contract fixture")
     invalid = client.get(f"/tasks/{task_id}")
     assert "Contract Visual QA không hợp lệ" in invalid.text
     assert "Evidence đã xác minh" not in invalid.text
@@ -406,7 +518,8 @@ def test_stale_run_and_invalid_contract_are_spelled_out(client, git_repo):
 def test_opted_in_task_without_repo_contract_is_blocked_visibly(client, git_repo):
     _root, repo = git_repo
     task_id, _workspace_id, worktree, _head = _task_workspace(client, repo, opted_in=True)
-    (worktree / "PROJECT.yaml").write_text("commands: {test: {command: 'true'}}\n", encoding="utf-8")
+    _git(worktree, "rm", "PROJECT.yaml")
+    _git(worktree, "commit", "-m", "commit missing visual contract fixture")
 
     response = client.get(f"/tasks/{task_id}")
 

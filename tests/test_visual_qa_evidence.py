@@ -112,6 +112,41 @@ def test_valid_fixture_artifact_set_is_accepted_and_digest_is_returned(tmp_path)
     }]
 
 
+def test_evidence_rejects_reference_bytes_changed_after_committed_contract_load(tmp_path):
+    import subprocess
+    from app.services.git_workspace import GitWorkspaceService
+    from app.services.visual_qa_contract import load_committed_visual_qa_contract
+
+    repo = tmp_path / "committed-project"
+    (repo / "docs").mkdir(parents=True)
+    (repo / "docs/reference-320x240.png").write_bytes(png(320, 240))
+    (repo / "PROJECT.yaml").write_text(
+        "commands: {test: {command: true}, visual_qa: {command: true}}\n"
+        "visual_qa:\n  enabled: true\n  reference: docs/reference-320x240.png\n"
+        "  route: http://127.0.0.1:4173/orders\n  viewports: [{width: 320, height: 240}]\n  threshold: 0.08\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Visual QA Test"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "visual-qa-test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "PROJECT.yaml", "docs/reference-320x240.png"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "commit visual reference"], cwd=repo, check=True, capture_output=True)
+    git = GitWorkspaceService(tmp_path)
+    head = git.head(repo)
+    contract = load_committed_visual_qa_contract(repo, git, head)
+    assert contract is not None
+
+    (repo / "docs/reference-320x240.png").write_bytes(png(320, 240, color=(200, 12, 41)))
+    exp = {
+        "run_id": 42, "tested_commit": head, "repo_root": repo,
+        "contract": contract,
+    }
+    run = create_run(tmp_path / "run", exp)
+
+    with pytest.raises(VisualEvidenceError, match="differ from tested commit"):
+        validate_visual_qa_run(run.parent, **exp)
+
+
 def test_threshold_only_failure_is_accepted_only_as_nonpassing_diagnostic(tmp_path):
     exp = expected(tmp_path)
     run = create_run(

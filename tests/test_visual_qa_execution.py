@@ -11,12 +11,14 @@ import threading
 from pathlib import Path
 
 from app.services.task_decision_service import TaskDecisionService
+from app.services.git_workspace import GitWorkspaceService
 from app.services.test_runner import TestRunner as _ProjectFlowTestRunner
+from tests.test_visual_qa_evidence import png
 
 
 def _project(root: Path) -> None:
     (root / "docs").mkdir()
-    (root / "docs/reference.png").write_bytes(b"fixture reference")
+    (root / "docs/reference.png").write_bytes(png(430, 932))
     (root / "PROJECT.yaml").write_text(
         "commands:\n"
         "  test: {command: 'fixture-test'}\n"
@@ -29,6 +31,11 @@ def _project(root: Path) -> None:
         "  threshold: 0.08\n",
         encoding="utf-8",
     )
+    subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Visual QA Test"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "visual-qa-test@example.invalid"], cwd=root, check=True)
+    subprocess.run(["git", "add", "PROJECT.yaml", "docs/reference.png"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-m", "commit visual QA fixture"], cwd=root, check=True, capture_output=True)
 
 
 class _DB:
@@ -73,12 +80,9 @@ class _DB:
         self.events.append((kind, entity_id, name, detail))
 
 
-class _Git:
-    def head(self, _path):
-        return "fixture-head-123"
-
-    def source_state(self, _path):
-        return {"head": "fixture-head-123", "tracked_diff_sha256": "", "untracked_paths": (), "clean": True}
+class _Git(GitWorkspaceService):
+    def __init__(self, root: Path):
+        super().__init__(root)
 
 
 class _Runner:
@@ -93,18 +97,19 @@ class _Runner:
 
 
 def _run_and_wait(db, runner, root: Path):
-    test_runner = _ProjectFlowTestRunner(db, _Git(), runner=runner)
+    test_runner = _ProjectFlowTestRunner(db, _Git(root), runner=runner)
     run_ids = test_runner.start("agent", 11, root)
     assert db.finished.wait(3), "TestRunner background stage dispatch did not finish"
     return run_ids
 
 
 def _decision(db, root: Path):
-    service = TaskDecisionService(db, _Git())
+    git = _Git(root)
+    service = TaskDecisionService(db, git)
     return service.builder_tests_status({
         "id": 11,
         "task_id": 7,
-        "head": "fixture-head-123",
+        "head": git.head(root),
         "worktree_path": str(root),
     })
 
