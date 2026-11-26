@@ -1,0 +1,67 @@
+{
+  "milestone": "VQ-03b2 authenticated image evidence viewer",
+  "source_commit": "16842dd89aad669d26df088a93680d66acb7b8f3",
+  "source_tree": "b15c52ebb0f33713b15a923ba31f6940e0460c10",
+  "source_parent": "547d7814998149ef91afedef2027c79097ab416f",
+  "source_clean_after_test": true,
+  "test_command": [
+    "DOCKER_HOST=unix:///tmp/projectflow-vq-panel-no-daemon.sock",
+    "/tmp/pf-vq-panel-venv-20261126/bin/python -m pytest -p no:cacheprovider -q -ra",
+    "--junitxml=<EVIDENCE_DIR>/focused-regressions.xml",
+    "tests/test_visual_qa_task_panel.py",
+    "tests/test_visual_qa_evidence.py",
+    "tests/test_visual_qa_contract.py",
+    "tests/test_visual_qa_execution.py",
+    "tests/test_task_decision_required_stages.py",
+    "tests/test_test_runner_source_identity.py",
+    "tests/test_b1_read_isolation.py",
+    "tests/test_b03_authz.py",
+    "tests/test_engineering_lifecycle_ui.py::test_existing_task_detail_page_still_works"
+  ],
+  "exit_code": 0,
+  "junit": {
+    "tests": "109",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "101.935",
+    "timestamp": "2026-11-26T15:32:16.569747+07:00"
+  },
+  "started_ict": "2026-11-26T15:32:16.569747+07:00",
+  "started_utc": "2026-11-26T08:32:16.569572+00:00",
+  "duration_seconds": 101.935,
+  "ended_utc": "2026-11-26T08:33:58.504572+00:00",
+  "ended_ict": "2026-11-26T15:33:58.504572+07:00",
+  "red_before": {
+    "exit_code": 1,
+    "junit": {
+      "tests": "11",
+      "failures": "6",
+      "errors": "0",
+      "skipped": "0",
+      "time": "17.036",
+      "timestamp": "2026-11-26T15:22:34.167544+07:00"
+    },
+    "failed_nodes": [
+      "test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers[reference.png]",
+      "test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers[actual.png]",
+      "test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers[diff.png]",
+      "test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers[overlay.png]",
+      "test_task_page_embeds_only_authenticated_urls_for_current_verified_visual_images",
+      "test_image_route_uses_the_exact_run_workspace_within_a_task"
+    ],
+    "invocation_exact": "DOCKER_HOST=unix:///tmp/projectflow-vq-panel-no-daemon.sock /tmp/pf-vq-panel-venv-20261126/bin/python -m pytest -p no:cacheprovider -q -ra tests/test_visual_qa_task_panel.py -k \"artifact_route or image_route or embeds_only\" --junitxml=/tmp/vq03b2-red.xml"
+  },
+  "environment": {
+    "python": "3.14.4 task-local venv",
+    "docker_host": "task-local nonexistent unix socket; shared daemon not contacted",
+    "node": "v26.7.0",
+    "node_playwright": "MODULE_NOT_FOUND from require.resolve(\"playwright\")",
+    "python_playwright": "ModuleNotFoundError: No module named playwright",
+    "browser_smoke": "NOT_RUN; no compatible task-owned Playwright package/runtime available; no global install or sandbox change"
+  },
+  "focused_log_sha256": "b3c7b25269bc3ebcd2a9fe4489aa0f5bb03b9f849f0b42b272db6fae47fee7fd",
+  "focused_junit_sha256": "a300a47b28f4515dfdcd72a2573bf8aeeccef9a2abc35e7ccd962781734b6383",
+  "red_junit_sha256": "843dc45d33178491669d245297b84cc5d8d9a9fb7a65b4d14c6ce15f98326c84",
+  "invocation_exact": "set -o pipefail; DOCKER_HOST=unix:///tmp/projectflow-vq-panel-no-daemon.sock /tmp/pf-vq-panel-venv-20261126/bin/python -m pytest -p no:cacheprovider -q -ra --junitxml=/tmp/vq03b2-exact-16842dd.xml tests/test_visual_qa_task_panel.py tests/test_visual_qa_evidence.py tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py tests/test_task_decision_required_stages.py tests/test_test_runner_source_identity.py tests/test_b1_read_isolation.py tests/test_b03_authz.py tests/test_engineering_lifecycle_ui.py::test_existing_task_detail_page_still_works 2>&1 | tee /tmp/vq03b2-exact-16842dd.log"
+}
