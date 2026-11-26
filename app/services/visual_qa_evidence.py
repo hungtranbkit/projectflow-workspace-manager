@@ -188,6 +188,34 @@ def validate_visual_qa_run(
     evidence_root: Path, *, run_id: int, tested_commit: str, repo_root: Path,
     contract: dict, expected_manifest_sha256: str | None = None,
 ) -> dict:
+    """Validate evidence that qualifies as a passing visual stage."""
+    return _validate_visual_qa_run(
+        evidence_root, run_id=run_id, tested_commit=tested_commit,
+        repo_root=repo_root, contract=contract,
+        expected_manifest_sha256=expected_manifest_sha256, diagnostic=False,
+    )
+
+
+def validate_visual_qa_diagnostic_run(
+    evidence_root: Path, *, run_id: int, tested_commit: str, repo_root: Path,
+    contract: dict, expected_manifest_sha256: str | None = None,
+) -> dict:
+    """Validate complete, safe artifacts from a threshold-only FAIL.
+
+    This is presentation evidence only. The caller must keep the TestRunner
+    stage status FAIL; this validator never makes a failed stage gate-ready.
+    """
+    return _validate_visual_qa_run(
+        evidence_root, run_id=run_id, tested_commit=tested_commit,
+        repo_root=repo_root, contract=contract,
+        expected_manifest_sha256=expected_manifest_sha256, diagnostic=True,
+    )
+
+
+def _validate_visual_qa_run(
+    evidence_root: Path, *, run_id: int, tested_commit: str, repo_root: Path,
+    contract: dict, expected_manifest_sha256: str | None, diagnostic: bool,
+) -> dict:
     """Validate one output tree against the current project contract.
 
     The caller chooses the coordinator-owned run path; no path from the
@@ -230,6 +258,7 @@ def validate_visual_qa_run(
     manifest_hashes = []
     metrics_by_viewport = []
     artifact_hashes_by_viewport = {}
+    threshold_failures = 0
     for key, spec in expected_by_key.items():
         directory = evidence_root / key
         _safe_directory(directory)
@@ -258,8 +287,6 @@ def validate_visual_qa_run(
             raise VisualEvidenceError("manifest threshold mismatch")
         if manifest.get("referenceSha256") != spec["reference_sha256"]:
             raise VisualEvidenceError("manifest reference hash mismatch")
-        if manifest.get("passed") is not True:
-            raise VisualEvidenceError("manifest does not report PASS")
         if not isinstance(manifest.get("artifacts"), dict) or set(manifest["artifacts"]) != ARTIFACT_NAMES:
             raise VisualEvidenceError("manifest artifact inventory is incomplete or unexpected")
         file_bytes = {}
@@ -297,12 +324,19 @@ def validate_visual_qa_run(
                 or not 0 <= mismatched <= total or abs(percent - mismatched / total) > max(1 / total, 1e-9)
                 or type(ssim) not in (int, float) or not math.isfinite(ssim) or not 0 <= ssim <= 1):
             raise VisualEvidenceError("metrics values are malformed or non-finite")
-        if percent > threshold:
-            raise VisualEvidenceError("metrics exceed configured threshold")
-        if metrics.get("passed") is not True or metrics.get("horizontalOverflow") is not False:
-            raise VisualEvidenceError("metrics pass/overflow verdict is invalid")
+        pixel_passed = percent <= threshold
+        if bool(manifest.get("passed")) is not pixel_passed or type(manifest.get("passed")) is not bool:
+            raise VisualEvidenceError("manifest verdict disagrees with threshold metrics")
+        if type(metrics.get("passed")) is not bool or metrics["passed"] is not pixel_passed:
+            raise VisualEvidenceError("metrics verdict disagrees with threshold")
+        if metrics.get("horizontalOverflow") is not False:
+            raise VisualEvidenceError("metrics report horizontal overflow")
         if metrics.get("pageErrors") != [] or metrics.get("blockedRequests") != []:
-            raise VisualEvidenceError("metrics contain page errors or blocked external requests")
+            raise VisualEvidenceError("metrics contain page errors or blocked requests")
+        if not pixel_passed:
+            threshold_failures += 1
+        if not diagnostic and not pixel_passed:
+            raise VisualEvidenceError("metrics exceed configured threshold")
         if manifest.get("metrics") != {k: metrics[k] for k in ("percentDiff", "mismatchedPixels", "totalPixels", "ssim", "horizontalOverflow", "pageErrors", "blockedRequests")}:
             raise VisualEvidenceError("manifest and metrics values disagree")
         for name, image in (("reference.png", file_bytes["reference.png"]), ("actual.png", file_bytes["actual.png"]),
@@ -316,19 +350,25 @@ def validate_visual_qa_run(
             "percent_diff": percent,
             "mismatched_pixels": mismatched,
             "total_pixels": total,
-            "passed": True,
+            "passed": pixel_passed,
         })
         artifact_hashes_by_viewport[key] = {
             name: manifest["artifacts"][name]["sha256"]
             for name in VISUAL_IMAGE_ARTIFACTS
         }
         manifest_hashes.append(f"{key}:{manifest_hash}")
+    if diagnostic and not threshold_failures:
+        raise VisualEvidenceError("diagnostic evidence has no threshold mismatch")
+    if not diagnostic and threshold_failures:
+        raise VisualEvidenceError("passing evidence contains a threshold mismatch")
     digest = _sha("\n".join(manifest_hashes).encode())
     if expected_manifest_sha256 is not None and digest != expected_manifest_sha256:
         raise VisualEvidenceError("stored visual evidence manifest digest no longer matches")
     return {
         "run_id": run_id,
         "tested_commit": tested_commit,
+        "passed": not bool(threshold_failures),
+        "diagnostic": "THRESHOLD_MISMATCH" if threshold_failures else None,
         "viewports": sorted(expected_by_key),
         "manifest_sha256": digest,
         "metrics": metrics_by_viewport,
@@ -339,6 +379,32 @@ def validate_visual_qa_run(
 def read_verified_visual_png(
     evidence_root: Path, *, run_id: int, tested_commit: str, repo_root: Path,
     contract: dict, expected_manifest_sha256: str, viewport: str, artifact: str,
+) -> bytes:
+    return _read_verified_visual_png(
+        validate_visual_qa_run, evidence_root, run_id=run_id,
+        tested_commit=tested_commit, repo_root=repo_root, contract=contract,
+        expected_manifest_sha256=expected_manifest_sha256,
+        viewport=viewport, artifact=artifact,
+    )
+
+
+def read_verified_visual_diagnostic_png(
+    evidence_root: Path, *, run_id: int, tested_commit: str, repo_root: Path,
+    contract: dict, expected_manifest_sha256: str, viewport: str, artifact: str,
+) -> bytes:
+    """Read one image from a validated failed threshold comparison."""
+    return _read_verified_visual_png(
+        validate_visual_qa_diagnostic_run, evidence_root, run_id=run_id,
+        tested_commit=tested_commit, repo_root=repo_root, contract=contract,
+        expected_manifest_sha256=expected_manifest_sha256,
+        viewport=viewport, artifact=artifact,
+    )
+
+
+def _read_verified_visual_png(
+    validator, evidence_root: Path, *, run_id: int, tested_commit: str,
+    repo_root: Path, contract: dict, expected_manifest_sha256: str,
+    viewport: str, artifact: str,
 ) -> bytes:
     """Return one bounded PNG only if its exact bytes remain manifest-valid.
 
@@ -354,7 +420,7 @@ def read_verified_visual_png(
     if viewport not in expected_viewports:
         raise VisualEvidenceError("visual viewport is not in the configured contract")
 
-    before = validate_visual_qa_run(
+    before = validator(
         evidence_root, run_id=run_id, tested_commit=tested_commit,
         repo_root=repo_root, contract=contract,
         expected_manifest_sha256=expected_manifest_sha256,
@@ -379,7 +445,7 @@ def read_verified_visual_png(
     if len(data) > MAX_ARTIFACT_BYTES or digest != expected_hash:
         raise VisualEvidenceError("visual image bytes changed after validation")
 
-    after = validate_visual_qa_run(
+    after = validator(
         evidence_root, run_id=run_id, tested_commit=tested_commit,
         repo_root=repo_root, contract=contract,
         expected_manifest_sha256=expected_manifest_sha256,

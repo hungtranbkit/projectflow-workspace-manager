@@ -3031,12 +3031,14 @@ def create_app(settings=None):
                          _authz: None = Depends(require_read_role("test_run", "rid"))):
         """Serve one validated PNG from an opted-in Task's current visual run."""
         from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
-        from app.services.visual_qa_evidence import read_verified_visual_png
+        from app.services.visual_qa_evidence import (
+            read_verified_visual_diagnostic_png, read_verified_visual_png,
+        )
 
         denied = HTTPException(404, "Visual evidence unavailable")
         row = db.one(
             "SELECT * FROM test_runs WHERE id=? AND workspace_type='agent' "
-            "AND stage='visual_qa' AND status='PASS'", (rid,)
+            "AND stage='visual_qa' AND status IN ('PASS','FAIL')", (rid,)
         )
         if not row:
             raise denied
@@ -3081,14 +3083,21 @@ def create_app(settings=None):
                 "id": workspace["id"], "head": source["head"],
                 "worktree_path": str(worktree_path), "task_id": task["id"],
             }
-            if decision.builder_tests_status(builder) != "PASS":
-                raise denied
-            verified = decision._visual_evidence_result(
-                row, "agent", workspace["id"], source["head"], worktree_path, task
-            )
+            diagnostic = row["status"] == "FAIL"
+            if diagnostic:
+                verified = decision._visual_diagnostic_result(
+                    row, "agent", workspace["id"], source["head"], worktree_path, task
+                )
+            else:
+                if decision.builder_tests_status(builder) != "PASS":
+                    raise denied
+                verified = decision._visual_evidence_result(
+                    row, "agent", workspace["id"], source["head"], worktree_path, task
+                )
             if verified is None:
                 raise denied
-            image = read_verified_visual_png(
+            image_reader = read_verified_visual_diagnostic_png if diagnostic else read_verified_visual_png
+            image = image_reader(
                 visual_evidence_root / "agent" / str(workspace["id"]) / str(row["id"]),
                 run_id=row["id"], tested_commit=source["head"], repo_root=worktree_path,
                 contract=contract, expected_manifest_sha256=verified["manifest_sha256"],
@@ -3097,14 +3106,20 @@ def create_app(settings=None):
             after = git.source_state(worktree_path)
             if not after["clean"] or after["head"] != source["head"]:
                 raise denied
-            if decision.builder_tests_status(builder) != "PASS":
+            if diagnostic:
+                if decision._visual_diagnostic_result(
+                    row, "agent", workspace["id"], source["head"], worktree_path, task
+                ) is None:
+                    raise denied
+            elif decision.builder_tests_status(builder) != "PASS":
                 raise denied
             still_latest = db.one(
                 "SELECT id,status,tested_commit FROM test_runs WHERE workspace_type='agent' "
                 "AND workspace_id=? AND stage='visual_qa' AND tested_commit=? ORDER BY id DESC LIMIT 1",
                 (workspace["id"], source["head"]),
             )
-            if (not still_latest or still_latest["id"] != rid or still_latest["status"] != "PASS"
+            expected_status = "FAIL" if diagnostic else "PASS"
+            if (not still_latest or still_latest["id"] != rid or still_latest["status"] != expected_status
                     or still_latest["tested_commit"] != row["tested_commit"]):
                 raise denied
         except HTTPException:

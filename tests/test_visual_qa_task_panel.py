@@ -87,6 +87,42 @@ def _add_visual_run(client, workspace_id: int, worktree: Path, head: str, *, tam
     return run_id
 
 
+def _add_visual_diagnostic_run(client, workspace_id: int, worktree: Path, head: str, *, tamper=False):
+    db = client.app.state.db
+    for stage in ("preflight", "test"):
+        db.execute(
+            "INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit,exit_code) VALUES(?,?,?,?,?,?,?)",
+            ("agent", workspace_id, "true", stage, "PASS", head, 0),
+        )
+    run_id = db.execute(
+        "INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit,exit_code,stdout_tail,stderr_tail) VALUES(?,?,?,?,?,?,?,?,?)",
+        ("agent", workspace_id, "visual-qa", "visual_qa", "FAIL", head, 1, "", "threshold mismatch"),
+    )
+    exp = {
+        "run_id": run_id, "tested_commit": head, "repo_root": worktree,
+        "contract": {
+            "reference": {"430x932": "docs/order.png"},
+            "route": "http://127.0.0.1:4173/orders",
+            "viewports": [{"width": 430, "height": 932}], "threshold": 0.08,
+        },
+    }
+    evidence_root = client.app.state.settings.state_dir / "visual-qa-evidence" / "agent" / str(workspace_id) / str(run_id)
+    artifact_dir = create_run(
+        evidence_root, exp, manifest_overrides={"runId": str(run_id), "passed": False},
+        metrics_overrides={
+            "percentDiff": 0.2, "mismatchedPixels": int(0.2 * 430 * 932), "passed": False,
+        },
+    )
+    from app.services.visual_qa_evidence import validate_visual_qa_diagnostic_run
+    checked = validate_visual_qa_diagnostic_run(evidence_root, **exp)
+    db.execute("UPDATE test_runs SET stderr_tail=? WHERE id=?", (
+        f"PROJECTFLOW_VISUAL_DIAGNOSTIC_SHA256={checked['manifest_sha256']}\n", run_id,
+    ))
+    if tamper:
+        (artifact_dir / "actual.png").write_bytes(b"tampered")
+    return run_id
+
+
 def test_opted_in_task_detail_shows_validated_contract_and_existing_test_action(client, git_repo):
     _root, repo = git_repo
     task_id, workspace_id, worktree, _head = _task_workspace(client, repo, opted_in=True)
@@ -134,6 +170,86 @@ def test_current_valid_run_displays_real_verified_metrics_and_log_link(client, g
     assert "0.000%" in response.text
     assert head in response.text
     assert f"/test-runs/{run_id}/log" in response.text
+
+
+def test_current_threshold_failure_shows_diagnostic_images_without_gate_promotion(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_diagnostic_run(client, workspace_id, worktree, head)
+
+    response = client.get(f"/tasks/{task_id}")
+
+    assert response.status_code == 200
+    assert "Không đạt — dùng để sửa" in response.text
+    assert "20.000%" in response.text
+    assert f"/test-runs/{run_id}/visual/430x932/actual.png" in response.text
+    assert "Evidence đã xác minh lại" not in response.text
+    assert client.app.state.decision.evaluate(task_id)["builders"][0]["tests_status"] == "FAIL"
+
+
+def test_diagnostic_evidence_tamper_is_not_rendered_or_served(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_diagnostic_run(client, workspace_id, worktree, head, tamper=True)
+
+    detail = client.get(f"/tasks/{task_id}")
+    image = client.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
+
+    assert detail.status_code == 200
+    assert "Bằng chứng thiếu hoặc không hợp lệ" in detail.text
+    assert f"/test-runs/{run_id}/visual/430x932/actual.png" not in detail.text
+    assert image.status_code == 404
+    assert client.app.state.decision.evaluate(task_id)["builders"][0]["tests_status"] == "FAIL"
+
+
+def test_diagnostic_evidence_symlink_is_not_rendered_or_served(client, git_repo, tmp_path):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_diagnostic_run(client, workspace_id, worktree, head)
+    artifact = (client.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                / str(workspace_id) / str(run_id) / "430x932" / "actual.png")
+    outside = tmp_path / "unrelated.png"
+    outside.write_bytes(artifact.read_bytes())
+    artifact.unlink()
+    artifact.symlink_to(outside)
+
+    detail = client.get(f"/tasks/{task_id}")
+    image = client.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
+
+    assert detail.status_code == 200
+    assert "Bằng chứng thiếu hoặc không hợp lệ" in detail.text
+    assert "/visual/430x932/actual.png" not in detail.text
+    assert image.status_code == 404
+    assert client.app.state.decision.evaluate(task_id)["builders"][0]["tests_status"] == "FAIL"
+
+
+def test_opt_out_task_cannot_view_diagnostic_images(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=False)
+    run_id = _add_visual_diagnostic_run(client, workspace_id, worktree, head)
+
+    detail = client.get(f"/tasks/{task_id}")
+    image = client.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
+
+    assert detail.status_code == 200
+    assert "không tự bật gate" in detail.text
+    assert f"/test-runs/{run_id}/visual/430x932/actual.png" not in detail.text
+    assert image.status_code == 404
+
+
+def test_dirty_source_cannot_view_current_head_diagnostic_images(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_diagnostic_run(client, workspace_id, worktree, head)
+    (worktree / "README.md").write_text("uncommitted source change\n", encoding="utf-8")
+
+    detail = client.get(f"/tasks/{task_id}")
+    image = client.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
+
+    assert detail.status_code == 200
+    assert "Bằng chứng thiếu hoặc không hợp lệ" in detail.text
+    assert f"/test-runs/{run_id}/visual/430x932/actual.png" not in detail.text
+    assert image.status_code == 404
 
 
 def test_stale_or_tampered_visual_evidence_is_not_presented_as_valid(client, git_repo):
@@ -221,6 +337,24 @@ def test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_he
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["cache-control"] == "private, no-store"
     assert "attachment" not in response.headers.get("content-disposition", "")
+
+
+def test_diagnostic_route_returns_exact_verified_bytes_but_keeps_fail_status(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+    run_id = _add_visual_diagnostic_run(client, workspace_id, worktree, head)
+    expected = (client.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                / str(workspace_id) / str(run_id) / "430x932" / "actual.png").read_bytes()
+
+    response = client.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
+
+    assert response.status_code == 200
+    assert response.content == expected
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert client.app.state.db.one("SELECT status FROM test_runs WHERE id=?", (run_id,))["status"] == "FAIL"
+    assert client.app.state.decision.evaluate(task_id)["builders"][0]["tests_status"] == "FAIL"
 
 
 @pytest.mark.parametrize("viewport,artifact", [
@@ -350,7 +484,8 @@ def test_image_route_uses_the_exact_run_workspace_within_a_task(client, git_repo
     assert second.content == other_actual
 
 
-def test_visual_image_route_reuses_required_authz_and_denies_other_tenant(git_repo, tmp_path):
+@pytest.mark.parametrize("diagnostic", [False, True], ids=["pass", "failed-diagnostic"])
+def test_visual_image_route_reuses_required_authz_and_denies_other_tenant(git_repo, tmp_path, diagnostic):
     import logging
     from fastapi.testclient import TestClient
     from tests.test_b03_authz import (
@@ -376,7 +511,8 @@ def test_visual_image_route_reuses_required_authz_and_denies_other_tenant(git_re
         task_id, workspace_id, worktree, head = _task_workspace(
             owner, repo, opted_in=True, repository_id=repository_id
         )
-        run_id = _add_visual_run(owner, workspace_id, worktree, head)
+        run_id = (_add_visual_diagnostic_run(owner, workspace_id, worktree, head)
+                  if diagnostic else _add_visual_run(owner, workspace_id, worktree, head))
         outsider_org = _create_org(owner, "Visual B")
         repo_b = _second_repo(_root, "visual-b-repo")
         _link_repo(owner, outsider_org, repo_b, "visual-b")

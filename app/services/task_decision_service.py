@@ -397,6 +397,32 @@ class TaskDecisionService:
             return panel
         if row["status"] != "PASS":
             panel["evidence_state"] = row["status"]
+            if row["status"] == "FAIL":
+                diagnostic = self._visual_diagnostic_result(
+                    row, "agent", workspace["id"], head, repo_path, task
+                )
+                if diagnostic is not None:
+                    panel["evidence_state"] = "DIAGNOSTIC"
+                    panel["metrics"] = diagnostic["metrics"]
+                    labels = {
+                        "reference.png": "Reference",
+                        "actual.png": "Actual",
+                        "diff.png": "Diff",
+                        "overlay.png": "Overlay",
+                    }
+                    panel["previews"] = [
+                        {
+                            "viewport": viewport,
+                            "artifact": artifact,
+                            "label": labels[artifact],
+                            "url": f"/test-runs/{row['id']}/visual/{viewport}/{artifact}",
+                            "alt": f"{labels[artifact]} {viewport} — kết quả FAIL dùng để sửa",
+                        }
+                        for viewport in diagnostic["viewports"]
+                        for artifact in labels
+                    ]
+                elif "PROJECTFLOW_VISUAL_DIAGNOSTIC_SHA256=" in (row["stderr_tail"] or ""):
+                    panel["evidence_state"] = "INVALID"
             return panel
 
         verified = self._visual_evidence_result(
@@ -1194,6 +1220,38 @@ class TaskDecisionService:
             return validate_visual_qa_run(
                 run_path, run_id=row["id"], tested_commit=head, repo_root=repo_path,
                 contract=contract, expected_manifest_sha256=matches[-1],
+            )
+        except Exception:
+            return None
+
+    def _visual_diagnostic_result(self, row, workspace_type, workspace_id, head, repo_path, task):
+        """Validate repair-only images without changing any gate result."""
+        if (row is None or row["status"] != "FAIL" or row["exit_code"] != 1 or not head
+                or self.visual_evidence_root is None):
+            return None
+        import re
+        matches = re.findall(
+            r"(?:^|\n)PROJECTFLOW_VISUAL_DIAGNOSTIC_SHA256=([0-9a-f]{64})(?:\n|$)",
+            row["stderr_tail"] or "",
+        )
+        if not matches:
+            return None
+        try:
+            from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
+            from app.services.visual_qa_evidence import validate_visual_qa_diagnostic_run
+            source = self.git.source_state(repo_path)
+            if not source.get("clean") or source.get("head") != head:
+                return None
+            if not task_requires_visual_qa(task):
+                return None
+            contract = load_visual_qa_contract(repo_path)
+            if contract is None:
+                return None
+            run_path = self.visual_evidence_root / workspace_type / str(workspace_id) / str(row["id"])
+            return validate_visual_qa_diagnostic_run(
+                run_path, run_id=row["id"], tested_commit=head,
+                repo_root=repo_path, contract=contract,
+                expected_manifest_sha256=matches[-1],
             )
         except Exception:
             return None

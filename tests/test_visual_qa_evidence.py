@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import app.services.visual_qa_evidence as visual_evidence
 from app.services.visual_qa_evidence import VisualEvidenceError, validate_visual_qa_run
 
 
@@ -111,6 +112,44 @@ def test_valid_fixture_artifact_set_is_accepted_and_digest_is_returned(tmp_path)
     }]
 
 
+def test_threshold_only_failure_is_accepted_only_as_nonpassing_diagnostic(tmp_path):
+    exp = expected(tmp_path)
+    run = create_run(
+        tmp_path / "run", exp,
+        manifest_overrides={"passed": False},
+        metrics_overrides={
+            "percentDiff": 0.2, "mismatchedPixels": 15360, "passed": False,
+        },
+    )
+
+    result = visual_evidence.validate_visual_qa_diagnostic_run(run.parent, **exp)
+
+    assert result["passed"] is False
+    assert result["diagnostic"] == "THRESHOLD_MISMATCH"
+    assert result["metrics"][0]["percent_diff"] == 0.2
+    assert result["metrics"][0]["passed"] is False
+    assert set(result["artifact_sha256"]["320x240"]) == {
+        "reference.png", "actual.png", "diff.png", "overlay.png",
+    }
+
+
+@pytest.mark.parametrize("manifest_overrides,metrics_overrides", [
+    ({"passed": True}, {"percentDiff": 0.2, "mismatchedPixels": 15360, "passed": False}),
+    ({"passed": False}, {"percentDiff": 0.0, "mismatchedPixels": 0, "passed": False}),
+    ({"passed": False}, {"percentDiff": 0.2, "mismatchedPixels": 15360, "passed": False, "pageErrors": ["uncaught"]}),
+])
+def test_diagnostic_verifier_rejects_pass_forgery_or_non_threshold_failures(tmp_path, manifest_overrides, metrics_overrides):
+    exp = expected(tmp_path)
+    run = create_run(
+        tmp_path / "run", exp,
+        manifest_overrides=manifest_overrides,
+        metrics_overrides=metrics_overrides,
+    )
+
+    with pytest.raises(VisualEvidenceError):
+        visual_evidence.validate_visual_qa_diagnostic_run(run.parent, **exp)
+
+
 @pytest.mark.parametrize(
     "manifest_overrides,metrics_overrides,reason",
     [
@@ -122,7 +161,7 @@ def test_valid_fixture_artifact_set_is_accepted_and_digest_is_returned(tmp_path)
         ({}, {"percentDiff": float("nan")}, "finite"),
         ({}, {"threshold": 0.01}, "threshold"),
         ({}, {"percentDiff": 0.2, "mismatchedPixels": 15360}, "threshold"),
-        ({}, {"passed": False}, "pass"),
+        ({}, {"passed": False}, "verdict"),
         ({}, {"pageErrors": ["uncaught"]}, "page"),
         ({}, {"blockedRequests": ["https://outside.invalid"]}, "request"),
     ],

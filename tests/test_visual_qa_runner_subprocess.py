@@ -308,6 +308,11 @@ def test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_h
         assert decisions["negativeColor"] == "FAIL"
         negative_visual_row = next(row for row in negative_rows if row["stage"] == "visual_qa")
         captures["negative-color"] = observing_runner.captured[int(negative_visual_row["id"])] / "320x240"
+        diagnostic_root = evidence_root / "agent" / str(workspace_id) / str(negative_visual_row["id"])
+        assert (diagnostic_root / "320x240" / "actual.png").is_file()
+        assert "PROJECTFLOW_VISUAL_DIAGNOSTIC_SHA256=" in (negative_visual_row["stderr_tail"] or "")
+        assert "PROJECTFLOW_VISUAL_EVIDENCE_SHA256=" not in (negative_visual_row["stdout_tail"] or "")
+        assert _decision(db, git, workspace_id, task_id, root, negative_head) == "FAIL"
 
         # The runner preserves the CLI's dimensions failure exit (2) as a gate FAIL.
         _write_project(root, url=f"{fixture.base_url}/same", command=_command(root, url=f"{fixture.base_url}/same", viewport="321x240"))
@@ -455,3 +460,67 @@ def test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_h
             })
     finally:
         fixture.close()
+
+
+def test_test_runner_retains_synthetic_threshold_diagnostic_without_passing_gate(tmp_path):
+    """Synthetic manifest exercises persistence; no browser/CLI is claimed here."""
+    from types import SimpleNamespace
+    from tests.test_visual_qa_evidence import create_run, png
+
+    root = tmp_path / "diagnostic-fixture"
+    root.mkdir()
+    subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "qa@example.invalid"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Visual QA Test"], cwd=root, check=True, capture_output=True)
+    (root / ".gitignore").write_text(".runtime/\n")
+    (root / "docs").mkdir()
+    (root / "docs/reference.png").write_bytes(png(320, 240, color=(24, 57, 90)))
+    (root / "README.md").write_text("synthetic diagnostic fixture\n")
+    _write_project(root, url="http://127.0.0.1:4173/orders", command="synthetic-visual")
+    (root / "PROJECT.yaml").write_text(
+        (root / "PROJECT.yaml").read_text().replace("threshold: 0\n", "threshold: 0.08\n")
+    )
+    git = GitWorkspaceService(tmp_path)
+    head = _commit(root, git, ".gitignore", "docs/reference.png", "README.md", "PROJECT.yaml", message="synthetic diagnostic fixture")
+    db = Database(tmp_path / "diagnostic.sqlite")
+    db.init()
+    repo_id = db.execute("INSERT INTO repositories(repo_name,repo_path) VALUES(?,?)", ("diagnostic", str(root)))
+    task_id, workspace_id = _add_task_and_workspace(db, git, root, "Visual repair\nVISUAL_QA_REQUIRED: true", "diagnostic", repo_id)
+    evidence_root = tmp_path / "coordinator-state" / "visual-qa-evidence"
+
+    class SyntheticThresholdRunner:
+        mandatory = False
+
+        def run(self, command, worktree_root, working_dir, timeout, env=None):
+            if env is None:
+                return SimpleNamespace(returncode=0, stdout="fixture command PASS", stderr="")
+            run_id = int(env["VISUAL_QA_RUN_ID"])
+            contract = {
+                "reference": {"320x240": "docs/reference.png"},
+                "route": "http://127.0.0.1:4173/orders",
+                "viewports": [{"width": 320, "height": 240}], "threshold": 0.08,
+            }
+            exp = {"run_id": run_id, "tested_commit": head, "repo_root": root, "contract": contract}
+            create_run(
+                Path(env["VISUAL_QA_EVIDENCE_OUTPUT"]), exp,
+                manifest_overrides={"runId": str(run_id), "passed": False},
+                metrics_overrides={
+                    "percentDiff": 1.0, "mismatchedPixels": 320 * 240,
+                    "ssim": 0.0, "passed": False,
+                },
+                artifact_overrides={"actual.png": png(320, 240, color=(165, 49, 121))},
+            )
+            return SimpleNamespace(returncode=1, stdout="FAIL UIFix threshold mismatch", stderr="")
+
+    runner = _ProjectFlowTestRunner(db, git, runner=SyntheticThresholdRunner(), visual_evidence_root=evidence_root)
+    rows = _run_stages(runner, db, workspace_id, root)
+    visual = next(row for row in rows if row["stage"] == "visual_qa")
+    retained = evidence_root / "agent" / str(workspace_id) / str(visual["id"])
+
+    assert visual["status"] == "FAIL" and visual["exit_code"] == 1
+    assert "PROJECTFLOW_VISUAL_DIAGNOSTIC_SHA256=" in (visual["stderr_tail"] or "")
+    assert "PROJECTFLOW_VISUAL_EVIDENCE_SHA256=" not in (visual["stdout_tail"] or "")
+    assert (retained / "320x240" / "actual.png").read_bytes() == png(320, 240, color=(165, 49, 121))
+    assert TaskDecisionService(db, git, visual_evidence_root=evidence_root).builder_tests_status({
+        "id": workspace_id, "task_id": task_id, "head": head, "worktree_path": str(root),
+    }) == "FAIL"

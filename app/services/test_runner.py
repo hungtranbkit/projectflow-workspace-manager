@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from app.services.project_contract import ContractError, load_contract
 from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
-from app.services.visual_qa_evidence import validate_visual_qa_run, VisualEvidenceError, ensure_private_directory
+from app.services.visual_qa_evidence import (
+    validate_visual_qa_diagnostic_run, validate_visual_qa_run,
+    VisualEvidenceError, ensure_private_directory,
+)
 
 def now(): return datetime.now(timezone.utc).isoformat()
 
@@ -158,6 +161,49 @@ class TestRunner:
                         status = "FAIL"
                         overall = False
                         stderr = (stderr + f"\nVISUAL_EVIDENCE_REJECTED: {type(exc).__name__}: {exc}").strip()
+                    finally:
+                        if visual_tmp and visual_tmp.exists() and visual_tmp.is_relative_to(Path(path).absolute() / ".runtime" / "projectflow-visual-qa"):
+                            shutil.rmtree(visual_tmp)
+                elif (stage == "visual_qa" and status == "FAIL" and proc.returncode == 1
+                      and not drift):
+                    # Retain only a complete, safe threshold-only comparison
+                    # for repair. The test_runs row remains FAIL and no PASS
+                    # evidence digest is written.
+                    target = None
+                    target_created = False
+                    try:
+                        if not source_state.get("clean") or not source_state.get("head"):
+                            raise VisualEvidenceError("diagnostic evidence requires a clean commit-bound source")
+                        task = self._task_for(kind, entity_id)
+                        contract = load_visual_qa_contract(Path(path))
+                        if not task_requires_visual_qa(task) or contract is None:
+                            raise VisualEvidenceError("diagnostic evidence requires an enabled opt-in contract")
+                        if self.visual_evidence_root is None:
+                            raise VisualEvidenceError("coordinator visual evidence storage is not configured")
+                        captured = validate_visual_qa_diagnostic_run(
+                            visual_tmp, run_id=run_id, tested_commit=source_state["head"],
+                            repo_root=Path(path), contract=contract,
+                        )
+                        target = self.visual_evidence_root / kind / str(entity_id) / str(run_id)
+                        ensure_private_directory(target.parent)
+                        if target.exists() or target.is_symlink():
+                            raise VisualEvidenceError("coordinator diagnostic run path already exists")
+                        target.mkdir(mode=0o700)
+                        target_created = True
+                        shutil.copytree(visual_tmp, target, symlinks=True, dirs_exist_ok=True)
+                        verified = validate_visual_qa_diagnostic_run(
+                            target, run_id=run_id, tested_commit=source_state["head"],
+                            repo_root=Path(path), contract=contract,
+                            expected_manifest_sha256=captured["manifest_sha256"],
+                        )
+                        stderr = (stderr + f"\nPROJECTFLOW_VISUAL_DIAGNOSTIC_SHA256={verified['manifest_sha256']}\n").strip()
+                    except Exception as exc:
+                        stderr = (stderr + f"\nVISUAL_DIAGNOSTIC_REJECTED: {type(exc).__name__}: {exc}").strip()
+                        owned_root = self.visual_evidence_root / kind / str(entity_id) if self.visual_evidence_root else None
+                        if (target_created and target is not None and owned_root is not None
+                                and target.is_relative_to(owned_root)):
+                            if target.is_dir() and not target.is_symlink():
+                                shutil.rmtree(target)
                     finally:
                         if visual_tmp and visual_tmp.exists() and visual_tmp.is_relative_to(Path(path).absolute() / ".runtime" / "projectflow-visual-qa"):
                             shutil.rmtree(visual_tmp)
