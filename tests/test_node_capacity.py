@@ -122,6 +122,58 @@ def test_issue86_reported_fleet_boundaries_are_policy_fixtures_not_live_health()
     assert (docker.node_id, docker.code) == ("dell-linux", "ALLOW")
 
 
+def test_issue86_exact_reported_root_tuples_replay_df_ratio_only_as_fixtures():
+    """Replay the owner's exact root tuples; these do not attest target mounts."""
+    gate = NodeCapacityGate(CapacityPolicy())
+    # (used bytes, available bytes, reported inode Use%).  The filesystem
+    # percent is df's rounded display; use the exact used/(used+available)
+    # formula for policy, and preserve the supplied inode percentages as
+    # explicitly synthetic counters.
+    reported = {
+        "hp-linux": (223_421_739_008, 13_607_075_840, 16),
+        "m910": (107_810_967_552, 10_125_598_720, 17),
+        "dell-linux": (369_241_120_768, 122_332_127_232, 15),
+        "macbook": (80_966_119_424, 384_224_636_928, 3),
+        "nec1": (44_738_027_520, 13_703_180_288, 12),
+    }
+    snapshots = []
+    for node, (used, available, inode_percent) in reported.items():
+        inode_total = 10_000
+        inode_used = inode_total * inode_percent // 100
+        snapshots.append(CapacitySnapshot(
+            node_id=node, mount_id=f"reported-root-{node}",
+            total_bytes=used + available, used_bytes=used,
+            free_bytes=available,
+            used_percent=100.0 * used / (used + available),
+            total_inodes=inode_total, used_inodes=inode_used,
+            free_inodes=inode_total - inode_used,
+            inode_used_percent=100.0 * inode_used / inode_total,
+            observed_at=NOW, capabilities=frozenset({"non_docker", "docker"}),
+        ))
+
+    by_node = {item.node_id: gate.evaluate(item, now=NOW, heavy=True)
+               for item in snapshots}
+    assert by_node["hp-linux"].used_percent == pytest.approx(
+        100 * 223_421_739_008 / (223_421_739_008 + 13_607_075_840))
+    assert by_node["m910"].used_percent == pytest.approx(
+        100 * 107_810_967_552 / (107_810_967_552 + 10_125_598_720))
+    assert by_node["hp-linux"].code == "BLOCKED_CAPACITY"
+    assert by_node["m910"].code == "BLOCKED_CAPACITY"
+    assert by_node["dell-linux"].code == "ALLOW"
+    assert by_node["macbook"].code == "ALLOW"
+    # NEC's exact available bytes are below the 20 GiB floor, so it blocks
+    # despite a moderate percentage. This is the independent headroom guard.
+    assert by_node["nec1"].code == "BLOCKED_CAPACITY"
+    # This only exercises policy against the supplied root figures. Freshness,
+    # capability, and mount identity still have to be proven by a live feed.
+    assert gate.select_node(
+        snapshots, now=NOW, required_capabilities={"non_docker"}, heavy=True
+    ).node_id == "macbook"
+    assert gate.select_node(
+        snapshots, now=NOW, required_capabilities={"docker"}, heavy=True
+    ).node_id == "dell-linux"
+
+
 def test_fleet_feed_unknown_offline_and_pinned_capacity_fail_closed():
     gate = NodeCapacityGate(CapacityPolicy(freshness_ttl_seconds=300))
     stale_mac = snap("macbook", used=18, caps={"non_docker"},
