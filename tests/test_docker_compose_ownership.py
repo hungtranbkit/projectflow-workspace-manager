@@ -280,6 +280,40 @@ def test_missing_or_mismatched_compose_identity_fails_closed_without_deletion():
     assert not any(command[1:3] == ["rm", "-f"] for command in fake.commands)
 
 
+def test_duplicate_resource_name_across_projects_removes_only_owned_id():
+    fake = FakeDocker()
+    registry = _registry(fake)
+    fake.add_network("sibling-network-id", "wm-other-pytest-555", "shared-default")
+
+    _compose_up(fake, registry, "wm-owned-pytest-001",
+                lambda: fake.add_network("owned-network-id", "wm-owned-pytest-001", "shared-default"))
+    registry.cleanup()
+
+    assert "owned-network-id" not in fake.networks
+    assert set(fake.networks) == {"sibling-network-id"}
+    assert [command for command in fake.commands if command[1:3] == ["network", "rm"]] == [
+        ["docker", "network", "rm", "owned-network-id"]
+    ]
+
+
+def test_spoofed_compose_project_filter_refuses_unowned_resource_id():
+    fake = FakeDocker()
+    registry = _registry(fake)
+
+    def create_with_spoofed_filter():
+        fake.add_container("owned-container-id", "wm-owned-pytest-001")
+        fake.add_container("spoofed-container-id", "wm-sibling-project")
+        fake.force_filtered_ids["container"]["wm-owned-pytest-001"] = {"spoofed-container-id"}
+
+    with pytest.raises(RuntimeError, match="identity does not match reserved project"):
+        _compose_up(fake, registry, "wm-owned-pytest-001", create_with_spoofed_filter)
+    with pytest.raises(RuntimeError, match="incomplete ownership capture"):
+        registry.cleanup()
+
+    assert set(fake.containers) == {"owned-container-id", "spoofed-container-id"}
+    assert not any(command[1:3] == ["rm", "-f"] for command in fake.commands)
+
+
 def test_inventory_failure_refuses_compose_before_any_create_or_cleanup():
     fake = FakeDocker()
     fake.fail_list = True

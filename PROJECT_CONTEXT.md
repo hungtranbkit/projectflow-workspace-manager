@@ -219,9 +219,9 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
   untouched. No product runtime naming/policy change.
 - Safe synthetic legacy prefix red reproducer exited 1 with two unowned
   `wm-*` resources selected. Updated conftest loaded for ownership regression:
-  16 passed, no failures/errors/skips, exit 0; Python 3.14.4/pytest 9.2.0.
-  The final run included a second-registry collision test and recorded JUnit
-  at 2026-11-26 05:56:01–05:56:03 UTC.
+  18 passed, no failures/errors/skips, exit 0; Python 3.14.4/pytest 9.2.0.
+  Final JUnit at 2026-11-26 06:01:15–06:01:17 UTC covers cross-run collision,
+  duplicate resource names, and spoofed project-filter IDs.
   The suite uses a fake Docker command runner and created no daemon resources.
   Helper/conftest `py_compile` and `git diff --check` passed.
 - Read-only audit: Docker server 29.7.2, 62 running/9 stopped, 71 total

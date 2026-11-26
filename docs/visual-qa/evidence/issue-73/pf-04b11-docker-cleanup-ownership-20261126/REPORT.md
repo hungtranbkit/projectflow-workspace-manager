@@ -56,22 +56,24 @@ PATH=/usr/bin:/bin "$VENV/bin/python" -m pytest -q -ra \
   --junitxml=green.xml
 ```
 
-Actual run: 2026-11-26 05:56:01–05:56:03 UTC (12:56:01–12:56:03 ICT),
-exit 0. JUnit: **16 passed, 0 failures, 0 errors, 0 skips**, Python 3.14.4,
-pytest 9.2.0; test time 0.087s. The 16 cases cover production-like and
+Final run: 2026-11-26 06:01:15–06:01:17 UTC (13:01:15–13:01:17 ICT),
+exit 0. JUnit: **18 passed, 0 failures, 0 errors, 0 skips**, Python 3.14.4,
+pytest 9.2.0; test time 0.100s. `green.xml` preserves the earlier 16-case run;
+`final-green.xml` is the final 18-case result. The 18 cases cover production-like and
 sibling `wm-*` resources,
 exact IDs, volume/network/container identity, pre-existing namespace
 collision, partial creation, unexpected later resource, mismatched worktree
 label, missing listed ID, inspect/inventory/remove failures, concurrent duplicate reservation, protected down/stop source identity, and a
 second pytest registry refusing a project whose exact resources belong to
-another run. All Docker
+another run, duplicate resource names across projects, and a spoofed Compose
+project-filter ID. All Docker
 behavior in these unit cases is fake; the session registry was empty and
 created no real resources. A read-only before/after inventory stayed at
 zero `wm-` containers and zero `wm-` networks.
 
 `py_compile` for the helper, regression module, and `conftest.py` exited 0;
-`git diff --check` exited 0. Final exits and timestamps are in their matching
-`.exit` files.
+`git diff --check` exited 0. Final exit evidence is in `py_compile.exit` and
+`diff-check.exit`.
 
 ## Safety incident disposition
 
