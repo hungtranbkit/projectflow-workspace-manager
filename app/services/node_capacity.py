@@ -7,9 +7,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 
 GIB = 1024 ** 3
 
@@ -64,6 +67,140 @@ class CapacitySnapshot:
     observed_at: datetime
     capabilities: frozenset[str] = field(default_factory=frozenset)
     online: bool = True
+
+
+@dataclass(frozen=True)
+class CapacityLease:
+    resource_key: str
+    owner_id: str
+    acquired_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class CapacityMountIdentity:
+    boot_id_sha256: str
+    mount_namespace: str
+    kernel_mount_id: str
+    st_dev: str
+    directory_inode: int
+    mountpoint: str
+    mount_root: str
+    fs_type: str
+    major_minor: str
+
+    def stable_id(self) -> str:
+        fields = (self.boot_id_sha256, self.mount_namespace, self.kernel_mount_id,
+                  self.st_dev, self.directory_inode, self.mountpoint,
+                  self.mount_root, self.fs_type, self.major_minor)
+        encoded = json.dumps(fields, separators=(",", ":"), ensure_ascii=True).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True)
+class CapacityTargetRequest:
+    role: str
+    path: str
+    expected_mount: CapacityMountIdentity
+
+
+@dataclass(frozen=True)
+class RawFilesystemCounters:
+    f_frsize: int
+    f_blocks: int
+    f_bfree: int
+    f_bavail: int
+    f_files: int
+    f_ffree: int
+    f_favail: int
+
+
+@dataclass(frozen=True)
+class CapacityTargetReceipt:
+    role: str
+    requested_path: str
+    canonical_existing_ancestor: str
+    relative_suffix: str
+    mount: CapacityMountIdentity
+    counters: RawFilesystemCounters
+
+
+@dataclass(frozen=True)
+class CapacityCapabilityEvidence:
+    name: str
+    evidence_level: str
+    code: str
+    observed_at: datetime
+
+
+@dataclass(frozen=True)
+class CapacityAdmissionRequest:
+    schema_version: int
+    request_key: str
+    task_id: int
+    project_id: str
+    node_id: str
+    identity_revision: str
+    workspace: str
+    workspace_revision: str
+    lease: CapacityLease
+    targets: tuple[CapacityTargetRequest, ...]
+    required_capabilities: frozenset[str]
+    requested_headroom_bytes: int = 0
+
+    def fingerprint(self) -> str:
+        def canonical(value):
+            if isinstance(value, datetime):
+                return _utc(value).isoformat()
+            if hasattr(value, "__dataclass_fields__"):
+                return {name: canonical(getattr(value, name)) for name in value.__dataclass_fields__}
+            if isinstance(value, (set, frozenset)):
+                return sorted(canonical(item) for item in value)
+            if isinstance(value, tuple):
+                return [canonical(item) for item in value]
+            return value
+
+        body = json.dumps(canonical(self), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(body.encode()).hexdigest()
+
+
+@dataclass(frozen=True)
+class CapacityReceipt:
+    schema_version: int
+    receipt_id: str
+    request_key: str
+    request_sha256: str
+    task_id: int
+    project_id: str
+    node_id: str
+    identity_revision: str
+    workspace: str
+    workspace_revision: str
+    lease: CapacityLease
+    controller_received_at: datetime
+    observed_at: datetime
+    expires_at: datetime
+    targets: tuple[CapacityTargetReceipt, ...]
+    capabilities: tuple[CapacityCapabilityEvidence, ...]
+    online: bool
+
+
+@dataclass(frozen=True)
+class VerifiedCapacityReceipt:
+    """Typed verifier output. `issuer` must be the gate's injected verifier."""
+    receipt: CapacityReceipt
+    issuer: object = field(repr=False, compare=False)
+
+
+class CapacityReceiptVerifier:
+    """Boundary implemented by the owning authenticated node adapter.
+
+    Production has no verifier wired yet, so remote admission remains
+    fail-closed. Tests inject a typed fixture verifier; no JSON/hash alone
+    can establish trusted provenance.
+    """
+    def verify(self, receipt: CapacityReceipt) -> VerifiedCapacityReceipt:
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)
@@ -150,9 +287,259 @@ def assess_worktree_cleanup(evidence: WorktreeCleanupEvidence, *, now: datetime,
 
 
 class NodeCapacityGate:
-    def __init__(self, policy: CapacityPolicy | None = None):
+    def __init__(self, policy: CapacityPolicy | None = None, *, receipt_verifier=None):
         self.policy = policy or CapacityPolicy()
+        self._receipt_verifier = receipt_verifier
         self._blocked_mounts: set[tuple[str, str]] = set()
+
+    @staticmethod
+    def _receipt_block(reason: str, *, node_id=None, mount_id=None, observed_at=None):
+        return CapacityDecision("BLOCKED_CAPACITY", node_id, mount_id, reason,
+                                observed_at, None, None, None)
+
+    @staticmethod
+    def _valid_mount_identity(mount: CapacityMountIdentity) -> bool:
+        return (
+            isinstance(mount, CapacityMountIdentity)
+            and all(isinstance(value, str) and value.strip() for value in (
+                mount.boot_id_sha256, mount.mount_namespace, mount.kernel_mount_id,
+                mount.st_dev, mount.mountpoint, mount.mount_root, mount.fs_type,
+                mount.major_minor,
+            ))
+            and mount.mountpoint.startswith("/") and mount.mount_root.startswith("/")
+            and len(mount.boot_id_sha256) == 64
+            and all(char in "0123456789abcdef" for char in mount.boot_id_sha256)
+            and type(mount.directory_inode) is int and mount.directory_inode > 0
+        )
+
+    def evaluate_receipt(self, request: CapacityAdmissionRequest, receipt: CapacityReceipt,
+                         *, now: datetime, heavy: bool) -> CapacityDecision:
+        """Validate an authenticated, request-bound target receipt.
+
+        No remote producer is configured in ProjectFlow yet. The method is
+        deliberately inert unless the existing owner injects a verifier; raw
+        request JSON, self-declared hashes and caller-selected trust flags are
+        never an authorization source.
+        """
+        try:
+            current = _utc(now)
+        except (TypeError, ValueError):
+            return self._receipt_block("CAPACITY_TIME_INVALID")
+        if not heavy:
+            return self._receipt_block("CAPACITY_GATE_HEAVY_ONLY",
+                                       node_id=getattr(request, "node_id", None))
+        if self._receipt_verifier is None:
+            return self._receipt_block("CAPACITY_RECEIPT_VERIFIER_UNAVAILABLE",
+                                       node_id=getattr(request, "node_id", None))
+        if not isinstance(request, CapacityAdmissionRequest) or not isinstance(receipt, CapacityReceipt):
+            return self._receipt_block("CAPACITY_RECEIPT_TYPE_INVALID")
+        try:
+            verified = self._receipt_verifier.verify(receipt)
+        except Exception:
+            return self._receipt_block("CAPACITY_RECEIPT_UNTRUSTED", node_id=request.node_id)
+        if (not isinstance(verified, VerifiedCapacityReceipt)
+                or verified.issuer is not self._receipt_verifier
+                or verified.receipt is not receipt):
+            return self._receipt_block("CAPACITY_RECEIPT_UNTRUSTED", node_id=request.node_id)
+
+        try:
+            lease_start = _utc(request.lease.acquired_at)
+            lease_end = _utc(request.lease.expires_at)
+            received = _utc(receipt.controller_received_at)
+            observed = _utc(receipt.observed_at)
+            receipt_end = _utc(receipt.expires_at)
+            cap_ttl = timedelta(seconds=self.policy.freshness_ttl_seconds)
+        except (AttributeError, TypeError, ValueError):
+            return self._receipt_block("CAPACITY_RECEIPT_TIMESTAMPS_INVALID",
+                                       node_id=request.node_id)
+
+        if (type(request.schema_version) is not int or request.schema_version != 1
+                or not isinstance(request.request_key, str) or not request.request_key
+                or type(request.task_id) is not int or request.task_id <= 0
+                or any(not isinstance(value, str) or not value for value in (
+                    request.project_id, request.node_id, request.identity_revision,
+                    request.workspace, request.workspace_revision,
+                ))
+                or type(request.requested_headroom_bytes) is not int
+                or request.requested_headroom_bytes < 0
+                or not isinstance(request.lease, CapacityLease)
+                or not isinstance(request.lease.resource_key, str) or not request.lease.resource_key
+                or not isinstance(request.lease.owner_id, str) or not request.lease.owner_id
+                or not isinstance(request.targets, tuple) or not request.targets or len(request.targets) > 16
+                or any(not isinstance(target, CapacityTargetRequest) for target in request.targets)
+                or any(not isinstance(target.role, str) or not target.role for target in request.targets)
+                or len({target.role for target in request.targets if isinstance(target, CapacityTargetRequest)}) != len(request.targets)
+                or any(not isinstance(target, CapacityTargetRequest) or not target.role or not target.path
+                       or not isinstance(target.role, str) or not isinstance(target.path, str)
+                       or not target.path.startswith("/") or not self._valid_mount_identity(target.expected_mount)
+                       for target in request.targets)
+                or not isinstance(request.required_capabilities, frozenset)
+                or any(not isinstance(name, str) or not name for name in request.required_capabilities)):
+            return self._receipt_block("CAPACITY_REQUEST_INVALID", node_id=request.node_id)
+
+        if (lease_end <= lease_start or current < lease_start or current >= lease_end
+                or observed < lease_start):
+            return self._receipt_block("CAPACITY_LEASE_INVALID", node_id=request.node_id,
+                                       observed_at=observed)
+
+        if (type(receipt.schema_version) is not int or receipt.schema_version != 1
+                or not isinstance(receipt.receipt_id, str) or not receipt.receipt_id):
+            return self._receipt_block("CAPACITY_RECEIPT_INVALID", node_id=request.node_id,
+                                       observed_at=observed)
+        if receipt.online is not True:
+            reason = "NODE_OFFLINE"
+            return self._receipt_block(reason, node_id=request.node_id,
+                                       observed_at=observed)
+        if current < observed or current < received:
+            return self._receipt_block("CAPACITY_FUTURE", node_id=request.node_id,
+                                       observed_at=observed)
+        if received < observed:
+            return self._receipt_block("CAPACITY_RECEIPT_TIMESTAMPS_INVALID",
+                                       node_id=request.node_id, observed_at=observed)
+        if current - observed > cap_ttl:
+            return self._receipt_block("CAPACITY_STALE", node_id=request.node_id,
+                                       observed_at=observed)
+        if receipt_end <= current:
+            return self._receipt_block("CAPACITY_RECEIPT_EXPIRED", node_id=request.node_id,
+                                       observed_at=observed)
+        if receipt_end > min(lease_end, observed + cap_ttl):
+            return self._receipt_block("CAPACITY_RECEIPT_EXPIRY_INVALID",
+                                       node_id=request.node_id, observed_at=observed)
+
+        if (receipt.request_key != request.request_key or receipt.task_id != request.task_id
+                or receipt.project_id != request.project_id or receipt.workspace != request.workspace
+                or receipt.workspace_revision != request.workspace_revision):
+            return self._receipt_block("CAPACITY_REQUEST_MISMATCH", node_id=request.node_id,
+                                       observed_at=observed)
+        if receipt.lease != request.lease:
+            return self._receipt_block("CAPACITY_LEASE_MISMATCH", node_id=request.node_id,
+                                       observed_at=observed)
+        if receipt.node_id != request.node_id or receipt.identity_revision != request.identity_revision:
+            return self._receipt_block("CAPACITY_NODE_IDENTITY_MISMATCH", node_id=request.node_id,
+                                       observed_at=observed)
+        try:
+            expected_hash = request.fingerprint()
+        except (TypeError, ValueError):
+            return self._receipt_block("CAPACITY_REQUEST_INVALID", node_id=request.node_id)
+        if (not isinstance(receipt.request_sha256, str)
+                or not hmac.compare_digest(receipt.request_sha256, expected_hash)):
+            return self._receipt_block("CAPACITY_REQUEST_HASH_MISMATCH", node_id=request.node_id,
+                                       observed_at=observed)
+
+        targets = receipt.targets
+        if (not isinstance(targets, tuple) or not targets or len(targets) > 16
+                or any(not isinstance(item, CapacityTargetReceipt) for item in targets)
+                or any(not isinstance(item.role, str) or not item.role for item in targets)
+                or len({item.role for item in targets if isinstance(item, CapacityTargetReceipt)}) != len(targets)):
+            return self._receipt_block("CAPACITY_TARGETS_MISMATCH", node_id=request.node_id,
+                                       observed_at=observed)
+        requested_by_role = {item.role: item for item in request.targets}
+        received_by_role = {item.role: item for item in targets if isinstance(item, CapacityTargetReceipt)}
+        if requested_by_role.keys() != received_by_role.keys():
+            return self._receipt_block("CAPACITY_TARGETS_MISMATCH", node_id=request.node_id,
+                                       observed_at=observed)
+
+        capabilities = receipt.capabilities
+        if (not isinstance(capabilities, tuple)
+                or any(not isinstance(item, CapacityCapabilityEvidence) for item in capabilities)
+                or any(not isinstance(item.name, str) or not item.name for item in capabilities)
+                or len({item.name for item in capabilities
+                        if isinstance(item, CapacityCapabilityEvidence)}) != len(capabilities)):
+            return self._receipt_block("CAPABILITY_MISMATCH", node_id=request.node_id,
+                                       observed_at=observed)
+        capability_by_name = {item.name: item for item in capabilities
+                              if isinstance(item, CapacityCapabilityEvidence)}
+        for name in request.required_capabilities:
+            evidence = capability_by_name.get(name)
+            minimum_level = "runtime" if name == "docker" else "binary"
+            allowed_levels = {"binary": {"binary", "runtime", "authenticated"},
+                              "runtime": {"runtime", "authenticated"}}
+            if (evidence is None or evidence.code != "SUPPORTED"
+                    or evidence.evidence_level not in allowed_levels[minimum_level]):
+                return self._receipt_block("CAPABILITY_MISMATCH", node_id=request.node_id,
+                                           observed_at=observed)
+            try:
+                cap_observed = _utc(evidence.observed_at)
+            except (TypeError, ValueError):
+                return self._receipt_block("CAPABILITY_MISMATCH", node_id=request.node_id,
+                                           observed_at=observed)
+            if cap_observed > current or current - cap_observed > cap_ttl:
+                return self._receipt_block("CAPABILITY_MISMATCH", node_id=request.node_id,
+                                           observed_at=cap_observed)
+
+        decisions = []
+        for role, target in requested_by_role.items():
+            evidence = received_by_role[role]
+            if (not isinstance(evidence.requested_path, str)
+                    or not isinstance(evidence.canonical_existing_ancestor, str)
+                    or not isinstance(evidence.relative_suffix, str)
+                    or evidence.requested_path != target.path):
+                return self._receipt_block("CAPACITY_TARGET_MISMATCH", node_id=request.node_id,
+                                           observed_at=observed)
+            if (not self._valid_mount_identity(evidence.mount)
+                    or evidence.mount != target.expected_mount):
+                return self._receipt_block("CAPACITY_MOUNT_MISMATCH", node_id=request.node_id,
+                                           mount_id=evidence.mount.stable_id() if isinstance(evidence.mount, CapacityMountIdentity) else None,
+                                           observed_at=observed)
+            ancestor = PurePosixPath(evidence.canonical_existing_ancestor)
+            suffix = PurePosixPath(evidence.relative_suffix)
+            if (not ancestor.is_absolute() or suffix.is_absolute() or not evidence.relative_suffix
+                    or ".." in ancestor.parts or ".." in suffix.parts
+                    or str(ancestor.joinpath(suffix)) != evidence.requested_path):
+                return self._receipt_block("CAPACITY_TARGET_MISMATCH", node_id=request.node_id,
+                                           observed_at=observed)
+            counters = evidence.counters
+            if not isinstance(counters, RawFilesystemCounters):
+                return self._receipt_block("CAPACITY_METRICS_INVALID", node_id=request.node_id,
+                                           mount_id=evidence.mount.stable_id(), observed_at=observed)
+            raw_values = (counters.f_frsize, counters.f_blocks, counters.f_bfree,
+                          counters.f_bavail, counters.f_files, counters.f_ffree,
+                          counters.f_favail)
+            if (any(type(value) is not int for value in raw_values)
+                    or counters.f_frsize <= 0 or counters.f_blocks <= 0
+                    or counters.f_bfree < 0 or counters.f_bfree > counters.f_blocks
+                    or counters.f_bavail < 0 or counters.f_bavail > counters.f_bfree
+                    or counters.f_files <= 0 or counters.f_ffree < 0
+                    or counters.f_ffree > counters.f_files or counters.f_favail < 0
+                    or counters.f_favail > counters.f_ffree):
+                return self._receipt_block("CAPACITY_METRICS_INVALID", node_id=request.node_id,
+                                           mount_id=evidence.mount.stable_id(), observed_at=observed)
+            used_bytes = (counters.f_blocks - counters.f_bfree) * counters.f_frsize
+            free_bytes = counters.f_bavail * counters.f_frsize
+            used_inodes = counters.f_files - counters.f_ffree
+            free_inodes = counters.f_favail
+            if used_bytes + free_bytes <= 0 or used_inodes + free_inodes <= 0:
+                return self._receipt_block("CAPACITY_METRICS_INVALID", node_id=request.node_id,
+                                           mount_id=evidence.mount.stable_id(), observed_at=observed)
+            snapshot = CapacitySnapshot(
+                node_id=request.node_id,
+                mount_id=evidence.mount.stable_id(),
+                total_bytes=counters.f_blocks * counters.f_frsize,
+                used_bytes=used_bytes, free_bytes=free_bytes,
+                used_percent=100.0 * used_bytes / (used_bytes + free_bytes),
+                total_inodes=counters.f_files, used_inodes=used_inodes,
+                free_inodes=free_inodes,
+                inode_used_percent=100.0 * used_inodes / (used_inodes + free_inodes),
+                observed_at=observed, capabilities=request.required_capabilities, online=True,
+            )
+            decision = self.evaluate(
+                snapshot, now=current, heavy=True,
+                previously_blocked=(snapshot.node_id, snapshot.mount_id) in self._blocked_mounts,
+            )
+            if decision.allowed and free_bytes < max(self.policy.block_free_bytes,
+                                                      request.requested_headroom_bytes):
+                decision = self._decision("BLOCKED_CAPACITY", snapshot,
+                                          "REQUESTED_HEADROOM_UNMET")
+            key = (snapshot.node_id, snapshot.mount_id)
+            if decision.code == "BLOCKED_CAPACITY":
+                self._blocked_mounts.add(key)
+            else:
+                self._blocked_mounts.discard(key)
+            decisions.append(decision)
+
+        priority = {"BLOCKED_CAPACITY": 2, "UNKNOWN_CAPACITY": 2,
+                    "WARN_CAPACITY": 1, "ALLOW": 0}
+        return max(decisions, key=lambda item: priority.get(item.code, 2))
 
     def restore_hysteresis(self, events) -> None:
         """Restore mount state from append-only capacity audit events."""
