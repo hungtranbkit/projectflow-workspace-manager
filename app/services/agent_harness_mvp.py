@@ -139,7 +139,8 @@ class HarnessStore:
                    (task_id, _iso(at), name, json.dumps(evidence, sort_keys=True, ensure_ascii=False)))
 
     def create(self, *, key: str, main_goal: str, child_goal: str, dod: str, agent: str,
-               node: str, created_at: datetime, ttl: timedelta = MAX_TTL) -> Task:
+               node: str, created_at: datetime, ttl: timedelta = MAX_TTL,
+               scope_limit: tuple[str, int] | None = None) -> Task:
         start = _dt(created_at)
         if not (timedelta(0) < ttl <= MAX_TTL):
             raise HarnessError("child TTL must be >0 and <=24 hours")
@@ -148,6 +149,17 @@ class HarnessStore:
         with self._connect() as db:
             # Serialize capacity and duplicate checks across concurrent workers.
             db.execute("BEGIN IMMEDIATE")
+            if scope_limit is not None:
+                prefix, maximum = scope_limit
+                if (not isinstance(prefix, str) or not prefix or not main_goal.startswith(prefix)
+                        or type(maximum) is not int or maximum < 1):
+                    raise HarnessError("invalid scoped capacity policy")
+                scoped = db.execute("""SELECT COUNT(*) FROM harness_tasks
+                    WHERE substr(main_goal, 1, length(?)) = ? AND
+                    (state NOT IN ('DONE_VERIFIED','FAILED','EXPIRED')
+                     OR cleanup_state != 'CLEANED_VERIFIED')""", (prefix, prefix)).fetchone()[0]
+                if scoped >= maximum:
+                    raise HarnessError("scoped capacity limit: outstanding tasks including unverified cleanup")
             # One active task for exactly the same main/child goal; not a hidden
             # way to spawn duplicates with new request keys.
             dup = db.execute("""SELECT id,state,cleanup_state FROM harness_tasks

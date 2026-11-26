@@ -180,3 +180,131 @@ class GitWorkspaceService:
         status = self.status(path).splitlines()
         commits = self.git(path, "log", "-10", "--pretty=format:%h %s").stdout.splitlines()
         return {"head": self.head(path), "status": status, "modified": [x for x in status if not x.startswith("??")], "untracked": [x for x in status if x.startswith("??")], "commits": commits}
+
+
+SOURCE_REF = re.compile(r"^(?:[0-9a-f]{40}|[A-Za-z0-9][A-Za-z0-9._/-]{0,199})$")
+SOURCE_PATH = re.compile(r"^[A-Za-z0-9._@+-][A-Za-z0-9._@+/ -]{0,399}$")
+_READ_ONLY_ENV = {"GIT_NO_LAZY_FETCH": "1", "GIT_ALLOW_PROTOCOL": "file", "GIT_TERMINAL_PROMPT": "0",
+                  "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C"}
+
+
+class ReadOnlySource:
+    """Read immutable Git objects of one operator-configured repository.
+
+    Architecture Center (#91) only ever reads commits, trees and blobs: no
+    checkout, ref update, fetch from a remote or hook execution happens in the
+    configured repository. Every call is an argv list with shell=False.
+    """
+
+    def __init__(self, repo: str | Path, timeout: int = 60):
+        self.repo = Path(repo).resolve()
+        self.timeout = timeout
+        top = self._git("rev-parse", "--show-toplevel", check=False)
+        if top.returncode or Path(top.stdout.decode().strip()).resolve() != self.repo:
+            raise GitSafetyError("Configured source is not a git repository root")
+
+    def _git(self, *args: str, check=True, input_bytes: bytes | None = None, cwd: Path | None = None,
+             isolated: bool = False):
+        import os
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")}, **_READ_ONLY_ENV}
+        if isolated:
+            env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_ALLOW_PROTOCOL="")
+        try:
+            proc = subprocess.run(["git", "--no-replace-objects", *args], cwd=cwd or self.repo, input=input_bytes,
+                                  capture_output=True, timeout=self.timeout, shell=False, env=env)
+        except subprocess.TimeoutExpired as exc:
+            raise GitCommandError("git read timed out") from exc
+        if check and proc.returncode:
+            raise GitCommandError(proc.stderr.decode(errors="replace").strip()[:300] or "git read failed")
+        return proc
+
+    def resolve(self, ref: str) -> str:
+        if not isinstance(ref, str) or not SOURCE_REF.fullmatch(ref) or ".." in ref or ref.endswith((".lock", "/")):
+            raise GitSafetyError("Unsafe source ref")
+        out = self._git("rev-parse", "--verify", "--quiet", "--end-of-options", ref + "^{commit}", check=False)
+        sha = out.stdout.decode().strip()
+        if out.returncode or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise GitSafetyError("Commit not found in configured repository")
+        return sha
+
+    def commit_info(self, sha: str) -> dict:
+        sha = self.resolve(sha)
+        out = self._git("show", "-s", "--format=%H%x00%cI%x00%P", sha).stdout.decode().strip().split("\x00")
+        return {"commit": out[0], "committed_at": out[1], "parents": out[2].split()}
+
+    def is_ancestor(self, older: str, newer: str) -> bool:
+        return self._git("merge-base", "--is-ancestor", self.resolve(older), self.resolve(newer), check=False).returncode == 0
+
+    def distance(self, older: str, newer: str) -> int | None:
+        out = self._git("rev-list", "--count", f"{self.resolve(older)}..{self.resolve(newer)}", check=False)
+        return int(out.stdout.decode().strip()) if out.returncode == 0 else None
+
+    def tree(self, sha: str) -> list[tuple[str, str, int, str]]:
+        """(mode, object, size, path) for every entry; symlinks/submodules included so callers can refuse them."""
+        sha = self.resolve(sha)
+        out = self._git("ls-tree", "-r", "-z", "--long", "--full-tree", sha).stdout
+        rows = []
+        for raw in out.split(b"\x00"):
+            if not raw:
+                continue
+            meta, path = raw.split(b"\t", 1)
+            mode, kind, obj, size = meta.decode().split()
+            rows.append((mode, obj, int(size) if size.isdigit() else -1, path.decode("utf-8", "surrogateescape")))
+        return rows
+
+    def blobs(self, objects: list[str]) -> dict[str, bytes]:
+        """Batch-read blob contents by object id (never by path or ref)."""
+        if not objects:
+            return {}
+        if any(not re.fullmatch(r"[0-9a-f]{40}", o) for o in objects):
+            raise GitSafetyError("Invalid object id")
+        out = self._git("cat-file", "--batch", input_bytes=("\n".join(objects) + "\n").encode()).stdout
+        result, cursor = {}, 0
+        for obj in objects:
+            nl = out.index(b"\n", cursor)
+            header = out[cursor:nl].decode().split()
+            if len(header) != 3 or header[0] != obj or header[1] != "blob":
+                raise GitCommandError("Unexpected object in source read")
+            size = int(header[2])
+            result[obj] = out[nl + 1: nl + 1 + size]
+            cursor = nl + 1 + size + 1
+        return result
+
+    def pin_filtered(self, source_commit: str, dest: Path, files: dict[str, bytes], max_bytes: int,
+                     origin_url: str | None = None) -> str:
+        """Create a synthetic root commit from approved bytes in a fresh object database."""
+        if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+            raise GitSafetyError("Invalid original source commit")
+        if origin_url:
+            if not re.fullmatch(r"https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+?(?:\.git)?", origin_url):
+                raise GitSafetyError("Unsupported origin URL")
+        if sum(map(len, files.values())) > max_bytes:
+            raise GitSafetyError("Filtered source exceeds its byte budget")
+        dest = dest.parent.resolve(strict=True) / dest.name
+        dest.mkdir(mode=0o700)
+        self._git("init", "--quiet", "--template=", "--object-format=sha1", "--initial-branch=filtered",
+                  cwd=dest, isolated=True)
+        self._git("config", "--local", "protocol.allow", "never", cwd=dest, isolated=True)
+        if origin_url:
+            # Archify compares the origin's repository name to the authored IR.
+            self._git("config", "--local", "remote.origin.url", origin_url, cwd=dest, isolated=True)
+        message = f"Filtered renderer source.\n\nOriginal-source: {source_commit}\n".encode()
+        stream = bytearray(b"commit refs/heads/filtered\ncommitter ProjectFlow <source@projectflow.invalid> 0 +0000\n"
+                           b"data %d\n" % len(message) + message + b"\n")
+        for path, data in sorted(files.items()):
+            if any(part.lower() in ("", ".", "..", ".git") for part in path.split("/")):
+                raise GitSafetyError("Unsafe filtered source path")
+            # Fast-import's quoted paths accept C-style octal escapes.
+            name = re.sub(rb'["\\\x00-\x1f\x7f-\xff]', lambda m: b"\\%03o" % m[0][0],
+                          path.encode("utf-8", "surrogateescape"))
+            stream.extend(b'M 100644 inline "' + name + b'"\ndata %d\n' % len(data))
+            stream.extend(data)
+            stream.extend(b"\n")
+        stream.extend(b"\ndone\n")
+        self._git("fast-import", "--quiet", "--done", input_bytes=bytes(stream), cwd=dest, isolated=True)
+        objects = self._git("cat-file", "--batch-all-objects", "--batch-check=%(objectsize)",
+                            cwd=dest, isolated=True).stdout.splitlines()
+        stored_bytes = sum(path.stat().st_size for path in dest.rglob("*") if path.is_file())
+        if max(sum(map(int, objects)), stored_bytes) > max_bytes:
+            raise GitSafetyError("Filtered Git repository exceeds its byte budget")
+        return self._git("rev-parse", "HEAD", cwd=dest, isolated=True).stdout.decode().strip()
