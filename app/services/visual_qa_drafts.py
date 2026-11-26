@@ -18,6 +18,7 @@ from app.services.visual_qa_evidence import VisualEvidenceError, _png_dimensions
 
 MAX_DRAFT_PNG_BYTES = 8 * 1024 * 1024
 MAX_DESIGN_NOTE_CHARS = 500
+MAX_DRAFTS_PER_WORKSPACE = 10
 DRAFT_VIEWPORTS = frozenset({"430x932", "768x1024", "1366x768", "1586x992", "1920x1080"})
 _DRAFT_REF = re.compile(r"visual-qa-drafts/([0-9a-f]{32})\.png\Z")
 _UPLOAD_PATH = re.compile(r"/api/tasks/[0-9]+/workspaces/[0-9]+/visual-reference-drafts\Z")

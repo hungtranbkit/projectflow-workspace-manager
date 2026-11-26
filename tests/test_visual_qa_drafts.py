@@ -198,6 +198,24 @@ def test_duplicate_draft_is_rejected_without_second_record(client, git_repo):
     assert len(list(root.glob("*.png"))) == 1
 
 
+def test_per_workspace_draft_limit_is_enforced(client, git_repo):
+    _root, repo = git_repo
+    tid, wid, _worktree, _head = _task_workspace(client, repo, opted_in=False)
+    for index in range(10):
+        image = png(430, 932, color=(index * 12, 92, 136))
+        assert _upload(client, tid, wid, image).status_code == 303
+    overflow = _upload(client, tid, wid, png(430, 932, color=(240, 92, 136)))
+    assert overflow.status_code == 409
+    rows = client.app.state.db.all(
+        "SELECT id FROM work_products WHERE task_id=? AND kind='UI_UX_DESIGN' "
+        "AND json_extract(content_metadata,'$.draft_kind')='visual-reference' "
+        "AND json_extract(content_metadata,'$.workspace_id')=?", (tid, wid),
+    )
+    assert len(rows) == 10
+    root = client.app.state.settings.state_dir / "visual-qa-drafts"
+    assert len(list(root.glob("*.png"))) == 10
+
+
 def test_workproduct_failure_cleans_only_new_upload_file(client, git_repo, monkeypatch):
     _root, repo = git_repo
     tid, wid, _worktree, _head = _task_workspace(client, repo, opted_in=False)

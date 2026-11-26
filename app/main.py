@@ -3097,7 +3097,7 @@ def create_app(settings=None):
                                             _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Save a private, unapproved Task design proposal outside repo/gate state."""
         from app.services.visual_qa_drafts import (
-            DRAFT_VIEWPORTS, MAX_DESIGN_NOTE_CHARS, MAX_DRAFT_PNG_BYTES,
+            DRAFT_VIEWPORTS, MAX_DESIGN_NOTE_CHARS, MAX_DRAFT_PNG_BYTES, MAX_DRAFTS_PER_WORKSPACE,
             VisualDraftError, validate_visual_draft_png, write_visual_draft,
             delete_visual_draft,
         )
@@ -3162,6 +3162,14 @@ def create_app(settings=None):
             )
             if duplicate:
                 raise HTTPException(409, "This image is already a draft for this workspace and viewport")
+            count = db.one(
+                "SELECT COUNT(*) AS count FROM work_products WHERE task_id=? AND kind='UI_UX_DESIGN' "
+                "AND status='DRAFT' AND json_extract(content_metadata,'$.draft_kind')='visual-reference' "
+                "AND json_extract(content_metadata,'$.workspace_id')=?",
+                (tid, wid),
+            )["count"]
+            if count >= MAX_DRAFTS_PER_WORKSPACE:
+                raise HTTPException(409, "Workspace draft limit reached; ask an owner to review existing drafts")
 
             try:
                 content_ref, stored_digest, stored_width, stored_height = write_visual_draft(
