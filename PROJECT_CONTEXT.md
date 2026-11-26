@@ -233,3 +233,24 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
   available; no real create/down/cleanup was run. Full suite/provider/CI not
   run. Keep PR #74 draft; A not qualified, E not PASS, and F not re-certified.
   Detailed evidence: `docs/visual-qa/evidence/issue-73/pf-04b11-docker-cleanup-ownership-20261126/REPORT.md`.
+
+## 2026-11-26 PF-04b12 — isolated runner readiness
+
+- PR #74 start head/tree `d1f86cb230d936d882071dc77996583a176cf346` /
+  `12e0eab92670cd754c662ad1f8543ec0e70a809c`; local task branch source was
+  tree-equivalent and clean. No source code changed.
+- Safe subset under nonexistent task-local `DOCKER_HOST`:
+  `test_visual_qa_contract`, `test_visual_qa_execution`,
+  `test_task_decision_required_stages`, `test_test_runner_source_identity`,
+  `test_project_test_timeout`: 42/42 passed, no skip, exit 0. This is not
+  full-suite or Docker integration evidence.
+- No safe daemon was available: Dell only has shared Docker socket; rootless
+  helpers `newuidmap`, `newgidmap`, `slirp4netns`, `pasta`, `fuse-overlayfs`
+  and a task user socket are absent. HP had 13 GiB free (95% full), nearly
+  exhausted swap, and lacks the same helpers; NEC1 SSH alias failed local
+  name resolution. No daemon or
+  host settings/packages were changed. Python Playwright is absent in the
+  existing venv; no provider auth files were read or provider invoked.
+- PF-04b10 cleanup impact remains unknown; F is not certified. A remains
+  unqualified, E not PASS, B/C unchanged, D historical. Evidence and exact
+  replay: `docs/visual-qa/evidence/issue-73/pf-04b12-isolated-runner-readiness-20261126/REPORT.md`.
