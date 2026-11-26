@@ -64,6 +64,30 @@ def test_correct_csrf_token_via_form_field_succeeds(two_org_fixture):
     assert r.status_code not in (401, 403, 404), r.text
 
 
+def test_visual_qa_prompt_optin_uses_existing_csrf_guard(two_org_fixture):
+    f = two_org_fixture
+    task = f["db"].one("SELECT implementation_prompt,brief_version FROM tasks WHERE id=?", (f["tid_a"],))
+    assert not task["implementation_prompt"]
+    denied = f["member"].post(
+        f"/api/tasks/{f['tid_a']}/prompt",
+        data={"implementation_prompt": "Keep existing task intent", "visual_qa_required": "true"},
+        follow_redirects=False,
+    )
+    assert denied.status_code == 403
+    token = _member_csrf_token(f)
+    allowed = f["member"].post(
+        f"/api/tasks/{f['tid_a']}/prompt",
+        data={"implementation_prompt": "Keep existing task intent", "visual_qa_required": "true",
+              "csrf_token": token},
+        follow_redirects=False,
+    )
+    assert allowed.status_code == 303
+    updated = f["db"].one("SELECT implementation_prompt,brief_version FROM tasks WHERE id=?", (f["tid_a"],))
+    assert updated["implementation_prompt"] == "Keep existing task intent\n\nVISUAL_QA_REQUIRED: true"
+    assert updated["brief_version"] == task["brief_version"] + 1
+    assert f["owner"].app.state.decision.evaluate(f["tid_a"])["visual_qa_required"] is True
+
+
 def test_cross_session_csrf_token_rejected(two_org_fixture):
     """A token that's real -- just bound to a DIFFERENT session (the
     outsider's, not member's) -- must not validate against member's

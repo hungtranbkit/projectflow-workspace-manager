@@ -279,3 +279,36 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
 - Exact clean source replay: 121 passed, no failures/errors/skips, exit 0, 95.245s. One new TestRunner test uses explicitly synthetic manifest/image fixtures; it is not real browser evidence. UIFix pin verification passed. Browser smoke was attempted with a task-owned Chromium copy but stopped after GPU error 1002 and Playwright auto-emitted `--no-sandbox`; no usable screenshot or real CLI result was produced.
 - Rechecked VQ-03b2 red JUnit SHA: committed bytes and checksum manifest match `6b4144be193aa1d60ea528b7c927c5b41a623efa9d600e1301ae90a468165078`; corrected the stale `run-summary.json` hash and refreshed its manifest entry. Details/log/JUnit/hash manifest: `docs/visual-qa/evidence/issue-73/vq03b3-failed-threshold-diagnostics-20261126/REPORT.md`.
 - No full suite, provider, CI, shared Docker, production, merge or deploy. Code commit is local pending expected-head PR publication; PR remains draft. Full-suite/A, CI/E, F incident disposition and approved NovaRetail B/C remain unqualified.
+
+## 2026-11-26 VQ-03c — pre-opt-in reference inspection
+
+- Started in the existing task-owned worktree on branch
+  `agent/codex/vq03b3b-preoptin-reference-20261126`, based on local commit
+  `db941199ce25578ee0b8270f0e588c2ef92743f2`, whose tree
+  `7a23f50102febb434be5c19950204b5dc181ae50` matched the then-current draft
+  PR #74 head `dfe2be82cfc5b397e7cbe9efd4bb7cd4eef7838c`.
+- The Task Visual QA panel now reads the validated repository-local contract
+  for both opt-in and opt-out Tasks, and can show configured reference PNGs
+  only for a clean current worktree. The preview endpoint binds Task,
+  workspace, registered repository fingerprint, current HEAD and contract
+  viewport; reads a bounded PNG through no-follow file descriptors and sets
+  `nosniff`/`private, no-store`. It does not accept a client path/URL or imply
+  design approval.
+- Opt-in is a required checkbox in the same Task prompt-save flow. The handler
+  adds the canonical marker without replacing user prompt text, preserves an
+  existing prompt marker during edits, and leaves brief fields intact. Save
+  does not launch Builder or TestRunner; the existing Run Test action remains
+  visible only when the canonical TaskDecisionService says Visual QA is
+  required.
+- Source commit `5bc2a4bc8505bb030c20684c9713dc9a380d35b1`, tree
+  `bf0d59c23a6139a789f105cc439dd408d8f052ba`, was retested with clean Git
+  status before and after. Python 3.14.4/pytest 9.2.0 focused JUnit: 96 passed,
+  0 failed/errors/skips, exit 0 (2026-11-26 12:38:11–12:39:31 UTC). This
+  includes panel, configured-image route, tenant/auth denial, prompt
+  preservation, CSRF, evidence, contract/execution, required-stage and
+  source-identity regressions. Raw sanitized log/JUnit and checksum manifest:
+  `docs/visual-qa/evidence/issue-73/vq03b3c-preoptin-reference-20261126/REPORT.md`.
+- No browser, provider, Docker, production, CI, merge or deploy was used.
+  Overall A–F remain unchanged: full-suite A and exact-CI E unqualified;
+  approved Nova B/C blocked; D historical; F still uncertified by PF-04b10
+  incident uncertainty. PR #74 remains draft.

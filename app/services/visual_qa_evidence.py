@@ -75,6 +75,62 @@ def _regular_file(path: Path) -> bytes:
     return path.read_bytes()
 
 
+def read_configured_reference_png(repo_root: Path, relative_path: str, viewport: dict) -> bytes:
+    """Read one contract-selected reference without following path symlinks.
+
+    The caller must resolve the path from the current repo-local visual_qa
+    contract and verify that source is clean/current before and after this
+    read. This helper never accepts a request path or arbitrary host path.
+    """
+    if not isinstance(relative_path, str) or "\\" in relative_path or "\x00" in relative_path:
+        raise VisualEvidenceError("configured reference path is invalid")
+    parts = relative_path.split("/")
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        raise VisualEvidenceError("configured reference path is not repository-relative")
+    if (not isinstance(viewport, dict) or type(viewport.get("width")) is not int
+            or type(viewport.get("height")) is not int):
+        raise VisualEvidenceError("configured reference viewport is invalid")
+
+    root = Path(repo_root).resolve(strict=True)
+    directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    directory_fd = os.open(root, directory_flags)
+    file_fd = None
+    try:
+        for component in parts[:-1]:
+            next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        file_fd = os.open(parts[-1], file_flags, dir_fd=directory_fd)
+        before = os.fstat(file_fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise VisualEvidenceError("configured reference is not a regular file")
+        if before.st_size > MAX_ARTIFACT_BYTES:
+            raise VisualEvidenceError("configured reference exceeds the size limit")
+        chunks = bytearray()
+        while len(chunks) <= MAX_ARTIFACT_BYTES:
+            chunk = os.read(file_fd, min(1024 * 1024, MAX_ARTIFACT_BYTES + 1 - len(chunks)))
+            if not chunk:
+                break
+            chunks.extend(chunk)
+        after = os.fstat(file_fd)
+        identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+        identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+        if identity_before != identity_after or len(chunks) != before.st_size:
+            raise VisualEvidenceError("configured reference changed while reading")
+        data = bytes(chunks)
+        dimensions = _png_dimensions(data, "configured reference")
+        if dimensions != (viewport["width"], viewport["height"]):
+            raise VisualEvidenceError("configured reference dimensions differ from its viewport")
+        return data
+    except OSError as exc:
+        raise VisualEvidenceError("configured reference is missing or unsafe") from exc
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        os.close(directory_fd)
+
+
 def _png_dimensions(data: bytes, label: str) -> tuple[int, int]:
     if len(data) < 45 or data[:8] != b"\x89PNG\r\n\x1a\n":
         raise VisualEvidenceError(f"corrupt PNG signature: {label}")

@@ -161,7 +161,9 @@ Lần chạy synthetic được ghi tại `docs/visual-qa/evidence/issue-73/proj
 
 Mở trang chi tiết của Task. Panel **Visual QA** đọc contract trong `PROJECT.yaml` của từng Builder workspace và run `visual_qa` đã ghi trong `test_runs`; panel không tạo dashboard, stage, status hay lệnh thực thi riêng.
 
-- Nếu prompt Task không có `VISUAL_QA_REQUIRED: true`, panel ghi **Không bắt buộc**. Chỉ có block trong `PROJECT.yaml` không tự bật gate.
+- Nếu prompt Task không có `VISUAL_QA_REQUIRED: true`, panel ghi **Không bắt buộc**. Khi workspace có source sạch và contract hợp lệ, người dùng vẫn xem được reference đã commit trước khi chọn opt-in. Chỉ có block trong `PROJECT.yaml` không tự bật gate.
+- Phần opt-in hiển thị prompt hiện tại và checkbox xác nhận. Lưu dùng chính endpoint lưu prompt hiện có; nội dung prompt được giữ nguyên, marker được thêm khi cần và version prompt chỉ tăng nếu nội dung thực sự đổi. Lưu không chạy Builder hay TestRunner; người dùng vẫn bấm hành động hiện có.
+- Reference preview chỉ lấy đường dẫn đã xác định từ `PROJECT.yaml` trong workspace hiện tại, đòi hỏi HEAD sạch/khớp, ảnh PNG thường (không symlink) đúng kích thước viewport. Route read-only yêu cầu quyền xem Task, không nhận path/URL từ client và trả `no-store`. Thiếu/không hợp lệ/stale/dirty thì ảnh không được phục vụ. Approval không được suy ra từ việc ảnh hiển thị.
 - Nếu đã opt-in, panel hiện route loopback, viewport/reference, SHA-256 reference, ngưỡng, SHA source đã đo và trạng thái run. Nguồn thiết kế không có trường approval thì UI ghi rõ **Chưa ghi nhận — không đồng nghĩa đã được duyệt**.
 - Metrics chỉ xuất hiện sau khi verifier của ProjectFlow xác minh lại evidence theo đúng run, source SHA, reference, route, viewport và contract. Thiếu/sai evidence sẽ không hiện metric như một kết quả hợp lệ; run SHA cũ hiện **STALE**.
 - Nếu CLI hoàn tất capture, chỉ lỗi pixel vượt threshold, và manifest/metrics/ảnh khớp đầy đủ (không JS error, request ngoài, overflow hay lỗi chạy), panel có thể hiển thị ảnh **Không đạt — dùng để sửa**. Stage vẫn là `FAIL`; ảnh này không được dùng để PASS gate. Timeout, browser/server lỗi, thiếu viewport/manifest, source bẩn/cũ hoặc evidence sai hash vẫn không có ảnh chẩn đoán.
@@ -169,7 +171,7 @@ Mở trang chi tiết của Task. Panel **Visual QA** đọc contract trong `PRO
 - Với run hiện tại PASS và source còn sạch, panel hiện thumbnail **Reference / Actual / Diff / Overlay** cho từng viewport. Ảnh tải từ route GET có authz theo test run; manifest và digest được kiểm tra lại trước khi trả byte. Run stale, source dirty, sai tenant, opt-out hoặc artifact bị sửa đều không được phục vụ.
 - **Run Test** trong panel gọi đúng endpoint TestRunner hiện có cho workspace. **Xem log run này** dùng route log hiện có và vẫn qua read authorization. Chỉ bốn PNG cố định được phục vụ qua route GET có authz; report/Markdown không được mở, và panel không nhận upload/URL/command.
 
-Opt-in qua prompt Task hiện có: mở **Task Prompt → Edit**, thêm đúng dòng sau, lưu prompt rồi dùng **Run Test** trên Builder workspace:
+Opt-in từ panel Task: xem reference đã cấu hình, mở **Bật Visual QA bắt buộc sau khi đã xem reference**, xác nhận checkbox và lưu prompt hiện tại. ProjectFlow thêm marker nếu cần mà không xóa brief. Sau đó người dùng chủ động bấm **Run Test** trên Builder workspace. Cũng có thể mở **Task Prompt → Edit** và thêm đúng dòng sau:
 
 ```text
 VISUAL_QA_REQUIRED: true

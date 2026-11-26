@@ -4,7 +4,7 @@
 {% if t.implementation_prompt %}
 <p><small>Nguồn (Prompt source)</small><b>Detailed Prompt</b></p>
 <pre class="prompt-box">{{t.implementation_prompt}}</pre>
-<details><summary>+ Edit</summary>
+<details id="prompt-edit"><summary>+ Edit</summary>
 <form method="post" action="/api/tasks/{{t.id}}/prompt"><textarea name="implementation_prompt" rows="6">{{t.implementation_prompt}}</textarea><button>Save Prompt</button></form>
 </details>
 {% else %}
@@ -108,25 +108,33 @@
 <div class="row"><div><h3 id="visual-qa-title">Visual QA</h3><small>Kết quả từ TestRunner và TaskDecisionService hiện có.</small></div>
 <span class="badge {{'pending' if decision.visual_qa_required else ''}}">{{'Bắt buộc theo Task' if decision.visual_qa_required else 'Không bắt buộc'}}</span></div>
 {% if not decision.visual_qa_required %}
-<p>Task này đang opt-out. Cấu hình <code>visual_qa</code> trong <code>PROJECT.yaml</code> không tự bật gate. Muốn bật, thêm dòng <code>VISUAL_QA_REQUIRED: true</code> vào prompt Task hiện có rồi chạy lại test của Builder.</p>
+<p>Task này đang opt-out. Cấu hình <code>visual_qa</code> trong <code>PROJECT.yaml</code> chỉ để xem trước, không tự bật gate. Xem reference bên dưới rồi chủ động dùng biểu mẫu opt-in. Việc lưu prompt không tự chạy test.</p>
 {% else %}
 <p>Gate chỉ áp dụng vì prompt Task có <code>VISUAL_QA_REQUIRED: true</code>. Opt-in chỉ yêu cầu đo kiểm; agent Builder và nút Run Test hiện có vẫn là luồng thực thi.</p>
+{% endif %}
 {% if not workspaces %}<div class="warning">Chưa có Builder workspace để đọc contract hoặc chạy Visual QA.</div>{% endif %}
+{% set reference_available = namespace(value=false) %}
 {% for w in workspaces %}
 <div class="nested" data-visual-qa-workspace="{{w.id}}">
-<div class="row"><b>{{w.repo_name}}</b><span class="badge">Automated tests: {{w.tests_status}}</span></div>
-{% if w.visual_qa.contract_state == 'INVALID' %}
-<div class="warning">Contract Visual QA không hợp lệ. Gate không được coi là PASS.</div>
+<div class="row"><b>{{w.repo_name}}</b>{% if decision.visual_qa_required %}<span class="badge">Automated tests: {{w.tests_status}}</span>{% endif %}</div>
+{% if w.visual_qa.contract_state == 'VALID' %}{% set reference_available.value = true %}{% endif %}
+{% if w.visual_qa.contract_state == 'SOURCE_NOT_CLEAN' %}<div class="warning">Source chưa sạch hoặc SHA đã đổi. Commit/clean source để xem reference an toàn.</div><div class="warning">Bằng chứng thiếu hoặc không hợp lệ khi source chưa sạch; gate vẫn bị chặn.</div>
+{% elif w.visual_qa.contract_state == 'INVALID' %}
+<div class="warning">Contract Visual QA không hợp lệ. Reference chưa hợp lệ hoặc không thể xem an toàn.</div>
 {% elif w.visual_qa.contract_state == 'MISSING' %}
-<div class="warning">Task đã opt-in nhưng repo chưa có contract Visual QA hợp lệ trong <code>PROJECT.yaml</code>.</div>
-{% elif w.visual_qa.contract_state == 'VALID' %}
+<div class="info">Workspace chưa có contract Visual QA hợp lệ trong <code>PROJECT.yaml</code>; trang này không cho chọn đường dẫn hoặc URL tùy ý.</div>{% if decision.visual_qa_required %}<div class="warning">Task đã opt-in nhưng repo chưa có contract Visual QA hợp lệ</div>{% endif %}
+{% endif %}
+{% if w.visual_qa.contract_state == 'VALID' %}
 <dl class="facts">
 <div class="wide"><dt>Route loopback</dt><dd><code>{{w.visual_qa.contract.route}}</code></dd></div>
 <div><dt>Ngưỡng</dt><dd>{{'%.1f%%'|format(w.visual_qa.contract.threshold * 100)}}</dd></div>
+<div class="wide"><dt>SHA source hiện tại (clean)</dt><dd><code>{{w.visual_qa.tested_commit}}</code></dd></div>
 <div><dt>Phê duyệt thiết kế</dt><dd>Chưa ghi nhận — không đồng nghĩa đã được duyệt.</dd></div>
 {% for ref in w.visual_qa.contract.references %}<div class="wide"><dt>Reference {{ref.viewport}}</dt><dd><code>{{ref.path}}</code><br><small>SHA-256 <code>{{ref.sha256}}</code></small></dd></div>{% endfor %}
 </dl>
+<div class="visual-qa-previews" aria-label="Reference thiết kế đã cấu hình">{% for ref in w.visual_qa.contract.references %}<figure><figcaption>Reference {{ref.viewport}}</figcaption><img src="{{ref.preview_url}}" alt="Ảnh reference đã cấu hình, viewport {{ref.viewport}}" loading="lazy" decoding="async"></figure>{% endfor %}</div>
 {% endif %}
+{% if decision.visual_qa_required %}
 {% if w.visual_qa.run %}
 <div class="row"><div><small>Visual QA run #{{w.visual_qa.run.id}}</small><br><small>SHA đã đo</small> <code>{{w.visual_qa.run.tested_commit or '—'}}</code></div>
 <span class="badge {{'failed' if w.visual_qa.evidence_state in ['FAIL','TIMEOUT','INVALID','BLOCKED','DIAGNOSTIC'] else ('ready' if w.visual_qa.evidence_state == 'VALID' else 'pending')}}">{{w.visual_qa.evidence_state}}{% if not w.visual_qa.run.is_current %} · STALE{% endif %}</span></div>
@@ -145,8 +153,21 @@
 {% elif w.visual_qa.evidence_state == 'STALE' %}<div class="warning">Run này thuộc SHA cũ; chạy lại bằng nút Test hiện có để tạo evidence cho source hiện tại.</div>
 {% elif w.visual_qa.required and w.visual_qa.evidence_state in ['FAIL','TIMEOUT','QUEUED','RUNNING','SKIPPED','BLOCKED'] %}<div class="warning">Chưa có evidence PASS hợp lệ cho run này: {{w.visual_qa.evidence_state}}.</div>{% endif %}
 <form method="post" action="/api/workspaces/{{w.id}}/test"><button class="ghost">Run Test</button></form>
+{% endif %}
 </div>
 {% endfor %}
+{% if not decision.visual_qa_required and reference_available.value %}
+<details id="visual-qa-opt-in" class="nested"><summary>Bật Visual QA bắt buộc sau khi đã xem reference</summary>
+<form method="post" action="/api/tasks/{{t.id}}/prompt">
+<label for="visual-qa-prompt-{{t.id}}">Prompt hiện tại (có thể giữ nguyên hoặc chỉnh sửa)</label>
+<textarea id="visual-qa-prompt-{{t.id}}" name="implementation_prompt" rows="6">{{t.implementation_prompt or ''}}</textarea>
+<label><input type="checkbox" name="visual_qa_required" value="true" required> Tôi muốn bật gate Visual QA cho Task này</label>
+<p><small>Lưu prompt sẽ thêm marker opt-in nếu cần. Không sửa brief, không thay <code>PROJECT.yaml</code> và không tự chạy test.</small></p>
+<button type="submit">Lưu prompt và bật Visual QA</button>
+</form>
+</details>
+{% elif not decision.visual_qa_required and workspaces %}
+<p class="info">Chỉ có thể bật từ panel này sau khi ít nhất một reference hợp lệ được đọc từ source sạch hiện tại.</p>
 {% endif %}
 </section>
 

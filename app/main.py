@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import sqlite3
 import time
@@ -3026,6 +3027,67 @@ def create_app(settings=None):
         row=db.one("SELECT * FROM test_runs WHERE id=?",(rid,));
         if not row: raise HTTPException(404)
         return f"STDOUT (tail)\n{row['stdout_tail']}\n\nSTDERR (tail)\n{row['stderr_tail']}"
+    @app.get("/tasks/{tid}/workspaces/{wid}/visual-reference/{tested_commit}/{viewport}")
+    def task_visual_reference(tid: int, wid: int, tested_commit: str, viewport: str,
+                              _authz: None = Depends(require_read_role("task", "tid"))):
+        """Serve only the current, committed reference configured for this Task's workspace."""
+        from app.services.visual_qa_contract import load_visual_qa_contract
+        from app.services.visual_qa_evidence import read_configured_reference_png
+
+        denied = HTTPException(404, "Configured visual reference unavailable")
+        if not re.fullmatch(r"[0-9a-f]{40}", tested_commit):
+            raise denied
+        workspace = db.one(
+            "SELECT w.*,r.repo_path AS registered_repo_path,r.git_fingerprint AS registered_git_fingerprint "
+            "FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id WHERE w.id=? AND w.task_id=?",
+            (wid, tid),
+        )
+        if not workspace:
+            raise denied
+        try:
+            repo_path = Path(workspace["registered_repo_path"]).resolve(strict=True)
+            worktree_path = git.validate_worktree(workspace["worktree_path"])
+            if not repo_path.is_dir() or not worktree_path.is_dir():
+                raise denied
+            repo_fingerprint = git.repo_fingerprint(repo_path)
+            worktree_fingerprint = git.repo_fingerprint(worktree_path)
+            if (not repo_fingerprint or repo_fingerprint != worktree_fingerprint
+                    or (workspace["registered_git_fingerprint"]
+                        and workspace["registered_git_fingerprint"] != repo_fingerprint)):
+                raise denied
+            before = git.source_state(worktree_path)
+            if not before["clean"] or before["head"] != tested_commit:
+                raise denied
+            contract = load_visual_qa_contract(worktree_path)
+            if contract is None or viewport not in contract["reference"]:
+                raise denied
+            viewport_spec = next(
+                (item for item in contract["viewports"]
+                 if f"{item['width']}x{item['height']}" == viewport),
+                None,
+            )
+            if viewport_spec is None:
+                raise denied
+            image = read_configured_reference_png(
+                worktree_path, contract["reference"][viewport], viewport_spec,
+            )
+            after = git.source_state(worktree_path)
+            if (not after["clean"] or after["head"] != before["head"]
+                    or after["tracked_diff_sha256"] != before["tracked_diff_sha256"]):
+                raise denied
+        except HTTPException:
+            raise
+        except Exception:
+            # Never reveal filesystem paths or contract-parser errors to a caller.
+            raise denied
+        return Response(
+            content=image, media_type="image/png",
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store",
+                "Content-Disposition": 'inline; filename="reference.png"',
+            },
+        )
     @app.get("/test-runs/{rid}/visual/{viewport}/{artifact}")
     def visual_run_image(rid: int, viewport: str, artifact: str,
                          _authz: None = Depends(require_read_role("test_run", "rid"))):
@@ -3355,7 +3417,7 @@ def create_app(settings=None):
         regenerate_agent_prompt(tid,repo_row)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/prompt")
-    def save_prompt(tid:int,implementation_prompt:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
+    def save_prompt(tid:int,implementation_prompt:str=Form(""), visual_qa_required: str = Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Edit the Implementation Prompt (section: 'do not rewrite the
         user's prompt silently' -- only the user changes this text, ever).
         Bumps brief_version on an actual content change, the exact same
@@ -3366,6 +3428,15 @@ def create_app(settings=None):
         agent_prompt so it always reflects the latest saved intent."""
         t=task_row(tid)
         new_prompt=implementation_prompt.strip()
+        from app.services.visual_qa_contract import task_requires_visual_qa
+        prompt_marker_task = {"implementation_prompt": t.get("implementation_prompt") or ""}
+        new_prompt_marker_task = {"implementation_prompt": new_prompt}
+        if visual_qa_required.strip().lower() == "true" and not task_requires_visual_qa(t):
+            new_prompt = (new_prompt + "\n\n" if new_prompt else "") + "VISUAL_QA_REQUIRED: true"
+        elif task_requires_visual_qa(prompt_marker_task) and not task_requires_visual_qa(new_prompt_marker_task):
+            # Keep an existing prompt marker when the user edits other text;
+            # a required marker in the separate brief remains untouched.
+            new_prompt = (new_prompt + "\n\n" if new_prompt else "") + "VISUAL_QA_REQUIRED: true"
         changed=(t.get("implementation_prompt") or "")!=new_prompt
         sets=["implementation_prompt=?","updated_at=CURRENT_TIMESTAMP"]
         params=[new_prompt]

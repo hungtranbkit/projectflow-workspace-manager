@@ -153,6 +153,112 @@ def test_opted_out_task_explains_contract_does_not_activate_gate(client, git_rep
     assert "Bắt buộc theo Task" not in response.text
 
 
+def test_opted_out_task_can_preview_committed_reference_without_running_gate(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=False)
+    expected = (worktree / "docs/order.png").read_bytes()
+
+    response = client.get(f"/tasks/{task_id}")
+    image = client.get(f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932")
+
+    assert response.status_code == 200
+    assert "Không bắt buộc" in response.text
+    assert "http://127.0.0.1:4173/orders" in response.text
+    assert "docs/order.png" in response.text
+    assert hashlib.sha256(expected).hexdigest() in response.text
+    assert f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932" in response.text
+    assert "Chưa ghi nhận — không đồng nghĩa đã được duyệt." in response.text
+    assert "Bật Visual QA bắt buộc" in response.text
+    visual_panel = response.text.split('<section class="panel" id="visual-qa"', 1)[1].split("</section>", 1)[0]
+    assert "Run Test" not in visual_panel
+    assert image.status_code == 200
+    assert image.content == expected
+    assert image.headers["content-type"] == "image/png"
+    assert image.headers["x-content-type-options"] == "nosniff"
+    assert image.headers["cache-control"] == "private, no-store"
+    assert client.app.state.decision.evaluate(task_id)["visual_qa_required"] is False
+    assert client.app.state.db.one("SELECT COUNT(*) AS n FROM test_runs WHERE workspace_id=?", (workspace_id,))["n"] == 0
+
+
+def test_reference_preview_rejects_stale_sha_dirty_worktree_and_unconfigured_viewport(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=False)
+    prefix = f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference"
+
+    assert client.get(f"{prefix}/{'0' * 40}/430x932").status_code == 404
+    assert client.get(f"{prefix}/{head}/1366x768").status_code == 404
+    (worktree / "README.md").write_text("dirty source\n", encoding="utf-8")
+    assert client.get(f"{prefix}/{head}/430x932").status_code == 404
+    page = client.get(f"/tasks/{task_id}")
+    assert "Source chưa sạch" in page.text
+    assert f"{prefix}/{head}/430x932" not in page.text
+
+
+def test_reference_preview_rejects_symlink_even_when_symlink_is_inside_repo(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, worktree, _head = _task_workspace(client, repo, opted_in=False)
+    reference = worktree / "docs/order.png"
+    original = worktree / "docs/order-original.png"
+    original.write_bytes(reference.read_bytes())
+    reference.unlink()
+    reference.symlink_to("order-original.png")
+    _git(worktree, "add", "-A")
+    _git(worktree, "commit", "-m", "fixture symlink reference")
+    head = _git(worktree, "rev-parse", "HEAD")
+
+    response = client.get(f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932")
+    page = client.get(f"/tasks/{task_id}")
+
+    assert response.status_code == 404
+    assert "Reference chưa hợp lệ hoặc không thể xem an toàn" in page.text
+
+
+def test_prompt_save_explicitly_opts_in_and_preserves_existing_prompt_without_running_test(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, _worktree, _head = _task_workspace(client, repo, opted_in=False)
+    client.app.state.db.execute(
+        "UPDATE tasks SET implementation_prompt=?, brief_version=4 WHERE id=?",
+        ("Keep this user-written request verbatim.", task_id),
+    )
+    page = client.get(f"/tasks/{task_id}")
+    assert 'name="visual_qa_required"' in page.text
+
+    response = client.post(f"/api/tasks/{task_id}/prompt", data={
+        "implementation_prompt": "Keep this user-written request verbatim.",
+        "visual_qa_required": "true",
+    }, follow_redirects=False)
+
+    assert response.status_code == 303
+    task = client.app.state.db.one("SELECT implementation_prompt,brief_version FROM tasks WHERE id=?", (task_id,))
+    assert task["implementation_prompt"] == "Keep this user-written request verbatim.\n\nVISUAL_QA_REQUIRED: true"
+    assert task["brief_version"] == 5
+    assert client.app.state.decision.evaluate(task_id)["visual_qa_required"] is True
+    assert client.app.state.db.one("SELECT COUNT(*) AS n FROM test_runs WHERE workspace_id=?", (workspace_id,))["n"] == 0
+
+
+def test_prompt_save_cannot_remove_optin_marker_or_brief_content(client, git_repo):
+    _root, repo = git_repo
+    task_id, workspace_id, _worktree, _head = _task_workspace(client, repo, opted_in=True)
+    client.app.state.db.execute(
+        "UPDATE tasks SET implementation_prompt=?, brief_requirements=?, brief_version=9 WHERE id=?",
+        ("User text\nVISUAL_QA_REQUIRED: true", "Legacy requirements remain", task_id),
+    )
+
+    response = client.post(f"/api/tasks/{task_id}/prompt", data={
+        "implementation_prompt": "Updated user text without marker",
+    }, follow_redirects=False)
+
+    assert response.status_code == 303
+    task = client.app.state.db.one(
+        "SELECT implementation_prompt,brief_requirements,brief_version FROM tasks WHERE id=?", (task_id,)
+    )
+    assert task["implementation_prompt"] == "Updated user text without marker\n\nVISUAL_QA_REQUIRED: true"
+    assert task["brief_requirements"] == "Legacy requirements remain"
+    assert task["brief_version"] == 10
+    assert client.app.state.decision.evaluate(task_id)["visual_qa_required"] is True
+    assert client.app.state.db.one("SELECT COUNT(*) AS n FROM test_runs WHERE workspace_id=?", (workspace_id,))["n"] == 0
+
+
 def test_current_valid_run_displays_real_verified_metrics_and_log_link(client, git_repo):
     _root, repo = git_repo
     task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
@@ -521,14 +627,22 @@ def test_visual_image_route_reuses_required_authz_and_denies_other_tenant(git_re
         anonymous = TestClient(owner.app)
         expected = (owner.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
                     / str(workspace_id) / str(run_id) / "430x932" / "actual.png").read_bytes()
+        expected_reference = (worktree / "docs/order.png").read_bytes()
 
         allowed = owner.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
         unauthenticated = anonymous.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
         foreign_tenant = outsider.get(f"/test-runs/{run_id}/visual/430x932/actual.png")
+        reference_url = f"/tasks/{task_id}/workspaces/{workspace_id}/visual-reference/{head}/430x932"
+        allowed_reference = owner.get(reference_url)
+        unauthenticated_reference = anonymous.get(reference_url)
+        foreign_reference = outsider.get(reference_url)
 
         assert allowed.status_code == 200 and allowed.content == expected
         assert unauthenticated.status_code == 401
         assert foreign_tenant.status_code == 404
+        assert allowed_reference.status_code == 200 and allowed_reference.content == expected_reference
+        assert unauthenticated_reference.status_code == 401
+        assert foreign_reference.status_code == 404
         assert task_id > 0
     finally:
         for logger in loggers:

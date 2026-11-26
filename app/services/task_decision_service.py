@@ -313,7 +313,7 @@ class TaskDecisionService:
         return view
 
     def _visual_qa_panel(self, workspace, head):
-        """Read-only, task-scoped presentation data for the existing UI gate."""
+        """Read-only, task-scoped contract preview and existing gate data."""
         from app.services.visual_qa_contract import task_requires_visual_qa, load_visual_qa_contract
 
         task = self.db.one("SELECT * FROM tasks WHERE id=?", (workspace.get("task_id"),)) if workspace.get("task_id") else None
@@ -322,45 +322,60 @@ class TaskDecisionService:
             "required": required,
             "repo_name": workspace.get("repo_name") or "Repository",
             "tested_commit": head,
-            "contract_state": "NOT_REQUIRED" if not required else "MISSING",
+            "contract_state": "MISSING",
             "contract": None,
             "run": None,
             "evidence_state": "NOT_REQUIRED" if not required else "NOT_RUN",
             "metrics": [],
             "previews": [],
         }
-        if not required:
+        if not task:
             return panel
 
         repo_path = Path(workspace["worktree_path"])
-        from app.services.visual_qa_evidence import MAX_ARTIFACT_BYTES
+        from app.services.visual_qa_evidence import read_configured_reference_png
         contract = None
         try:
             contract = load_visual_qa_contract(repo_path)
         except Exception:
             panel["contract_state"] = "INVALID"
-            panel["evidence_state"] = "BLOCKED"
+            if required:
+                panel["evidence_state"] = "BLOCKED"
+            return panel
+        if contract is None:
+            panel["contract_state"] = "MISSING"
+            if required:
+                panel["evidence_state"] = "BLOCKED"
+            return panel
+        try:
+            source = self.git.source_state(repo_path)
+            if not source["clean"] or source["head"] != head:
+                panel["contract_state"] = "SOURCE_NOT_CLEAN"
+                if required:
+                    panel["evidence_state"] = "BLOCKED"
+                return panel
+        except Exception:
+            panel["contract_state"] = "INVALID"
+            if required:
+                panel["evidence_state"] = "BLOCKED"
         if contract is not None:
             references = []
             try:
                 for viewport in contract["viewports"]:
                     key = f"{viewport['width']}x{viewport['height']}"
                     relative_path = contract["reference"][key]
-                    reference_path = repo_path / relative_path
-                    if reference_path.is_symlink() or not reference_path.is_file():
-                        raise ValueError("reference must be a regular repository file")
-                    if reference_path.stat().st_size > MAX_ARTIFACT_BYTES:
-                        raise ValueError("reference exceeds the evidence size limit")
-                    reference_bytes = reference_path.read_bytes()
+                    reference_bytes = read_configured_reference_png(repo_path, relative_path, viewport)
                     references.append({
                         "viewport": key,
                         "path": relative_path,
                         "sha256": hashlib.sha256(reference_bytes).hexdigest(),
+                        "preview_url": f"/tasks/{task['id']}/workspaces/{workspace['id']}/visual-reference/{head}/{key}",
                     })
             except Exception:
                 contract = None
                 panel["contract_state"] = "INVALID"
-                panel["evidence_state"] = "BLOCKED"
+                if required:
+                    panel["evidence_state"] = "BLOCKED"
             else:
                 panel["contract_state"] = "VALID"
                 panel["contract"] = {
@@ -369,6 +384,8 @@ class TaskDecisionService:
                     "references": references,
                     "approval": "NOT_RECORDED",
                 }
+        if not required:
+            return panel
         row = self.db.one(
             "SELECT * FROM test_runs "
             "WHERE workspace_type='agent' AND workspace_id=? AND stage='visual_qa' AND tested_commit=? ORDER BY id DESC LIMIT 1",
