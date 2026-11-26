@@ -14,5 +14,9 @@
   "docker_used": false,
   "provider_invoked": false,
   "full_suite_run": false,
-  "gate_effect": "none; A-F unchanged"
+  "gate_effect": "none; A-F unchanged",
+  "junit_suite_time_seconds": 75.23,
+  "junit_case_time_sum_seconds": 74.935,
+  "wall_elapsed_seconds": 80.298051,
+  "duration_note": "Earlier report value 57.746s was stale/incorrect; raw JUnit unchanged."
 }

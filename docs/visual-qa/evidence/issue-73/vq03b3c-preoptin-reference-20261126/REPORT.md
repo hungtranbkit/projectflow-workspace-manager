@@ -31,7 +31,7 @@ DOCKER_HOST=unix:///tmp/pf-vq03b3b-no-daemon.sock \
   --junitxml="$EVIDENCE_TMP/focused-tests.xml"
 ```
 
-Trong lần chạy thực tế, `$TASK_VENV` là venv task-local hiện có (Python 3.14.4, pytest 9.2.0); `$EVIDENCE_TMP` là thư mục scratch task-owned. Test result: **96 passed, 0 failed, 0 errors, 0 skipped**, exit 0; JUnit runtime 57.746 giây. Lượt này gồm preview opt-out, stale SHA, dirty source, viewport không cấu hình, symlink, opt-in giữ nội dung, không xóa marker, không tự tạo test run, CSRF, unauthenticated/cross-tenant denial, route PNG cũ, evidence/contract/execution, TaskDecisionService và source-identity.
+Trong lần chạy thực tế, `$TASK_VENV` là venv task-local hiện có (Python 3.14.4, pytest 9.2.0); `$EVIDENCE_TMP` là thư mục scratch task-owned. Test result: **96 passed, 0 failed, 0 errors, 0 skipped**, exit 0. JUnit suite time là **75.230 giây**, tổng `time` của từng test case là **74.935 giây**, còn thời gian tường từ timestamp bắt đầu/kết thúc là **80.298051 giây**. Con số 57.746 giây ghi trước đây là sai/stale; JUnit thô không bị sửa. Lượt này gồm preview opt-out, stale SHA, dirty source, viewport không cấu hình, symlink, opt-in giữ nội dung, không xóa marker, không tự tạo test run, CSRF, unauthenticated/cross-tenant denial, route PNG cũ, evidence/contract/execution, TaskDecisionService và source-identity.
 
 `git diff --check` và `py_compile` cho Python source/test đã exit 0. Trước khi sửa, test mới đã được chạy và thất bại đúng vì opt-out page không hiển thị route reference; stdout của lượt RED chỉ còn trong execution transcript, không được giữ lại như raw artifact. Lượt GREEN cuối có raw sanitized log và JUnit trong thư mục này.
 

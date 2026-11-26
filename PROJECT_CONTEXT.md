@@ -312,3 +312,11 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
   Overall A–F remain unchanged: full-suite A and exact-CI E unqualified;
   approved Nova B/C blocked; D historical; F still uncertified by PF-04b10
   incident uncertainty. PR #74 remains draft.
+
+## 2026-11-26 VQ-03c1 — committed-source binding
+
+- Task branch `agent/codex/vq03b3b-preoptin-reference-20261126`; source commit `4d88237e0611034d86df0d769442309f0f8e15d6`, tree `f411335d50518e62370d68e0bd6170963e3dd4e7`. This rebased source commit was tested locally after replay onto the exact PR base; evidence is a separate commit.
+- Visual QA `PROJECT.yaml` and reference PNG inputs are now read as regular Git blobs from the exact tested commit, with worktree bytes/index flags checked; ignored, untracked, symlinked, stale, hidden-index or changed inputs fail closed. Task panel returns invalid without a preview URL when source-state lookup fails. TestRunner, evidence validation and TaskDecisionService use the committed contract loader; backend opt-out remains unchanged.
+- Focused suite on source commit: 107 passed, no failures/errors/skips, exit 0. One pinned-browser subprocess case was excluded because its Chromium executable was unavailable; no browser install/retry, full suite, Docker, provider or CI run.
+- Evidence: `docs/visual-qa/evidence/issue-73/vq03c-source-integrity-20261126/REPORT.md`. VQ-03c timing corrected using raw JUnit: suite 75.230s, case sum 74.935s, wall 80.298051s; raw JUnit unchanged.
+- No merge/deploy. A–F are unchanged; full suite, compatible isolated browser/provider runner, approved Nova reference and exact-head CI remain blockers. Next: publish source/evidence commits to existing PR #74 only after expected-head recheck, then wait for authorized compatible runner before browser/full-suite work.
