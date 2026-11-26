@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="3" time="11.854" timestamp="2026-11-26T09:22:42.686746+07:00" hostname="dell-Latitude-5511"><testcase classname="tests.test_incidents" name="test_sync_status_advances_through_plan_review_deploy" time="2.642" /><testcase classname="tests.test_incidents" name="test_real_full_incident_closed_loop_reaches_closed" time="3.333" /><testcase classname="tests.test_product_acceptance" name="test_real_full_acceptance_flow_reaches_change_complete" time="5.660"><failure message="AssertionError: ['TESTS_PASS']&#10;assert 'ACTIVE' == 'COMPLETE'&#10;  &#10;  - COMPLETE&#10;  + ACTIVE">client = &lt;starlette.testclient.TestClient object at 0x75007de86490&gt;
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-650/test_real_full_acceptance_flow0/root'), PosixPath('/tmp/pytest-of-dell/pytest-650/test_real_full_acceptance_flow0/root/demo'))
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-650/test_real_full_acceptance_flow0')
+
+    def test_real_full_acceptance_flow_reaches_change_complete(client, git_repo, tmp_path):
+        """The exact E11.24 flow: Change -&gt; release -&gt; production deployment
+        -&gt; runtime verified -&gt; acceptance request -&gt; real checklist (from
+        real spec AC + real MANUAL_ACCEPTANCE TestCaseSpec) -&gt; live URL
+        present -&gt; human simulation checks PASS -&gt; accept -&gt; HUMAN_ACCEPTANCE
+        gate PASS -&gt; Workflow Change reaches COMPLETE (CONTROLLED profile,
+        every other gate satisfied with real E1-E10 evidence, same
+        construction test_workflow_engine.py's own CONTROLLED test uses)."""
+        root, _ = git_repo
+        repo = make_release_repo(root, name="rel19100", port=19100)
+        rid = register(client, repo, "demo")
+        cid = _user_facing_change(client, rid, title="Add an order confirmation screen")
+        # AGENTIC_STANDARD, not CONTROLLED -- exercises E11.3's own
+        # "recommended/default after Production deploy when user-facing
+        # behavior changed" REQUIRED_IF path directly (this Change IS
+        # user-facing), and avoids CONTROLLED's mandatory SecurityReview
+        # (a separate, already-tested E9 concern, not what this test is
+        # about).
+        client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "AGENTIC_STANDARD"})
+        # Deliberately no Change-level GOVERNED_BY trace link to FEAT-SPEC-
+        # LAYER here (unlike the Task-level /api/tasks/{tid}/spec linkage
+        # below, which SPEC_COMPLIANCE_PASS needs) -- TEST_DESIGN_READY's
+        # own coverage check would then require a TestCaseSpec proving
+        # EVERY real requirement on that whole production feature, not just
+        # REQ-001, which is unrelated E7 scope this test isn't exercising.
+        # test_test_design.py already covers TEST_DESIGN_READY's real
+        # coverage-gate behavior in depth.
+    
+        client.app.state.work_products.create(kind="FEATURE_SPEC", title="Spec", change_id=cid, status="APPROVED")
+        client.app.state.work_products.create(kind="TECHNICAL_DESIGN", title="Design", change_id=cid, status="APPROVED")
+    
+        tid, integ = _reviewed_and_integrated_task(client, repo, cid, rid)
+        # LOW risk -- same as test_workflow_engine.py's own CONTROLLED
+        # HUMAN_ACCEPTANCE test -- so SpecComplianceVerifier's QA
+        # requirement (RISK_GATES) doesn't need a separate sandbox/manual-
+        # verification flow this test isn't otherwise exercising.
+        _db(client).execute("UPDATE tasks SET risk_profile='LOW' WHERE id=?", (tid,))
+        client.post(f"/api/tasks/{tid}/spec", data={
+            "classification": "BUG_FIX_TO_EXISTING_SPEC", "feature_id": "FEAT-SPEC-LAYER",
+            "requirement_ids": "REQ-001", "acceptance_ids": "AC-001",
+        })
+        head = integ["integrated_commit"]
+        db = _db(client)
+        task_workspace = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
+        # SPEC_COMPLIANCE_PASS requires at least one verification_reports row
+        # stamped with this exact spec_feature_id (SpecComplianceVerifier's
+        # own S7 "never PASS on a declared-but-never-produced mapping" rule)
+        # -- _reviewed_and_integrated_task's own report was submitted before
+        # the /api/tasks/{tid}/spec linkage above, so a fresh one is needed.
+        client.post(f"/api/workspaces/{task_workspace['id']}/verification-report",
+                    data={"work_status": "READY", "what_changed": "order confirmation screen"}, follow_redirects=False)
+        # TESTS_PASS gate reuses TaskDecisionService's own AUTOMATED_TESTS
+        # checklist item (test_runs, workspace_type='agent', pinned to the
+        # exact submitted HEAD) -- the same construction test_workflow_
+        # engine.py's own CONTROLLED test uses.
+        db.execute(
+            "INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit) VALUES('agent',?,?,?,?,?)",
+            (task_workspace["id"], "pytest", "test", "PASS", task_workspace["last_commit"]))
+        db.execute(
+            "INSERT INTO test_case_specs(change_id,item_key,requirement_ids,test_level,test_type,title,expected_results,status) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (cid, "TC-MANUAL-CONFIRM", json.dumps(["REQ-001"]), "MANUAL", "MANUAL_ACCEPTANCE",
+             "Order confirmation screen shows the order summary", "The screen lists items and total", "APPROVED"))
+    
+        svc = client.app.state.release_service
+        r = svc.create_release(rid, [tid], version="v1")
+        svc.build(r["id"])
+        svc.qualify(r["id"], client.app.state.review_fix_orchestrator)
+        client.app.state.deployer.http_get = lambda *a, **k: FakeResp(200)
+        svc.deploy_test(r["id"])
+        svc.sync_test_result(r["id"])
+        svc.approve_production(r["id"], "operator")
+        svc.deploy_production(r["id"])
+        prod_result = svc.sync_production_result(r["id"])
+        assert prod_result["outcome"] == "RELEASE_COMPLETE", prod_result
+    
+        pas = client.app.state.product_acceptance_service
+        elig = pas.eligibility(cid)
+        assert elig["eligible"] is True, elig
+        pa = pas.request(cid, requested_by="human")
+        assert pa["status"] == "PENDING"
+        ctx = pas.context(cid)
+        assert ctx["live_url"] or ctx["runtime_target"]  # honest runtime target when no public URL
+        assert len(pas.checklist(pa["id"])) &gt;= 1
+    
+        for item in pas.checklist(pa["id"]):
+            pas.check_item(pa["id"], item["id"], "PASS", checked_by="human")
+        accepted = pas.accept(pa["id"], "human", "Confirmed on live app")
+        assert accepted["status"] == "ACCEPTED"
+    
+        state = client.get(f"/api/changes/{cid}/workflow/state").json()
+        assert "HUMAN_ACCEPTANCE" not in state["unmet_gates"], state
+&gt;       assert state["status"] == "COMPLETE", state["unmet_gates"]
+E       AssertionError: ['TESTS_PASS']
+E       assert 'ACTIVE' == 'COMPLETE'
+E         
+E         - COMPLETE
+E         + ACTIVE
+
+tests/test_product_acceptance.py:582: AssertionError</failure></testcase></testsuite></testsuites>

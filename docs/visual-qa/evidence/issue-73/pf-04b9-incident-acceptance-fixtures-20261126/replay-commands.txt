@@ -1,0 +1,10 @@
+# Run from the ProjectFlow repository root with the task-owned Python environment.
+PY=/home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/bin/python
+PATH=/usr/bin:/bin "$PY" -m pytest -q -ra \
+  tests/test_incidents.py::test_sync_status_advances_through_plan_review_deploy \
+  tests/test_incidents.py::test_real_full_incident_closed_loop_reaches_closed \
+  tests/test_product_acceptance.py::test_real_full_acceptance_flow_reaches_change_complete \
+  --junitxml=<owned-artifact-dir>/selected-three.xml
+PATH=/usr/bin:/bin "$PY" -m pytest -q -ra \
+  tests/test_incidents.py tests/test_product_acceptance.py \
+  --junitxml=<owned-artifact-dir>/affected-modules.xml

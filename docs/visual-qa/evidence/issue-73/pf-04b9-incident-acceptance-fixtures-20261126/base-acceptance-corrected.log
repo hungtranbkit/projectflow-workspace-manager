@@ -1,0 +1,84 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____________ test_real_full_acceptance_flow_reaches_change_complete ____________
+
+client = <starlette.testclient.TestClient object at 0x7be0e9675940>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-651/test_real_full_acceptance_flow0/root'), PosixPath('/tmp/pytest-of-dell/pytest-651/test_real_full_acceptance_flow0/root/demo'))
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-651/test_real_full_acceptance_flow0')
+
+    def test_real_full_acceptance_flow_reaches_change_complete(client, git_repo, tmp_path):
+        """The exact E11.24 flow: Change -> release -> production deployment
+        -> runtime verified -> acceptance request -> real checklist (from
+        real spec AC + real MANUAL_ACCEPTANCE TestCaseSpec) -> live URL
+        present -> human simulation checks PASS -> accept -> HUMAN_ACCEPTANCE
+        gate PASS -> Workflow Change reaches COMPLETE (CONTROLLED profile,
+        every other gate satisfied with real E1-E10 evidence, same
+        construction test_workflow_engine.py's own CONTROLLED test uses)."""
+        root, _ = git_repo
+        repo = make_release_repo(root, name="rel19100", port=19100)
+        rid = register(client, repo, "demo")
+        cid = _user_facing_change(client, rid, title="Add an order confirmation screen")
+        # AGENTIC_STANDARD, not CONTROLLED -- exercises E11.3's own
+        # "recommended/default after Production deploy when user-facing
+        # behavior changed" REQUIRED_IF path directly (this Change IS
+        # user-facing), and avoids CONTROLLED's mandatory SecurityReview
+        # (a separate, already-tested E9 concern, not what this test is
+        # about).
+        client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "AGENTIC_STANDARD"})
+        # Deliberately no Change-level GOVERNED_BY trace link to FEAT-SPEC-
+        # LAYER here (unlike the Task-level /api/tasks/{tid}/spec linkage
+        # below, which SPEC_COMPLIANCE_PASS needs) -- TEST_DESIGN_READY's
+        # own coverage check would then require a TestCaseSpec proving
+        # EVERY real requirement on that whole production feature, not just
+        # REQ-001, which is unrelated E7 scope this test isn't exercising.
+        # test_test_design.py already covers TEST_DESIGN_READY's real
+        # coverage-gate behavior in depth.
+    
+        client.app.state.work_products.create(kind="FEATURE_SPEC", title="Spec", change_id=cid, status="APPROVED")
+        client.app.state.work_products.create(kind="TECHNICAL_DESIGN", title="Design", change_id=cid, status="APPROVED")
+    
+>       tid, integ = _reviewed_and_integrated_task(client, repo, cid, rid)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_product_acceptance.py:521: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+client = <starlette.testclient.TestClient object at 0x7be0e9675940>
+repo = PosixPath('/tmp/pytest-of-dell/pytest-651/test_real_full_acceptance_flow0/root/rel19100')
+cid = 1, rid = 1, title = 'Feature task', scope_hints = None
+
+    def _reviewed_and_integrated_task(client, repo, cid, rid, title="Feature task", scope_hints=None):
+        """A real Task, real worktree, real commit, real E9 CodeReview PASS
+        (fake invoker -- no LLM needed for E10's own scope), real
+        integration into the repo's own main branch."""
+        tid, _ = materialize_task(client, cid, title=title, scope_hints=scope_hints or ["src.py"])
+        w = _select_and_create_workspace(client, tid, rid, agent="claude")
+        worktree = client.app.state.git.validate_worktree(w["worktree_path"])
+        (worktree / "src.py").write_text("def feature():\n    return 2\n")
+        (worktree / "test_src.py").write_text("from src import feature\n\n\ndef test_feature():\n    assert feature() == 2\n")
+        subprocess.run(["git", "add", "src.py", "test_src.py"], cwd=worktree, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "implement feature v2"], cwd=worktree, check=True, capture_output=True)
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+        set_fake(client, PASS)
+        review = client.post(f"/api/tasks/{tid}/review/code").json()
+>       assert review["outcome"] == "REVIEWED" and review["verdict"] == "PASS", review
+E       AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'}
+E       assert ('EXECUTION_FAILED' == 'REVIEWED'
+E         
+E         - REVIEWED
+E         + EXECUTION_FAILED)
+
+tests/test_release_pipeline.py:159: AssertionError
+=============================== warnings summary ===============================
+../../home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../../home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_product_acceptance.py: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_product_acceptance.py::test_real_full_acceptance_flow_reaches_change_complete
