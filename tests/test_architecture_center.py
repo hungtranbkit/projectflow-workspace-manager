@@ -481,3 +481,52 @@ def test_manifest_unknown_key_error_does_not_echo_value(tmp_path):
     with pytest.raises(ArtifactRejected, match="not allowed") as exc:
         ArchitectureStore(tmp_path / "keys.db").put(bad, {"archify": ARCHIFY, "floorplan": FLOORPLAN})
     assert key not in str(exc.value)
+
+def test_global_architecture_admission_is_atomic(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    _, _, cfg_path = gated_config(tmp_path)
+    cfg = runs_mod.load_config(cfg_path)
+    cfg["projects"][OTHER] = dict(cfg["projects"][PROJECT])
+    state = tmp_path / "state"
+    entered, release = Event(), Event()
+    launched = []
+    real_create = runs_mod.HarnessStore.create
+
+    def pause_first(self, **kwargs):
+        if kwargs["main_goal"] == runs_mod.MAIN_GOAL + PROJECT:
+            entered.set()
+            assert release.wait(10)
+        return real_create(self, **kwargs)
+
+    monkeypatch.setattr(runs_mod.HarnessStore, "create", pause_first)
+
+    def request(project):
+        try:
+            return runs_mod.request_rerun(project, cfg=cfg, state=state,
+                                          launcher=lambda *args: launched.append(args))
+        except runs_mod.RunRefused:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(request, PROJECT)
+        try:
+            assert entered.wait(10)
+            second = pool.submit(request, OTHER)
+            second_result = second.result(timeout=10)
+        finally:
+            release.set()
+        first_result = first.result(timeout=10)
+    assert sum(x is not None for x in (first_result, second_result)) == 1
+    assert len(launched) == len(runs_mod.harness(state).list_tasks()) == 1
+
+    # A terminal task without independently verified cleanup still reserves the slot.
+    task = runs_mod.harness(state).list_tasks()[0]
+    store = runs_mod.harness(state)
+    store.fail(task.id, at=datetime.now(timezone.utc), reason="synthetic failure")
+    assert request(PROJECT if task.main_goal.endswith(OTHER) else OTHER) is None
+    store.cleanup(task.id, at=datetime.now(timezone.utc), executor_stopped=True,
+                  no_active_refs=True, dirty_worktree=False, evidence_preserved=True,
+                  deletion_verified=True)
+    monkeypatch.setattr(runs_mod.HarnessStore, "create", real_create)
+    assert request(PROJECT if task.main_goal.endswith(OTHER) else OTHER) is not None

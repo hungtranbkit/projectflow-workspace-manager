@@ -210,7 +210,8 @@ def request_rerun(project: str, commit: str | None = None, archify_ir: Path | No
     try:
         task = h.create(key=hashlib.sha256(child.encode()).hexdigest()[:40], main_goal=MAIN_GOAL + project,
                         child_goal=child, dod="both native outputs rendered from one pinned commit, validated and imported",
-                        agent="architecture-runner", node=os.uname().nodename[:60] or "local", created_at=at, ttl=RUN_TTL)
+                        agent="architecture-runner", node=os.uname().nodename[:60] or "local", created_at=at, ttl=RUN_TTL,
+                        scope_limit=(MAIN_GOAL, limits["max_active"]))
     except HarnessError as exc:
         raise RunRefused(str(exc)) from exc
     d = run_dir(task.id, state)
