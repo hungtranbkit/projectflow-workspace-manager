@@ -117,6 +117,27 @@
 {% for w in workspaces %}
 <div class="nested" data-visual-qa-workspace="{{w.id}}">
 <div class="row"><b>{{w.repo_name}}</b>{% if decision.visual_qa_required %}<span class="badge">Automated tests: {{w.tests_status}}</span>{% endif %}</div>
+<details class="nested" id="visual-qa-draft-import-{{w.id}}">
+<summary>Thêm ảnh thiết kế nháp cho workspace này</summary>
+<p><b>Chỉ tạo bản nháp riêng tư.</b> Ảnh chưa được duyệt; thao tác này không sửa <code>PROJECT.yaml</code>, không đổi reference đang chạy, không bật opt-in và không chạy test.</p>
+<form method="post" enctype="multipart/form-data" action="/api/tasks/{{t.id}}/workspaces/{{w.id}}/visual-reference-drafts">
+<label for="visual-draft-file-{{w.id}}">Ảnh PNG (tối đa 8 MiB)</label>
+<input id="visual-draft-file-{{w.id}}" type="file" name="reference_png" accept="image/png" required>
+<label for="visual-draft-viewport-{{w.id}}">Viewport gốc</label>
+<select id="visual-draft-viewport-{{w.id}}" name="viewport" required>
+<option value="">Chọn kích thước PNG</option><option value="430x932">430 × 932</option><option value="768x1024">768 × 1024</option><option value="1366x768">1366 × 768</option><option value="1586x992">1586 × 992</option><option value="1920x1080">1920 × 1080</option>
+</select>
+<label for="visual-draft-note-{{w.id}}">Nguồn / ghi chú thiết kế (tối đa 500 ký tự)</label>
+<textarea id="visual-draft-note-{{w.id}}" name="design_note" maxlength="500" rows="2" required></textarea>
+<button type="submit">Lưu ảnh nháp</button>
+</form>
+{% if w.visual_qa_drafts %}<h4>Ảnh thiết kế nháp — chưa được duyệt</h4>
+{% for draft in w.visual_qa_drafts %}<article class="nested" data-visual-reference-draft="{{draft.id}}">
+<div class="row"><b>{{draft.viewport}}</b><span class="badge {{'failed' if draft.integrity != 'VALID' or draft.source_changed else 'pending'}}">{% if draft.integrity != 'VALID' %}Không khả dụng — kiểm tra integrity thất bại{% elif draft.source_changed %}Bản nháp từ SHA cũ hoặc source đã thay đổi{% else %}DRAFT · UNREVIEWED{% endif %}</span></div>
+<p>{{draft.design_note}}</p><p>SHA-256 <code>{{draft.sha256}}</code></p><p>SHA lúc nhập <code>{{draft.source_commit}}</code></p>
+{% if draft.integrity == 'VALID' %}<figure><figcaption>Ảnh tải lên · {{draft.viewport}} · bản nháp, không phải reference của gate</figcaption><img src="{{draft.preview_url}}" alt="Ảnh thiết kế nháp chưa được duyệt, viewport {{draft.viewport}}" loading="lazy" decoding="async"></figure><a class="ghost" href="{{draft.download_url}}">Tải PNG để owner xem xét</a>{% endif %}
+</article>{% endfor %}{% endif %}
+</details>
 {% if w.visual_qa.contract_state == 'VALID' %}{% set reference_available.value = true %}{% endif %}
 {% if w.visual_qa.contract_state == 'SOURCE_NOT_CLEAN' %}<div class="warning">Source chưa sạch hoặc SHA đã đổi. Commit/clean source để xem reference an toàn.</div><div class="warning">Bằng chứng thiếu hoặc không hợp lệ khi source chưa sạch; gate vẫn bị chặn.</div>
 {% elif w.visual_qa.contract_state == 'INVALID' %}

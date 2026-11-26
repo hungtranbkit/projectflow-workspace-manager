@@ -180,3 +180,9 @@ VISUAL_QA_REQUIRED: true
 ```
 
 Kết quả nhìn thấy trên panel chỉ là phần hiển thị của decision/evidence hiện có; không thay thế review hành vi/accessibility, approval thiết kế, hoặc yêu cầu CI.
+
+## 11. Nhập ảnh thiết kế nháp từ Task
+
+Trong Task hiện có, mở **Thêm ảnh thiết kế nháp cho workspace này**, chọn PNG, chọn đúng viewport gốc và ghi nguồn thiết kế (ví dụ mã frame Figma hoặc đường dẫn bàn giao). Hệ thống chỉ nhận PNG hợp lệ có kích thước khớp viewport, tối đa 8 MiB; tên file tải lên không được dùng làm đường dẫn lưu. Ảnh được giữ riêng tư trong state của ProjectFlow và hiện SHA-256, kích thước, SHA workspace lúc nhập cùng trạng thái **DRAFT · UNREVIEWED**. Dùng nút xem/tải trên chính Task đó để owner kiểm tra.
+
+Đây là bản nháp để con người xem xét. Tải ảnh xuống, owner chọn đúng repo/branch/worktree, đưa PNG vào đường dẫn repo-local, rồi cập nhật `visual_qa.references` trong `PROJECT.yaml` theo viewport. Commit cả cấu hình và PNG bằng workflow Git bình thường. Sau khi source sạch ở SHA mới, Task page mới hiển thị reference đã commit; người dùng có thể opt-in qua prompt và chủ động bấm **Run Test** như các bước ở trên. Upload không sửa repo, không thay reference đang cấu hình, không phê duyệt thiết kế, không bật gate và không chạy agent/test. Ghi chú nguồn do người dùng nhập là provenance tham khảo, không phải bằng chứng phê duyệt.

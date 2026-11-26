@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.config import load_settings
 from app.db import Database
@@ -340,6 +341,8 @@ def create_app(settings=None):
     task_execution_context_builder = TaskExecutionContextBuilder(
         db, work_products, trace, specs_root, test_case_specs_store, executable_test_mapping_service)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
+    from app.services.visual_qa_drafts import VisualDraftUploadBodyLimit
+    app.add_middleware(VisualDraftUploadBodyLimit)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
     templates.env.filters["humanize_blocker"] = humanize_blocker
@@ -3088,6 +3091,179 @@ def create_app(settings=None):
                 "Content-Disposition": 'inline; filename="reference.png"',
             },
         )
+
+    @app.post("/api/tasks/{tid}/workspaces/{wid}/visual-reference-drafts")
+    async def create_visual_reference_draft(tid: int, wid: int, request: Request,
+                                            _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
+        """Save a private, unapproved Task design proposal outside repo/gate state."""
+        from app.services.visual_qa_drafts import (
+            DRAFT_VIEWPORTS, MAX_DESIGN_NOTE_CHARS, MAX_DRAFT_PNG_BYTES,
+            VisualDraftError, validate_visual_draft_png, write_visual_draft,
+            delete_visual_draft,
+        )
+
+        denied = HTTPException(404, "Visual reference draft unavailable")
+        workspace = db.one(
+            "SELECT w.*,r.repo_path AS registered_repo_path,r.git_fingerprint AS registered_git_fingerprint "
+            "FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id "
+            "WHERE w.id=? AND w.task_id=?", (wid, tid),
+        )
+        if not workspace:
+            raise denied
+        try:
+            repo_path = Path(workspace["registered_repo_path"]).resolve(strict=True)
+            worktree_path = git.validate_worktree(workspace["worktree_path"])
+            repo_fingerprint = git.repo_fingerprint(repo_path)
+            if (not repo_path.is_dir() or not worktree_path.is_dir() or not repo_fingerprint
+                    or repo_fingerprint != git.repo_fingerprint(worktree_path)
+                    or (workspace["registered_git_fingerprint"]
+                        and workspace["registered_git_fingerprint"] != repo_fingerprint)):
+                raise denied
+            source = git.source_state(worktree_path)
+            if not source.get("clean") or not re.fullmatch(r"[0-9a-f]{40}", source.get("head", "")):
+                raise HTTPException(409, "Commit and clean the workspace before importing a draft")
+        except HTTPException:
+            raise
+        except Exception:
+            raise denied
+
+        try:
+            form = await request.form(max_files=1, max_fields=3, max_part_size=4096)
+        except Exception as exc:
+            raise HTTPException(422, "Invalid Visual QA draft form") from exc
+        try:
+            allowed_fields = {"reference_png", "viewport", "design_note", "csrf_token"}
+            if any(key not in allowed_fields for key, _value in form.multi_items()):
+                raise HTTPException(422, "Unexpected form field")
+            uploads = form.getlist("reference_png")
+            if len(uploads) != 1 or not isinstance(uploads[0], StarletteUploadFile):
+                raise HTTPException(422, "Choose one PNG image")
+            viewport = str(form.get("viewport", "")).strip()
+            if viewport not in DRAFT_VIEWPORTS:
+                raise HTTPException(422, "Unsupported Visual QA viewport")
+            note = str(form.get("design_note", "")).strip()
+            if not note or len(note) > MAX_DESIGN_NOTE_CHARS:
+                raise HTTPException(422, "Add a design source note of at most 500 characters")
+            data = await uploads[0].read(MAX_DRAFT_PNG_BYTES + 1)
+            if len(data) > MAX_DRAFT_PNG_BYTES:
+                raise HTTPException(413, "PNG exceeds the 8 MiB limit")
+            try:
+                width, height, digest = validate_visual_draft_png(data, viewport)
+            except VisualDraftError as exc:
+                raise HTTPException(422, str(exc)) from exc
+
+            duplicate = db.one(
+                "SELECT id FROM work_products WHERE task_id=? AND kind='UI_UX_DESIGN' "
+                "AND status='DRAFT' AND content_digest=? "
+                "AND json_extract(content_metadata,'$.draft_kind')='visual-reference' "
+                "AND json_extract(content_metadata,'$.workspace_id')=? "
+                "AND json_extract(content_metadata,'$.viewport')=? LIMIT 1",
+                (tid, digest, wid, viewport),
+            )
+            if duplicate:
+                raise HTTPException(409, "This image is already a draft for this workspace and viewport")
+
+            try:
+                content_ref, stored_digest, stored_width, stored_height = write_visual_draft(
+                    settings.state_dir, data, viewport,
+                )
+            except VisualDraftError as exc:
+                raise HTTPException(500, "Private draft storage is unavailable") from exc
+            metadata = {
+                "schema": "visual-reference-draft-v1",
+                "draft_kind": "visual-reference",
+                "approval": "UNREVIEWED",
+                "workspace_id": wid,
+                "repository_id": workspace["repository_id"],
+                "source_commit": source["head"],
+                "source_clean": True,
+                "viewport": viewport,
+                "width": stored_width,
+                "height": stored_height,
+                "sha256": stored_digest,
+                "design_note": note,
+            }
+            try:
+                latest_source = git.source_state(worktree_path)
+                if (not latest_source.get("clean") or latest_source.get("head") != source["head"]
+                        or latest_source.get("tracked_diff_sha256") != source.get("tracked_diff_sha256")):
+                    raise HTTPException(409, "Workspace source changed during import; retry from a clean commit")
+                wpid = work_products.create(
+                    kind="UI_UX_DESIGN", title=f"Visual reference draft ({viewport})",
+                    project_id=None, change_id=None, task_id=tid, status="DRAFT",
+                    content_ref=content_ref, content_metadata=metadata, content_digest=stored_digest,
+                )
+            except HTTPException:
+                delete_visual_draft(settings.state_dir, content_ref)
+                raise
+            except Exception as exc:
+                delete_visual_draft(settings.state_dir, content_ref)
+                raise HTTPException(500, "Could not save the Visual QA draft") from exc
+            return RedirectResponse(f"/tasks/{tid}#visual-qa", status_code=303)
+        finally:
+            for upload in form.getlist("reference_png"):
+                if isinstance(upload, StarletteUploadFile):
+                    await upload.close()
+
+    def _visual_draft_for_scope(tid: int, wid: int, wpid: int):
+        from app.services.visual_qa_drafts import read_visual_draft
+        row = db.one(
+            "SELECT wp.* FROM work_products wp JOIN agent_workspaces w "
+            "ON w.task_id=wp.task_id WHERE wp.id=? AND wp.task_id=? AND w.id=? "
+            "AND wp.kind='UI_UX_DESIGN' AND wp.status='DRAFT' "
+            "AND wp.project_id IS NULL AND wp.change_id IS NULL",
+            (wpid, tid, wid),
+        )
+        if not row:
+            raise HTTPException(404, "Visual reference draft unavailable")
+        workspace = db.one(
+            "SELECT repository_id FROM agent_workspaces WHERE id=? AND task_id=?", (wid, tid),
+        )
+        try:
+            metadata = json.loads(row["content_metadata"] or "{}")
+        except (TypeError, ValueError):
+            raise HTTPException(404, "Visual reference draft unavailable")
+        if (not workspace or metadata.get("schema") != "visual-reference-draft-v1"
+                or metadata.get("draft_kind") != "visual-reference"
+                or metadata.get("approval") != "UNREVIEWED"
+                or metadata.get("workspace_id") != wid
+                or metadata.get("repository_id") != workspace["repository_id"]
+                or metadata.get("source_clean") is not True
+                or not re.fullmatch(r"[0-9a-f]{40}", metadata.get("source_commit", ""))
+                or metadata.get("sha256") != row["content_digest"]
+                or not isinstance(metadata.get("design_note"), str)
+                or len(metadata.get("design_note", "")) > 500
+                or type(metadata.get("width")) is not int
+                or type(metadata.get("height")) is not int
+                or f"{metadata.get('width')}x{metadata.get('height')}" != metadata.get("viewport")):
+            raise HTTPException(404, "Visual reference draft unavailable")
+        try:
+            data = read_visual_draft(
+                settings.state_dir, row["content_ref"], row["content_digest"],
+                metadata.get("viewport", ""), expected_size=None,
+            )
+        except Exception:
+            raise HTTPException(404, "Visual reference draft unavailable")
+        return row, metadata, data
+
+    @app.get("/tasks/{tid}/workspaces/{wid}/visual-reference-drafts/{wpid}/preview")
+    def preview_visual_reference_draft(tid: int, wid: int, wpid: int,
+                                       _authz: None = Depends(require_read_role("task", "tid"))):
+        _row, _metadata, data = _visual_draft_for_scope(tid, wid, wpid)
+        return Response(content=data, media_type="image/png", headers={
+            "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+            "Content-Disposition": 'inline; filename="visual-reference-draft.png"',
+        })
+
+    @app.get("/tasks/{tid}/workspaces/{wid}/visual-reference-drafts/{wpid}/download")
+    def download_visual_reference_draft(tid: int, wid: int, wpid: int,
+                                        _authz: None = Depends(require_read_role("task", "tid"))):
+        _row, _metadata, data = _visual_draft_for_scope(tid, wid, wpid)
+        return Response(content=data, media_type="image/png", headers={
+            "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+            "Content-Disposition": f'attachment; filename="visual-reference-draft-{wpid}.png"',
+        })
+
     @app.get("/test-runs/{rid}/visual/{viewport}/{artifact}")
     def visual_run_image(rid: int, viewport: str, artifact: str,
                          _authz: None = Depends(require_read_role("test_run", "rid"))):
@@ -3562,9 +3738,42 @@ def create_app(settings=None):
         t=task_row(tid)
         d=decision.evaluate(tid)
         workspaces=d["builders"]; ti=d["task_integration"]; ti_repos=d["integration_repos"]
+        task_visual_drafts = work_products.list_for_task(tid)
         sbxs=task_sandboxes(tid)
 
         for w in workspaces:
+            w["visual_qa_drafts"] = []
+            for draft in task_visual_drafts:
+                if draft.get("kind") != "UI_UX_DESIGN" or draft.get("status") != "DRAFT":
+                    continue
+                try:
+                    draft_meta = json.loads(draft.get("content_metadata") or "{}")
+                except (TypeError, ValueError):
+                    continue
+                if (draft_meta.get("draft_kind") != "visual-reference"
+                        or draft_meta.get("workspace_id") != w["id"]):
+                    continue
+                item = {
+                    "id": draft["id"], "viewport": draft_meta.get("viewport", ""),
+                    "sha256": draft_meta.get("sha256", ""),
+                    "design_note": draft_meta.get("design_note", ""),
+                    "source_commit": draft_meta.get("source_commit", ""),
+                    "integrity": "INVALID",
+                }
+                try:
+                    _draft_row, _draft_meta, _draft_bytes = _visual_draft_for_scope(tid, w["id"], draft["id"])
+                    item["integrity"] = "VALID"
+                    try:
+                        current_source = git.source_state(w["worktree_path"])
+                        item["source_changed"] = (not current_source.get("clean")
+                                                   or current_source.get("head") != item["source_commit"])
+                    except Exception:
+                        item["source_changed"] = True
+                    item["preview_url"] = f"/tasks/{tid}/workspaces/{w['id']}/visual-reference-drafts/{draft['id']}/preview"
+                    item["download_url"] = f"/tasks/{tid}/workspaces/{w['id']}/visual-reference-drafts/{draft['id']}/download"
+                except HTTPException:
+                    item["source_changed"] = True
+                w["visual_qa_drafts"].append(item)
             w["details"]=safe_details(w["worktree_path"]); w["status_label"]=workspace_status_label(w["status"])
             # E8.5.25: managed-worktree lifecycle/staleness -- computed,
             # cheap (no probe merge; integration-check is its own
