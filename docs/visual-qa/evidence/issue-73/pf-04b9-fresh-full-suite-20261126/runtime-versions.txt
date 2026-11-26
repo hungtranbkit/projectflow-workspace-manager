@@ -1,0 +1,3 @@
+uifix=1.2.6
+node=v26.7.0
+node_playwright=1.60.0

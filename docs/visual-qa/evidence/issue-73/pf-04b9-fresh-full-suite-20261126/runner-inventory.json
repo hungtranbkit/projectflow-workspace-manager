@@ -1,0 +1,32 @@
+{
+  "sourceSha": "70d467ce7532d6f4fdcb9a238157daba3737afa1",
+  "sourceTree": "3639037adab78f941f22817b235cb7f43373e579",
+  "dell": {
+    "docker": "29.7.2",
+    "dockerNetworksObserved": 29,
+    "defaultAddressPools": null,
+    "diskAvailableGiBApprox": 115,
+    "memoryAvailableGiBApprox": 17,
+    "cpus": 12,
+    "uifix": "1.2.6",
+    "node": "v26.7.0",
+    "nodePlaywright": "1.60.0",
+    "pythonPlaywright": "missing",
+    "claudeAuthStatus": "logged_in (status only; no provider invocation)",
+    "codexAuthStatus": "not_logged_in",
+    "unrelatedMainCheckoutPytestActive": true,
+    "activeClaudeSessionObserved": true,
+    "existingDellTmpTrustEntryCount": 1
+  },
+  "hp": {
+    "diskAvailableGiBApprox": 13,
+    "rootFilesystemPercentUsed": 95,
+    "swapAvailableMiBApprox": 11,
+    "providerAgentProcessCount": 11,
+    "claudeCliAvailable": false,
+    "docker": "29.7.2"
+  },
+  "fullSuiteStarted": false,
+  "providerInvocationCount": 0,
+  "sharedDockerMutation": false
+}

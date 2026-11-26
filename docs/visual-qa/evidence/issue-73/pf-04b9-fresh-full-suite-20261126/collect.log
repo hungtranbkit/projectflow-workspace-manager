@@ -1,0 +1,140 @@
+tests/test_action_feedback.py: 20
+tests/test_agent_harness_managed.py: 14
+tests/test_agent_harness_mvp.py: 21
+tests/test_agent_harness_parent.py: 4
+tests/test_agent_harness_reconcile_cli.py: 1
+tests/test_agent_harness_terminal.py: 6
+tests/test_agent_observability.py: 36
+tests/test_agent_observability_p0_final.py: 31
+tests/test_agent_observability_p0_repair.py: 38
+tests/test_agent_observability_security.py: 131
+tests/test_agent_possibly_stuck.py: 3
+tests/test_architecture_design.py: 49
+tests/test_autonomous_execution.py: 37
+tests/test_autonomous_execution_real.py: 1
+tests/test_b01_authn.py: 24
+tests/test_b02_organizations.py: 24
+tests/test_b03_authz.py: 14
+tests/test_b04_csrf.py: 11
+tests/test_b05_ratelimit.py: 8
+tests/test_b06_sandbox.py: 18
+tests/test_b07_secrets.py: 28
+tests/test_b0_final_qualification.py: 11
+tests/test_b1_read_isolation.py: 15
+tests/test_b2_release_concurrency.py: 4
+tests/test_b3_github_app.py: 20
+tests/test_b4_github_webhook_ingestion.py: 16
+tests/test_b5_tenant_isolation_completeness.py: 8
+tests/test_b6_trusted_proxy.py: 8
+tests/test_b7_repository_identity.py: 11
+tests/test_backup_restore.py: 5
+tests/test_baseline_reproduction_duplicate_click.py: 1
+tests/test_baseline_waivers.py: 4
+tests/test_builder_completion_vs_session.py: 11
+tests/test_builder_exec_ux.py: 8
+tests/test_builder_workspace_ux.py: 8
+tests/test_change_overview.py: 19
+tests/test_claude_structured_turns.py: 7
+tests/test_cleanup_and_restart.py: 3
+tests/test_control_plane.py: 16
+tests/test_cross_repo_integration.py: 1
+tests/test_db_locked_handled_cleanly.py: 2
+tests/test_deployment.py: 15
+tests/test_deployment_hardening.py: 11
+tests/test_deployment_stuck_after_restart.py: 2
+tests/test_engineering_catalog.py: 25
+tests/test_engineering_domain.py: 29
+tests/test_engineering_lifecycle_ui.py: 27
+tests/test_execution_wave_reservation_stuck_after_restart.py: 2
+tests/test_execution_waves.py: 23
+tests/test_exited_no_report_recovery.py: 16
+tests/test_failure_classifier.py: 9
+tests/test_git_integration.py: 2
+tests/test_golden_e2e.py: 2
+tests/test_harness_monitor_bridge.py: 23
+tests/test_harness_monitor_canary.py: 4
+tests/test_harness_monitor_report.py: 10
+tests/test_harness_monitor_service.py: 8
+tests/test_harness_progress.py: 8
+tests/test_harness_trajectory.py: 7
+tests/test_harness_zgh_node_java_qa.py: 5
+tests/test_help_guide.py: 11
+tests/test_incidents.py: 22
+tests/test_integration_contract_probe.py: 4
+tests/test_integration_create_idempotent.py: 1
+tests/test_integration_lock_stuck_after_restart.py: 2
+tests/test_integration_push.py: 10
+tests/test_integration_test_run_stuck_after_restart.py: 2
+tests/test_interrupted_migration_clear_error.py: 1
+tests/test_live_terminal_routing.py: 8
+tests/test_merge_reconciliation.py: 13
+tests/test_operations_stuck_after_restart.py: 2
+tests/test_performance_regression.py: 5
+tests/test_planner_service.py: 43
+tests/test_product_acceptance.py: 23
+tests/test_productization_audit.py: 8
+tests/test_project_test_timeout.py: 2
+tests/test_prompt_delivery.py: 5
+tests/test_prompt_ux.py: 9
+tests/test_qa_center_sandbox_contract.py: 10
+tests/test_real_merge.py: 12
+tests/test_release_pipeline.py: 29
+tests/test_repo_rename_worktree_repair.py: 3
+tests/test_repository_runtime_sandbox.py: 16
+tests/test_review_fix_loop.py: 31
+tests/test_review_fix_loop_real.py: 2
+tests/test_runtime_dependency_staleness.py: 1
+tests/test_sandbox_dies_self_heals.py: 2
+tests/test_sandbox_docker.py: 3
+tests/test_sandbox_reset_data.py: 3
+tests/test_sandbox_stuck_busy_after_restart.py: 2
+tests/test_service_scripts.py: 3
+tests/test_sidebar_nav.py: 7
+tests/test_simple_mode.py: 14
+tests/test_smoke.py: 1
+tests/test_soak_multi_repo_resource_leak.py: 1
+tests/test_spec_compliance.py: 8
+tests/test_spec_gate.py: 15
+tests/test_spec_lifecycle.py: 39
+tests/test_spec_registry.py: 11
+tests/test_spec_supervisor_gate.py: 9
+tests/test_state_invariants.py: 9
+tests/test_task_centric_ux.py: 13
+tests/test_task_decision_required_stages.py: 14
+tests/test_task_lifecycle_engine.py: 25
+tests/test_task_sandbox_views.py: 4
+tests/test_task_wizard.py: 9
+tests/test_terminal_launcher.py: 4
+tests/test_test_design.py: 45
+tests/test_test_runner_source_identity.py: 9
+tests/test_transcript_tail_persistence.py: 2
+tests/test_unit.py: 5
+tests/test_user_state_view.py: 9
+tests/test_verification_ux.py: 8
+tests/test_visual_qa_contract.py: 14
+tests/test_visual_qa_evidence.py: 17
+tests/test_visual_qa_execution.py: 3
+tests/test_visual_qa_mandatory_sandbox.py: 1
+tests/test_visual_qa_runner_subprocess.py: 1
+tests/test_web.py: 10
+tests/test_wizard_sandbox_picks_latest.py: 1
+tests/test_workflow_dead_anchors.py: 13
+tests/test_workflow_decision_ux.py: 17
+tests/test_workflow_engine.py: 43
+tests/test_workspace_branch_collision.py: 2
+tests/test_workspace_detail_ux.py: 10
+tests/test_worktree_manager.py: 20
+tests/test_worktree_manager_real.py: 1
+
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_ui_high_frequency_screens.py:24: could not import 'playwright.sync_api': No module named 'playwright'
