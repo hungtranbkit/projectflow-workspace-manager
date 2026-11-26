@@ -209,6 +209,8 @@ def test_private_routes_auth_isolation_and_cross_project(steward):
     assert client.get(art, headers={"sec-fetch-dest": "document", "sec-fetch-site": "none"}).status_code == 403
     assert client.get(art, headers={"sec-fetch-dest": "iframe", "sec-fetch-site": "cross-site"}).status_code == 403
     assert client.get(art, headers={"sec-fetch-dest": "empty", "sec-fetch-site": "same-origin"}).status_code == 403
+    for metadata in ({}, {"sec-fetch-dest": "iframe"}, {"sec-fetch-site": "same-origin"}):
+        assert client.get(art, headers=metadata).status_code == 403
     # Stale / wrong hash, unknown kind, cross-project and traversal attempts.
     assert client.get(art.replace(sha256(ARCHIFY), sha256(FLOORPLAN)), headers=IFRAME).status_code == 409
     assert client.get(art.replace("/archify?", "/notes?"), headers=IFRAME).status_code == 404

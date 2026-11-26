@@ -148,7 +148,7 @@ def register(router: APIRouter, *, store, allowed, same_origin, render, private)
         # a cross-site embed or a script fetch.
         dest = request.headers.get("sec-fetch-dest")
         site = request.headers.get("sec-fetch-site")
-        if dest is not None and (dest != "iframe" or site not in ("same-origin", None)):
+        if dest != "iframe" or site != "same-origin":
             raise HTTPException(403, headers=private)
         try:
             data = arch(memory).artifact(pid, snap_id, kind, sha)
