@@ -323,7 +323,7 @@ def test_launch_failure_is_recorded_not_retried(tmp_path):
     cfg = runs_mod.load_config(cfg_path)
 
     def boom(*a):
-        raise RuntimeError("no systemd")
+        raise runs_mod.LaunchRefused("no systemd")
 
     with pytest.raises(runs_mod.RunRefused):
         runs_mod.request_rerun(PROJECT, cfg=cfg, state=tmp_path / "st", launcher=boom)
@@ -530,3 +530,94 @@ def test_global_architecture_admission_is_atomic(tmp_path, monkeypatch):
                   deletion_verified=True)
     monkeypatch.setattr(runs_mod.HarnessStore, "create", real_create)
     assert request(PROJECT if task.main_goal.endswith(OTHER) else OTHER) is not None
+
+def test_ambiguous_architecture_launch_keeps_capacity(tmp_path):
+    _, _, path = gated_config(tmp_path)
+    cfg = runs_mod.load_config(path)
+    state = tmp_path / "state"
+    calls = []
+    def timeout(*args):
+        calls.append(args)
+        raise subprocess.TimeoutExpired("systemd-run", 30)
+    with pytest.raises(runs_mod.RunRefused):
+        runs_mod.request_rerun(PROJECT, cfg=cfg, state=state, launcher=timeout)
+    task = runs_mod.harness(state).list_tasks()[0]
+    assert task.state == "FAILED" and task.cleanup_state == "CLEANUP_PENDING"
+    with pytest.raises(runs_mod.RunRefused):
+        runs_mod.request_rerun(PROJECT, cfg=cfg, state=state, launcher=timeout)
+    assert len(calls) == 1
+
+
+def test_retention_never_erases_active_or_unknown_evidence(tmp_path):
+    state = tmp_path / "state"
+    for i in range(1, 5):
+        d = runs_mod.run_dir(i, state)
+        d.mkdir(parents=True)
+        (d / "request.json").write_text("{}")
+    runs_mod.prune_run_dirs(state, 1)
+    assert all((runs_mod.run_dir(i, state) / "request.json").is_file() for i in range(1, 5))
+
+def _terminal_architecture_fixture(tmp_path):
+    _, _, path = gated_config(tmp_path)
+    state = tmp_path / "state"
+    result = runs_mod.request_rerun(PROJECT, cfg=runs_mod.load_config(path), state=state, launcher=lambda *a: None)
+    h = runs_mod.harness(state)
+    task = h.fail(result["task_id"], at=datetime.now(timezone.utc), reason="synthetic exit")
+    d = runs_mod.run_dir(task.id, state)
+    req = runs_mod.read_receipt(d / "request.json")
+    runs_mod.write_receipt(d / "worker-finished.json", {"owner": req["owner"], "state": task.state, "exit": 1})
+    (d / "src").mkdir()
+    (d / "src" / "data").write_text("derived source")
+    (d / "test.log").write_text("evidence")
+    return state, task, d, req
+
+
+def test_cleanup_requires_independent_proof_and_preserves_evidence(tmp_path, monkeypatch):
+    state, task, d, req = _terminal_architecture_fixture(tmp_path)
+    monkeypatch.setattr(runs_mod, "runtime_absent", lambda req: False)
+    assert not runs_mod.reconcile_run_cleanup(task.id, state)
+    assert (d / "src" / "data").is_file()
+    assert runs_mod.harness(state).get(task.id).cleanup_state == "CLEANUP_PENDING"
+    monkeypatch.setattr(runs_mod, "runtime_absent", lambda req: True)
+    with runs_mod.execution_lock(d):
+        assert not runs_mod.reconcile_run_cleanup(task.id, state)
+    marker = d / "container-test.json"
+    runs_mod.write_receipt(marker, {"owner": req["owner"], "state": "UNCERTAIN"})
+    assert not runs_mod.reconcile_run_cleanup(task.id, state)
+    assert (d / "src").exists()
+    runs_mod.write_receipt(marker, {"owner": req["owner"], "state": "REMOVED"})
+    assert runs_mod.reconcile_run_cleanup(task.id, state)
+    assert not (d / "src").exists()
+    for name in ("request.json", "launch.json", "worker-finished.json", "test.log", "container-test.json", "cleanup.json"):
+        assert (d / name).is_file()
+    assert runs_mod.harness(state).get(task.id).cleanup_state == "CLEANED_VERIFIED"
+    assert runs_mod.reconcile_run_cleanup(task.id, state)
+
+
+@pytest.mark.parametrize("mode", ["active-unit", "missing-property", "docker-error", "container-present", "timeout", "absent"])
+def test_runtime_absence_fails_closed(monkeypatch, mode):
+    from types import SimpleNamespace
+    values = "LoadState=loaded\nActiveState=inactive\nSubState=dead\nMainPID=0\nControlPID=0\nJob=0\n"
+    def probe(argv, **kwargs):
+        if mode == "timeout":
+            raise subprocess.TimeoutExpired(argv, 10)
+        if argv[0] == "systemctl":
+            text = values.replace("ActiveState=inactive", "ActiveState=active") if mode == "active-unit" else values
+            if mode == "missing-property":
+                text = text.replace("Job=0\n", "")
+            return SimpleNamespace(returncode=0, stdout=text)
+        assert argv[:3] == ["docker", "ps", "-aq"]
+        assert argv[-1] == "label=projectflow.architecture-owner=" + "a"*32
+        return SimpleNamespace(returncode=int(mode == "docker-error"), stdout="cid" if mode == "container-present" else "")
+    monkeypatch.setattr(runs_mod.subprocess, "run", probe)
+    assert runs_mod.runtime_absent({"unit": "synthetic", "owner": "a"*32}) is (mode == "absent")
+
+
+def test_cleanup_refuses_legacy_or_ambiguous_launch(tmp_path, monkeypatch):
+    state, task, d, req = _terminal_architecture_fixture(tmp_path)
+    monkeypatch.setattr(runs_mod, "runtime_absent", lambda req: True)
+    runs_mod.write_receipt(d / "launch.json", {"owner": req["owner"], "state": "AMBIGUOUS"})
+    assert not runs_mod.reconcile_run_cleanup(task.id, state)
+    (d / "launch.json").unlink()
+    assert not runs_mod.reconcile_run_cleanup(task.id, state)
+    assert (d / "src" / "data").is_file()

@@ -48,6 +48,11 @@ from app.services.architecture_runs import (  # noqa: E402
     make_read_only,
     materialize,
     prune_run_dirs,
+    assert_executor_active,
+    bound_request,
+    execution_lock,
+    reconcile_run_cleanup,
+    write_receipt,
     request_rerun,
     run_dir,
     runs,
@@ -109,7 +114,8 @@ def run_floorplan(cfg, d: Path) -> dict:
     steps, ok = [], True
     for step in FLOORPLAN_STEPS:
         r = container(cfg, [(d / "src", "/src", "ro"), (d / "src/floorplan", "/src/floorplan", "rw"), (Path(tool), "/tools/floorplan", "ro")],
-                      ["node", f"/tools/floorplan/skills/floorplan/scripts/{step}.mjs", "/src"], cfg["limits"]["timeout_seconds"])
+                      ["node", f"/tools/floorplan/skills/floorplan/scripts/{step}.mjs", "/src"], cfg["limits"]["timeout_seconds"],
+                      run=d, step=f"floorplan-{len(steps)}-{step}")
         steps.append(dict(step=step, exit=r["exit"], seconds=r["seconds"]))
         (d / f"floorplan-{len(steps)}-{step}.log").write_text(r["tail"])
         if r["exit"] != 0:
@@ -140,7 +146,8 @@ def run_archify(cfg, d: Path, src: ReadOnlySource, commit: str, allowed: set[str
     tool = cfg["tools"]["archify"]["path"]
     r = container(cfg, [(d / "pin", "/repo", "ro"), (work, "/work", "rw"), (Path(tool) / "archify", "/tools/archify", "ro")],
                   ["node", "/tools/archify/bin/archify.mjs", "finalize", "architecture", "/work/ir.json", "/work/archify.html",
-                   "--repo-root", "/repo", "--quality", "showcase", "--json"], cfg["limits"]["timeout_seconds"])
+                   "--repo-root", "/repo", "--quality", "showcase", "--json"], cfg["limits"]["timeout_seconds"],
+                  run=d, step="archify-finalize")
     (d / "archify-finalize.log").write_text(r["tail"])
     gates = finalize_gates(work, r["tail"])
     steps = [dict(step=k, result={"pass": "PASS", "fail": "FAIL"}.get(v, "NOT_RUN"), detail=v) for k, v in gates.items()]
@@ -197,7 +204,22 @@ def cmd_run(args) -> int:
     h = harness()
     task_id = args.task_id
     d = run_dir(task_id)
-    req = json.loads((d / "request.json").read_text())
+    try:
+        with execution_lock(d):
+            h.reconcile_due(at=now())
+            task = h.get(task_id)
+            if task.state != "DISPATCHED":
+                raise RunRefused("Run is not eligible for execution")
+            req = bound_request(d, task)
+            rc = _execute_run(task_id, h, d, req)
+            terminal = h.get(task_id)
+            write_receipt(d / "worker-finished.json", {"owner": req["owner"], "state": terminal.state, "exit": rc})
+            return rc
+    except (OSError, ValueError, HarnessError):
+        return 1
+
+
+def _execute_run(task_id, h, d, req) -> int:
     try:
         h.observe(task_id, backend_state="RUNNING", process_alive=True, at=now(), progress_at=now(), evidence_ref=f"run:{task_id}:start")
         cfg = load_config()
@@ -258,7 +280,7 @@ def cmd_run(args) -> int:
             {k: v for k, v in tools_meta(cfg).items() if k in artifacts or k == "runtime"},
             artifacts, limitations)
         snap, created = store().put(manifest, blobs)
-        h.observe(task_id, backend_state="FINISHED", process_alive=False, at=now(), evidence_ref=f"snapshot:{snap}")
+        h.observe(task_id, backend_state="RUNNING", process_alive=True, at=now(), progress_at=now(), evidence_ref=f"snapshot:{snap}")
 
         def verifier(artifact_ref, test_ref, runtime_ref):
             s = store().snapshot(req["project"], artifact_ref.split(":", 1)[1])
@@ -271,7 +293,7 @@ def cmd_run(args) -> int:
             h.fail(task_id, at=now(), reason=f"PARTIAL snapshot {snap[:12]} imported; " + "; ".join(limitations)[:300])
         print(json.dumps(dict(task=task_id, snapshot=snap, created=created, artifacts={k: a["status"] for k, a in artifacts.items()},
                               limitations=limitations), ensure_ascii=False))
-        rc = 0
+        rc = 0 if len(artifacts) == 2 else 1
     except Exception as exc:  # every failure is recorded on the durable task
         try:
             h.fail(task_id, at=now(), reason=f"{type(exc).__name__}: {str(exc)[:240]}")
@@ -279,24 +301,8 @@ def cmd_run(args) -> int:
             pass
         print(f"run {task_id} failed: {exc}", file=sys.stderr)
         rc = 1
-    finally:
-        keep = ["request.json", "source-manifest.json"]
-        for child in d.iterdir():
-            if child.name in keep or child.suffix == ".log":
-                continue
-            for dirpath, _, _ in os.walk(child):
-                os.chmod(dirpath, 0o700)
-            shutil.rmtree(child) if child.is_dir() else child.unlink()
-        gone = all(c.name in keep or c.suffix == ".log" for c in d.iterdir())
-        try:
-            h.cleanup(task_id, at=now(), executor_stopped=True, no_active_refs=True, dirty_worktree=False,
-                      evidence_preserved=True, deletion_verified=gone)
-        except HarnessError:
-            pass
-        try:
-            prune_run_dirs(state_dir(), load_config()["limits"]["keep_run_dirs"])
-        except Exception:
-            pass
+    # A worker is still a live unit at this point. Never remove its mounts
+    # or claim executor_stopped; the independent reconciler owns cleanup.
     return rc
 
 
@@ -363,6 +369,12 @@ def cmd_status(args) -> int:
     return 0
 
 
+def cmd_reconcile(args) -> int:
+    ok = reconcile_run_cleanup(args.task_id)
+    print(json.dumps({"task_id": args.task_id, "cleanup": "CLEANED_VERIFIED" if ok else "CLEANUP_PENDING"}))
+    return 0 if ok else 3
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -377,11 +389,13 @@ def main(argv=None) -> int:
         i.add_argument("--" + k, required=True)
     for k in ("branch", "source-manifest", "export-ref", "expect-archify-sha", "expect-floorplan-sha"):
         i.add_argument("--" + k)
+    c = sub.add_parser("reconcile")
+    c.add_argument("--task-id", type=int, required=True)
     s = sub.add_parser("status")
     s.add_argument("--project", required=True)
     args = ap.parse_args(argv)
     try:
-        return {"run": cmd_run, "enqueue": cmd_enqueue, "import": cmd_import, "status": cmd_status}[args.cmd](args)
+        return {"run": cmd_run, "enqueue": cmd_enqueue, "import": cmd_import, "status": cmd_status, "reconcile": cmd_reconcile}[args.cmd](args)
     except ArtifactRejected as exc:
         print(json.dumps(dict(rejected=str(exc)), ensure_ascii=False))
         return 4

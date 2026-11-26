@@ -13,6 +13,10 @@ project (and optionally a full commit SHA that must already exist locally).
 from __future__ import annotations
 
 import fnmatch
+import fcntl
+import stat
+import uuid
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -48,6 +52,82 @@ DEFAULT_LIMITS = dict(
 
 class RunRefused(ValueError):
     """Gate refusal with an operator-safe message."""
+
+
+class LaunchRefused(RunRefused):
+    """Definitive refusal before any executor could have been submitted."""
+
+
+TERMINAL_RUNS = frozenset({"DONE_VERIFIED", "FAILED", "EXPIRED"})
+OWNER_LABEL = "projectflow.architecture-owner"
+
+
+def write_receipt(path: Path, value: dict) -> None:
+    """Atomically persist private lifecycle evidence before the next side effect."""
+    tmp = path.with_name("." + path.name + "." + uuid.uuid4().hex)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as file:
+            file.write(canonical(value))
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(tmp, path)
+        fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def read_receipt(path: Path) -> dict:
+    value = json.loads(read_regular_file(path, MAX_AUX))
+    if not isinstance(value, dict):
+        raise RunRefused("Invalid lifecycle receipt")
+    return value
+
+
+@contextmanager
+def execution_lock(d: Path):
+    """One executor or reconciler per run; never follow a lock symlink."""
+    if d.is_symlink() or not d.is_dir():
+        raise RunRefused("Run directory is missing or unsafe")
+    fd = os.open(d / "execution.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise RunRefused("Unsafe run lock")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RunRefused("Run executor or reconciler is still active") from exc
+        yield
+    finally:
+        os.close(fd)
+
+
+def bound_request(d: Path, task) -> dict:
+    req = read_receipt(d / "request.json")
+    owner = req.get("owner")
+    if not isinstance(owner, str) or not re.fullmatch(r"[0-9a-f]{32}", owner):
+        raise RunRefused("Missing durable run owner")
+    commit = req.get("commit")
+    if not isinstance(commit, str) or not SHA1_RE.fullmatch(commit):
+        raise RunRefused("Missing pinned run source")
+    expected = f"pf-arch-run-{task.id}-{owner[:12]}-{commit[:10]}"
+    if req.get("unit") != expected or task.external_task_id != expected or task.main_goal != MAIN_GOAL + req.get("project", ""):
+        raise RunRefused("Run ownership mismatch")
+    return req
+
+
+def assert_executor_active(d: Path) -> dict:
+    store = harness(d.parent.parent)
+    store.reconcile_due(at=datetime.now(timezone.utc))
+    task = store.get(int(d.name))
+    if task.state not in ("RUNNING_VERIFIED", "STALLED"):
+        raise RunRefused("Run is not eligible to execute another tool")
+    return bound_request(d, task)
+
 
 
 def state_dir() -> Path:
@@ -194,6 +274,13 @@ def request_rerun(project: str, commit: str | None = None, archify_ir: Path | No
     h = harness(state)
     at = now or datetime.now(timezone.utc)
     h.reconcile_due(at=at)
+    # The production admission path can reconcile completed work from an earlier
+    # request. Injected launchers are isolated test/adapter paths, never probe host tools.
+    if launcher is None:
+        for old in h.list_tasks():
+            if (old.main_goal.startswith(MAIN_GOAL) and old.state in TERMINAL_RUNS
+                    and old.cleanup_state == "CLEANUP_PENDING"):
+                reconcile_run_cleanup(old.id, state)
     tries = [t for t in h.list_tasks() if t.child_goal == child or t.child_goal.startswith(child + "#")]
     for t in reversed(tries):
         if t.state not in ("FAILED", "EXPIRED"):
@@ -215,26 +302,36 @@ def request_rerun(project: str, commit: str | None = None, archify_ir: Path | No
     except HarnessError as exc:
         raise RunRefused(str(exc)) from exc
     d = run_dir(task.id, state)
-    os.umask(os.umask(0o077) | 0o077)
     d.mkdir(mode=0o700, parents=True, exist_ok=False)
-    (d / "archify-ir.json").write_bytes(ir)
-    (d / "floorplan-architecture.json").write_bytes(seed)
+    for name, content in (("archify-ir.json", ir), ("floorplan-architecture.json", seed)):
+        fd = os.open(d / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+    owner = uuid.uuid4().hex
+    unit = f"pf-arch-run-{task.id}-{owner[:12]}-{sha[:10]}"
     req = dict(project=project, commit=sha, toolset=toolset, archify_ir_sha256=sha256(ir), floorplan_seed_sha256=sha256(seed),
-               requested_at=int(at.timestamp()))
-    (d / "request.json").write_text(canonical(req))
-    unit = f"pf-arch-run-{task.id}-{sha[:10]}"
+               requested_at=int(at.timestamp()), owner=owner, unit=unit)
+    write_receipt(d / "request.json", req)
+    write_receipt(d / "launch.json", {"owner": owner, "state": "REQUESTED"})
     # The receipt (unit name) is durable BEFORE the process can start, so the
     # runner can always record progress against a dispatched task.
     h.dispatch(task.id, external_task_id=unit, at=at)
     try:
         (launcher or launch_unit)(task.id, unit, cfg)
-    except Exception as exc:  # launch failure is recorded, never retried silently
+    except Exception as exc:
         at_fail = now or datetime.now(timezone.utc)
-        h.fail(task.id, at=at_fail, reason="launch failed: " + str(exc)[:200])
-        # Nothing was started: no process, container or output exists to clean.
-        h.cleanup(task.id, at=at_fail, executor_stopped=True, no_active_refs=True, dirty_worktree=False,
-                  evidence_preserved=True, deletion_verified=True)
+        definitive = isinstance(exc, LaunchRefused)
+        write_receipt(d / "launch.json", {"owner": owner, "state": "REFUSED" if definitive else "AMBIGUOUS"})
+        try:
+            h.fail(task.id, at=at_fail, reason="launch failed: " + type(exc).__name__)
+        except HarnessError:
+            pass  # a late executor may already have produced a terminal result
+        if definitive:
+            # Only an explicitly pre-submission refusal proves no runtime ever existed.
+            h.cleanup(task.id, at=at_fail, executor_stopped=True, no_active_refs=True,
+                      dirty_worktree=False, evidence_preserved=True, deletion_verified=True)
         raise RunRefused("Không khởi chạy được lượt chạy; đã ghi nhận thất bại.") from exc
+    write_receipt(d / "launch.json", {"owner": owner, "state": "ACCEPTED"})
     return dict(task_id=task.id, state="DISPATCHED", commit=sha, duplicate=False,
                 message=f"Đã xếp lượt chạy #{task.id} cho commit {sha[:12]}.")
 
@@ -249,9 +346,12 @@ def launch_unit(task_id: int, unit: str, cfg: dict) -> None:
             f"--property=MemoryMax={str(lim['memory']).upper()}", f"--working-directory={repo}",
             *[f"--setenv={k}={v}" for k, v in env.items()],
             os.path.realpath(sys.executable), "-m", "scripts.architecture_rerun", "run", "--task-id", str(int(task_id))]
-    proc = subprocess.run(argv, capture_output=True, text=True, timeout=30, shell=False)
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=30, shell=False)
+    except FileNotFoundError as exc:
+        raise LaunchRefused("systemd-run executable unavailable") from exc
     if proc.returncode:
-        raise RuntimeError(proc.stderr.strip()[:200] or "systemd-run failed")
+        raise RunRefused("systemd-run returned an unconfirmed submission result")
 
 
 def select_sources(tree: list, p: dict, limits: dict) -> tuple[list, list]:
@@ -307,37 +407,156 @@ def make_read_only(root: Path, writable_dirs: tuple[Path, ...] = (), writable_tr
             os.chmod(d, 0o555)
 
 
-def container(cfg: dict, mounts: list[tuple[Path, str, str]], argv: list[str], timeout: int) -> dict:
-    """Run one pinned tool command offline. Returns exit code and bounded, redacted output tail."""
+def container(cfg: dict, mounts: list[tuple[Path, str, str]], argv: list[str], timeout: int,
+              *, run: Path, step: str) -> dict:
+    """Persist exact ownership before Docker; distinguish tool exit from unknown launch."""
+    req = assert_executor_active(run)
+    owner = req["owner"]
+    if not re.fullmatch(r"[a-z0-9-]{1,40}", step):
+        raise RunRefused("Invalid tool step")
+    receipt = run / f"container-{step}.json"
+    if receipt.exists():
+        raise RunRefused("Tool step already has a receipt")
+    name = f"pf-arch-{owner}-{step}"
+    info = {"owner": owner, "name": name, "state": "CREATING"}
+    write_receipt(receipt, info)
     lim = cfg["limits"]
     image = cfg["tools"]["runtime"]["image"]
-    cmd = ["docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
-           "--security-opt", "no-new-privileges", "--pids-limit", str(lim["pids"]), "--memory", str(lim["memory"]),
+    cmd = ["docker", "create", "--name", name, "--pull=never", "--network", "none",
+           "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+           "--pids-limit", str(lim["pids"]), "--memory", str(lim["memory"]),
            "--cpus", str(lim["cpus"]), "--user", f"{os.getuid()}:{os.getgid()}",
            "--tmpfs", "/tmp:rw,size=512m", "-e", "HOME=/tmp", "-e", "CI=1", "-e", "NO_COLOR=1",
            "-e", "ARCHIFY_NO_UPDATE_CHECK=1", "-e", "GIT_CONFIG_NOSYSTEM=1",
            "-e", "GIT_CONFIG_COUNT=1", "-e", "GIT_CONFIG_KEY_0=safe.directory", "-e", "GIT_CONFIG_VALUE_0=*",
-           "--label", "projectflow.architecture-run=1"]
+           "--label", "projectflow.architecture-run=1", "--label", f"{OWNER_LABEL}={owner}"]
     for host, inside, mode in mounts:
         cmd += ["-v", f"{host}:{inside}:{mode}"]
     cmd += ["--entrypoint", argv[0], image, *argv[1:]]
     started = time.time()
     try:
-        proc = subprocess.run(cmd, capture_output=True, timeout=timeout, shell=False)
-        code, out = proc.returncode, (proc.stdout + proc.stderr)
-    except subprocess.TimeoutExpired as exc:
-        code, out = 124, (exc.stdout or b"") + (exc.stderr or b"")
-    text = out.decode("utf-8", "replace")
-    text = re.sub(r"/home/[^/\s]+/", "~/", text)
-    return dict(exit=code, seconds=round(time.time() - started, 1), tail=text[-2000:])
+        created = subprocess.run(cmd, capture_output=True, timeout=min(timeout, 60), shell=False)
+        cid = created.stdout.decode("ascii", "strict").strip()
+        if created.returncode or not re.fullmatch(r"[0-9a-f]{64}", cid):
+            raise RunRefused("Docker create outcome unverified")
+        info.update(id=cid, state="CREATED")
+        write_receipt(receipt, info)
+        assert_executor_active(run)
+        info["state"] = "STARTING"
+        write_receipt(receipt, info)
+        proc = subprocess.run(["docker", "start", "-a", cid], capture_output=True, timeout=timeout, shell=False)
+        inspected = subprocess.run(["docker", "inspect", "--type", "container", cid], capture_output=True,
+                                   timeout=10, shell=False)
+        if inspected.returncode:
+            raise RunRefused("Docker terminal state unverified")
+        row, = json.loads(inspected.stdout)
+        st = row["State"]
+        if (row["Id"] != cid or row["Name"] != "/" + name or row["Config"]["Labels"].get(OWNER_LABEL) != owner
+                or st.get("Status") != "exited" or st.get("Running") is not False
+                or st.get("Restarting") is not False or st.get("Paused") is not False
+                or st.get("Pid") != 0 or type(st.get("ExitCode")) is not int):
+            raise RunRefused("Docker terminal identity or state unverified")
+        code = st["ExitCode"]
+        info.update(state="EXITED", exit=code)
+        write_receipt(receipt, info)
+        # Non-forced removal of exactly the inspected stopped container. Failure
+        # leaves its receipt and blocks capacity until the supervisor verifies it.
+        removed = subprocess.run(["docker", "rm", cid], capture_output=True, timeout=10, shell=False)
+        if removed.returncode:
+            raise RunRefused("Stopped container removal not verified")
+        info["state"] = "REMOVED"
+        write_receipt(receipt, info)
+        text = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+        text = re.sub(r"/home/[^/\\s]+/", "~/", text)
+        return dict(exit=code, seconds=round(time.time() - started, 1), tail=text[-2000:])
+    except Exception as exc:
+        # A timeout or lost daemon reply is not proof of cancellation. No next
+        # tool step, forced removal, or automatic retry on an ambiguous receipt.
+        if info["state"] not in ("EXITED", "REMOVED"):
+            info["state"] = "UNCERTAIN"
+        write_receipt(receipt, info)
+        raise RunRefused("Container execution or cleanup needs reconciliation") from exc
+
+
+def runtime_absent(req: dict) -> bool:
+    """Query the exact unit and owner-labelled containers, never infer from exit 124."""
+    try:
+        unit = subprocess.run(["systemctl", "--user", "show", req["unit"] + ".service",
+                               "-p", "LoadState", "-p", "ActiveState", "-p", "SubState",
+                               "-p", "MainPID", "-p", "ControlPID", "-p", "Job"],
+                              capture_output=True, text=True, timeout=10, shell=False)
+        if unit.returncode:
+            return False
+        values = dict(x.split("=", 1) for x in unit.stdout.splitlines() if "=" in x)
+        if (values.get("LoadState") not in ("loaded", "not-found")
+                or values.get("ActiveState") not in ("inactive", "failed")
+                or values.get("SubState") not in ("dead", "failed")
+                or values.get("MainPID") != "0" or values.get("ControlPID") != "0"
+                or values.get("Job") not in ("", "0")):
+            return False
+        found = subprocess.run(["docker", "ps", "-aq", "--no-trunc", "--filter",
+                                f"label={OWNER_LABEL}={req['owner']}"],
+                               capture_output=True, text=True, timeout=10, shell=False)
+        return found.returncode == 0 and not found.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return False
+
+
+def reconcile_run_cleanup(task_id: int, state: Path | None = None) -> bool:
+    """Separate supervisor: terminal + durable completion + exact runtime absence.
+    Legacy/ambiguous/unknown receipts stay pending, preserve all evidence and capacity.
+    """
+    state = state or state_dir()
+    h = harness(state)
+    task = h.get(task_id)
+    if not task.main_goal.startswith(MAIN_GOAL) or task.state not in TERMINAL_RUNS:
+        return False
+    if task.cleanup_state == "CLEANED_VERIFIED":
+        return True
+    d = run_dir(task_id, state)
+    try:
+        with execution_lock(d):
+            task = h.get(task_id)
+            if task.state not in TERMINAL_RUNS:
+                return False
+            if task.cleanup_state == "CLEANED_VERIFIED":
+                return True
+            req = bound_request(d, task)
+            launch = read_receipt(d / "launch.json")
+            done = read_receipt(d / "worker-finished.json")
+            if (launch.get("owner") != req["owner"] or launch.get("state") != "ACCEPTED"
+                    or done.get("owner") != req["owner"] or done.get("state") != task.state):
+                return False
+            for receipt in d.glob("container-*.json"):
+                step = read_receipt(receipt)
+                if step.get("owner") != req["owner"] or step.get("state") != "REMOVED":
+                    return False
+            if not runtime_absent(req):
+                return False
+            # Keep request, source manifest, IR/seed, logs, and every receipt.
+            # Delete only derived bulky trees of this exact stopped run.
+            for name in ("src", "pin", "archify"):
+                child = d / name
+                if child.is_symlink() or (child.exists() and not child.is_dir()):
+                    return False
+                if child.exists():
+                    for directory, _, _ in os.walk(child, followlinks=False):
+                        os.chmod(directory, 0o700, follow_symlinks=False)
+                    shutil.rmtree(child)
+            if any((d / name).exists() or (d / name).is_symlink() for name in ("src", "pin", "archify")):
+                return False
+            write_receipt(d / "cleanup.json", {"owner": req["owner"], "state": "VERIFIED"})
+            h.cleanup(task_id, at=datetime.now(timezone.utc), executor_stopped=True, no_active_refs=True,
+                      dirty_worktree=False, evidence_preserved=True, deletion_verified=True)
+            return True
+    except (OSError, ValueError, HarnessError):
+        return False
 
 
 def prune_run_dirs(state: Path, keep: int) -> None:
-    base = state / "architecture-runs"
-    if not base.is_dir():
-        return
-    dirs = sorted((d for d in base.iterdir() if d.is_dir() and d.name.isdigit()), key=lambda d: int(d.name))
-    for d in dirs[:-keep] if keep > 0 else dirs:
-        for dirpath, _, _ in os.walk(d):
-            os.chmod(dirpath, 0o700)
-        shutil.rmtree(d)
+    """Compatibility entry point: age/count must never erase durable evidence.
+
+    Reconciliation releases generated payloads, not run directories or receipts.
+    Evidence archival/retention requires a separate reviewed export policy.
+    """
+    return None

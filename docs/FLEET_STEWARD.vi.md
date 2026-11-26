@@ -57,3 +57,11 @@ python -m scripts.architecture_rerun status --project OWNER/REPO
 Nút "Chạy lại" và `enqueue` đi qua `HarnessStore` (`architecture-runs.sqlite3` cạnh DB quản gia): một mục tiêu cho mỗi dự án + commit + bộ công cụ + đầu vào; lượt đã xong hoặc đang chạy không chạy lặp; lượt lỗi được thử lại tối đa 3 lần, mỗi lần là mục tiêu mới có ghi nhận; tối đa một lượt kiến trúc đồng thời; TTL 45 phút; cần còn ít nhất 5 GiB đĩa. Lượt chạy là unit user tạm thời có giới hạn thời gian/bộ nhớ. Nguồn là các blob Git của đúng commit, chỉ tệp thường trong danh sách cho phép, đặt chỉ đọc. Công cụ chạy trong container `--network none --read-only --cap-drop ALL` với giới hạn CPU/bộ nhớ/PID. IR Archify mang từ commit khác bị từ chối nếu dòng được trích dẫn đã đổi; khi đó tác tử phải soạn lại IR và gửi bằng `enqueue --archify-ir`. Browser-check nội bộ của Archify không chạy khi Chrome không có user namespace; hệ thống không tắt sandbox Chrome mà ghi `PARTIAL`.
 
 Hoàn tác: trỏ dịch vụ về bản ProjectFlow trước; bảng `arch_*` và `architecture-runs.sqlite3` được bản cũ bỏ qua, không cần xoá.
+
+### An toàn vòng đời lượt tạo sơ đồ
+
+Mỗi lượt có định danh sở hữu riêng, receipt ghi bền vững trước khi khởi chạy unit/container. Worker không tự chứng nhận đã dừng hoặc xóa dữ liệu. Nếu timeout/mất phản hồi, lượt vẫn giữ tài nguyên ở CLEANUP_PENDING; không tự retry. Khi đã có kết quả terminal, receipt hoàn tất, tất cả container đã được ghi nhận xóa và kiểm tra độc lập xác nhận unit không hoạt động / không còn container theo đúng owner, supervisor mới xóa ba cây staging phát sinh (src, pin, archify). Giữ request, manifest, IR, log và receipt; không xóa thư mục theo tuổi/số lượng. Có thể chạy bằng tài khoản dịch vụ tại đúng node:
+
+    python -m scripts.architecture_rerun reconcile --task-id N
+
+Lệnh chỉ hoàn tất khi đủ bằng chứng; trả exit 3 nếu vẫn pending. Lần enqueue thực tế tiếp theo cũng kiểm tra các lượt terminal còn pending trước khi cấp slot. Lượt cũ thiếu receipt hoặc launch/container không rõ kết quả cần kiểm tra độc lập theo đúng định danh; không xóa thủ công hoặc đặt CLEANED_VERIFIED để vượt giới hạn. Không có thay đổi production trong bộ test tổng hợp.
