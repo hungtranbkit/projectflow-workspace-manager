@@ -89,6 +89,10 @@ class CapacityMountIdentity:
     fs_type: str
     major_minor: str
 
+    def filesystem_id(self) -> str:
+        fields = (self.boot_id_sha256, self.mount_namespace, self.kernel_mount_id, self.st_dev, self.mountpoint, self.mount_root, self.fs_type, self.major_minor)
+        return hashlib.sha256(json.dumps(fields, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
+
     def stable_id(self) -> str:
         fields = (self.boot_id_sha256, self.mount_namespace, self.kernel_mount_id,
                   self.st_dev, self.directory_inode, self.mountpoint,
@@ -220,6 +224,9 @@ class CapacityDecision:
     total_inodes: int | None = None
     used_inodes: int | None = None
 
+    filesystem_id: str | None = None
+    mount_decisions: tuple = ()
+
     @property
     def allowed(self) -> bool:
         return self.code in {"ALLOW", "WARN_CAPACITY"}
@@ -233,6 +240,7 @@ class CapacityDecision:
             "total_inodes": self.total_inodes, "used_inodes": self.used_inodes,
             "inode_used_percent": self.inode_used_percent,
             "rank_penalty": self.rank_penalty, "rerouted": self.rerouted,
+            "filesystem_id": self.filesystem_id, "mount_decisions": list(self.mount_decisions),
         }
 
 
@@ -422,6 +430,8 @@ class NodeCapacityGate:
         except (TypeError, ValueError):
             return self._receipt_block("CAPACITY_REQUEST_INVALID", node_id=request.node_id)
         if (not isinstance(receipt.request_sha256, str)
+                or len(receipt.request_sha256) != 64
+                or any(c not in "0123456789abcdef" for c in receipt.request_sha256)
                 or not hmac.compare_digest(receipt.request_sha256, expected_hash)):
             return self._receipt_block("CAPACITY_REQUEST_HASH_MISMATCH", node_id=request.node_id,
                                        observed_at=observed)
@@ -479,7 +489,7 @@ class NodeCapacityGate:
             if (not self._valid_mount_identity(evidence.mount)
                     or evidence.mount != target.expected_mount):
                 return self._receipt_block("CAPACITY_MOUNT_MISMATCH", node_id=request.node_id,
-                                           mount_id=evidence.mount.stable_id() if isinstance(evidence.mount, CapacityMountIdentity) else None,
+                                           mount_id=evidence.mount.stable_id() if self._valid_mount_identity(evidence.mount) else None,
                                            observed_at=observed)
             ancestor = PurePosixPath(evidence.canonical_existing_ancestor)
             suffix = PurePosixPath(evidence.relative_suffix)
@@ -522,24 +532,32 @@ class NodeCapacityGate:
                 inode_used_percent=100.0 * used_inodes / (used_inodes + free_inodes),
                 observed_at=observed, capabilities=request.required_capabilities, online=True,
             )
+            physical_id = evidence.mount.filesystem_id()
+            key = (snapshot.node_id, physical_id)
             decision = self.evaluate(
                 snapshot, now=current, heavy=True,
-                previously_blocked=(snapshot.node_id, snapshot.mount_id) in self._blocked_mounts,
+                previously_blocked=key in self._blocked_mounts,
             )
             if decision.allowed and free_bytes < max(self.policy.block_free_bytes,
                                                       request.requested_headroom_bytes):
                 decision = self._decision("BLOCKED_CAPACITY", snapshot,
                                           "REQUESTED_HEADROOM_UNMET")
-            key = (snapshot.node_id, snapshot.mount_id)
-            if decision.code == "BLOCKED_CAPACITY":
-                self._blocked_mounts.add(key)
-            else:
-                self._blocked_mounts.discard(key)
-            decisions.append(decision)
+            decisions.append(__import__("dataclasses").replace(decision, filesystem_id=physical_id))
 
         priority = {"BLOCKED_CAPACITY": 2, "UNKNOWN_CAPACITY": 2,
                     "WARN_CAPACITY": 1, "ALLOW": 0}
-        return max(decisions, key=lambda item: priority.get(item.code, 2))
+        by_filesystem = {}
+        for item in decisions:
+            key = (item.node_id, item.filesystem_id)
+            if key not in by_filesystem or priority.get(item.code, 2) > priority.get(by_filesystem[key].code, 2):
+                by_filesystem[key] = item
+        for key, item in by_filesystem.items():
+            if item.code == "BLOCKED_CAPACITY":
+                self._blocked_mounts.add(key)
+            else:
+                self._blocked_mounts.discard(key)
+        result = max(decisions, key=lambda item: priority.get(item.code, 2))
+        return __import__("dataclasses").replace(result, mount_decisions=tuple({"node_id": item.node_id, "filesystem_id": item.filesystem_id, "code": item.code} for item in by_filesystem.values()))
 
     def restore_hysteresis(self, events) -> None:
         """Restore mount state from append-only capacity audit events."""
@@ -547,9 +565,10 @@ class NodeCapacityGate:
         for event in events:
             try:
                 payload = json.loads(event["details"])
-                key = (payload["node_id"], payload["mount_id"])
-                if key[0] and key[1]:
-                    latest[key] = payload["code"]
+                for item in payload.get("mount_decisions") or [payload]:
+                    key = (item["node_id"], item.get("filesystem_id") or item.get("mount_id"))
+                    if key[0] and key[1]:
+                        latest[key] = item["code"]
             except (KeyError, TypeError, ValueError):
                 continue
         self._blocked_mounts = {key for key, code in latest.items() if code == "BLOCKED_CAPACITY"}
