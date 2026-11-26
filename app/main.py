@@ -3779,6 +3779,17 @@ def create_app(settings=None):
                         item["source_changed"] = True
                     item["preview_url"] = f"/tasks/{tid}/workspaces/{w['id']}/visual-reference-drafts/{draft['id']}/preview"
                     item["download_url"] = f"/tasks/{tid}/workspaces/{w['id']}/visual-reference-drafts/{draft['id']}/download"
+                    if not item["source_changed"]:
+                        # A handoff suggestion only. The owner must copy the
+                        # downloaded PNG into a reviewed source branch and
+                        # commit it; this page never edits PROJECT.yaml or
+                        # changes the active reference/gate.
+                        viewport = item["viewport"]
+                        item["handoff_path"] = (
+                            f"docs/design/visual-qa/drafts/task-{tid}-workspace-{w['id']}-"
+                            f"draft-{draft['id']}-{viewport}.png"
+                        )
+                        item["handoff_reference_entry"] = f"    {viewport}: {item['handoff_path']}"
                 except HTTPException:
                     item["source_changed"] = True
                 w["visual_qa_drafts"].append(item)

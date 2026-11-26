@@ -109,6 +109,41 @@ def test_visual_draft_upload_form_is_available_without_enabling_visual_gate(clie
     assert client.app.state.decision.evaluate(tid)["visual_qa_required"] is False
 
 
+def test_visual_draft_has_owner_handoff_without_approval_or_repo_mutation(client, git_repo):
+    _root, repo = git_repo
+    tid, wid, worktree, head = _task_workspace(client, repo, opted_in=False)
+    assert _upload(client, tid, wid).status_code == 303
+    draft = _draft(client, tid, wid)
+    destination = f"docs/design/visual-qa/drafts/task-{tid}-workspace-{wid}-draft-{draft['id']}-{VIEWPORT}.png"
+
+    page = client.get(f"/tasks/{tid}")
+    assert page.status_code == 200
+    assert "Bàn giao cho owner xem xét" in page.text
+    assert destination in page.text
+    assert f"{VIEWPORT}: {destination}" in page.text
+    assert "DRAFT · UNREVIEWED" in page.text
+    assert "Không tự thay" in page.text and "PROJECT.yaml" in page.text
+    assert client.app.state.decision.evaluate(tid)["visual_qa_required"] is False
+    assert _git(worktree, "rev-parse", "HEAD") == head
+    assert _git(worktree, "status", "--porcelain") == ""
+
+
+def test_visual_draft_handoff_is_withheld_after_source_changes(client, git_repo):
+    _root, repo = git_repo
+    tid, wid, worktree, _head = _task_workspace(client, repo, opted_in=False)
+    assert _upload(client, tid, wid).status_code == 303
+    draft = _draft(client, tid, wid)
+    destination = f"docs/design/visual-qa/drafts/task-{tid}-workspace-{wid}-draft-{draft['id']}-{VIEWPORT}.png"
+    (worktree / "README.md").write_text("changed after draft import\n")
+
+    page = client.get(f"/tasks/{tid}")
+    assert page.status_code == 200
+    assert "Không tạo hướng dẫn bàn giao" in page.text
+    assert "Bàn giao cho owner xem xét" not in page.text
+    assert destination not in page.text
+    assert client.app.state.decision.evaluate(tid)["visual_qa_required"] is False
+
+
 @pytest.mark.parametrize("case", ["bad-crc", "truncated", "svg", "wrong-dimensions"])
 def test_invalid_images_do_not_create_drafts(client, git_repo, case):
     _root, repo = git_repo
