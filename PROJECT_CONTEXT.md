@@ -206,3 +206,30 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
 - Not yet a full-suite, provider, visual-equivalence, CI, or issue #73 gate
   pass. Keep #74 draft and report the real-provider authorization and Docker
   fixture safety limitations. Rollback only this task branch commit.
+## 2026-11-26 PF-04b11 — task-owned pytest Docker cleanup
+
+- New isolated branch `agent/codex/issue-73-docker-test-ownership-20261126`
+  starts at exact PR #74 head `7fad14ffe02dd8303a59a4e00ac31344e31cfbfd`,
+  tree `850de8112d673f20c4802752292cc6634fc6fd63`.
+- Replaced session-wide `wm-` prefix teardown in `tests/conftest.py` with
+  per-run `tests/docker_compose_ownership.py`: reserve exact Compose project
+  before creation, reject existing resources, register and inspect exact
+  container/network/volume identities (including partial-up results), guard
+  app stop/down/reset, and fail visibly while leaving unverified resources
+  untouched. No product runtime naming/policy change.
+- Safe synthetic legacy prefix red reproducer exited 1 with two unowned
+  `wm-*` resources selected. Updated conftest loaded for ownership regression:
+  16 passed, no failures/errors/skips, exit 0; Python 3.14.4/pytest 9.2.0.
+  The final run included a second-registry collision test and recorded JUnit
+  at 2026-11-26 05:56:01–05:56:03 UTC.
+  The suite uses a fake Docker command runner and created no daemon resources.
+  Helper/conftest `py_compile` and `git diff --check` passed.
+- Read-only audit: Docker server 29.7.2, 62 running/9 stopped, 71 total
+  containers, 29 networks; current `wm-` inventory zero. Container/network
+  destroy event queries for the earlier window returned zero records, but
+  prior inventory/retention is insufficient to establish whether PF-04b10
+  removed anything. Impact remains unknown; do not claim a clean bill.
+- Real Compose integration was blocked because only the shared daemon is
+  available; no real create/down/cleanup was run. Full suite/provider/CI not
+  run. Keep PR #74 draft; A not qualified, E not PASS, and F not re-certified.
+  Detailed evidence: `docs/visual-qa/evidence/issue-73/pf-04b11-docker-cleanup-ownership-20261126/REPORT.md`.

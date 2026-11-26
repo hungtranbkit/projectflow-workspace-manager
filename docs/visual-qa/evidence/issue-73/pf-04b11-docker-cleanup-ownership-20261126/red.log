@@ -1,0 +1,2 @@
+synthetic legacy targets=test-owned-1,service-1,sibling-1
+synthetic unowned targets=service-1,sibling-1
