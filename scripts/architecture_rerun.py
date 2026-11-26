@@ -125,10 +125,11 @@ def run_floorplan(cfg, d: Path) -> dict:
     return dict(ok=ok and out.is_file(), steps=steps, html=out, graph=d / "src/floorplan/graph.json")
 
 
-def run_archify(cfg, d: Path, src: ReadOnlySource, commit: str, allowed: set[str]) -> dict:
+def run_archify(cfg, d: Path, src: ReadOnlySource, commit: str, source_manifest: dict) -> dict:
     ir = json.loads((d / "archify-ir.json").read_bytes() or b"{}")
     if not ir:
         return dict(ok=False, status="NOT_RUN", reason="Chưa có Archify IR cho dự án.", steps=[])
+    allowed = {entry["path"] for entry in source_manifest["files"]}
     outside = [p for p in archify_sources(ir) if p not in allowed]
     if outside:
         return dict(ok=False, status="FAIL", steps=[], reason=f"IR trích dẫn {len(outside)} tệp ngoài danh sách nguồn cho phép.")
@@ -136,41 +137,63 @@ def run_archify(cfg, d: Path, src: ReadOnlySource, commit: str, allowed: set[str
     if drift:
         return dict(ok=False, status="FAIL", steps=[], drift=drift,
                     reason=f"{len(drift)} trích dẫn đã đổi nội dung ở commit đích; cần tác tử soạn lại IR (không render sơ đồ sai dòng).")
-    ir["meta"]["repository"]["revision"] = commit
+    files = {}
+    for entry in source_manifest["files"]:
+        path = entry["path"]
+        data = read_regular_file(d / "src" / path, cfg["limits"]["max_file_bytes"])
+        if len(data) != entry["bytes"] or sha256(data) != entry["sha256"]:
+            raise RunRefused("Nguồn Archify không khớp danh sách nguồn đã ghim.")
+        files[path] = data
+    pin = d / "pin"
+    repo = ir["meta"]["repository"]
+    repo["revision"] = src.pin_filtered(commit, pin, files, cfg["limits"]["max_source_bytes"], origin_url=repo.get("url"))
+    repo["link_mode"] = "local-only"  # the synthetic revision has no public permalink
     ir["meta"]["output"] = "archify.html"
     work = d / "archify"
     work.mkdir(mode=0o700)
-    (work / "ir.json").write_text(json.dumps(ir, ensure_ascii=False))
-    src.pin_commit(commit, d / "pin", origin_url=ir["meta"]["repository"].get("url"))
-    make_read_only(d / "pin")
+    ir_bytes = json.dumps(ir, ensure_ascii=False).encode()
+    (work / "ir.json").write_bytes(ir_bytes)
+    make_read_only(pin)
     tool = cfg["tools"]["archify"]["path"]
-    r = container(cfg, [(d / "pin", "/repo", "ro"), (work, "/work", "rw"), (Path(tool) / "archify", "/tools/archify", "ro")],
+    r = container(cfg, [(pin, "/repo", "ro"), (work, "/work", "rw"), (Path(tool) / "archify", "/tools/archify", "ro")],
                   ["node", "/tools/archify/bin/archify.mjs", "finalize", "architecture", "/work/ir.json", "/work/archify.html",
                    "--repo-root", "/repo", "--quality", "showcase", "--json"], cfg["limits"]["timeout_seconds"],
                   run=d, step="archify-finalize")
     (d / "archify-finalize.log").write_text(r["tail"])
-    gates = finalize_gates(work, r["tail"])
+    gates = finalize_gates(work, ir_bytes)
     steps = [dict(step=k, result={"pass": "PASS", "fail": "FAIL"}.get(v, "NOT_RUN"), detail=v) for k, v in gates.items()]
     core = all(gates.get(k) == "pass" for k in ("validate", "deliver", "check"))
     html = work / "archify.html"
     status = "PASS" if core and gates.get("browser-check") == "pass" else "PARTIAL" if core else "FAIL"
     return dict(ok=core and html.is_file(), status=status, exit=r["exit"], seconds=r["seconds"], steps=steps, html=html, ir=ir,
+                filtered_revision=repo["revision"],
                 reason="" if core else "finalize gates: " + json.dumps(gates)[:200])
 
 
-def finalize_gates(work: Path, stdout_tail: str) -> dict:
-    """Gate results from Archify's summary receipt (the full receipt does not carry them)."""
-    for candidate in (work / "archify.finalize-summary.json",):
-        try:
-            gates = json.loads(candidate.read_text()).get("gates")
-            if isinstance(gates, dict):
-                return gates
-        except (OSError, ValueError):
-            pass
+def finalize_gates(work: Path, ir_bytes: bytes) -> dict:
+    """Accept gate evidence only for the submitted IR and resulting artifact."""
     try:
-        return json.loads(stdout_tail[stdout_tail.index("{"):]).get("gates") or {}
-    except ValueError:
+        receipt = json.loads(read_regular_file(work / "archify.finalize-summary.json", MAX_AUX))
+        html = read_regular_file(work / "archify.html", MAX_HTML)
+    except (OSError, ValueError):
         return {}
+    if not isinstance(receipt, dict):
+        return {}
+    for key, data in (("specification", ir_bytes), ("artifact", html)):
+        identity = receipt.get(key)
+        if not isinstance(identity, dict) or identity.get("sha256") != sha256(data) or identity.get("bytes") != len(data):
+            return {}
+    gates = receipt.get("gates")
+    if not isinstance(gates, dict):
+        return {}
+    return {step: gates.get(step) if gates.get(step) in ("pass", "fail") else "not-run"
+            for step in ("validate", "deliver", "check", "browser-check")}
+
+
+def archify_limitations(status: str) -> list[str]:
+    if status == "PARTIAL":
+        return ["Kết quả kiểm tra trình duyệt của Archify chưa đạt PASS trong bằng chứng của lượt chạy này."]
+    return []
 
 
 def build_manifest(project, src_info, origin, provenance, tools, artifacts, limitations):
@@ -242,8 +265,7 @@ def _execute_run(task_id, h, d, req) -> int:
         h.observe(task_id, backend_state="RUNNING", process_alive=True, at=now(), progress_at=now(), evidence_ref=f"run:{task_id}:source")
         fp = run_floorplan(cfg, d)
         h.observe(task_id, backend_state="RUNNING", process_alive=True, at=now(), progress_at=now(), evidence_ref=f"run:{task_id}:floorplan")
-        allowed = {f["path"] for f in source_manifest["files"]}
-        ar = run_archify(cfg, d, src, commit, allowed)
+        ar = run_archify(cfg, d, src, commit, source_manifest)
         artifacts, blobs, limitations = {}, {}, []
         if fp["ok"]:
             data = read_regular_file(fp["html"], MAX_HTML)
@@ -257,8 +279,9 @@ def _execute_run(task_id, h, d, req) -> int:
         if ar["ok"]:
             data = read_regular_file(ar["html"], MAX_HTML)
             val = [dict(step="archify " + s["step"], result=s["result"], detail=s["detail"]) for s in ar["steps"]]
-            lim = ["Archify browser-check không chạy: Chrome cần user namespace, bị AppArmor của host chặn; không tắt sandbox Chrome. Đã kiểm tra trình duyệt riêng ở bước nghiệm thu."] \
-                if ar["status"] == "PARTIAL" else []
+            lim = archify_limitations(ar["status"])
+            lim.append("Archify xác minh dòng trên Git commit lọc cục bộ "
+                       + ar["filtered_revision"] + ". SHA nguồn đầy đủ nằm trong bằng chứng snapshot.")
             artifacts["archify"] = artifact_entry(data, ar["status"], val,
                                                   {"components": len(ar["ir"]["components"]), "connections": len(ar["ir"]["connections"]),
                                                    "cited_files": len(archify_sources(ar["ir"]))},

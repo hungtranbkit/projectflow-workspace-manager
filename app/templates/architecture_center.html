@@ -36,14 +36,6 @@
 {% if dep.runtime %}<details><summary>Quan sát runtime ({{dep.runtime|length}})</summary>{% for r in dep.runtime %}<p>{{r.node}} · {{r.source}} · {{r.name}} · {{r.state}} · <code>{{r.version or 'không có phiên bản'}}</code>{% if not r.fresh %} · Dữ liệu cũ / chưa xác minh{% elif not r.running %} · Chưa xác minh đang chạy{% elif not r.has_sha %} · không có SHA{% elif r.matches %} · khớp commit{% else %} · khác commit{% endif %}</p>{% endfor %}</details>{% endif %}
 {% if dep.same_checkouts %}<details><summary>Checkout ở đúng commit ({{dep.same_checkouts|length}})</summary>{% for r in dep.same_checkouts %}<p>{{r.node}} · {{r.name}}</p>{% endfor %}</details>{% endif %}
 {% if current.limitations %}<h3>Giới hạn</h3><ul>{% for l in current.limitations %}<li>{{l}}</li>{% endfor %}</ul>{% endif %}
-<h3>Chạy lại</h3>
-{% if configured %}<form class="a-run" method="post" action="/steward/architecture/{{pid}}/regenerate">
-<label for="rc">Commit (để trống = đầu {{tracked.ref}}{% if tracked.commit %} · {{tracked.commit[:12]}}{% endif %})</label>
-<div><input id="rc" name="commit" inputmode="latin" autocomplete="off" pattern="[0-9a-fA-F]{40}" maxlength="40" placeholder="SHA đầy đủ 40 ký tự"><button>Chạy lại cả hai công cụ</button></div>
-<p class="a-note">Đi qua cổng tác vụ: mỗi commit + bộ công cụ chỉ chạy một lần, giới hạn số lượt đồng thời, chạy ngoại tuyến trên bản nguồn chỉ đọc.</p></form>
-{% else %}<p>Dự án chưa được cấu hình để chạy lại.</p>{% endif %}
-{% for r in runs[:5] %}<article><strong>Lượt #{{r.id}} · {{r.state}}</strong><p>{{stamp(r.created_at)}} · <code>{{(r.commit or '')[:12]}}</code> · dọn dẹp {{r.cleanup}}</p>
-{% for e in r.events[-4:] %}<p class="a-ev">{{e.event}} · {{e.at[:19]}}{% if e.evidence.reason %} · {{e.evidence.reason}}{% endif %}{% if e.evidence.artifact %} · {{e.evidence.artifact[:21]}}{% endif %}</p>{% endfor %}</article>{% endfor %}
 
 {% elif tab in kinds %}
 {% set a = current.artifacts.get(tab) %}
@@ -77,6 +69,16 @@
 <p>Phủ quét: {% for k, v in a.coverage.items() %}{{k}} {{v}}{% if not loop.last %} · {% endif %}{% endfor %}</p>
 <p>Hỗ trợ: {{a.capabilities|join(' · ')}}</p>{% endfor %}
 {% endif %}
+{% endif %}
+{% if tab == 'overview' or not current %}
+<h3>Chạy lại</h3>
+{% if configured %}<form class="a-run" method="post" action="/steward/architecture/{{pid}}/regenerate">
+<label for="rc">Commit (để trống = đầu {{tracked.ref}}{% if tracked.commit %} · {{tracked.commit[:12]}}{% endif %})</label>
+<div><input id="rc" name="commit" inputmode="latin" autocomplete="off" pattern="[0-9a-fA-F]{40}" maxlength="40" placeholder="SHA đầy đủ 40 ký tự"><button>Chạy lại cả hai công cụ</button></div>
+<p class="a-note">Đi qua cổng tác vụ: mỗi commit + bộ công cụ chỉ chạy một lần, giới hạn số lượt đồng thời, chạy ngoại tuyến trên bản nguồn chỉ đọc.</p></form>
+{% else %}<p>Dự án chưa được cấu hình để chạy lại.</p>{% endif %}
+{% for r in runs[:5] %}<article><strong>Lượt #{{r.id}} · {{r.state}}</strong><p>{{stamp(r.created_at)}} · <code>{{(r.commit or '')[:12]}}</code> · dọn dẹp {{r.cleanup}}</p>
+{% for e in r.events[-4:] %}<p class="a-ev">{{e.event}} · {{e.at[:19]}}{% if e.evidence.reason %} · {{e.evidence.reason}}{% endif %}{% if e.evidence.artifact %} · {{e.evidence.artifact[:21]}}{% endif %}</p>{% endfor %}</article>{% endfor %}
 {% endif %}
 {% endif %}
 </div>

@@ -203,9 +203,12 @@ class ReadOnlySource:
         if top.returncode or Path(top.stdout.decode().strip()).resolve() != self.repo:
             raise GitSafetyError("Configured source is not a git repository root")
 
-    def _git(self, *args: str, check=True, input_bytes: bytes | None = None, cwd: Path | None = None):
+    def _git(self, *args: str, check=True, input_bytes: bytes | None = None, cwd: Path | None = None,
+             isolated: bool = False):
         import os
         env = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")}, **_READ_ONLY_ENV}
+        if isolated:
+            env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_ALLOW_PROTOCOL="")
         try:
             proc = subprocess.run(["git", "--no-replace-objects", *args], cwd=cwd or self.repo, input=input_bytes,
                                   capture_output=True, timeout=self.timeout, shell=False, env=env)
@@ -267,28 +270,41 @@ class ReadOnlySource:
             cursor = nl + 1 + size + 1
         return result
 
-    def pin_commit(self, sha: str, dest: Path, origin_url: str | None = None) -> Path:
-        """Create a private depth-1 repository holding exactly one commit, no checkout.
-
-        Used only as a read-only mount for a renderer that verifies line
-        citations against Git objects. The source repository is read through
-        upload-pack; nothing is written to it.
-        """
-        sha = self.resolve(sha)
-        dest = Path(dest)
-        if dest.exists():
-            raise GitSafetyError("Pinned repository destination already exists")
-        self._git("init", "--quiet", str(dest), cwd=dest.parent)
-        self._git("-c", "protocol.file.allow=always", "fetch", "--quiet", "--no-tags", "--depth=1",
-                  f"--upload-pack=git -c uploadpack.allowAnySHA1InWant=true upload-pack",
-                  "file://" + str(self.repo), sha, cwd=dest)
-        self._git("update-ref", "--no-deref", "HEAD", sha, cwd=dest)
+    def pin_filtered(self, source_commit: str, dest: Path, files: dict[str, bytes], max_bytes: int,
+                     origin_url: str | None = None) -> str:
+        """Create a synthetic root commit from approved bytes in a fresh object database."""
+        if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+            raise GitSafetyError("Invalid original source commit")
         if origin_url:
             if not re.fullmatch(r"https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+?(?:\.git)?", origin_url):
                 raise GitSafetyError("Unsupported origin URL")
-            # Identity metadata for evidence tools only; the pinned copy is never fetched or pushed.
-            self._git("remote", "add", "origin", origin_url, cwd=dest)
-        got = self._git("rev-parse", "HEAD", cwd=dest).stdout.decode().strip()
-        if got != sha:
-            raise GitCommandError("Pinned repository does not hold the requested commit")
-        return dest
+        if sum(map(len, files.values())) > max_bytes:
+            raise GitSafetyError("Filtered source exceeds its byte budget")
+        dest = dest.parent.resolve(strict=True) / dest.name
+        dest.mkdir(mode=0o700)
+        self._git("init", "--quiet", "--template=", "--object-format=sha1", "--initial-branch=filtered",
+                  cwd=dest, isolated=True)
+        self._git("config", "--local", "protocol.allow", "never", cwd=dest, isolated=True)
+        if origin_url:
+            # Archify compares the origin's repository name to the authored IR.
+            self._git("config", "--local", "remote.origin.url", origin_url, cwd=dest, isolated=True)
+        message = f"Filtered renderer source.\n\nOriginal-source: {source_commit}\n".encode()
+        stream = bytearray(b"commit refs/heads/filtered\ncommitter ProjectFlow <source@projectflow.invalid> 0 +0000\n"
+                           b"data %d\n" % len(message) + message + b"\n")
+        for path, data in sorted(files.items()):
+            if any(part.lower() in ("", ".", "..", ".git") for part in path.split("/")):
+                raise GitSafetyError("Unsafe filtered source path")
+            # Fast-import's quoted paths accept C-style octal escapes.
+            name = re.sub(rb'["\\\x00-\x1f\x7f-\xff]', lambda m: b"\\%03o" % m[0][0],
+                          path.encode("utf-8", "surrogateescape"))
+            stream.extend(b'M 100644 inline "' + name + b'"\ndata %d\n' % len(data))
+            stream.extend(data)
+            stream.extend(b"\n")
+        stream.extend(b"\ndone\n")
+        self._git("fast-import", "--quiet", "--done", input_bytes=bytes(stream), cwd=dest, isolated=True)
+        objects = self._git("cat-file", "--batch-all-objects", "--batch-check=%(objectsize)",
+                            cwd=dest, isolated=True).stdout.splitlines()
+        stored_bytes = sum(path.stat().st_size for path in dest.rglob("*") if path.is_file())
+        if max(sum(map(int, objects)), stored_bytes) > max_bytes:
+            raise GitSafetyError("Filtered Git repository exceeds its byte budget")
+        return self._git("rev-parse", "HEAD", cwd=dest, isolated=True).stdout.decode().strip()

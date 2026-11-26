@@ -428,6 +428,7 @@ def container(cfg: dict, mounts: list[tuple[Path, str, str]], argv: list[str], t
            "--cpus", str(lim["cpus"]), "--user", f"{os.getuid()}:{os.getgid()}",
            "--tmpfs", "/tmp:rw,size=512m", "-e", "HOME=/tmp", "-e", "CI=1", "-e", "NO_COLOR=1",
            "-e", "ARCHIFY_NO_UPDATE_CHECK=1", "-e", "GIT_CONFIG_NOSYSTEM=1",
+           "-e", "GIT_NO_LAZY_FETCH=1", "-e", "GIT_ALLOW_PROTOCOL=",
            "-e", "GIT_CONFIG_COUNT=1", "-e", "GIT_CONFIG_KEY_0=safe.directory", "-e", "GIT_CONFIG_VALUE_0=*",
            "--label", "projectflow.architecture-run=1", "--label", f"{OWNER_LABEL}={owner}"]
     for host, inside, mode in mounts:

@@ -85,6 +85,65 @@ def login(m, client):
 IFRAME = {"sec-fetch-dest": "iframe", "sec-fetch-site": "same-origin"}
 
 
+@pytest.mark.parametrize("evidence", ["missing", "no-browser", "wrong-source", "stale-artifact", "current"])
+def test_archify_gates_require_current_input_and_artifact(tmp_path, evidence):
+    ir = json.dumps({"meta": {"repository": {"revision": COMMIT}}}).encode()
+    (tmp_path / "archify.html").write_bytes(ARCHIFY)
+    if evidence != "missing":
+        submitted = ir.replace(COMMIT.encode(), b"d" * 40) if evidence == "wrong-source" else ir
+        html = FLOORPLAN if evidence == "stale-artifact" else ARCHIFY
+        gates = dict(validate="pass", deliver="pass", check="pass")
+        if evidence != "no-browser":
+            gates["browser-check"] = "pass"
+        receipt = dict(specification=dict(sha256=sha256(submitted), bytes=len(submitted)),
+                       artifact=dict(sha256=sha256(html), bytes=len(html)), gates=gates)
+        (tmp_path / "archify.finalize-summary.json").write_text(json.dumps(receipt))
+    result = architecture_rerun.finalize_gates(tmp_path, ir)
+    if evidence == "no-browser":
+        assert result == {"validate": "pass", "deliver": "pass", "check": "pass", "browser-check": "not-run"}
+        limitations = architecture_rerun.archify_limitations("PARTIAL")
+        assert limitations == ["Kết quả kiểm tra trình duyệt của Archify chưa đạt PASS trong bằng chứng của lượt chạy này."]
+    elif evidence == "current":
+        assert result["browser-check"] == "pass"
+    else:
+        assert result == {}
+
+
+@pytest.mark.parametrize("configured,state,snapshot", [
+    (True, None, False),
+    (True, "DISPATCHED", False),
+    (True, "FAILED", False),
+    (False, None, False),
+    (True, "FAILED", True),
+])
+def test_project_rerun_controls_before_and_after_first_snapshot(
+    steward, monkeypatch, configured, state, snapshot,
+):
+    memory, client = steward
+    path = f"/steward/architecture/{PROJECT}"
+    monkeypatch.setattr(runs_mod, "load_config", lambda: {"projects": {PROJECT: {}} if configured else {}})
+    monkeypatch.setattr(runs_mod, "tracked_revision", lambda *_: {"ref": "main", "commit": COMMIT})
+    run = dict(id=51, state=state, created_at=1, cleanup="CLEANUP_PENDING", commit=COMMIT,
+               events=[dict(event="RUN_EVENT", at="2026-01-01", evidence={"reason": "synthetic run detail"})])
+    monkeypatch.setattr(runs_mod, "runs", lambda _: [run] if state else [])
+    if snapshot:
+        ArchitectureStore(memory.path).put(manifest(), {"archify": ARCHIFY, "floorplan": FLOORPLAN})
+    assert f'action="{path}/regenerate"' not in client.get(path).text
+    login(memory, client)
+    page = client.get(path)
+    assert page.status_code == 200
+    assert page.text.count(f'action="{path}/regenerate"') == int(configured)
+    assert ("Chưa có snapshot cho dự án này." in page.text) is (not snapshot)
+    assert ("Dự án chưa được cấu hình để chạy lại." in page.text) is (not configured)
+    if state:
+        assert page.text.count(f"Lượt #51 · {state}") == 1
+        assert "synthetic run detail" in page.text
+    if snapshot:
+        viewer = client.get(path + "?tab=archify")
+        assert viewer.text.count("<iframe ") == 1
+        assert f'action="{path}/regenerate"' not in viewer.text
+
+
 def test_snapshot_is_immutable_content_addressed_and_survives_restart(tmp_path):
     store = ArchitectureStore(tmp_path / "s.db")
     snap, created = store.put(manifest(), {"archify": ARCHIFY, "floorplan": FLOORPLAN})
@@ -378,6 +437,70 @@ def test_carried_forward_ir_with_moved_citations_is_refused(tmp_path):
     (src / "app/a.js").write_text("zero\none\ntwo\nthree\nfour\n")
     git(src, "commit", "-qam", "shift")
     assert architecture_rerun.cited_drift(ro, ir, ro.resolve("HEAD")) == ["a:app/a.js:2-2"]
+
+
+def test_archify_renderer_gets_only_bounded_filtered_git_objects(tmp_path, monkeypatch):
+    from app.services.git_workspace import GitSafetyError
+
+    code = "one\ntwo\nthree\n"
+    credential = "ghp_" + "z" * 36
+    src = repo_with(tmp_path, "original", {
+        "app/a.js": code, "app/.env.js": credential, "app/large.js": "x" * (1 << 20),
+    })
+    ro = runs_mod.ReadOnlySource(src)
+    commit = ro.resolve("HEAD")
+    d = tmp_path / "run"
+    d.mkdir()
+    project = {"include_prefixes": ["app/"], "include_suffixes": [".js"], "exclude_globs": ["*/.env*"]}
+    limits = {**runs_mod.DEFAULT_LIMITS, "max_file_bytes": 1024, "max_source_bytes": 4096}
+    source = runs_mod.materialize(ro, commit, project, limits, d / "src")
+    ir = {"meta": {"repository": {"revision": commit, "url": "https://github.com/example/demo-app"}},
+          "components": [{"id": "a", "sources": [{"path": "app/a.js", "line": 2}]}], "connections": []}
+    (d / "archify-ir.json").write_text(json.dumps(ir))
+    excluded = [obj for _, obj, _, path in ro.tree(commit) if path != "app/a.js"]
+
+    def renderer(cfg, mounts, argv, timeout, *, run, step):
+        pin, work = mounts[0][0], mounts[1][0]
+        assert mounts == [(pin, "/repo", "ro"), (work, "/work", "rw"), (tmp_path / "archify", "/tools/archify", "ro")]
+        assert argv[argv.index("--repo-root") + 1] == "/repo"
+        submitted = (work / "ir.json").read_bytes()
+        candidate = json.loads(submitted)
+        revision = candidate["meta"]["repository"]["revision"]
+        assert candidate["meta"]["repository"]["link_mode"] == "local-only"
+        assert revision == git(pin, "rev-parse", "HEAD") != commit
+        assert git(pin, "rev-list", "--count", "HEAD") == "1"
+        assert git(pin, "ls-tree", "-r", "--name-only", revision) == "app/a.js"
+        citation = candidate["components"][0]["sources"][0]
+        assert git(pin, "show", f"{revision}:{citation['path']}").splitlines()[citation["line"] - 1] == "two"
+        assert git(pin, "blame", "-L", "2,2", revision, "--", citation["path"]).endswith("two")
+        objects = git(pin, "cat-file", "--batch-all-objects", "--batch-check=%(objectname) %(objectsize)")
+        sizes = dict(entry.split() for entry in objects.splitlines())
+        assert all(obj not in sizes for obj in [commit, *excluded])
+        assert sum(map(int, sizes.values())) <= limits["max_source_bytes"]
+        files = [path for path in pin.rglob("*") if path.is_file()]
+        assert sum(path.stat().st_size for path in files) <= limits["max_source_bytes"]
+        assert all(path.stat().st_nlink == 1 and not path.is_symlink() for path in files)
+        assert not (pin / ".git/objects/info/alternates").exists()
+        assert not list(pin.rglob("*.promisor"))
+        assert git(pin, "config", "--local", "--get", "protocol.allow") == "never"
+        assert all(credential.encode() not in path.read_bytes() for path in files)
+        (work / "archify.html").write_bytes(ARCHIFY)
+        receipt = dict(specification=dict(sha256=sha256(submitted), bytes=len(submitted)),
+                       artifact=dict(sha256=sha256(ARCHIFY), bytes=len(ARCHIFY)),
+                       gates=dict(validate="pass", deliver="pass", check="pass"))
+        (work / "archify.finalize-summary.json").write_text(json.dumps(receipt))
+        return dict(exit=1, seconds=0, tail="")
+
+    monkeypatch.setattr(architecture_rerun, "container", renderer)
+    cfg = {"tools": {"archify": {"path": str(tmp_path)}}, "limits": limits}
+    result = architecture_rerun.run_archify(cfg, d, ro, commit, source)
+    assert source["inputCommit"] == commit
+    assert result["filtered_revision"] != commit and result["ok"] and result["status"] == "PARTIAL"
+    with pytest.raises(GitSafetyError, match="repository exceeds its byte budget"):
+        ro.pin_filtered(commit, d / "too-small", {"app/a.js": code.encode()}, len(code))
+    git(src, "commit", "--allow-empty", "-qm", "same tree, different source commit")
+    other_source = ro.resolve("HEAD")
+    assert ro.pin_filtered(other_source, d / "other-source", {"app/a.js": code.encode()}, 4096) != result["filtered_revision"]
 
 
 def test_config_permissions_and_pins_are_enforced(tmp_path):
