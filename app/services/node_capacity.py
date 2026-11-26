@@ -54,9 +54,11 @@ class CapacitySnapshot:
     node_id: str
     mount_id: str
     total_bytes: int
+    used_bytes: int
     free_bytes: int
     used_percent: float
     total_inodes: int
+    used_inodes: int
     free_inodes: int
     inode_used_percent: float
     observed_at: datetime
@@ -76,6 +78,10 @@ class CapacityDecision:
     inode_used_percent: float | None
     rank_penalty: int = 0
     rerouted: bool = False
+    total_bytes: int | None = None
+    used_bytes: int | None = None
+    total_inodes: int | None = None
+    used_inodes: int | None = None
 
     @property
     def allowed(self) -> bool:
@@ -85,7 +91,9 @@ class CapacityDecision:
         return {
             "code": self.code, "node_id": self.node_id, "mount_id": self.mount_id,
             "reason": self.reason, "observed_at": self.observed_at.isoformat() if self.observed_at else None,
+            "total_bytes": self.total_bytes, "used_bytes": self.used_bytes,
             "free_bytes": self.free_bytes, "used_percent": self.used_percent,
+            "total_inodes": self.total_inodes, "used_inodes": self.used_inodes,
             "inode_used_percent": self.inode_used_percent,
             "rank_penalty": self.rank_penalty, "rerouted": self.rerouted,
         }
@@ -171,17 +179,35 @@ class NodeCapacityGate:
             raise ValueError("capacity target must be an existing directory")
         stats = os.statvfs(target)
         block_size = stats.f_frsize or stats.f_bsize
+        if (block_size <= 0 or stats.f_blocks <= 0 or stats.f_bfree < 0
+                or stats.f_bavail < 0 or stats.f_bfree > stats.f_blocks
+                or stats.f_bavail > stats.f_bfree):
+            raise ValueError("filesystem block metrics are invalid")
+        if (stats.f_files <= 0 or stats.f_ffree < 0 or stats.f_favail < 0
+                or stats.f_ffree > stats.f_files or stats.f_favail > stats.f_ffree):
+            raise ValueError("filesystem inode metrics are invalid")
         total_bytes = int(stats.f_blocks * block_size)
+        used_bytes = int((stats.f_blocks - stats.f_bfree) * block_size)
         free_bytes = int(stats.f_bavail * block_size)
         total_inodes = int(stats.f_files)
+        used_inodes = int(stats.f_files - stats.f_ffree)
         free_inodes = int(stats.f_favail)
-        used_percent = (100.0 * (total_bytes - max(0, free_bytes)) / total_bytes) if total_bytes else 100.0
-        inode_used_percent = (100.0 * (total_inodes - max(0, free_inodes)) / total_inodes) if total_inodes else 100.0
+        used_and_available = used_bytes + free_bytes
+        if used_and_available <= 0:
+            raise ValueError("filesystem block metrics are invalid")
+        # Match df's Use%: used / (used + available). f_bavail excludes
+        # reserved blocks, while f_bfree includes them; treating f_bavail as
+        # all free blocks overstates usage on filesystems with reservations.
+        used_percent = 100.0 * used_bytes / used_and_available
+        inodes_used_and_available = used_inodes + free_inodes
+        if inodes_used_and_available <= 0:
+            raise ValueError("filesystem inode metrics are invalid")
+        inode_used_percent = 100.0 * used_inodes / inodes_used_and_available
         mount_id = f"dev-{target.stat().st_dev:x}"
         return CapacitySnapshot(
             node_id=node_id, mount_id=mount_id, total_bytes=total_bytes,
-            free_bytes=free_bytes, used_percent=used_percent,
-            total_inodes=total_inodes, free_inodes=free_inodes,
+            used_bytes=used_bytes, free_bytes=free_bytes, used_percent=used_percent,
+            total_inodes=total_inodes, used_inodes=used_inodes, free_inodes=free_inodes,
             inode_used_percent=inode_used_percent, observed_at=_utc(now or datetime.now(timezone.utc)),
             capabilities=frozenset(str(item) for item in capabilities), online=True,
         )
@@ -232,16 +258,20 @@ class NodeCapacityGate:
             values_valid = (
                 bool(snapshot.node_id and snapshot.mount_id)
                 and snapshot.total_bytes > 0
-                and 0 <= snapshot.free_bytes <= snapshot.total_bytes
+                and 0 <= snapshot.used_bytes <= snapshot.total_bytes
+                and 0 <= snapshot.free_bytes <= snapshot.total_bytes - snapshot.used_bytes
+                and snapshot.used_bytes + snapshot.free_bytes > 0
                 and 0 <= snapshot.used_percent <= 100
                 and abs(snapshot.used_percent - (
-                    100.0 * (snapshot.total_bytes - snapshot.free_bytes) / snapshot.total_bytes
+                    100.0 * snapshot.used_bytes / (snapshot.used_bytes + snapshot.free_bytes)
                 )) <= 1.0
                 and snapshot.total_inodes > 0
-                and 0 <= snapshot.free_inodes <= snapshot.total_inodes
+                and 0 <= snapshot.used_inodes <= snapshot.total_inodes
+                and 0 <= snapshot.free_inodes <= snapshot.total_inodes - snapshot.used_inodes
+                and snapshot.used_inodes + snapshot.free_inodes > 0
                 and 0 <= snapshot.inode_used_percent <= 100
                 and abs(snapshot.inode_used_percent - (
-                    100.0 * (snapshot.total_inodes - snapshot.free_inodes) / snapshot.total_inodes
+                    100.0 * snapshot.used_inodes / (snapshot.used_inodes + snapshot.free_inodes)
                 )) <= 1.0
             )
         except (AttributeError, TypeError, ValueError):
@@ -315,4 +345,6 @@ class NodeCapacityGate:
         return CapacityDecision(code, snapshot.node_id, snapshot.mount_id, reason,
                                 snapshot.observed_at, snapshot.free_bytes,
                                 snapshot.used_percent, snapshot.inode_used_percent,
-                                rank_penalty=rank_penalty)
+                                rank_penalty=rank_penalty,
+                                total_bytes=snapshot.total_bytes, used_bytes=snapshot.used_bytes,
+                                total_inodes=snapshot.total_inodes, used_inodes=snapshot.used_inodes)

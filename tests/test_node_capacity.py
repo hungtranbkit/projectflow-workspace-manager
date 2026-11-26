@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,8 +15,9 @@ GIB = 1024 ** 3
 def snap(node="dell-linux", *, used=70, free=100*GIB, inode=20, caps=(), at=NOW, online=True):
     return CapacitySnapshot(
         node_id=node, mount_id=f"dev-{node}", total_bytes=int(free / (1 - used / 100)),
+        used_bytes=int(free / (1 - used / 100)) - free,
         free_bytes=free, used_percent=used, total_inodes=1000,
-        free_inodes=1000 - inode*10, inode_used_percent=inode,
+        used_inodes=inode*10, free_inodes=1000 - inode*10, inode_used_percent=inode,
         observed_at=at, capabilities=frozenset(caps), online=online,
     )
 
@@ -89,16 +91,17 @@ def test_auto_selection_ranks_healthy_fallback_above_warned_preferred_node():
 
 
 def test_issue86_reported_fleet_boundaries_are_policy_fixtures_not_live_health():
-    """Keep the reported HP/M910/MacBook/Dell limits explicit in policy tests.
+    """Replay reported HP/M910/MacBook/Dell boundaries, not live health.
 
-    Values come from issue #86 comment 7154171990 and are intentionally
-    synthetic observations at NOW. This does not attest those nodes are online.
+    The HP/MacBook/Dell values mirror historical reports; the M910 92% is
+    the owner-requested boundary. Free bytes are synthetic for HP/M910 so
+    this specifically exercises percentage thresholds. None attest live health.
     """
     gate = NodeCapacityGate(CapacityPolicy())
     fleet = [
-        snap("hp-linux", used=95, free=13_831_671_808, inode=16,
+        snap("hp-linux", used=95, free=30*GIB, inode=16,
              caps={"non_docker", "docker"}),
-        snap("m910", used=90, free=11_876_749_312, inode=17,
+        snap("m910", used=92, free=30*GIB, inode=17,
              caps={"non_docker", "docker"}),
         snap("macbook", used=18, free=385_339_617_280, inode=20,
              caps={"non_docker"}),
@@ -109,6 +112,7 @@ def test_issue86_reported_fleet_boundaries_are_policy_fixtures_not_live_health()
     per_node = {item.node_id: gate.evaluate(item, now=NOW, heavy=True) for item in fleet}
     assert per_node["hp-linux"].code == "BLOCKED_CAPACITY"
     assert per_node["m910"].code == "BLOCKED_CAPACITY"
+    assert per_node["m910"].used_percent == pytest.approx(92)
     assert per_node["macbook"].code == "ALLOW"
     assert per_node["dell-linux"].code == "ALLOW"
 
@@ -145,6 +149,56 @@ def test_filesystem_probe_reports_real_target_metrics(tmp_path):
     assert snapshot.total_bytes > 0 and snapshot.free_bytes >= 0
     assert snapshot.total_inodes > 0 and snapshot.inode_used_percent >= 0
     assert snapshot.observed_at == NOW
+
+
+def test_filesystem_probe_matches_df_used_over_used_plus_available_with_reserved_blocks(tmp_path, monkeypatch):
+    block_size = 4096
+    stats = SimpleNamespace(
+        f_frsize=block_size, f_bsize=block_size,
+        f_blocks=1000, f_bfree=200, f_bavail=100,
+        f_files=1000, f_ffree=200, f_favail=100,
+    )
+    monkeypatch.setattr("app.services.node_capacity.os.statvfs", lambda _path: stats)
+
+    gate = NodeCapacityGate(CapacityPolicy(block_free_bytes=1, clear_free_bytes=1))
+    snapshot = gate.probe_path(tmp_path, node_id="reserved-test", now=NOW)
+
+    assert snapshot.total_bytes == 1000 * block_size
+    assert snapshot.free_bytes == 100 * block_size
+    assert snapshot.used_bytes == 800 * block_size
+    assert snapshot.used_percent == pytest.approx(800 / (800 + 100) * 100)
+    assert snapshot.used_inodes == 800
+    assert snapshot.inode_used_percent == pytest.approx(800 / (800 + 100) * 100)
+    decision = gate.evaluate(snapshot, now=NOW, heavy=True)
+    assert decision.code == "WARN_CAPACITY"
+    assert decision.audit_fields()["used_bytes"] == snapshot.used_bytes
+    assert decision.audit_fields()["total_bytes"] == snapshot.total_bytes
+    assert decision.audit_fields()["used_inodes"] == snapshot.used_inodes
+
+
+def test_filesystem_probe_rejects_zero_or_impossible_block_counters(tmp_path, monkeypatch):
+    gate = NodeCapacityGate(CapacityPolicy())
+    for stats in (
+        SimpleNamespace(f_frsize=4096, f_bsize=4096, f_blocks=0, f_bfree=0, f_bavail=0,
+                        f_files=100, f_ffree=10, f_favail=10),
+        SimpleNamespace(f_frsize=4096, f_bsize=4096, f_blocks=10, f_bfree=11, f_bavail=1,
+                        f_files=100, f_ffree=10, f_favail=10),
+        SimpleNamespace(f_frsize=4096, f_bsize=4096, f_blocks=10, f_bfree=2, f_bavail=3,
+                        f_files=100, f_ffree=10, f_favail=10),
+    ):
+        monkeypatch.setattr("app.services.node_capacity.os.statvfs", lambda _path, value=stats: value)
+        with pytest.raises(ValueError, match="filesystem block metrics are invalid"):
+            gate.probe_path(tmp_path, node_id="invalid-test", now=NOW)
+
+
+def test_filesystem_probe_rejects_zero_inode_counters(tmp_path, monkeypatch):
+    stats = SimpleNamespace(
+        f_frsize=4096, f_bsize=4096, f_blocks=1000, f_bfree=200, f_bavail=100,
+        f_files=0, f_ffree=0, f_favail=0,
+    )
+    monkeypatch.setattr("app.services.node_capacity.os.statvfs", lambda _path: stats)
+    with pytest.raises(ValueError, match="filesystem inode metrics are invalid"):
+        NodeCapacityGate().probe_path(tmp_path, node_id="invalid-inode-test", now=NOW)
 
 
 def test_hysteresis_restores_latest_mount_decision_from_audit_events():
