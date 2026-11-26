@@ -2773,6 +2773,12 @@ def create_app(settings=None):
         live=latest_session_for_workspace(wid)
         if live and live["status"] in LIVE_SESSION_STATUSES:
             return JSONResponse({"ok":False,"code":"ACTIVE_SESSION_EXISTS","message":f"An AgentSession is already {live['status']} for this workspace -- open it instead of starting a second, untracked agent process.","session_id":live["id"]},status_code=409)
+        capacity = _check_builder_capacity(
+            [Path(w["worktree_path"]), Path(repo(w["repository_id"])["repo_path"])],
+            entity_type="agent", entity_id=wid)
+        if capacity and not capacity.allowed:
+            return JSONResponse({"ok": False, "code": "BLOCKED_CAPACITY",
+                                 "message": capacity.reason, "evidence": capacity.audit_fields()}, status_code=409)
         try:
             result=launcher.launch_agent(w["worktree_path"],w["agent"]); db.event("agent",wid,"AGENT_LAUNCHED",f"agent={w['agent']} path={result['worktree']} terminal={result['terminal']} result=requested")
             return {"ok":True,"message":f"{result['agent']} terminal đã được yêu cầu mở.",**result}
@@ -2794,6 +2800,12 @@ def create_app(settings=None):
         if not ids: raise GitSafetyError("Select at least one agent workspace")
         r=repo(repository_id); sources=[agent_row(x) for x in ids]
         if any(x["repository_id"]!=repository_id for x in sources): raise GitSafetyError("All sources must belong to integration repository")
+        capacity = _check_builder_capacity(
+            [Path(r["repo_path"]), *[Path(s["worktree_path"]) for s in sources]],
+            entity_type="repository", entity_id=repository_id)
+        if capacity and not capacity.allowed:
+            evidence = json.dumps(capacity.audit_fields(), sort_keys=True)
+            raise GitSafetyError(f"BLOCKED_CAPACITY: {capacity.reason}; evidence={evidence}")
         branch,path,commit=git.create_integration(r["repo_path"],name,base)
         iid=db.execute("INSERT INTO integration_workspaces(repository_id,name,branch,worktree_path,base_branch,base_commit,status) VALUES(?,?,?,?,?,?,?)",(repository_id,name,branch,str(path),base,commit,"MERGING")); db.event("integration",iid,"INTEGRATION_CREATED",branch)
         for source in sources:
