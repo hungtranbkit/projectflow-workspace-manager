@@ -16,6 +16,8 @@ This is a targeted source-integrity milestone, not proof of a browser run, full-
 
 ## Red / green evidence
 
+RED baseline was local commit `edf92d08fd80212689921b12d1fb91f0da8ccebe`, tree `51d17b4c00718f176f7397cde582e21c007a116b`; this tree matches the expected PR head tree, while the commit SHA differs.
+
 RED command (three focused regressions, before implementation):
 
 ```sh
