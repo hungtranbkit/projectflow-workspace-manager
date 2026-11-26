@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="1.006" timestamp="2026-11-26T11:45:24.040282+07:00" hostname="dell-Latitude-5511"><testcase classname="tests.test_claude_test_config_isolation" name="test_cleanup_preserves_sibling_pytest_trust_entries" time="0.933"><failure message="AssertionError: assert '/tmp/pytest-of-dell/pytest-sibling/worktree' in {'/home/dell/projects/another-session': {'hasTrustDialogAccepted': True}}">monkeypatch = &lt;_pytest.monkeypatch.MonkeyPatch object at 0x72378398c9d0&gt;
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-676/test_cleanup_preserves_sibling0')
+
+    def test_cleanup_preserves_sibling_pytest_trust_entries(monkeypatch, tmp_path):
+        config = tmp_path / ".claude.json"
+        own_key = "/tmp/pytest-of-dell/pytest-current/worktree"
+        sibling_key = "/tmp/pytest-of-dell/pytest-sibling/worktree"
+        unrelated_key = "/home/dell/projects/another-session"
+        config.write_text(json.dumps({"projects": {
+            own_key: {"hasTrustDialogAccepted": True},
+            sibling_key: {"hasTrustDialogAccepted": True},
+            unrelated_key: {"hasTrustDialogAccepted": True},
+        }}))
+        monkeypatch.setattr(real_provider_tests, "CLAUDE_CONFIG", config)
+
+        real_provider_tests._restore_claude_dir(own_key, None)
+
+        projects = json.loads(config.read_text())["projects"]
+        assert own_key not in projects
+&gt;       assert sibling_key in projects
+E       AssertionError: assert '/tmp/pytest-of-dell/pytest-sibling/worktree' in {'/home/dell/projects/another-session': {'hasTrustDialogAccepted': True}}
+
+tests/test_claude_test_config_isolation.py:26: AssertionError</failure></testcase></testsuite></testsuites>

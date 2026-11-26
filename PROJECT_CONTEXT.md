@@ -180,3 +180,29 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
 - Reverified published source SHA `70d467ce7532d6f4fdcb9a238157daba3737afa1` / tree `3639037adab78f941f22817b235cb7f43373e579`; ran exact-source preflight/build/smoke and UIFix verification successfully. Fresh deterministic prepass: 6/6 passed; fresh collect-only inventory sums to 1,627 test items plus one module-level skip because this venv lacks Python Playwright. No full-suite result is claimed.
 - Full suite was not started: Dell had an unrelated pytest in the main checkout, an active Claude session, and one existing `/tmp/pytest-of-dell/` trust entry; real-provider test cleanup sweeps every such entry in `~/.claude.json`. HP was not viable (13 GiB free, 95% root usage, swap exhausted, 11 provider/agent processes, no Claude CLI). No provider call, shared config edit, provider hiding, dependency installation, Docker mutation, or production change occurred.
 - Evidence and exact blocker: `docs/visual-qa/evidence/issue-73/pf-04b9-fresh-full-suite-20261126/REPORT.md`. Gate A remains unqualified until an isolated authorized provider/browser runner can execute unchanged `./scripts/test.sh` with JUnit and `-rs`; E remains not PASS without exact-SHA required CI.
+## 2026-11-26 PF-04b10 — isolated Claude trust config (task branch)
+
+- Work is isolated in `agent/codex/issue-73-provider-test-isolation-20261126`,
+  based on local commit `b3c0a23a46ee0273dc4954b906700f76bb04654c` (tree
+  `205452217c23ba8ff88dfb2c2022c19a2ea9a58a`). At preflight PR #74 remote
+  head was `e3755269baa42fb266044a9441f4f8e8979b168e`; local parent was
+  tree-equivalent, not the same commit.
+- Test-only helper `tests/claude_test_config.py` confines Claude trust state
+  to each pytest temp root, sets `CLAUDE_CONFIG_DIR` inherited by PTY children,
+  and restores only its exact project key through a finalizer. Real-provider
+  tests in the affected modules now fail closed unless isolated `claude auth
+  status --json` confirms login. No application/provider launcher changes.
+- `tests/test_claude_test_config_isolation.py`: red sibling-trust regression
+  reproduced against old helper; after fix 6 passed, exit 0. Affected-module
+  collection: 209 items, exit 0; real-provider modules were not run. Isolated
+  auth probe was unauthenticated; no provider call. Evidence/report:
+  `docs/visual-qa/evidence/issue-73/pf-04b10-provider-config-isolation-20261126/REPORT.md`.
+- Safety caveat: one exploratory pytest accidentally loaded the repository
+  autouse Docker cleanup fixture with broad `wm-` resource matching. Prior
+  inventory was insufficient to prove whether it removed a pre-existing
+  resource; a later read-only event query timed out. Current known state had
+  no listed `wm-` resources. Do not run repo pytest without reviewing or
+  isolating this fixture; do not claim shared Docker was unaffected.
+- Not yet a full-suite, provider, visual-equivalence, CI, or issue #73 gate
+  pass. Keep #74 draft and report the real-provider authorization and Docker
+  fixture safety limitations. Rollback only this task branch commit.

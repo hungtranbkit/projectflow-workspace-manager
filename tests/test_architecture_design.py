@@ -612,7 +612,7 @@ def test_production_specs_root_never_touched_by_this_suite():
     assert "feat-thing.yaml" not in names
 
 
-def test_real_architecture_design_lifecycle_end_to_end(client, git_repo, arch_env):
+def test_real_architecture_design_lifecycle_end_to_end(client, git_repo, arch_env, monkeypatch):
     """E6.23: one safe, real, non-fake Architecture & Design Lifecycle
     run against a disposable Change and an isolated tmp_path specs_root
     (arch_env) -- NO fake runner is installed anywhere in this test, so
@@ -624,6 +624,9 @@ def test_real_architecture_design_lifecycle_end_to_end(client, git_repo, arch_en
     a source file -- confirmed at the end via git status on the real repo."""
     import subprocess
     root, repo = git_repo
+    from tests.claude_test_config import prepare_claude_test_config, require_isolated_claude_auth
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     rid = register(client, repo, "demo")
     cid = new_change(
         client,

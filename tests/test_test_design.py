@@ -644,7 +644,7 @@ def test_production_specs_root_never_touched_by_this_suite():
     assert "feat-thing.yaml" not in names
 
 
-def test_real_test_design_lifecycle_end_to_end(client, git_repo, tdesign_env):
+def test_real_test_design_lifecycle_end_to_end(client, git_repo, tdesign_env, monkeypatch):
     """E7.23: one safe, real, non-fake Test Design lifecycle run against
     a disposable Change and an isolated tmp_path specs_root (tdesign_env)
     -- NO fake runner is installed anywhere in this test, so every Test
@@ -656,6 +656,9 @@ def test_real_test_design_lifecycle_end_to_end(client, git_repo, tdesign_env):
     import subprocess
     from pathlib import Path
     root, repo = git_repo
+    from tests.claude_test_config import prepare_claude_test_config, require_isolated_claude_auth
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     rid = register(client, repo, "demo")
     cid = new_change(
         client,

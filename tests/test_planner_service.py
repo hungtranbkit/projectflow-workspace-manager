@@ -631,13 +631,16 @@ def test_task_decision_service_unaffected_by_materialized_task(client, git_repo)
 # ============================================================= Real Planner test (E4.21)
 
 @pytest.mark.skipif(not shutil.which("claude"), reason="real `claude` CLI not available in this environment")
-def test_real_planner_invocation_end_to_end(client, git_repo):
+def test_real_planner_invocation_end_to_end(client, git_repo, monkeypatch):
     """E4.21: one safe, real, non-fake Planner invocation. Disposable
     Change/workflow, real `claude -p --json-schema` subprocess call, no
     production repository mutation, no Task execution -- materializes
     only into disposable Task records and asserts no Agent session was
     ever started for them."""
     root, repo = git_repo
+    from tests.claude_test_config import prepare_claude_test_config, require_isolated_claude_auth
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     rid = register(client, repo, "demo")
     cid = new_change(client, "Add an endpoint returning the current workflow profile", project_id=rid)
     client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "VIBE"})

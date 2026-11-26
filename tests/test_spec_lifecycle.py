@@ -680,7 +680,7 @@ def test_production_specs_root_never_touched_by_this_suite():
     assert "feat-workflow-profile-api.yaml" not in names
 
 
-def test_real_spec_lifecycle_end_to_end(client, git_repo, spec_env):
+def test_real_spec_lifecycle_end_to_end(client, git_repo, spec_env, monkeypatch):
     """E5.24: one safe, real, non-fake Spec Lifecycle run against a
     disposable Change and an isolated tmp_path specs_root (spec_env) --
     NO fake runner is installed anywhere in this test, so every
@@ -696,6 +696,9 @@ def test_real_spec_lifecycle_end_to_end(client, git_repo, spec_env):
     real_specs_before = {p.name for p in (Path(__file__).resolve().parent.parent / "specs" / "features").glob("*.yaml")}
 
     root, repo = git_repo
+    from tests.claude_test_config import prepare_claude_test_config, require_isolated_claude_auth
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     rid = register(client, repo, "demo")
     cid = new_change(
         client,
