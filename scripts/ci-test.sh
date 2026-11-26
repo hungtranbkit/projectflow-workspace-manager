@@ -10,6 +10,9 @@ fi
 tier="$1"; shift
 case "$tier" in
   fast)
+    # Required JS model checks must fail the tier before pytest on regression.
+    node --check app/static/cc95-map.js
+    node --test tests/cc95_map_model.test.cjs
     set -- tests/test_fleet_steward.py \
       tests/test_architecture_center.py \
       tests/test_sidebar_nav.py \
