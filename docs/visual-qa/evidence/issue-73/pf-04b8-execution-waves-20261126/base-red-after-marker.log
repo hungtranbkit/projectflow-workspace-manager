@@ -1,0 +1,89 @@
+COMMAND=PATH=/usr/bin:/bin /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/bin/python -m pytest -q -ra [two historical provider-seam nodes]
+START_UTC=2026-11-26T01:19:53,860767686+00:00
+START_ICT=2026-11-26T08:19:53,864714214+07:00
+FF                                                                       [100%]
+=================================== FAILURES ===================================
+_______________ test_double_tick_never_launches_same_task_twice ________________
+
+client = <starlette.testclient.TestClient object at 0x771c71a90d70>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-642/test_double_tick_never_launche0/root'), PosixPath('/tmp/pytest-of-dell/pytest-642/test_double_tick_never_launche0/root/demo'))
+
+    def test_double_tick_never_launches_same_task_twice(client, git_repo):
+        root, repo = git_repo
+        enable_parallel(repo, max_concurrent=2)
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Double tick change", project_id=rid)
+        a, _ = new_plan_task(client, cid, "A", "A", ["a.py"])
+        fake_launcher(client, "claude")
+    
+        results = []
+        errors = []
+    
+        def run():
+            try:
+                results.append(_ews(client).run_execution_wave(cid))
+            except Exception as exc:
+                errors.append(exc)
+    
+        t1 = threading.Thread(target=run)
+        t2 = threading.Thread(target=run)
+        t1.start(); t2.start()
+        t1.join(timeout=15); t2.join(timeout=15)
+        assert not errors, errors
+    
+        sessions = _db(client).all("SELECT * FROM agent_sessions WHERE task_id=?", (a,))
+>       assert len(sessions) == 1, f"Task launched {len(sessions)} times, expected exactly once"
+E       AssertionError: Task launched 0 times, expected exactly once
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests/test_execution_waves.py:352: AssertionError
+_______________ test_sibling_failure_does_not_stop_safe_sibling ________________
+
+client = <starlette.testclient.TestClient object at 0x771c71192fd0>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-642/test_sibling_failure_does_not_0/root'), PosixPath('/tmp/pytest-of-dell/pytest-642/test_sibling_failure_does_not_0/root/demo'))
+
+    def test_sibling_failure_does_not_stop_safe_sibling(client, git_repo):
+        root, repo = git_repo
+        enable_parallel(repo, max_concurrent=2)
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Failure isolation change", project_id=rid)
+        a, _ = new_plan_task(client, cid, "A", "A fails", ["a.py"])
+        b, _ = new_plan_task(client, cid, "B", "B succeeds", ["b.py"])
+    
+        real_start = client.app.state.autonomous_execution_service._start_builder_session
+        calls = {"n": 0}
+    
+        def flaky(ws):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("Builder A failed to start")
+            return real_start(ws)
+    
+        fake_launcher(client, "claude")
+        client.app.state.autonomous_execution_service._start_builder_session = flaky
+        run = _ews(client).run_execution_wave(cid)
+>       assert run["outcome"] == "LAUNCHED"
+E       AssertionError: assert 'NO_TASKS_LAUNCHED' == 'LAUNCHED'
+E         
+E         - LAUNCHED
+E         + NO_TASKS_LAUNCHED
+
+tests/test_execution_waves.py:379: AssertionError
+=============================== warnings summary ===============================
+../../home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../../home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_execution_waves.py: 22 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_execution_waves.py::test_double_tick_never_launches_same_task_twice
+FAILED tests/test_execution_waves.py::test_sibling_failure_does_not_stop_safe_sibling
+COMMAND_EXIT=1
+END_UTC=2026-11-26T01:20:02,767161950+00:00
+END_ICT=2026-11-26T08:20:02,774513048+07:00

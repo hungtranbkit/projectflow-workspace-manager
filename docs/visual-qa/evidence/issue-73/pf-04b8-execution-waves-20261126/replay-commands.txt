@@ -1,0 +1,36 @@
+PF-04b8 replay commands
+
+Run from the repository root in the existing task worktree with the already provisioned venv. No package install/provider invocation is needed.
+
+VENV=/home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv
+E=docs/visual-qa/evidence/issue-73/pf-04b8-execution-waves-20261126
+
+# Four historical node IDs before patch (two failed, two passed):
+PATH=/usr/bin:/bin "$VENV/bin/python" -m pytest -q -ra \
+  tests/test_execution_waves.py::test_double_tick_never_launches_same_task_twice \
+  tests/test_execution_waves.py::test_sibling_failure_does_not_stop_safe_sibling \
+  tests/test_execution_waves.py::test_real_two_task_wave_parallel_safe_full_closed_loop \
+  tests/test_execution_waves.py::test_execution_wave_2_uses_updated_base \
+  --junitxml="$E/candidate-targeted-red.xml"
+
+# The first base attempt failed collection because base lacks tests/__init__.py.
+# With an empty tests/__init__.py added ONLY to the disposable base worktree,
+# these two provider-selection fixture nodes reproduced red:
+PATH=/usr/bin:/bin "$VENV/bin/python" -m pytest -q -ra \
+  tests/test_execution_waves.py::test_double_tick_never_launches_same_task_twice \
+  tests/test_execution_waves.py::test_sibling_failure_does_not_stop_safe_sibling \
+  --junitxml="$E/base-red-after-marker.xml"
+
+# Entire affected module after patch; includes the genuine real-Claude test,
+# which remains an explicit skip when the host CLI is unavailable:
+PATH=/usr/bin:/bin "$VENV/bin/python" -m pytest -q -ra tests/test_execution_waves.py \
+  --junitxml="$E/candidate-final-module.xml"
+
+# Related scheduler/review and UI-only visual contract/execution regressions:
+PATH=/usr/bin:/bin "$VENV/bin/python" -m pytest -q -ra \
+  tests/test_autonomous_execution.py::test_ready_implementation_task_is_auto_ready \
+  tests/test_autonomous_execution.py::test_no_duplicate_launch_for_same_task \
+  tests/test_autonomous_execution.py::test_execution_failure_recorded \
+  tests/test_review_fix_loop.py::test_fix_required_creates_fix_task_transfers_worktree \
+  tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py \
+  --junitxml="$E/related-final.xml"

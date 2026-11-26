@@ -1,0 +1,28 @@
+SOURCE_HEAD=45ed1a25b6dd9bdbe420bc5bb00767e25196c2c5
+SOURCE_TREE=3316adb87418d7a05adba7fbd6cc18a7c14be40f
+TEST_BLOB=633184fac09ecfa77b57f36b860374c215e1a4a2
+PYTHON=Python 3.14.4
+PYTEST=pytest 9.2.0
+COMMAND=PATH=/usr/bin:/bin /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/bin/python -m pytest -q -ra tests/test_execution_waves.py::test_double_tick_never_launches_same_task_twice tests/test_execution_waves.py::test_sibling_failure_does_not_stop_safe_sibling --junitxml=docs/visual-qa/evidence/issue-73/pf-04b8-execution-waves-20261126/candidate-two-green.xml
+START_UTC=2026-11-26T01:20:38,900148293+00:00
+START_ICT=2026-11-26T08:20:38,902708014+07:00
+..                                                                       [100%]
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_execution_waves.py: 22 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_execution_waves.py::test_double_tick_never_launches_same_task_twice
+tests/test_execution_waves.py::test_sibling_failure_does_not_stop_safe_sibling
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=2418367) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+COMMAND_EXIT=0
+END_UTC=2026-11-26T01:20:45,867699895+00:00
+END_ICT=2026-11-26T08:20:45,870122623+07:00

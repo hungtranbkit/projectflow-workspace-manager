@@ -1,0 +1,5 @@
+historical_node\thistorical_category\tbase_repro\tcandidate_before_patch\tcandidate_after_patch
+tests.test_execution_waves::test_double_tick_never_launches_same_task_twice\tother_assertion_or_contract_failure\tFAIL (restricted PATH; 0 sessions)\tFAIL (0 sessions)\tPASS
+tests.test_execution_waves::test_sibling_failure_does_not_stop_safe_sibling\tother_assertion_or_contract_failure\tFAIL (NO_TASKS_LAUNCHED)\tFAIL (NO_TASKS_LAUNCHED)\tPASS
+tests.test_execution_waves::test_real_two_task_wave_parallel_safe_full_closed_loop\tprovider_cli_missing\tNOT_RUN (base imports blocked before marker setup)\tPASS in 4-node candidate run\tPASS
+tests.test_execution_waves::test_execution_wave_2_uses_updated_base\tother_assertion_or_contract_failure\tNOT_RUN (base comparison limited to two fixture-seam nodes)\tPASS in 4-node candidate run\tPASS

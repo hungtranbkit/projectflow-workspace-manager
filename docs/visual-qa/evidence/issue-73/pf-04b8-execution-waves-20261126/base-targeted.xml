@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="0.190" timestamp="2026-11-26T08:19:33.580826+07:00" hostname="dell-Latitude-5511"><testcase classname="" name="tests.test_execution_waves" time="0.000"><error message="collection failure">ImportError while importing test module '/tmp/pf04b8-base-ac288/tests/test_execution_waves.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_execution_waves.py:20: in &lt;module&gt;
+    from tests.test_autonomous_execution import register, new_change, materialize_task, tid_seq
+E   ModuleNotFoundError: No module named 'tests.test_autonomous_execution'</error></testcase></testsuite></testsuites>

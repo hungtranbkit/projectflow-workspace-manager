@@ -331,7 +331,12 @@ def test_double_tick_never_launches_same_task_twice(client, git_repo):
     rid = register(client, repo, "demo")
     cid = new_change(client, "Double tick change", project_id=rid)
     a, _ = new_plan_task(client, cid, "A", "A", ["a.py"])
-    fake_launcher(client, "claude")
+    assert client.app.state.autonomous_execution_service._default_provider() == "codex"
+    # The scheduler picks the configured default provider (Codex first in
+    # Settings.agents); keep the disposable real-PTY launcher on that same
+    # provider so this race test exercises launch/reservation, not a missing
+    # Claude CLI.
+    fake_launcher(client, "codex")
 
     results = []
     errors = []
@@ -373,7 +378,9 @@ def test_sibling_failure_does_not_stop_safe_sibling(client, git_repo):
             raise RuntimeError("Builder A failed to start")
         return real_start(ws)
 
-    fake_launcher(client, "claude")
+    # Match the launchable default provider used by the scheduler.
+    assert client.app.state.autonomous_execution_service._default_provider() == "codex"
+    fake_launcher(client, "codex")
     client.app.state.autonomous_execution_service._start_builder_session = flaky
     run = _ews(client).run_execution_wave(cid)
     assert run["outcome"] == "LAUNCHED"
