@@ -1,0 +1,52 @@
+{
+  "milestone": "VQ-03e1 private Task Visual QA reference draft upload",
+  "tested_source_commit": "8e70ca21cfec8ea8fbbc02ee4c1bf5c54321169e",
+  "tested_source_tree": "17a4e21b503eff0395b961ece07d4cfda7e46a32",
+  "pr_number": 74,
+  "published_source_head": "8e70ca21cfec8ea8fbbc02ee4c1bf5c54321169e",
+  "red": {
+    "baseline_commit": "28a148018d1c1c92dcc5312817cd231600ad921c",
+    "baseline_tree": "fa5aa4609f5d6bc930c76dd9fb09d87a18ade83a",
+    "node": "tests/test_visual_qa_drafts.py::test_task_upload_creates_private_unapproved_draft_and_preview_download",
+    "exit_code": 1,
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "skips": 0,
+    "observed": "Upload route returned HTTP 404 before implementation",
+    "junit_sha256": "6776aeaed854deb77751f1683114cd7b1f672cc3ba6f176e7e62da8f0eebd95f",
+    "log_sha256": "46970c5bde1e9815b25de0a84be483d8a25b3878109182f87840e06ac05097ff"
+  },
+  "green": {
+    "command": "DOCKER_HOST=unix:///tmp/pf-vq03e1-no-docker.sock \"$TASK_VENV/bin/python\" -m pytest -p no:cacheprovider -q -ra tests/test_visual_qa_drafts.py tests/test_visual_qa_task_panel.py tests/test_visual_qa_evidence.py tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py tests/test_task_decision_required_stages.py tests/test_test_runner_source_identity.py tests/test_visual_qa_runner_subprocess.py tests/test_b1_read_isolation.py -k \"not test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_head\" --junitxml=focused.xml",
+    "python": "3.14.4",
+    "pytest": "9.2.0",
+    "exit_code": 0,
+    "tests": 138,
+    "passed": 138,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "browser_test_deselected": 1,
+    "junit_started_ict": "2026-11-26T22:31:23.615576+07:00",
+    "finished_ict_approx": "2026-11-26T22:33:28+07:00",
+    "junit_suite_seconds": 124.814,
+    "junit_sha256": "bf7da34478e9ad60da8585fdb59b97e739eba7a717a926beb1e083f5b127c064",
+    "log_sha256": "6a6a780a8e2d6cd34e8b587ae6c6a0bd010b5913a9836afb332f79445baf5c56",
+    "drafts_per_workspace_max": 10
+  },
+  "verification": {
+    "py_compile_exit": 0,
+    "git_diff_check_exit": 0,
+    "git_show_check_exit": 0
+  },
+  "limitations": [
+    "No pinned browser subprocess executed",
+    "No full suite, provider, CI, shared Docker, production, merge, or deploy"
+  ],
+  "logs_are_sanitized": true,
+  "source_commits": [
+    "4c671c1412d256e1b1b8a16ab6edeec6ce97f87a",
+    "8e70ca21cfec8ea8fbbc02ee4c1bf5c54321169e"
+  ]
+}
