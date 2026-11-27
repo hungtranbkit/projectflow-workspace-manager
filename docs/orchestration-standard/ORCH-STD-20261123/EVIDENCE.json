@@ -1086,7 +1086,14 @@
         "state": "PENDING",
         "observed_at_utc": "2026-11-27T02:41:36Z"
       },
-      "independent_reviews": 0
+      "independent_reviews": 0,
+      "docs_checkpoint_commit": "2445fdb1444eb558a66a75535aea7ecf932e7857",
+      "official_ci_latest_head": {
+        "commit": "2445fdb1444eb558a66a75535aea7ecf932e7857",
+        "status_state": "pending",
+        "total_status_contexts": 0,
+        "observed_at_utc": "2026-11-27"
+      }
     }
   ]
 }
