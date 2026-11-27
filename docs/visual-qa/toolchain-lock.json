@@ -18,14 +18,16 @@
     },
     "playwright": {
       "source": "pinned UIFix dependency lockfile unless VISUAL_QA_PLAYWRIGHT_FROM selects the app's installed Playwright",
+      "minimumVersion": "1.60.0",
       "browser": "matching Playwright Chromium; CHROME_PATH is an optional executable override",
+      "launchPolicy": {
+        "headless": true,
+        "chromiumSandbox": true,
+        "fallback": "fail closed; never retry with Chromium sandbox disabled",
+        "executableOverride": "CHROME_PATH may select only an operator-approved compatible Chromium binary; it does not prove sandbox enforcement"
+      },
       "deviceScaleFactor": 1,
-      "isolatedHostFallback": {
-        "image": "mcr.microsoft.com/playwright:v1.60.0-noble",
-        "imageDigest": "sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948",
-        "scope": "ephemeral local test container only; no published ports; mount only the UI preview and tool worktree read-only",
-        "rootSandbox": "Playwright's official root-container behavior disables Chromium sandbox in that disposable test container; do not use this for production browsing"
-      }
+      "runtimeRequirement": "Use an authorized runtime that supports Chromium sandboxing and the repository's isolated TestRunner policy; this config requests sandboxing but cannot attest the kernel/runtime actually enforced it. No root-container or host-network fallback is supported."
     }
   }
 }

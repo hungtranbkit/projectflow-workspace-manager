@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { launchVisualQaChromium, loadVisualQaChromium } from "./browser-launch.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const UIFIX_DIR = path.join(root, ".runtime", "uifix-v1.2.6");
@@ -109,22 +110,14 @@ async function main(argv) {
   await mkdir(args.out, { recursive: true });
 
   const requireFromUIFix = createRequire(path.join(UIFIX_DIR, "package.json"));
-  let requireFromPlaywright = requireFromUIFix;
-  const playwrightFrom = process.env.VISUAL_QA_PLAYWRIGHT_FROM || process.cwd();
-  try {
-    requireFromPlaywright = createRequire(path.join(playwrightFrom, "package.json"));
-    requireFromPlaywright.resolve("playwright");
-  } catch {
-    requireFromPlaywright = requireFromUIFix;
-  }
-  const { chromium } = requireFromPlaywright("playwright");
+  const chromium = loadVisualQaChromium({
+    selectedPackageFrom: process.env.VISUAL_QA_PLAYWRIGHT_FROM,
+    pinnedPackageFrom: UIFIX_DIR,
+  });
   const sharp = requireFromUIFix("sharp");
   const { diffPipeline } = await import(pathToFileURL(path.join(UIFIX_DIR, "dist/diff/index.js")));
   const chromePath = process.env.CHROME_PATH;
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: chromePath,
-  });
+  const browser = await launchVisualQaChromium(chromium, { executablePath: chromePath });
   const pageErrors = [];
   const blockedRequests = [];
   let page;

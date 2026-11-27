@@ -13,11 +13,13 @@ python3 .agents/skills/image-to-code/scripts/install.py --agent codex --scope pr
 python3 .claude/skills/image-to-code/scripts/install.py --agent claude --scope project --project . --verify
 ```
 
-`Image-to-code` được cài project-local cho Codex trong `.agents/skills/` và Claude Code trong `.claude/skills/`, từ commit `9b6c8940d2844aff8288ed594abfc2b9680ee558` (MIT). UIFix `1.2.6` được checkout tại commit `97c4b9d83684c7d607cb8c4b146e3f8aa5356e53` (MIT). Bootstrap kiểm tra pin, license và build script; `npm ci --ignore-scripts` tắt tất cả dependency lifecycle scripts. Source/build/dependencies được giữ trong `.runtime/`, không đưa vào PR. Mặc định Playwright lấy từ lockfile UIFix. Để dùng Playwright đã có trong repo ứng dụng, đặt `VISUAL_QA_PLAYWRIGHT_FROM` thành thư mục package chứa `playwright`. Cài browser theo đúng phiên bản Playwright đã chọn; `CHROME_PATH` có thể override executable.
+`Image-to-code` được cài project-local cho Codex trong `.agents/skills/` và Claude Code trong `.claude/skills/`, từ commit `9b6c8940d2844aff8288ed594abfc2b9680ee558` (MIT). UIFix `1.2.6` được checkout tại commit `97c4b9d83684c7d607cb8c4b146e3f8aa5356e53` (MIT). Bootstrap kiểm tra pin, license và build script; `npm ci --ignore-scripts` tắt tất cả dependency lifecycle scripts. Source/build/dependencies được giữ trong `.runtime/`, không đưa vào PR. Playwright tối thiểu `1.60.0`; mặc định lấy bản pin trong lockfile UIFix. Để dùng Playwright đã có trong repo ứng dụng, đặt `VISUAL_QA_PLAYWRIGHT_FROM` thành thư mục package chứa `playwright`; nếu biến này được đặt nhưng package thiếu hoặc không tương thích, CLI dừng thay vì âm thầm dùng bản khác. Browser phải tương thích chính xác với Playwright đã chọn.
+
+Cả CLI và smoke truyền rõ `chromiumSandbox: true`. Lỗi khởi chạy sẽ dừng tại đó, không thử lại với sandbox tắt. `CHROME_PATH` chỉ được dùng cho executable Chromium tương thích đã được người vận hành cho phép; đường dẫn này không chứng minh sandbox của kernel/runtime đang hoạt động. Cấu hình launch là yêu cầu cho Playwright, không phải bằng chứng xác nhận sandbox thực tế. Chỉ chạy trong runner được phê duyệt, có sandbox Chromium được hỗ trợ và giữ nguyên cô lập `TestRunner` khi `AUTH_MODE=required`.
 
 Không có npm package UIFix công khai ở bản pin; CLI gọi trực tiếp `diffPipeline` trong source UIFix pinned để nhận pixel diff/SSIM và vùng khác biệt. Không gắn nhãn fallback/pixelmatch tự viết.
 
-Ưu tiên Chromium đúng phiên bản Playwright của repo UI. Nếu Chromium trên host lỗi GPU, dùng container Playwright tạm thời đúng phiên bản đã pin trong `toolchain-lock.json`, nối loopback preview qua host network trên máy phát triển được ủy quyền, mount source/artifact cần thiết và không publish port. Image chính thức chạy với quyền root tắt Chromium sandbox trong container; chỉ dùng cho trang fixture/local preview, không production hoặc tab cá nhân. Không thêm `--no-sandbox` vào lệnh host.
+Nếu browser không khởi chạy được với sandbox bật, dừng và yêu cầu runner cô lập đã được phê duyệt. Không chuyển sang container chạy root, không dùng host network, không thêm `--no-sandbox`/`--disable-setuid-sandbox`, không đổi policy hệ thống và không dùng Docker daemon dùng chung. Hiện chưa có fallback container được hỗ trợ trong hợp đồng toolchain này.
 
 ## 2. Chuẩn bị ảnh và trang
 
@@ -93,11 +95,12 @@ CLI không tự sửa source; CLI tạo bằng chứng và hướng dẫn, agent
 
 ```sh
 node --test tests/test_visual_qa_cli.mjs
-CHROME_PATH=/path/to/authorized-chromium-wrapper \
-VISUAL_QA_PLAYWRIGHT_FROM="$PWD" node tools/visual_qa/smoke.mjs
+node --test tests/test_visual_qa_browser_launch.mjs
+# Chỉ chạy smoke browser trên runner cô lập đã được phê duyệt:
+node tools/visual_qa/smoke.mjs
 ```
 
-Smoke chạy page fixture local: baseline chính xác PASS (0%), cố ý đổi màu FAIL, chạy lại bản đã sửa PASS (0%) với cùng reference SHA; reference thiếu/hỏng và server không sẵn sàng phải trả lỗi. Nó không chứng minh reference tương đương với màn nghiệp vụ.
+Smoke chạy page fixture local: baseline chính xác PASS (0%), cố ý đổi màu FAIL, chạy lại bản đã sửa PASS (0%) với cùng reference SHA; reference thiếu/hỏng và server không sẵn sàng phải trả lỗi. Nó không chứng minh reference tương đương với màn nghiệp vụ. Không đặt `CHROME_PATH` vào wrapper tự thêm cờ; nếu cần executable override, chỉ dùng binary Chromium tương thích đã được người vận hành cho phép và vẫn giữ `chromiumSandbox: true`. Nếu launch bị từ chối, dừng và chuyển sang runner được phê duyệt; không thử browser trên host chưa đủ điều kiện.
 
 ## 7. Dùng Image-to-code trong Claude/Codex
 

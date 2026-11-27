@@ -1,20 +1,19 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { launchVisualQaChromium, loadVisualQaChromium } from "./browser-launch.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const uifix = path.join(root, ".runtime", "uifix-v1.2.6");
-const requireFromUIFix = createRequire(path.join(uifix, "package.json"));
-const playwrightFrom = process.env.VISUAL_QA_PLAYWRIGHT_FROM || root;
-let requireFromPlaywright = createRequire(path.join(playwrightFrom, "package.json"));
-try { requireFromPlaywright.resolve("playwright"); } catch { requireFromPlaywright = requireFromUIFix; }
-const { chromium } = requireFromPlaywright("playwright");
+const chromium = loadVisualQaChromium({
+  selectedPackageFrom: process.env.VISUAL_QA_PLAYWRIGHT_FROM,
+  pinnedPackageFrom: uifix,
+});
 const chromePath = process.env.CHROME_PATH;
 const cli = path.join(root, "tools/visual_qa/visual-qa.mjs");
 function fixtureHtml(color) {
@@ -48,10 +47,7 @@ try {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port;
   const url = `http://127.0.0.1:${port}/same`;
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: chromePath,
-  });
+  const browser = await launchVisualQaChromium(chromium, { executablePath: chromePath });
   let reference;
   try {
     const page = await browser.newPage({ viewport: { width: 320, height: 240 }, deviceScaleFactor: 1 });

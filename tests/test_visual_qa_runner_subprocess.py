@@ -111,6 +111,10 @@ def _install_visual_cli_fixture(root: Path) -> None:
         Path(__file__).resolve().parents[1] / "tools" / "visual_qa" / "visual-qa.mjs",
         cli_dir / "visual-qa.mjs",
     )
+    shutil.copyfile(
+        Path(__file__).resolve().parents[1] / "tools" / "visual_qa" / "browser-launch.mjs",
+        cli_dir / "browser-launch.mjs",
+    )
 
 
 def _write_project(root: Path, *, url: str, command: str, reference: str = "docs/reference.png") -> None:
@@ -269,7 +273,7 @@ def test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_h
     db.init()
     git = GitWorkspaceService(tmp_path)
     _write_project(root, url=f"{fixture.base_url}/same", command=_command(root, url=f"{fixture.base_url}/same"))
-    positive_head = _commit(root, git, "README.md", ".gitignore", "tools/visual_qa/visual-qa.mjs", "docs/reference.png", "PROJECT.yaml", message="fixture positive visual contract")
+    positive_head = _commit(root, git, "README.md", ".gitignore", "tools/visual_qa/visual-qa.mjs", "tools/visual_qa/browser-launch.mjs", "docs/reference.png", "PROJECT.yaml", message="fixture positive visual contract")
     repo_id = db.execute(
         "INSERT INTO repositories(repo_name,repo_path) VALUES(?,?)", ("fixture-ui", str(root))
     )

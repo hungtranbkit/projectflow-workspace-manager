@@ -259,6 +259,8 @@ def test_required_auth_visual_gate_runs_inside_real_sandbox(tmp_path, monkeypatc
     cli = Path(__file__).resolve().parents[1] / "tools" / "visual_qa" / "visual-qa.mjs"
     (project_root / "tools/visual_qa").mkdir(parents=True)
     shutil.copyfile(cli, project_root / "tools/visual_qa/visual-qa.mjs")
+    launch_policy = Path(__file__).resolve().parents[1] / "tools" / "visual_qa" / "browser-launch.mjs"
+    shutil.copyfile(launch_policy, project_root / "tools/visual_qa/browser-launch.mjs")
     server_script = project_root / "tools/visual_qa/sandbox-fixture-server.py"
     server_script.write_text(_fixture_server_source(), encoding="utf-8")
     (project_root / ".runtime/uifix-v1.2.6").parent.mkdir(parents=True)
