@@ -294,3 +294,7 @@ One separately authorized real `RecoveryDecisionService.advise()` call used a di
 ### Remaining gates
 
 PR #92 remains open and unchanged on the remote until this scoped commit is pushed. After a normal fast-forward, require new-head `local-ci/verify`, independent review and exact remote readback. The separate B18 accepted provider receipt is still absent; the full project test gate is incomplete. No merge/deploy or production DB/service change is authorized (`PROJECT.yaml` keeps production deployment disabled). No independent reviewer was found/assigned in the PR review list; do not self-approve.
+
+### Local commit checkpoint
+
+- B20 source, permanent regression, and evidence/context are committed locally as `d73743490ba48ae4f5fce38843b860fcd1551c16` (`fix: prevent blocked recovery from starving ready tasks`). It is based on the existing PR head `15e8fed50f2058b8d976f74bd7ec618a7cd867fa`; remote was not advanced yet at this note. Push only through a normal fast-forward after a fresh exact-head check.

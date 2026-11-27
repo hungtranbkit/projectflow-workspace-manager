@@ -1199,7 +1199,9 @@
         "production_db_or_service_touched": false,
         "production_enabled_in_PROJECT_yaml": false
       },
-      "private_checkpoint_dir": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-macbook-handoff-20261127/integrated-pr92-20261127"
+      "private_checkpoint_dir": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-macbook-handoff-20261127/integrated-pr92-20261127",
+      "source_test_commit": "d73743490ba48ae4f5fce38843b860fcd1551c16",
+      "push_status": "not yet pushed; requires final fresh remote head/ancestry check"
     }
   ]
 }
