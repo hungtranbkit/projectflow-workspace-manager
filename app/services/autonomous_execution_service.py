@@ -80,6 +80,21 @@ _DEFAULT_POLICY = {"enabled": False, "max_concurrent_builders": 1, "auto_start_r
                    "goal_reconciliation_enabled": False}
 
 _SUPERVISOR_LEASE_OWNER: ContextVar[str | None] = ContextVar("projectflow_supervisor_lease_owner", default=None)
+_RECOVERY_SKIPPED_CHANGES: ContextVar[frozenset[int]] = ContextVar("projectflow_recovery_skipped_changes", default=frozenset())
+
+def _recovery_is_observation(item: dict) -> bool:
+    outcome = item.get("outcome")
+    if outcome in ("NO_RECOVERY_REQUIRED", "DISABLED", "ALREADY_RUNNING", "BACKOFF"):
+        return True
+    if outcome == "UNKNOWN":
+        return item.get("code") == "SESSION_LIVENESS_UNKNOWN"
+    if outcome == "BLOCKED":
+        return "advisory" not in item and item.get("code") in {
+            "OWNER_UNASSIGNED", "V2_UPGRADE_REQUIRED", "CONTRACT_BLOCKED",
+            "WORKSPACE_UNSAFE", "PROVIDER_QUOTA_OR_AUTH", "PROVIDER_UNKNOWN",
+            "RETRY_BUDGET_EXHAUSTED", "CI_FAIL",
+        }
+    return False
 
 
 class AutonomousExecutionError(ValueError):
@@ -307,11 +322,15 @@ class AutonomousExecutionService:
                 outcomes.append({"change_id":change["id"],"outcome":"BLOCKED","code":"OWNER_UNASSIGNED",
                                  "owner":"Change owner","next_action":"Assign a named Change owner before automatic continuation."})
                 continue
+            if not self._supervisor_lease_is_current():
+                outcomes.append({"change_id":change["id"],"outcome":"LEASE_LOST"})
+                return outcomes
             result=self.reconcile_change(change["id"])
+            if not result:
+                outcomes.append({"change_id":change["id"],"outcome":"UNKNOWN","code":"RECOVERY_RESULT_MISSING"})
+                return outcomes
             outcomes.extend(result)
-            # A confirmed resume or factual blocker is the action for this
-            # tick. Do not continue to another goal and create competing work.
-            if result and result[0]["outcome"] != "NO_RECOVERY_REQUIRED":
+            if any(not _recovery_is_observation(item) for item in result):
                 return outcomes
         return outcomes
 
@@ -363,8 +382,7 @@ class AutonomousExecutionService:
         try:
             recovery = self.reconcile_exited_goals()
             action_required = any(
-                item.get("outcome") not in ("NO_RECOVERY_REQUIRED", "DISABLED")
-                for item in recovery
+                not _recovery_is_observation(item) for item in recovery
             )
             action = recovery
             if not action_required:
@@ -372,7 +390,13 @@ class AutonomousExecutionService:
                 # the expired owner must stop before DAG dispatch.
                 if not self._supervisor_lease_is_current(owner_id):
                     return {"outcome": "LEASE_LOST", "recovery": recovery, "action": []}
-                action = self.tick()
+                skipped = frozenset(item["change_id"] for item in recovery
+                                    if item.get("outcome") not in ("NO_RECOVERY_REQUIRED", "DISABLED"))
+                skip_token = _RECOVERY_SKIPPED_CHANGES.set(skipped)
+                try:
+                    action = self.tick()
+                finally:
+                    _RECOVERY_SKIPPED_CHANGES.reset(skip_token)
             result = {"outcome": "RECOVERY_ACTION" if action_required else "TICKED",
                       "recovery": recovery, "action": action}
             self.db.event("system", 0, "SUPERVISOR_TICK_FINISHED",
@@ -750,6 +774,9 @@ class AutonomousExecutionService:
         results = []
         launched = False
         for change in changes:
+            if change["id"] in _RECOVERY_SKIPPED_CHANGES.get():
+                results.append({"change_id":change["id"],"outcome":"SKIPPED_RECOVERY_PENDING"})
+                continue
             if launched:
                 results.append({"change_id": change["id"], "outcome": "SKIPPED_CAPACITY_REACHED"})
                 continue

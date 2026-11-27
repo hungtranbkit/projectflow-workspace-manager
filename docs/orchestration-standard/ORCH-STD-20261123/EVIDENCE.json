@@ -1094,6 +1094,112 @@
         "total_status_contexts": 0,
         "observed_at_utc": "2026-11-27"
       }
+    },
+    {
+      "timestamp_local": "2026-11-27 Asia/Bangkok",
+      "task": "B20 integration plus B18 single provider receipt attempt on existing PR #92",
+      "repository": {
+        "repo": "hungtranbkit/projectflow-workspace-manager",
+        "branch": "agent/codex/orch-std-20261123-release",
+        "base": "cbeaffe417765f2778eeb9ad96cd0db21a9acb69",
+        "remote_head_before": "15e8fed50f2058b8d976f74bd7ec618a7cd867fa",
+        "status_before": "clean",
+        "local_ci_before": "success, 122 tests"
+      },
+      "ownership": {
+        "route": "existing active P0 owner and existing exact-head PR checkout; no new task/session/branch/worktree",
+        "native_task_id": null,
+        "competing_writer_process_in_pr_checkout": false
+      },
+      "b20_delivery": {
+        "delivery_receipt_sha256": "3a0d467536d987028b90239f1cb49cd52526933a540901f6be5f5c6df11c5fd0",
+        "patch_sha256": "9b5a351bfd3470011666680d3410dd53c8e1adcbcab488fefa7dd5ca7c24ee2d",
+        "original_test_sha256": "44d39b2a58194f94fd58d4463fb8f3dff3caa85fa1f1f8018d1769d2bdcfc039",
+        "original_receipt_sha256": "97014af4a23ccb24a305e322741cd811c7f59d95505367a9eaf9e23828bcd839",
+        "bounded_green_receipt_sha256": "b7642183eddf49815e093cd814271707afd705da3241cc5556115ff3dd7fc1a9",
+        "apply_receipt_sha256": "5e381d718ff1e9ae35ed81d45157c9a8d5ba1b03200e846411ec3add605164b2",
+        "source_blob_at_original_head": "4627c162e307b78e5fc2623b215c853d2b9d430b",
+        "git_apply_check": "PASS on exact current PR checkout",
+        "final_combined_autonomous_blob": "3c7fedb39100e7575a7595a335cb272b58fe82cd",
+        "integrated_test_sha256": "05f3452c3ca3d7bd75a522b6ae68a2e4710602d13e262356f60042f255c9f0dd"
+      },
+      "change_summary": [
+        "Classify CI_FAIL as a Change-local observation during bounded supervisor reconciliation",
+        "Preserve B17 finite lease guard",
+        "Add B20 real-DB starvation matrix with CI_FAIL actual merge-gate check, independent eligible tasks, blocked dependency descendant, repeated-tick quiescence and no-new-session assertion"
+      ],
+      "test_receipts": [
+        {
+          "command": "PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b20_actual_db_starvation.py tests/test_orchestrator_supervisor_tick.py --junitxml=/tmp/pf92-b20-supervisor-20261127.xml",
+          "exit": 0,
+          "result": "12 passed in 21.03s",
+          "junit_sha256": "bbc122e7c88dcc9ac357e10bdd0bedcca40c46e0cfa4b48dded2b217eecec620"
+        },
+        {
+          "command": "PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b17_finite_lease.py tests/test_b18_actual_db.py tests/test_b20_actual_db_starvation.py tests/test_autonomous_execution.py tests/test_orchestration_v2_dispatch.py tests/test_exited_no_report_recovery.py tests/test_orchestrator_supervisor_tick.py tests/test_recovery_model_policy.py tests/test_native_callback_recovery.py tests/test_lease_takeover_external.py tests/test_spec_supervisor_gate.py tests/test_agent_observability_security.py tests/test_real_merge.py --junitxml=/tmp/pf92-b17-b18-b20-focused-20261127.xml",
+          "exit": 0,
+          "result": "288 passed in 248.14s",
+          "junit_sha256": "f25ffa5fe82e8bd6837a185bbc3e9bcd22b428b7c0e429faff155df30d8f4395"
+        },
+        {
+          "command": "scripts/preflight.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "scripts/build.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "scripts/smoke.sh",
+          "exit": 0,
+          "result": "1 passed"
+        },
+        {
+          "command": "PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q -s tests/test_native_callback_recovery.py --junitxml=/tmp/pf92-native-canary-20261127.xml",
+          "exit": 0,
+          "result": "2 passed in 9.99s; one exhausted-budget blocker/UI 200 and one actual local shell marker start; disposable TestClient/SQLite, not deployed staging",
+          "junit_sha256": "135759c4420afc1e7bc8e37493d3390c8ea4f681efb303847da43fde24f09d79"
+        },
+        {
+          "command": "env HOME=/tmp/pf92-full-test-home-20261127 XDG_CONFIG_HOME=/tmp/pf92-full-test-home-20261127/.config VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. timeout 900s ./scripts/test.sh",
+          "exit": 1,
+          "result": "11 test collection import errors (top-level conftest/test_b03_authz imports)"
+        },
+        {
+          "command": "env HOME=/tmp/pf92-full-test-home-20261127 XDG_CONFIG_HOME=/tmp/pf92-full-test-home-20261127/.config VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=.:tests PYTEST_ADDOPTS=--junitxml=/tmp/pf92-full-test-rerun-20261127.xml timeout 900s ./scripts/test.sh",
+          "exit": 124,
+          "result": "bounded at 900s, streamed progress ~47%, repeated failures observed, no final summary; nested pytest overwrote JUnit path, not a valid suite report",
+          "log_sha256": "fb1c30e9e6dec70d252f184a6f26f4885127c36ba2ffd2e490f7e88caa346b87"
+        }
+      ],
+      "b18_real_probe": {
+        "evidence_path": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-macbook-handoff-20261127/integrated-pr92-20261127/b18-real-probe-receipt.json",
+        "receipt_sha256": "b3c2b96cf6783cea5cea9159abc46e28367974c457aa9219e43a1fc7c980a023",
+        "incident_fingerprint": "f3c8c66ac871ffe8a5d05ad936e5a9d4f139fa712f77586ca25b64b11de2ebcb",
+        "observed_at_utc": "2026-11-27T04:14:45.483290+00:00",
+        "provider": "claude",
+        "requested_model": "claude-opus-5-5",
+        "requested_effort": "high",
+        "max_attempts": 1,
+        "provider_invocations": 1,
+        "budget_cap_usd": 0.1,
+        "outcome": "PlannerAgentError; deterministic VERIFY fallback; no accepted receipt; no action executed; no retry",
+        "effective_model_effort_tool_attestation": "UNKNOWN",
+        "usage_cost": "UNKNOWN"
+      },
+      "remote_and_release": {
+        "current_remote_before_new_push": "15e8fed50f2058b8d976f74bd7ec618a7cd867fa",
+        "local_ci_on_that_head": "success, 122 tests",
+        "independent_review": "none found",
+        "current_change_push": "pending",
+        "merge": "not performed",
+        "deployment": "not performed",
+        "production_db_or_service_touched": false,
+        "production_enabled_in_PROJECT_yaml": false
+      },
+      "private_checkpoint_dir": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-macbook-handoff-20261127/integrated-pr92-20261127"
     }
   ]
 }

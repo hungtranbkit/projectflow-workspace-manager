@@ -268,3 +268,29 @@ The schema-in-prompt change, per-call `$0.10` cap, fail-reason/receipt logging, 
 - GitHub's exact-head `local-ci/verify` status is `pending` (observed 2026-11-27 02:41:36Z). PR review submissions currently return an empty list. No merge, provider invocation, or deployment occurred.
 
 - Documentation checkpoint `2445fdb1444eb558a66a75535aea7ecf932e7857` was pushed normally to the same PR branch. Its GitHub commit status readback was `pending` with zero status contexts at the latest read; review submissions remain empty. This is not a CI pass.
+
+## B20 delivery integration and PR #92 continuation — 2026-11-27
+
+**State: B20 local implementation and focused verification PASS; full PR/release acceptance remains BLOCKED.** The existing PR #92 branch was clean at `15e8fed50f2058b8d976f74bd7ec618a7cd867fa`; GitHub confirmed that exact head had `local-ci/verify=success` (122 tests). No separate task, session, branch, or worktree was created. There was no other process writing the exact PR checkout.
+
+### Delivery and integration
+
+- The MacBook-to-Dell handoff in the private B20 directory was verified against delivery receipt SHA256 `3a0d467536d987028b90239f1cb49cd52526933a540901f6be5f5c6df11c5fd0`. Patch SHA256 `9b5a351bfd3470011666680d3410dd53c8e1adcbcab488fefa7dd5ca7c24ee2d`, original test SHA256 `44d39b2a58194f94fd58d4463fb8f3dff3caa85fa1f1f8018d1769d2bdcfc039`, and three original receipt files all matched the delivery manifest. Packet source blob `4627c162e307b78e5fc2623b215c853d2b9d430b` is the exact `autonomous_execution_service.py` blob at original head `b49a217`; patch `git apply --check` passed on current PR head with B17 finite lease intact.
+- Integrated B20 observation classification and blocked-Change skip into `AutonomousExecutionService`; added `CI_FAIL` as a Change-local terminal observation. Added `tests/test_b20_actual_db_starvation.py` and a CI-failure regression. The regression records a real SQLite `merge_records.ci_status='FAIL'`, confirms the actual TaskDecision merge gate returns `CI_FAIL`, injects that result at the supervisor reconciliation seam, and proves compatible independent work progresses while the affected Change is skipped. Existing dependent descendants remain `WAITING_DEPENDENCY`; three ticks add no sessions after eligible work is exhausted. The injection is explicit because current `reconcile_change()` does not itself emit a `CI_FAIL` recovery result.
+- B17 code was preserved byte-for-byte during the B20 patch application before the added classification; final combined source blob is recorded in EVIDENCE.json. No acquisition policy or TTL changed.
+
+### Verification
+
+- B20 + supervisor suite: **12 passed, exit 0** in 21.03s; JUnit copied to the private evidence directory (SHA256 `bbc122e7c88dcc9ac357e10bdd0bedcca40c46e0cfa4b48dded2b217eecec620`).
+- Focused recovery/autonomous/security/spec/merge suite including B17/B18/B20: **288 passed, exit 0** in 248.14s; JUnit SHA256 `f25ffa5fe82e8bd6837a185bbc3e9bcd22b428b7c0e429faff155df30d8f4395`.
+- `scripts/preflight.sh` PASS, `scripts/build.sh` PASS, `scripts/smoke.sh` PASS (1 passed), and `git diff --check` PASS.
+- A separate isolated CleanupWorker callback canary passed **2/2, exit 0** in 9.99s. Exhausted retry produced one blocker, two attempts, one existing session and Change page HTTP 200; recovery started exactly one local shell marker process and one successor session. This was a disposable TestClient/SQLite/local process canary, not a deployed staging service. Its test fixture/temp state were torn down; production rollback was not needed.
+- Full project test gate: with `PYTHONPATH=.` `scripts/test.sh` stopped at collection with 11 import errors (`conftest` / `test_b03_authz` top-level imports). With `PYTHONPATH=.:tests`, bounded `timeout 900s ./scripts/test.sh` exited **124** at roughly 47%; streamed progress showed multiple failures in unrelated full-suite modules, but no final summary was captured. The XML path was overwritten by a nested pytest process and is not a complete JUnit report. No full-suite pass and no failure-to-base classification are claimed. Log hash and private copy are recorded in EVIDENCE.json.
+
+### B18 provider receipt
+
+One separately authorized real `RecoveryDecisionService.advise()` call used a disposable SQLite DB, sanitized synthetic incident, provider `claude`, requested model `claude-opus-5-5`, effort `high`, one attempt, one invocation and a `$0.10` per-call cap. Incident fingerprint `f3c8c66ac871ffe8a5d05ad936e5a9d4f139fa712f77586ca25b64b11de2ebcb`. The invocation returned `PlannerAgentError`; no matching effective-model/tool-less receipt was accepted, and the service returned deterministic `VERIFY`. It executed no action. Effective model, tool-use proof, usage and cost remain UNKNOWN. No second call or auth retry was made. Sanitized receipt SHA256 `b3c2b96cf6783cea5cea9159abc46e28367974c457aa9219e43a1fc7c980a023` is in the private evidence store.
+
+### Remaining gates
+
+PR #92 remains open and unchanged on the remote until this scoped commit is pushed. After a normal fast-forward, require new-head `local-ci/verify`, independent review and exact remote readback. The separate B18 accepted provider receipt is still absent; the full project test gate is incomplete. No merge/deploy or production DB/service change is authorized (`PROJECT.yaml` keeps production deployment disabled). No independent reviewer was found/assigned in the PR review list; do not self-approve.
