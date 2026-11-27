@@ -298,3 +298,8 @@ PR #92 remains open and unchanged on the remote until this scoped commit is push
 ### Local commit checkpoint
 
 - B20 source, permanent regression, and evidence/context are committed locally as `d73743490ba48ae4f5fce38843b860fcd1551c16` (`fix: prevent blocked recovery from starving ready tasks`). It is based on the existing PR head `15e8fed50f2058b8d976f74bd7ec618a7cd867fa`; remote was not advanced yet at this note. Push only through a normal fast-forward after a fresh exact-head check.
+
+### Remote push/readback — 2026-11-27
+
+- Scoped source/test commit `d73743490ba48ae4f5fce38843b860fcd1551c16` and evidence checkpoint `b6dc80ca884a5c6df4a49200ee2ceded3c6dc705` were normally fast-forward pushed to the existing PR branch after verifying the expected remote head `15e8fed50f2058b8d976f74bd7ec618a7cd867fa`. `git ls-remote` and GitHub PR readback both match `b6dc80c`; PR #92 remains open.
+- Exact-head `local-ci/verify` is pending with zero published status contexts at latest read; independent PR review list is empty. Old `15e8fed` success is not current-head evidence. No merge/deploy.

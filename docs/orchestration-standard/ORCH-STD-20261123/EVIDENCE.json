@@ -1201,7 +1201,21 @@
       },
       "private_checkpoint_dir": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-macbook-handoff-20261127/integrated-pr92-20261127",
       "source_test_commit": "d73743490ba48ae4f5fce38843b860fcd1551c16",
-      "push_status": "not yet pushed; requires final fresh remote head/ancestry check"
+      "push_status": "normal fast-forward verified; PR remains open",
+      "push": {
+        "method": "normal fast-forward",
+        "expected_remote_before": "15e8fed50f2058b8d976f74bd7ec618a7cd867fa",
+        "remote_readback": "b6dc80ca884a5c6df4a49200ee2ceded3c6dc705",
+        "result": "PASS"
+      },
+      "current_pr_head": "b6dc80ca884a5c6df4a49200ee2ceded3c6dc705",
+      "current_exact_head_ci": {
+        "context": "local-ci/verify",
+        "state": "pending",
+        "status_contexts": 0,
+        "observed_at_utc": "2026-11-27"
+      },
+      "independent_reviews": 0
     }
   ]
 }
