@@ -334,3 +334,10 @@ Updated 2026-11-24 ICT. Recovery is open; this is a handoff, not a completion cl
 - Exact committed-source focused regression: 140 passed, 0 failed/errors/skips, exit 0; one pinned-browser subprocess test deselected because browser prerequisite is unavailable. `py_compile` and `git diff --check` passed. Evidence and red/green JUnit/logs: `docs/visual-qa/evidence/issue-73/vq03e2-owner-handoff-20261126/REPORT.md`.
 - Corrected VQ-03e1 artifact hash fields in evidence commit `1e2dc7afd05bff846e5f451156f8732ceee47989`: prior summary hashes referenced pre-sanitization bytes, while its manifest referenced published sanitized files. New `published_sanitized_*` hashes are calculated from actual published files; counts/outcomes are unchanged. `sha256sum -c` passes for both evidence packages.
 - Worktree branch `agent/codex/vq03b3b-preoptin-reference-20261126`; source and evidence are being published separately to existing draft PR #74 via expected-head fast-forward. No browser/provider/Docker/full suite/CI/production/merge/deploy. A–F unchanged; #73 remains open.
+
+## 2026-11-27 PF-04d — deterministic productization and baseline-waiver residuals
+
+- Tested exact PR #74 source SHA `3a9fb5a94811a1f44dba150e0573116bebc628cf`, tree `8db4112bdfd1f33d039e6974421c24f4dc855fd9`, in the existing clean task worktree.
+- `tests/test_productization_audit.py`: 8 passed, no failures/errors/skips, exit 0. `tests/test_baseline_waivers.py`: 4 passed, no failures/errors/skips, exit 0. Both used the existing venv read-only, restricted PATH and nonexistent task-local DOCKER_HOST; no provider or shared Docker. The waiver suite was run after confirming its fixture uses disposable repos, real local subprocess pytest, and `sandbox_profile=NONE`.
+- No source code changed. JUnit/log/manifest and exact commands/timestamps are in `docs/visual-qa/evidence/issue-73/pf-04d-productization-audit-20261127/REPORT.md`; all listed checksums verify.
+- These focused groups do not qualify Gate A: the full suite is still required. A–F remain otherwise unchanged; PR #74 remains draft, no CI/merge/deploy/production/main mutation.
