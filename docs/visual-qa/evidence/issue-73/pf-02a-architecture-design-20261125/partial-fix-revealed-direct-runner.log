@@ -1,0 +1,76 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.2.0, pluggy-1.7.0 -- <task-venv>/bin/python
+rootdir: <candidate-checkout>
+configfile: pyproject.toml
+plugins: anyio-4.16.0
+collecting ... collected 56 items / 1 deselected / 55 selected
+
+tests/test_architecture_design.py::test_new_roles_exist_in_catalog PASSED [  1%]
+tests/test_architecture_design.py::test_architecture_reviewer_role_reuses_reviewer_not_a_new_role PASSED [  3%]
+tests/test_architecture_design.py::test_new_capabilities_validate_for_claude PASSED [  5%]
+tests/test_architecture_design.py::test_new_roles_never_have_deployment_capability PASSED [  7%]
+tests/test_architecture_design.py::test_architecture_analysis_structured_result PASSED [  9%]
+tests/test_architecture_design.py::test_every_classification_value_accepted[NO_ARCHITECTURE_CHANGE] PASSED [ 10%]
+tests/test_architecture_design.py::test_every_classification_value_accepted[LOCAL_ARCHITECTURE_CHANGE] PASSED [ 12%]
+tests/test_architecture_design.py::test_every_classification_value_accepted[ARCHITECTURE_REFINEMENT] PASSED [ 14%]
+tests/test_architecture_design.py::test_every_classification_value_accepted[ARCHITECTURE_BREAKING_CHANGE] PASSED [ 16%]
+tests/test_architecture_design.py::test_unknown_classification_rejected PASSED [ 18%]
+tests/test_architecture_design.py::test_adr_created_and_traced_to_analysis PASSED [ 20%]
+tests/test_architecture_design.py::test_breaking_change_can_raise_human_decision PASSED [ 21%]
+tests/test_architecture_design.py::test_no_architecture_change_never_forces_human_decision PASSED [ 23%]
+tests/test_architecture_design.py::test_architecture_review_pass_approves_analysis_and_adrs PASSED [ 25%]
+tests/test_architecture_design.py::test_architecture_review_needs_refinement_then_refine_creates_new_revision PASSED [ 27%]
+tests/test_architecture_design.py::test_architecture_review_human_decision_required_blocks PASSED [ 29%]
+tests/test_architecture_design.py::test_architecture_review_reject_marks_rejected PASSED [ 30%]
+tests/test_architecture_design.py::test_technical_design_structured_result PASSED [ 32%]
+tests/test_architecture_design.py::test_technical_design_covered_requirements_validated_against_registry PASSED [ 34%]
+tests/test_architecture_design.py::test_technical_design_uncovered_requirement_surfaced PASSED [ 36%]
+tests/test_architecture_design.py::test_technical_design_full_coverage_leaves_nothing_uncovered PASSED [ 38%]
+tests/test_architecture_design.py::test_technical_design_models_migration_and_rollback PASSED [ 40%]
+tests/test_architecture_design.py::test_technical_design_incorporates_approved_architecture PASSED [ 41%]
+tests/test_architecture_design.py::test_ui_ux_not_applicable_for_backend_only_change PASSED [ 43%]
+tests/test_architecture_design.py::test_ui_ux_applicable_for_user_facing_change PASSED [ 45%]
+tests/test_architecture_design.py::test_ui_ux_policy_override_forces_applicable PASSED [ 47%]
+tests/test_architecture_design.py::test_ui_ux_governing_spec_evidence_never_leaks_from_unrelated_change PASSED [ 49%]
+tests/test_architecture_design.py::test_ui_ux_design_structured_result PASSED [ 50%]
+tests/test_architecture_design.py::test_ui_ux_design_acceptance_mapping PASSED [ 52%]
+tests/test_architecture_design.py::test_design_review_pass_approves_technical_and_ui_ux PASSED [ 54%]
+tests/test_architecture_design.py::test_design_review_needs_refinement PASSED [ 56%]
+tests/test_architecture_design.py::test_design_review_human_decision_required PASSED [ 58%]
+tests/test_architecture_design.py::test_design_spec_conflict_human_variant_creates_human_decision_pointing_to_spec_lifecycle PASSED [ 60%]
+tests/test_architecture_design.py::test_design_spec_conflict_refinable_variant_does_not_block PASSED [ 61%]
+tests/test_architecture_design.py::test_design_review_never_writes_canonical_spec PASSED [ 63%]
+tests/test_architecture_design.py::test_bounded_design_refinement_loop_never_infinite PASSED [ 65%]
+tests/test_architecture_design.py::test_refine_never_weakens_spec_prompt_language PASSED [ 67%]
+tests/test_architecture_design.py::test_architecture_ready_requires_real_review_evidence PASSED [ 69%]
+tests/test_architecture_design.py::test_design_ready_requires_real_review_evidence PASSED [ 70%]
+tests/test_architecture_design.py::test_design_ready_false_while_ui_ux_required_but_missing PASSED [ 72%]
+tests/test_architecture_design.py::test_unresolved_human_decision_blocks_design_ready_and_surfaces_waiting_human PASSED [ 74%]
+tests/test_architecture_design.py::test_controlled_profile_cannot_pass_without_required_design PASSED [ 76%]
+tests/test_architecture_design.py::test_workflow_service_without_gate_hook_falls_back_to_presence_check PASSED [ 78%]
+tests/test_architecture_design.py::test_planner_context_sees_design_work_products PASSED [ 80%]
+tests/test_architecture_design.py::test_plan_design_staleness_signal PASSED [ 81%]
+tests/test_architecture_design.py::test_design_state_digest_stable_when_nothing_changes PASSED [ 83%]
+tests/test_architecture_design.py::test_design_lifecycle_never_creates_implementation_task PASSED [ 85%]
+tests/test_architecture_design.py::test_production_specs_root_never_touched_by_this_suite PASSED [ 87%]
+tests/test_claude_structured_turns.py::test_structured_schema_uses_bounded_three_turns_and_no_tools PASSED [ 89%]
+tests/test_claude_structured_turns.py::test_nonzero_provider_envelope_reports_safe_subtype[error_max_turns] PASSED [ 90%]
+tests/test_claude_structured_turns.py::test_nonzero_provider_envelope_reports_safe_subtype[error_max_structured_output_retries] PASSED [ 92%]
+tests/test_claude_structured_turns.py::test_nonzero_provider_envelope_reports_safe_subtype[error_during_execution] PASSED [ 94%]
+tests/test_claude_structured_turns.py::test_zero_exit_provider_error_does_not_expose_raw_errors PASSED [ 96%]
+tests/test_claude_structured_turns.py::test_unexpected_provider_envelope_shape_fails_closed[[]] PASSED [ 98%]
+tests/test_claude_structured_turns.py::test_unexpected_provider_envelope_shape_fails_closed[{"subtype": [], "is_error": true, "errors": ["unsafe"]}] PASSED [100%]
+
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  <task-venv>/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_architecture_design.py: 517 warnings
+  <task-venv>/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: <task-artifacts>/candidate-architecture-design-junit.xml -
+========== 55 passed, 1 deselected, 529 warnings in 73.17s (0:01:13) ===========

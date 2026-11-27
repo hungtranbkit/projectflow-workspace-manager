@@ -1,0 +1,7 @@
+{
+  "projects": [
+    {"name":"Catty minhaAmiga","real_project":true,"approved_by_owner":true,"independent_references":false,"states":[{"viewport":"mobile","reference_independent":true,"browser_render":true,"visually_reviewed":true}],"notes":"Approved mobile app triptych exists; no independent approved tablet/desktop screenshot."},
+    {"name":"iFood PiP prototype","real_project":true,"approved_by_owner":false,"independent_references":false,"states":[{"viewport":"desktop","reference_independent":true,"browser_render":true,"visually_reviewed":true}],"notes":"Single desktop promo screenshot and a reconstructed render; other viewports inferred."},
+    {"name":"Built-in browser QA fixtures","real_project":false,"approved_by_owner":false,"independent_references":false,"states":[{"viewport":"mobile","reference_independent":false,"browser_render":true,"visually_reviewed":true}],"notes":"Synthetic negative control fixture, never counted as a real independent project."}
+  ]
+}

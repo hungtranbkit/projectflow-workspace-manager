@@ -1,0 +1,20 @@
+# Independent visual reviewer protocol
+
+A screenshot-to-code task is **not approved** just because it renders, passes unit tests or has a plausible overall composition. Run these four independent reviews before reporting fidelity. Use actual parallel/subagents **only if the executing coding agent supports them**; otherwise perform the four reviews sequentially with separately recorded evidence. Never claim four subagents ran when one agent simply performed four checks.
+
+1. **Icon reviewer:** compare every meaningful icon in the same normalized crop. Check filled/outline style, stroke thickness, silhouette, optical size, circle diameter, color and icon placement. Do not quietly swap a custom icon for a different Lucide glyph or an emoji. Record source asset provenance or mark inferred and block pixel-perfect approval.
+2. **Typography and controls reviewer:** examine headline, body, labels and CTAs. Record suspected vs confirmed font family, weight, line height, letter spacing, text wrap, CTA visible width/height and positions at a matching viewport. CSS dimensions may differ from painted dimensions due to padding, shadow and rounded corners. A one-pixel height change does **not** prove a CTA is larger in both dimensions. A font inferred from pixels must not be called identical.
+3. **Subject and asset reviewer:** before CSS, open the exported character image itself over checkerboard/white/black backgrounds and look for text remnants, missing limbs/paws/hair/ears, cutouts, hard seams and transparent alpha mistakes. If the screenshot contains text over the anatomy or body hidden by another layer, a crop **cannot recover it**. Mark such a source as *not independently extractable*; never heal or regenerate without appropriate user authorization. Do not label a partial extract `preserved` if the anatomy is not intact.
+4. **Lighting and composition reviewer:** distinguish illumination already baked into a source photograph/illustration from CSS-created overlays. Do not duplicate baked-in glows with blurred copies, filtered duplicate images, gradient haze or glow rings that cover the subject. Compare crisp luminous streaks separately from ambient colored illumination. Confirm preservation of face, body, paws and lower/upper background.
+
+## Evidence / gate
+
+Each review must have `status: pass | fail | unknown`, a concrete screenshot/image or source path as `evidence`, and a nonempty explanation. `unknown` blocks claiming approval. Validate a complete review JSON with `python scripts/validate_visual_review.py --file artifacts/visual-review.json --root .`. The validator **checks completeness and grounded file references**, not whether an agent's aesthetic verdict is correct. An agent must not self-approve by inventing evidence or marking discrepancies as `pass`.
+
+The same four reviews apply to desktop, tablet and mobile, but visual **fidelity** is measured only for viewport(s) actually supplied in reference imagery. For side-by-side evidence, use the matching crop without stretching or rescaling components separately.
+
+Example: an existing image already carries coral light around a kitten; a new CSS layer creates fuzzy pink blobs, the source crop loses its paw, icons become thin outlined variants and a CTA is 4 px narrower but 1 px taller. Record three failures plus a CTA geometry deviation (not "larger CTA"), and stop before claiming 9.5/10.
+
+## Explicit recreation / video two-pass review
+
+When a user explicitly authorizes scene regeneration, the approved-source crop is used **only to condition image generation**. Audit the fresh scene-only image before overlaying text. Check preserved facial identity, natural paw continuation, the exact visible props (no new bows, human hair or phone), whole-scene coherent glow and no source text/labels. Then independently check the second-pass typography overlay against the reference. Use `references/reference-guided-regeneration.md` and `scripts/validate_generation_cycle.py`. Do not call a crop 'generated' and do not claim a 100% match based on prompt length.

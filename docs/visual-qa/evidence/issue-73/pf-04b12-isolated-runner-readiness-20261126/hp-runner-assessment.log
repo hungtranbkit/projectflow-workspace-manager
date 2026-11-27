@@ -1,0 +1,15 @@
+2026-11-26T06:52:35Z
+Linux 7.0.0-38-generic x86_64
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme0n1p2  233G  209G   13G  95% /
+               total        used        free      shared  buff/cache   available
+Mem:            14Gi       6.8Gi       895Mi       322Mi       7.9Gi       8.1Gi
+Swap:          4.0Gi       4.0Gi        17Mi
+/usr/bin/dockerd-rootless.sh
+/usr/bin/rootlesskit
+newuidmap=missing
+newgidmap=missing
+slirp4netns=missing
+pasta=missing
+fuse-overlayfs=missing
+user_socket=absent

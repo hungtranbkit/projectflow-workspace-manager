@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "tools": {
+    "imageToCode": {
+      "repository": "https://github.com/lenixeduardo/Image-to-code",
+      "commit": "9b6c8940d2844aff8288ed594abfc2b9680ee558",
+      "license": "MIT",
+      "install": "python3 .agents/skills/image-to-code/scripts/install.py --agent codex --scope project --project . --verify"
+    },
+    "uifix": {
+      "repository": "https://github.com/yasiral/uifix",
+      "version": "1.2.6",
+      "commit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+      "license": "MIT",
+      "distribution": "source; not published as a public npm package",
+      "install": "python3 tools/visual_qa/bootstrap.py",
+      "dependencyInstall": "npm ci --ignore-scripts --no-audit --no-fund"
+    },
+    "playwright": {
+      "source": "pinned UIFix dependency lockfile unless VISUAL_QA_PLAYWRIGHT_FROM selects the app's installed Playwright",
+      "minimumVersion": "1.60.0",
+      "browser": "matching Playwright Chromium; CHROME_PATH is an optional executable override",
+      "launchPolicy": {
+        "headless": true,
+        "chromiumSandbox": true,
+        "fallback": "fail closed; never retry with Chromium sandbox disabled",
+        "executableOverride": "CHROME_PATH may select only an operator-approved compatible Chromium binary; it does not prove sandbox enforcement"
+      },
+      "deviceScaleFactor": 1,
+      "runtimeRequirement": "Use an authorized runtime that supports Chromium sandboxing and the repository's isolated TestRunner policy; this config requests sandboxing but cannot attest the kernel/runtime actually enforced it. No root-container or host-network fallback is supported."
+    }
+  }
+}

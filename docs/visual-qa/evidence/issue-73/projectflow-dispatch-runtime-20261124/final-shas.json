@@ -1,0 +1,8 @@
+{
+  "negativeSha": "8913bda32a647bfb399f13497e273cbab424307f",
+  "repairedSha": "d308d481441eaea23e151e0126a92dfa4b596cd2",
+  "staleHead": "2e3a64eea93d56346e5fcb0987eef16a291c726f",
+  "backendSha": "2e3a64eea93d56346e5fcb0987eef16a291c726f",
+  "referenceSha256": "c263f6b9a8326d18111c583bf3450c446507261d1164456eb941850599d5e0cf",
+  "projectLocalSkillSha256": "d737786ccd7512358c6d23bda7ddc2a1d04b7f3ece097242a55ae85932c1184e"
+}

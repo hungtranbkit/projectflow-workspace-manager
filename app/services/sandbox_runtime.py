@@ -141,6 +141,11 @@ class SandboxRuntimeService:
         - `--cap-drop ALL --security-opt no-new-privileges` -- no Linux
           capabilities beyond an unprivileged process's own default, no
           privilege-escalation via setuid binaries.
+        - `--user {worktree owner uid}:{gid}` -- tenant code runs as the
+          owner of the one bind-mounted worktree, not as an image's
+          default root user. This also lets a legitimate command write
+          into task-private (0700) run evidence directories without
+          weakening their host-side permissions.
         - `-v {worktree_root}:/workspace:rw -w /workspace[/{working_dir}]`
           -- the command sees ONLY the one worktree/probe directory it
           was given (the FULL worktree, matching what the equivalent
@@ -179,8 +184,11 @@ class SandboxRuntimeService:
         env_flags = []
         for key, value in (env or {}).items():
             env_flags += ["-e", f"{key}={value}"]
+        owner = Path(worktree_root).stat()
+        container_user = f"{owner.st_uid}:{owner.st_gid}"
         argv = [
             self.docker_bin, "run", "--rm", "--name", container_name,
+            "--user", container_user,
             "--memory", memory, "--cpus", cpus, "--pids-limit", str(pids_limit),
             "--network", network,
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",

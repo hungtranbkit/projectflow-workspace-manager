@@ -1,0 +1,2066 @@
+{
+  "tested_source_sha": "50ce031328cfaad4e976dc5507ff5e9908d18b42",
+  "input_junit_sha256": "b1a8531d6aaa4f01b9e85afe09619eb05922549f112af953ea78f589091b31be",
+  "outcomes": {
+    "failed": 194,
+    "skipped": 6,
+    "error": 20
+  },
+  "fingerprint_count": 122,
+  "groups": [
+    {
+      "status": "failed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('",
+      "count": 29
+    },
+    {
+      "status": "failed",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <",
+      "count": 23
+    },
+    {
+      "status": "error",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet",
+      "count": 20
+    },
+    {
+      "status": "failed",
+      "category": "technical_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Technical Design exists for this Change yet -- run /design/technical first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p",
+      "count": 9
+    },
+    {
+      "status": "failed",
+      "category": "test_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Test Design exists for this Change yet -- run /tests/design first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), P",
+      "count": 8
+    },
+    {
+      "status": "failed",
+      "category": "architecture_analysis_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Architecture Analysis exists for this Change yet -- run /architecture/analyze first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (Posi",
+      "count": 7
+    },
+    {
+      "status": "skipped",
+      "category": "provider_cli_unavailable_skip",
+      "fingerprint": "real `claude` CLI not installed on this host <path> real `claude` CLI not installed on this host",
+      "count": 5
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert False is True + where False = pending_for_change(1) + where pending_for_change = <app.services.human_decisions.HumanDecisionService object at 0x…>.pending_for_change + where <app.services.human_decisions.HumanDecisionService object at 0x…> = <starlette.",
+      "count": 3
+    },
+    {
+      "status": "failed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'work_product': None, 'message': 'claude CLI not found in PATH'} assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<pa",
+      "count": 2
+    },
+    {
+      "status": "failed",
+      "category": "child_python_missing_pytest",
+      "fingerprint": "AssertionError: <path> No module named pytest assert 1 == 0 + where 1 = CompletedProcess(args=['python3', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', 'test_stock.py'], returncode=1, stdout='', stderr='<path> No module named pytest/n').returncode client = <",
+      "count": 2
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_architecture_analysis_structu",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') classification = 'NO_ARCHITECTURE_CHAN",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') classification = 'LOCAL_ARCHITECTURE_C",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') classification = 'ARCHITECTURE_REFINEM",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') classification = 'ARCHITECTURE_BREAKIN",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'OUTPUT_INVALID' - OUTPUT_INVALID + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_unknown_cla",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'adr_ids' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_adr_created_and_traced_to_analysis(client, git_repo, arch_env): cid = new_change(client, ",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_technical_design_structured_r",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'covered_requirements' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_technical_design_covered_requirements_validated_against_registry(client, git",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'uncovered_requirements' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_technical_design_uncovered_requirement_surfaced(client, git_repo, arch_env",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'uncovered_requirements' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_technical_design_full_coverage_leaves_nothing_uncovered(client, git_repo, ",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_technical_design_models_migration_and_rollback(client, git_",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_ui_ux_design_structured_resul",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_ui_ux_design_acceptance_mapping(client, git_repo, arch_env)",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'NEEDS_REFINEMENT' - NEEDS_REFINEMENT + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_bounded",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'TECHNICAL_DESIGN' in set() client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_planner_context_sees_design_work_products(client, git_repo",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_plan_design_staleness_signal(client, git_repo, arch_env): c",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert (None == None and None is not None) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_design_state_digest_stable_when_nothing_changes(client, git_repo, ",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'test' == 'tests_probe/..._known_broken' - tests_probe/test_x.py::test_known_broken + test client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_reproduce_baseline_then_wa",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 1 == 2 + where 1 = len([{'stage': 'test', 'test_identifier': 'test', 'reason': 'FAIL', 'fingerprint': 'bd51de3a3a6445f2', ...}]) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>'",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert 'HUMAN DECISION REQUIRED' in '<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><...ehind)./nsetTimeout(()=>{if(document.querySelector(/'[data-running]/'))location.reload()},1500)</script",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'outcome': 'NO_TASKS_LAUNCHED', 'change_id': 1, 'wave_id': 1, 'launched': [], ...} assert 'NO_TASKS_LAUNCHED' == 'LAUNCHED' - LAUNCHED + NO_TASKS_LAUNCHED git_repo = (PosixPath('<path>'), PosixPath('<path>')) tmp_path = PosixPath('<path>') def",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: Task launched 0 times, expected exactly once assert 0 == 1 + where 0 = len([]) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_double_tick_never_launches_same_task_twice(cl",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'NO_TASKS_LAUNCHED' == 'LAUNCHED' - LAUNCHED + NO_TASKS_LAUNCHED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_sibling_failure_does_not_stop_safe_sibling(client, g",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'wave_id': 1, 'status': 'BLOCKED', 'results': [{'task_id': 1, 'outcome': 'BLOCKED', 'reasons': ['CODE_REVIEW_NOT_PASS']}]} assert 'BLOCKED' == 'COMPLETE' - COMPLETE + BLOCKED client = <starlette.testclient.TestClient object at 0x…> git_repo = ",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_plan_create_and_revision_numbering(client, git_repo): cid, r = create_and_plan(client, git",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_replan_sets_supersedes_and_marks_old_plan_superseded(client, git_repo): cid, r = create_an",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_materialized_plan_never_marked_superseded_by_replan(client, git_repo): \"\"\"History-friendly",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert [] == [1, 2] Right contains 2 more items, first extra item: 1 Use -v to get more diff client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_plan_list_ordered_by_revision(client, git_repo)",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_valid_output_produces_plan_ready(c",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: assert 'subtype=usage_limit_reached' in 'claude CLI not found in PATH' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_planner_reports_allowlisted_provider_usage_limit_with",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLANNER_OUTPUT_INVALID' - PLANNER_OUTPUT_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_malformed_",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_unknown_task_type_rejected(cli",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_unknown_role_rejected(client, ",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_incompatible_role_is_warning_not_e",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_valid_dependency_graph_accepted(cl",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_self_dependency_rejected(clien",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_unknown_dependency_key_rejecte",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_dependency_cycle_rejected(clie",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_duplicate_task_key_rejected(cl",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_vibe_accepts_minimal_build_only_pl",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_agentic_standard_missing_revie",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_agentic_standard_covers_review_ver",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_controlled_cannot_skip_design(",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_controlled_human_acceptance_is_cov",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_materialize_creates_real_tasks_with_type_and_change(client, git_repo): cid, r = create_and",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_materialize_never_starts_any_agent_session(client, git_repo): cid, r = create_and_plan(cli",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_cannot_materialize_a_draft_or_rejected_plan(client, git_repo): cid, r = create_and_plan(cl",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_materialize_is_atomic_on_partial_failure(client, git_repo): \"\"\"A corrupted plan_items row ",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_materialize_recognizes_existing_tasks_via_explicit_linkage_not_dedup(client, git_repo): \"\"",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'HUMAN_DECISION_REQUIRED' - HUMAN_DECISION_REQUIRED + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_unresolv",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'PENDING' == 'WAITING_HUMAN' - WAITING_HUMAN + PENDING client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_workflow_waiting_human_while_decision_unresolved(client, git_r",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_resolving_decision_unblocks_materialization(client, git_repo): cid, r = create_and_plan(cl",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' in ('PLAN_READY', 'HUMAN_DECISION_REQUIRED') client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_planner_retries_once_with_validator_errors_an",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_task_decision_service_unaffected_by_materialized_task(client, git_repo): cid, r = create_a",
+      "count": 1
+    },
+    {
+      "status": "skipped",
+      "category": "provider_cli_unavailable_skip",
+      "fingerprint": "real `claude` CLI not available in this environment <path> real `claude` CLI not available in this environment",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: [{'outcome': 'PLANNER_EXECUTION_FAILED', 'plan': None, 'message': 'claude CLI not found in PATH'}, {'outcome': 'PLANNE... not found in PATH'}, {'outcome': 'PLANNER_EXECUTION_FAILED', 'plan': None, 'message': 'claude CLI not found in PATH'}] ass",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'task_id': 1, 'outcome': 'BLOCKED', 'reasons': ['CODE_REVIEW_NOT_PASS']} assert 'BLOCKED' == 'INTEGRATED' - INTEGRATED + BLOCKED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'outcome': 'BLOCKED', 'task_id': 1, 'reasons': ['CODE_REVIEW_NOT_PASS']} assert 'BLOCKED' == 'LOCKED' - LOCKED + BLOCKED ? + client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tmp_pat",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'outcome': 'BLOCKED', 'task_id': 1, 'reasons': ['CODE_REVIEW_NOT_PASS']} assert 'BLOCKED' == 'INTEGRATION_VERIFY_FAILED' - INTEGRATION_VERIFY_FAILED + BLOCKED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<pat",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert 'EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert None == 'PASS_WITH_FINDINGS' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_code_review_pass_with_findings(client, git_repo): root, repo = git_repo rid = register(c",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert None == 'FIX_REQUIRED' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_code_review_fix_required(client, git_repo): root, repo = git_repo rid = register(client, repo,",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert None == 'HUMAN_DECISION_REQUIRED' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_code_review_human_decision_required(client, git_repo): root, repo = git_repo rid = ",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert None == 'REJECT' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_code_review_reject(client, git_repo): root, repo = git_repo rid = register(client, repo, \"demo\") cid",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert 'EXECUTION_FAILED' == 'REVIEW_OUTPUT_INVALID' - REVIEW_OUTPUT_INVALID + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…>",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert 0 == 2 + where 0 = len([]) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_finding_deduplicated_across_rounds(client, git_repo): root, repo = git_repo rid = register(client, repo, \"",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "IndexError: list index out of range client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_finding_resolve_requires_reference(client, git_repo): root, repo = git_repo rid = register(client, repo,",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'prompt' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_code_review_uses_real_diff_not_builder_reasoning(client, git_repo): root, repo = git_repo rid = register(client, repo, \"d",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_security_review_produces_dedicated_work_product(client",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "IndexError: list index out of range client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_finding_auto_resolved_when_no_longer_reported_after_fix(client, git_repo): root, repo = git_repo rid = r",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'CODE_REVIEW_RUN', 'verdict': None, 'message': 'claude CLI not found in PATH', 'task_id': 1, ...} assert 'CODE_REVIEW_RUN' in ('FIX_BUILDER_LAUNCHED', 'EXECUTION_FAILED', 'FIX_BUILDER_ALREADY_RUNNING') client = <starlette.testclient",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "IndexError: list index out of range client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_finding_from_original_task_resolved_after_fix_task_commit(client, git_repo): \"\"\"Real bug caught by this ",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'CODE_REVIEW_RUN', 'verdict': None, 'message': 'claude CLI not found in PATH', 'task_id': 1, ...} assert 'CODE_REVIEW_RUN' == 'WAITING_HUMAN' - WAITING_HUMAN + CODE_REVIEW_RUN client = <starlette.testclient.TestClient object at 0x…>",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'CODE_REVIEW_RUN', 'verdict': None, 'message': 'claude CLI not found in PATH', 'task_id': 1, ...} assert 'CODE_REVIEW_RUN' == 'SECURITY_CRITICAL_BLOCK' - SECURITY_CRITICAL_BLOCK + CODE_REVIEW_RUN client = <starlette.testclient.TestC",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert None is True + where None = review_pass(1) + where review_pass = <app.services.review_fix_orchestrator.ReviewFixOrchestratorService object at 0x…>.review_pass client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), Posi",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'task_id': 1, 'governing_task_id': 1, 'ready': False, 'outcome': 'BLOCKED', ...} assert 'BLOCKED' == 'INTEGRATION_READY' - INTEGRATION_READY + BLOCKED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), Po",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_requirement_analysis_structur",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'human_decision_ids' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_requirement_analysis_ambiguity_classification(client, git_repo, spec_env): cid",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'human_decision_ids' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_how_decision_never_creates_human_decision(client, git_repo, spec_env): cid = n",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'task_id' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_requirement_analysis_creates_traceable_task(client, git_repo, spec_env): cid = new_change",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_invalid_structured_output_rejected(cl",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'NEEDS_REFINEMENT' - NEEDS_REFINEMENT + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_bounded",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_baseline_staleness_visible(client, git_repo, spec_env): roo",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_planner_still_works_without_any_sp",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_structured_res",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_valid_spec_ids_stored(client, git_repo, tdesign_env): cid = new_change(",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_fictional_ids_silently_excluded(client, git_repo, tdesign_env): cid = n",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_negative_case_generation(client, git_repo, tdesign_env): cid = new_chan",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_ui_and_manual_acceptance_levels(client, git_repo, tdesign_env): cid = n",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_migration_case_generation(client, git_repo, tdesign_env): cid = new_cha",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_unknown_level_falls_back_to_integration(client, git_repo, tdesign_env):",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_untestable_items_and_implementation_conflicts_captured(c",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert ['REQ-001', 'REQ-002'] == [] Left contains 2 more items, first extra item: 'REQ-001' Use -v to get more diff client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = Pos",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert ['REQ-001', 'REQ-002'] == ['REQ-002'] At index 0 diff: 'REQ-001' != 'REQ-002' Left contains one more item: 'REQ-002' Use -v to get more diff client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixP",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert [] == ['REQ-001'] Right contains one more item: 'REQ-001' Use -v to get more diff client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_c",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert 0 == 1 client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_coverage_manual_acceptance_counts_correctly(client, git_repo, tdesign_env): cid = new_change",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_coverage_invalid_references_surfaced(client, git_repo, t",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'prompt' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_review_receives_real_deterministic_coverage_not_model_claim(client, git_repo, tdesign_e",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'NEEDS_REFINEMENT' - NEEDS_REFINEMENT + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_boun",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_executable_mapping_defaults_to_unimplemented(client, git_repo, tdesign_env): cid = ",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_executable_mapping_explicit_valid(client, git_repo, tdesign_env): cid = new_change(",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_executable_mapping_requires_explicit_symbol_or_command(client, git_repo, tdesign_en",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_executable_mapping_record_result(client, git_repo, tdesign_env): cid = new_change(c",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_executable_mapping_stale_after_refinement(client, git_repo, tdesign_env): cid = new",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'TEST_CASE_SET' in set() client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_planner_context_sees_test_design(client, git_repo, tdesign",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert False is True client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_planner_context_sees_unimplemented_test_cases(client, git_repo, tdesign_env): cid = n",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_plan_test_design_staleness_signal(client, git_repo, tdes",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'TEST_DESIGN_MISSING' == 'TEST_IMPLEMENTATION_MISSING' - TEST_IMPLEMENTATION_MISSING + TEST_DESIGN_MISSING client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = Posix",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_spec_compliance_missing_evidence_vs_fail_distinguished(client, git_repo, tdesign_en",
+      "count": 1
+    },
+    {
+      "status": "failed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'test_plan': None, 'message': 'claude CLI not found in PATH'} assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>",
+      "count": 1
+    }
+  ],
+  "nodes": [
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_architecture_analysis_structured_result",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_architecture_analysis_structu"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_every_classification_value_accepted[NO_ARCHITECTURE_CHANGE]",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') classification = 'NO_ARCHITECTURE_CHAN"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_every_classification_value_accepted[LOCAL_ARCHITECTURE_CHANGE]",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') classification = 'LOCAL_ARCHITECTURE_C"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_every_classification_value_accepted[ARCHITECTURE_REFINEMENT]",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') classification = 'ARCHITECTURE_REFINEM"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_every_classification_value_accepted[ARCHITECTURE_BREAKING_CHANGE]",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') classification = 'ARCHITECTURE_BREAKIN"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_unknown_classification_rejected",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'OUTPUT_INVALID' - OUTPUT_INVALID + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_unknown_cla"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_adr_created_and_traced_to_analysis",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'adr_ids' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_adr_created_and_traced_to_analysis(client, git_repo, arch_env): cid = new_change(client, "
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_breaking_change_can_raise_human_decision",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert False is True + where False = pending_for_change(1) + where pending_for_change = <app.services.human_decisions.HumanDecisionService object at 0x…>.pending_for_change + where <app.services.human_decisions.HumanDecisionService object at 0x…> = <starlette."
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_architecture_review_pass_approves_analysis_and_adrs",
+      "category": "architecture_analysis_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Architecture Analysis exists for this Change yet -- run /architecture/analyze first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (Posi"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_architecture_review_needs_refinement_then_refine_creates_new_revision",
+      "category": "architecture_analysis_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Architecture Analysis exists for this Change yet -- run /architecture/analyze first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (Posi"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_architecture_review_human_decision_required_blocks",
+      "category": "architecture_analysis_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Architecture Analysis exists for this Change yet -- run /architecture/analyze first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (Posi"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_architecture_review_reject_marks_rejected",
+      "category": "architecture_analysis_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Architecture Analysis exists for this Change yet -- run /architecture/analyze first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (Posi"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_technical_design_structured_result",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_technical_design_structured_r"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_technical_design_covered_requirements_validated_against_registry",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'covered_requirements' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_technical_design_covered_requirements_validated_against_registry(client, git"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_technical_design_uncovered_requirement_surfaced",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'uncovered_requirements' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_technical_design_uncovered_requirement_surfaced(client, git_repo, arch_env"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_technical_design_full_coverage_leaves_nothing_uncovered",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'uncovered_requirements' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_technical_design_full_coverage_leaves_nothing_uncovered(client, git_repo, "
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_technical_design_models_migration_and_rollback",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_technical_design_models_migration_and_rollback(client, git_"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_technical_design_incorporates_approved_architecture",
+      "category": "architecture_analysis_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Architecture Analysis exists for this Change yet -- run /architecture/analyze first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (Posi"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_ui_ux_design_structured_result",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_ui_ux_design_structured_resul"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_ui_ux_design_acceptance_mapping",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_ui_ux_design_acceptance_mapping(client, git_repo, arch_env)"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_design_review_pass_approves_technical_and_ui_ux",
+      "category": "technical_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Technical Design exists for this Change yet -- run /design/technical first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_design_review_needs_refinement",
+      "category": "technical_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Technical Design exists for this Change yet -- run /design/technical first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_design_review_human_decision_required",
+      "category": "technical_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Technical Design exists for this Change yet -- run /design/technical first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_design_spec_conflict_human_variant_creates_human_decision_pointing_to_spec_lifecycle",
+      "category": "technical_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Technical Design exists for this Change yet -- run /design/technical first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_design_spec_conflict_refinable_variant_does_not_block",
+      "category": "technical_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Technical Design exists for this Change yet -- run /design/technical first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_design_review_never_writes_canonical_spec",
+      "category": "technical_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Technical Design exists for this Change yet -- run /design/technical first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_bounded_design_refinement_loop_never_infinite",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'NEEDS_REFINEMENT' - NEEDS_REFINEMENT + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_bounded"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_architecture_ready_requires_real_review_evidence",
+      "category": "architecture_analysis_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Architecture Analysis exists for this Change yet -- run /architecture/analyze first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (Posi"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_design_ready_requires_real_review_evidence",
+      "category": "technical_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Technical Design exists for this Change yet -- run /design/technical first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_design_ready_false_while_ui_ux_required_but_missing",
+      "category": "technical_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Technical Design exists for this Change yet -- run /design/technical first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_unresolved_human_decision_blocks_design_ready_and_surfaces_waiting_human",
+      "category": "technical_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Technical Design exists for this Change yet -- run /design/technical first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_planner_context_sees_design_work_products",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'TECHNICAL_DESIGN' in set() client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_planner_context_sees_design_work_products(client, git_repo"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_plan_design_staleness_signal",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_plan_design_staleness_signal(client, git_repo, arch_env): c"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_design_state_digest_stable_when_nothing_changes",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert (None == None and None is not None) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) arch_env = PosixPath('<path>') def test_design_state_digest_stable_when_nothing_changes(client, git_repo, "
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_design_lifecycle_never_creates_implementation_task",
+      "category": "architecture_analysis_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Architecture Analysis exists for this Change yet -- run /architecture/analyze first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (Posi"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_architecture_design::test_real_architecture_design_lifecycle_end_to_end",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'work_product': None, 'message': 'claude CLI not found in PATH'} assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<pa"
+    },
+    {
+      "status": "skipped",
+      "nodeid": "tests.test_autonomous_execution_real::test_real_autonomous_builder_fixture_end_to_end",
+      "category": "provider_cli_unavailable_skip",
+      "fingerprint": "real `claude` CLI not installed on this host <path> real `claude` CLI not installed on this host"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_b2_release_concurrency::test_concurrent_auto_version_releases_never_collide",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_b2_release_concurrency::test_explicit_version_collision_raises_clean_error_not_generic_retry_exhausted",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_b2_release_concurrency::test_explicit_version_race_window_also_raises_clean_error",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_baseline_waivers::test_reproduce_baseline_then_waive_unblocks_ready_for_main",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'test' == 'tests_probe/..._known_broken' - tests_probe/test_x.py::test_known_broken + test client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_reproduce_baseline_then_wa"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_baseline_waivers::test_multiple_mixed_failures_one_waived_one_new_still_blocks",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 1 == 2 + where 1 = len([{'stage': 'test', 'test_identifier': 'test', 'reason': 'FAIL', 'fingerprint': 'bd51de3a3a6445f2', ...}]) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>'"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_project_overview_shows_active_and_waiting_human_changes",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_project_overview_filters_by_status",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_change_header_reflects_real_state",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_lifecycle_timeline_no_fake_completion",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_spec_tab_renders_requirements_ac_invariants",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_spec_tab_shows_staleness_when_stale",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_architecture_tab_shows_classification_adr_review",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_design_tab_shows_technical_design_and_applicable_ui_ux_gap",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_human_decision_state_visible_on_architecture_review",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert 'HUMAN DECISION REQUIRED' in '<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><...ehind)./nsetTimeout(()=>{if(document.querySelector(/'[data-running]/'))location.reload()},1500)</script"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_tests_tab_distinguishes_designed_implemented_evidence",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_tests_tab_shows_failed_mapping",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_tests_tab_coverage_counts",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_plan_tab_shows_current_revision_and_dependencies",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_plan_tab_shows_stale_flags",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_decisions_tab_shows_unresolved_decision",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_decisions_tab_resolve_action_works",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_reviews_tab_aggregates_every_review_kind",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_evidence_tab_no_raw_dump_by_default",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_release_tab_honest_not_linked",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_deploy_tab_honest_not_deployed",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "error",
+      "nodeid": "tests.test_engineering_lifecycle_ui::test_control_surface_endpoint_composes_every_tab",
+      "category": "html_response_parsed_as_json",
+      "fingerprint": "JSONDecodeError on HTML response: No Requirement Analysis exists for this Change yet"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_execution_wave_reservation_stuck_after_restart::test_restart_reconciliation_clears_stale_reservations_and_scheduling_works_again",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'outcome': 'NO_TASKS_LAUNCHED', 'change_id': 1, 'wave_id': 1, 'launched': [], ...} assert 'NO_TASKS_LAUNCHED' == 'LAUNCHED' - LAUNCHED + NO_TASKS_LAUNCHED git_repo = (PosixPath('<path>'), PosixPath('<path>')) tmp_path = PosixPath('<path>') def"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_execution_waves::test_double_tick_never_launches_same_task_twice",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: Task launched 0 times, expected exactly once assert 0 == 1 + where 0 = len([]) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_double_tick_never_launches_same_task_twice(cl"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_execution_waves::test_sibling_failure_does_not_stop_safe_sibling",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'NO_TASKS_LAUNCHED' == 'LAUNCHED' - LAUNCHED + NO_TASKS_LAUNCHED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_sibling_failure_does_not_stop_safe_sibling(client, g"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_execution_waves::test_real_two_task_wave_parallel_safe_full_closed_loop",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_execution_waves::test_execution_wave_2_uses_updated_base",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'wave_id': 1, 'status': 'BLOCKED', 'results': [{'task_id': 1, 'outcome': 'BLOCKED', 'reasons': ['CODE_REVIEW_NOT_PASS']}]} assert 'BLOCKED' == 'COMPLETE' - COMPLETE + BLOCKED client = <starlette.testclient.TestClient object at 0x…> git_repo = "
+    },
+    {
+      "status": "skipped",
+      "nodeid": "tests.test_execution_waves::test_real_claude_builder_launches_through_execution_wave_path",
+      "category": "provider_cli_unavailable_skip",
+      "fingerprint": "real `claude` CLI not installed on this host <path> real `claude` CLI not installed on this host"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_golden_e2e::test_golden_end_to_end_inventory_app_reaches_complete",
+      "category": "child_python_missing_pytest",
+      "fingerprint": "AssertionError: <path> No module named pytest assert 1 == 0 + where 1 = CompletedProcess(args=['python3', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', 'test_stock.py'], returncode=1, stdout='', stderr='<path> No module named pytest/n').returncode client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_golden_e2e::test_golden_bug_closed_loop_returns_to_healthy",
+      "category": "child_python_missing_pytest",
+      "fingerprint": "AssertionError: <path> No module named pytest assert 1 == 0 + where 1 = CompletedProcess(args=['python3', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', 'test_stock.py'], returncode=1, stdout='', stderr='<path> No module named pytest/n').returncode client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_incidents::test_sync_status_advances_through_plan_review_deploy",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_incidents::test_real_full_incident_closed_loop_reaches_closed",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_plan_create_and_revision_numbering",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_plan_create_and_revision_numbering(client, git_repo): cid, r = create_and_plan(client, git"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_replan_sets_supersedes_and_marks_old_plan_superseded",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_replan_sets_supersedes_and_marks_old_plan_superseded(client, git_repo): cid, r = create_an"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_materialized_plan_never_marked_superseded_by_replan",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_materialized_plan_never_marked_superseded_by_replan(client, git_repo): \"\"\"History-friendly"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_plan_list_ordered_by_revision",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert [] == [1, 2] Right contains 2 more items, first extra item: 1 Use -v to get more diff client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_plan_list_ordered_by_revision(client, git_repo)"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_valid_output_produces_plan_ready",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_valid_output_produces_plan_ready(c"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_planner_reports_allowlisted_provider_usage_limit_without_raw_payload",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: assert 'subtype=usage_limit_reached' in 'claude CLI not found in PATH' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_planner_reports_allowlisted_provider_usage_limit_with"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_malformed_inner_result_produces_output_invalid_no_plan_row",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLANNER_OUTPUT_INVALID' - PLANNER_OUTPUT_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_malformed_"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_unknown_task_type_rejected",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_unknown_task_type_rejected(cli"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_unknown_role_rejected",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_unknown_role_rejected(client, "
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_incompatible_role_is_warning_not_error",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_incompatible_role_is_warning_not_e"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_valid_dependency_graph_accepted",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_valid_dependency_graph_accepted(cl"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_self_dependency_rejected",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_self_dependency_rejected(clien"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_unknown_dependency_key_rejected",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_unknown_dependency_key_rejecte"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_dependency_cycle_rejected",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_dependency_cycle_rejected(clie"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_duplicate_task_key_rejected",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_duplicate_task_key_rejected(cl"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_vibe_accepts_minimal_build_only_plan",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_vibe_accepts_minimal_build_only_pl"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_agentic_standard_missing_review_coverage_rejected",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_agentic_standard_missing_revie"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_agentic_standard_covers_review_verify_implicitly_via_build",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_agentic_standard_covers_review_ver"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_controlled_cannot_skip_design",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_controlled_cannot_skip_design("
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_controlled_human_acceptance_is_coverage_exempt_but_still_a_real_gate",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_controlled_human_acceptance_is_cov"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_materialize_creates_real_tasks_with_type_and_change",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_materialize_creates_real_tasks_with_type_and_change(client, git_repo): cid, r = create_and"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_materialize_never_starts_any_agent_session",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_materialize_never_starts_any_agent_session(client, git_repo): cid, r = create_and_plan(cli"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_cannot_materialize_a_draft_or_rejected_plan",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_cannot_materialize_a_draft_or_rejected_plan(client, git_repo): cid, r = create_and_plan(cl"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_materialize_is_atomic_on_partial_failure",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_materialize_is_atomic_on_partial_failure(client, git_repo): \"\"\"A corrupted plan_items row "
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_materialize_recognizes_existing_tasks_via_explicit_linkage_not_dedup",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_materialize_recognizes_existing_tasks_via_explicit_linkage_not_dedup(client, git_repo): \"\""
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_unresolved_human_decision_blocks_materialization",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'HUMAN_DECISION_REQUIRED' - HUMAN_DECISION_REQUIRED + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_unresolv"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_workflow_waiting_human_while_decision_unresolved",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'PENDING' == 'WAITING_HUMAN' - WAITING_HUMAN + PENDING client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_workflow_waiting_human_while_decision_unresolved(client, git_r"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_resolving_decision_unblocks_materialization",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_resolving_decision_unblocks_materialization(client, git_repo): cid, r = create_and_plan(cl"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_planner_retries_once_with_validator_errors_and_canonical_ids",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' in ('PLAN_READY', 'HUMAN_DECISION_REQUIRED') client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_planner_retries_once_with_validator_errors_an"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_planner_service::test_task_decision_service_unaffected_by_materialized_task",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_task_decision_service_unaffected_by_materialized_task(client, git_repo): cid, r = create_a"
+    },
+    {
+      "status": "skipped",
+      "nodeid": "tests.test_planner_service::test_real_planner_invocation_end_to_end",
+      "category": "provider_cli_unavailable_skip",
+      "fingerprint": "real `claude` CLI not available in this environment <path> real `claude` CLI not available in this environment"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_product_acceptance::test_real_full_acceptance_flow_reaches_change_complete",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_productization_audit::test_concurrent_plan_creation_never_collides_on_revision",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: [{'outcome': 'PLANNER_EXECUTION_FAILED', 'plan': None, 'message': 'claude CLI not found in PATH'}, {'outcome': 'PLANNE... not found in PATH'}, {'outcome': 'PLANNER_EXECUTION_FAILED', 'plan': None, 'message': 'claude CLI not found in PATH'}] ass"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_productization_audit::test_task_decision_service_done_reflects_real_e9_e10_evidence_for_low_risk",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_productization_audit::test_actual_scope_overlap_despite_declared_safe_scopes",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'task_id': 1, 'outcome': 'BLOCKED', 'reasons': ['CODE_REVIEW_NOT_PASS']} assert 'BLOCKED' == 'INTEGRATED' - INTEGRATED + BLOCKED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_integration_ready_and_real_merge",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_integration_lock_prevents_concurrent_merge",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'outcome': 'BLOCKED', 'task_id': 1, 'reasons': ['CODE_REVIEW_NOT_PASS']} assert 'BLOCKED' == 'LOCKED' - LOCKED + BLOCKED ? + client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tmp_pat"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_integration_verify_failure_detected",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'outcome': 'BLOCKED', 'task_id': 1, 'reasons': ['CODE_REVIEW_NOT_PASS']} assert 'BLOCKED' == 'INTEGRATION_VERIFY_FAILED' - INTEGRATION_VERIFY_FAILED + BLOCKED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<pat"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_release_create_version_source_commit",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_failed_release_is_immutable_new_attempt_created",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_build_produces_valid_artifact_with_digest",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_no_rebuild_between_test_and_production_same_digest",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_artifact_source_mismatch_invalidates_build",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_qualification_ready_when_all_evidence_passes",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_qualification_blocked_without_build",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_deploy_test_success_runtime_verified",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_deploy_test_health_failure",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_production_deploy_requires_test_verified_first",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_approval_binds_to_release_digest_target_new_artifact_invalidates",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_full_production_promotion_verified",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_migration_no_migration_default",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_migration_destructive_requires_human_approval",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_migration_rollback_safe_classification",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_rollback_auto_and_verified",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_deploy_test_real_http_server_health_verified",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_rollback_real_process_restored_to_healthy",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_destructive_migration_rollback_requires_human",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_release_pipeline::test_deploy_verified_uses_real_release_evidence",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert ('EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_code_review_pass",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert 'EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<p"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_code_review_pass_with_findings",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert None == 'PASS_WITH_FINDINGS' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_code_review_pass_with_findings(client, git_repo): root, repo = git_repo rid = register(c"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_code_review_fix_required",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert None == 'FIX_REQUIRED' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_code_review_fix_required(client, git_repo): root, repo = git_repo rid = register(client, repo,"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_code_review_human_decision_required",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert None == 'HUMAN_DECISION_REQUIRED' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_code_review_human_decision_required(client, git_repo): root, repo = git_repo rid = "
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_code_review_reject",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert None == 'REJECT' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_code_review_reject(client, git_repo): root, repo = git_repo rid = register(client, repo, \"demo\") cid"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_invalid_pass_with_critical_finding_rejected",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'} assert 'EXECUTION_FAILED' == 'REVIEW_OUTPUT_INVALID' - REVIEW_OUTPUT_INVALID + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…>"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_finding_deduplicated_across_rounds",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert 0 == 2 + where 0 = len([]) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_finding_deduplicated_across_rounds(client, git_repo): root, repo = git_repo rid = register(client, repo, \""
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_finding_resolve_requires_reference",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "IndexError: list index out of range client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_finding_resolve_requires_reference(client, git_repo): root, repo = git_repo rid = register(client, repo,"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_code_review_uses_real_diff_not_builder_reasoning",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'prompt' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_code_review_uses_real_diff_not_builder_reasoning(client, git_repo): root, repo = git_repo rid = register(client, repo, \"d"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_security_review_produces_dedicated_work_product",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'REVIEWED' - REVIEWED + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_security_review_produces_dedicated_work_product(client"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_finding_auto_resolved_when_no_longer_reported_after_fix",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "IndexError: list index out of range client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_finding_auto_resolved_when_no_longer_reported_after_fix(client, git_repo): root, repo = git_repo rid = r"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_fix_required_creates_fix_task_transfers_worktree",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'CODE_REVIEW_RUN', 'verdict': None, 'message': 'claude CLI not found in PATH', 'task_id': 1, ...} assert 'CODE_REVIEW_RUN' in ('FIX_BUILDER_LAUNCHED', 'EXECUTION_FAILED', 'FIX_BUILDER_ALREADY_RUNNING') client = <starlette.testclient"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_finding_from_original_task_resolved_after_fix_task_commit",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "IndexError: list index out of range client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_finding_from_original_task_resolved_after_fix_task_commit(client, git_repo): \"\"\"Real bug caught by this "
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_human_decision_stops_loop",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'CODE_REVIEW_RUN', 'verdict': None, 'message': 'claude CLI not found in PATH', 'task_id': 1, ...} assert 'CODE_REVIEW_RUN' == 'WAITING_HUMAN' - WAITING_HUMAN + CODE_REVIEW_RUN client = <starlette.testclient.TestClient object at 0x…>"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_security_critical_finding_blocks",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'CODE_REVIEW_RUN', 'verdict': None, 'message': 'claude CLI not found in PATH', 'task_id': 1, ...} assert 'CODE_REVIEW_RUN' == 'SECURITY_CRITICAL_BLOCK' - SECURITY_CRITICAL_BLOCK + CODE_REVIEW_RUN client = <starlette.testclient.TestC"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_review_stale_after_new_commit",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert None is True + where None = review_pass(1) + where review_pass = <app.services.review_fix_orchestrator.ReviewFixOrchestratorService object at 0x…>.review_pass client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), Posi"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_review_fix_loop::test_integration_readiness_ready",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: {'task_id': 1, 'governing_task_id': 1, 'ready': False, 'outcome': 'BLOCKED', ...} assert 'BLOCKED' == 'INTEGRATION_READY' - INTEGRATION_READY + BLOCKED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), Po"
+    },
+    {
+      "status": "skipped",
+      "nodeid": "tests.test_review_fix_loop_real::test_real_code_review_catches_missing_spec_case_and_fix_loop_resolves_it",
+      "category": "provider_cli_unavailable_skip",
+      "fingerprint": "real `claude` CLI not installed on this host <path> real `claude` CLI not installed on this host"
+    },
+    {
+      "status": "skipped",
+      "nodeid": "tests.test_review_fix_loop_real::test_real_security_review_catches_path_traversal",
+      "category": "provider_cli_unavailable_skip",
+      "fingerprint": "real `claude` CLI not installed on this host <path> real `claude` CLI not installed on this host"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_requirement_analysis_structured_result",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_requirement_analysis_structur"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_requirement_analysis_ambiguity_classification",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'human_decision_ids' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_requirement_analysis_ambiguity_classification(client, git_repo, spec_env): cid"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_how_decision_never_creates_human_decision",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'human_decision_ids' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_how_decision_never_creates_human_decision(client, git_repo, spec_env): cid = n"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_what_decision_requires_human",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert False is True + where False = pending_for_change(1) + where pending_for_change = <app.services.human_decisions.HumanDecisionService object at 0x…>.pending_for_change + where <app.services.human_decisions.HumanDecisionService object at 0x…> = <starlette."
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_requirement_analysis_creates_traceable_task",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'task_id' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_requirement_analysis_creates_traceable_task(client, git_repo, spec_env): cid = new_change"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_valid_spec_proposal_created",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_invalid_structured_output_rejected",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0) client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_invalid_structured_output_rejected(cl"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_duplicate_id_deterministically_remapped",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_updating_existing_feature_reuses_its_own_ids",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_new_feature_starts_at_version_one",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_malformed_spec_rejected_by_real_spec_registry",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_duplicate_global_requirement_id_within_same_new_feature_never_reaches_registry_error",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_proposal_never_ready_when_validation_invalid",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_review_pass_marks_proposal_ready",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_review_needs_refinement",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_review_human_decision_required",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_logical_contradiction_finding_recorded",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_untestable_requirement_finding_recorded",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_review_does_not_receive_author_rationale",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_auto_refinement_creates_new_revision_and_history",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_bounded_refinement_loop_never_infinite",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'NEEDS_REFINEMENT' - NEEDS_REFINEMENT + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_bounded"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_refinement_never_weakens_invariants_or_deletes_requirements",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_human_decision_blocks_apply",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_human_decision_resolution_preserved_and_resumes",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_ready_proposal_writes_canonical_spec_and_real_registry_loads_it",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_apply_changes_baseline",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_failed_apply_leaves_canonical_tree_valid",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_cannot_apply_a_non_ready_proposal",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_plan_valid_requirement_ids_resolve",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_fictional_requirement_id_rejected",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_INVALID' - PLAN_INVALID + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_baseline_staleness_visible",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) spec_env = PosixPath('<path>') def test_baseline_staleness_visible(client, git_repo, spec_env): roo"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_plan_spec_drift_when_referenced_requirement_disappears",
+      "category": "requirement_analysis_page_missing",
+      "fingerprint": "AssertionError: <h1>Action blocked</h1><pre>No Requirement Analysis exists for this Change yet -- run /requirements/analyze first</pre><a href='javascript:history.back()'>Back</a> assert 409 == 200 + where 409 = <Response [409 Conflict]>.status_code client = <"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_planner_still_works_without_any_spec_proposal",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'PLANNER_EXECUTION_FAILED' == 'PLAN_READY' - PLAN_READY + PLANNER_EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) def test_planner_still_works_without_any_sp"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_spec_lifecycle::test_real_spec_lifecycle_end_to_end",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'work_product': None, 'message': 'claude CLI not found in PATH'} assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<pa"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_test_design_structured_result",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_structured_res"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_test_design_valid_spec_ids_stored",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_valid_spec_ids_stored(client, git_repo, tdesign_env): cid = new_change("
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_test_design_fictional_ids_silently_excluded",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_fictional_ids_silently_excluded(client, git_repo, tdesign_env): cid = n"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_test_design_negative_case_generation",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_negative_case_generation(client, git_repo, tdesign_env): cid = new_chan"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_test_design_ui_and_manual_acceptance_levels",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_ui_and_manual_acceptance_levels(client, git_repo, tdesign_env): cid = n"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_test_design_migration_case_generation",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_migration_case_generation(client, git_repo, tdesign_env): cid = new_cha"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_test_design_unknown_level_falls_back_to_integration",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_test_design_unknown_level_falls_back_to_integration(client, git_repo, tdesign_env):"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_untestable_items_and_implementation_conflicts_captured",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_untestable_items_and_implementation_conflicts_captured(c"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_human_decision_from_test_design",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert False is True + where False = pending_for_change(1) + where pending_for_change = <app.services.human_decisions.HumanDecisionService object at 0x…>.pending_for_change + where <app.services.human_decisions.HumanDecisionService object at 0x…> = <starlette."
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_coverage_full",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert ['REQ-001', 'REQ-002'] == [] Left contains 2 more items, first extra item: 'REQ-001' Use -v to get more diff client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = Pos"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_coverage_partial_missing_ac_and_invariant",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert ['REQ-001', 'REQ-002'] == ['REQ-002'] At index 0 diff: 'REQ-001' != 'REQ-002' Left contains one more item: 'REQ-002' Use -v to get more diff client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixP"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_coverage_duplicate_does_not_inflate_totals",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert [] == ['REQ-001'] Right contains one more item: 'REQ-001' Use -v to get more diff client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_c"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_coverage_manual_acceptance_counts_correctly",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert 0 == 1 client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_coverage_manual_acceptance_counts_correctly(client, git_repo, tdesign_env): cid = new_change"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_coverage_invalid_references_surfaced",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_coverage_invalid_references_surfaced(client, git_repo, t"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_review_pass_approves_test_case_set_and_plan",
+      "category": "test_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Test Design exists for this Change yet -- run /tests/design first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), P"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_review_needs_refinement",
+      "category": "test_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Test Design exists for this Change yet -- run /tests/design first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), P"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_review_human_decision_required",
+      "category": "test_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Test Design exists for this Change yet -- run /tests/design first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), P"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_review_reject_marks_rejected",
+      "category": "test_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Test Design exists for this Change yet -- run /tests/design first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), P"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_review_receives_real_deterministic_coverage_not_model_claim",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "KeyError: 'prompt' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_review_receives_real_deterministic_coverage_not_model_claim(client, git_repo, tdesign_e"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_bounded_refinement_loop_never_infinite",
+      "category": "asserted_provider_or_planner_outcome_mismatch",
+      "fingerprint": "AssertionError: assert 'EXECUTION_FAILED' == 'NEEDS_REFINEMENT' - NEEDS_REFINEMENT + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_boun"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_refinement_creates_immutable_history",
+      "category": "test_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Test Design exists for this Change yet -- run /tests/design first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), P"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_refinement_cannot_fake_coverage_without_real_test_case",
+      "category": "test_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Test Design exists for this Change yet -- run /tests/design first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), P"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_executable_mapping_defaults_to_unimplemented",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_executable_mapping_defaults_to_unimplemented(client, git_repo, tdesign_env): cid = "
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_executable_mapping_explicit_valid",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_executable_mapping_explicit_valid(client, git_repo, tdesign_env): cid = new_change("
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_executable_mapping_requires_explicit_symbol_or_command",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_executable_mapping_requires_explicit_symbol_or_command(client, git_repo, tdesign_en"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_executable_mapping_record_result",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_executable_mapping_record_result(client, git_repo, tdesign_env): cid = new_change(c"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_executable_mapping_stale_after_refinement",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_executable_mapping_stale_after_refinement(client, git_repo, tdesign_env): cid = new"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_planner_context_sees_test_design",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'TEST_CASE_SET' in set() client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_planner_context_sees_test_design(client, git_repo, tdesign"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_planner_context_sees_unimplemented_test_cases",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "assert False is True client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_planner_context_sees_unimplemented_test_cases(client, git_repo, tdesign_env): cid = n"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_plan_test_design_staleness_signal",
+      "category": "none_value_subscript",
+      "fingerprint": "TypeError: 'NoneType' object is not subscriptable client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_plan_test_design_staleness_signal(client, git_repo, tdes"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_test_design_ready_requires_real_review_evidence",
+      "category": "test_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Test Design exists for this Change yet -- run /tests/design first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), P"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_spec_compliance_designed_test_without_execution_never_passes",
+      "category": "other_assertion_or_contract_failure",
+      "fingerprint": "AssertionError: assert 'TEST_DESIGN_MISSING' == 'TEST_IMPLEMENTATION_MISSING' - TEST_IMPLEMENTATION_MISSING + TEST_DESIGN_MISSING client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = Posix"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_spec_compliance_missing_evidence_vs_fail_distinguished",
+      "category": "missing_test_cases_key",
+      "fingerprint": "KeyError: 'test_cases' client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), PosixPath('<path>')) tdesign_env = PosixPath('<path>') def test_spec_compliance_missing_evidence_vs_fail_distinguished(client, git_repo, tdesign_en"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_test_design_never_creates_implementation_task",
+      "category": "test_design_missing",
+      "fingerprint": "AssertionError: {\"detail\":\"No Test Design exists for this Change yet -- run /tests/design first\"} assert 404 == 200 + where 404 = <Response [404 Not Found]>.status_code client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>'), P"
+    },
+    {
+      "status": "failed",
+      "nodeid": "tests.test_test_design::test_real_test_design_lifecycle_end_to_end",
+      "category": "provider_cli_missing",
+      "fingerprint": "AssertionError: {'outcome': 'EXECUTION_FAILED', 'test_plan': None, 'message': 'claude CLI not found in PATH'} assert 'EXECUTION_FAILED' == 'READY' - READY + EXECUTION_FAILED client = <starlette.testclient.TestClient object at 0x…> git_repo = (PosixPath('<path>"
+    },
+    {
+      "status": "skipped",
+      "nodeid": "tests.test_worktree_manager_real::test_real_worktree_isolation_fixture_end_to_end",
+      "category": "provider_cli_unavailable_skip",
+      "fingerprint": "real `claude` CLI not installed on this host <path> real `claude` CLI not installed on this host"
+    }
+  ]
+}

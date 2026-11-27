@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="0.227" timestamp="2026-11-27T17:39:52.907923+07:00" hostname="task-runner"><testcase classname="tests.test_integration_contract_probe" name="test_required_visual_integration_does_not_pass_from_exit_zero_without_evidence" time="0.161"><failure message="AssertionError: exit 0 from `true` must not qualify required visual integration without validated evidence&#10;assert not True">tmp_path = PosixPath('<task-artifact>/red-tmp/pytest/test_required_visual_integrati0')
+
+    def test_required_visual_integration_does_not_pass_from_exit_zero_without_evidence(tmp_path):
+        root = tmp_path / "visual-workspace"
+        repo = root / "repo"
+        repo.mkdir(parents=True)
+        git(repo, "init", "-b", "main")
+        git(repo, "config", "user.email", "test@example.invalid")
+        git(repo, "config", "user.name", "Integration visual evidence test")
+        visual_project = (
+            "schema_version: 1\nproject: {code: probe}\nsource: {root: .}\n"
+            "commands:\n  test: {command: 'true'}\n  visual_qa: {command: 'true'}\n"
+            "ci: {required: [test]}\n"
+            "visual_qa:\n  enabled: true\n  route: http://127.0.0.1:8765/orders\n"
+            "  viewports: [{width: 320, height: 240}]\n  reference: reference.png\n  threshold: 0.08\n"
+        )
+        (repo / "PROJECT.yaml").write_text(visual_project, encoding="utf-8")
+        (repo / "reference.png").write_bytes(png(320, 240))
+        git(repo, "add", ".")
+        git(repo, "commit", "-m", "valid opted-in visual contract")
+        tested_commit = git(repo, "rev-parse", "HEAD")
+        task = {"implementation_prompt": "Verify merged UI\nVISUAL_QA_REQUIRED: true"}
+
+        result, seen = verify(root, repo, tested_commit, task)
+
+&gt;       assert not result["passed"], "exit 0 from `true` must not qualify required visual integration without validated evidence"
+E       AssertionError: exit 0 from `true` must not qualify required visual integration without validated evidence
+E       assert not True
+
+tests/test_integration_contract_probe.py:166: AssertionError</failure></testcase></testsuite></testsuites>

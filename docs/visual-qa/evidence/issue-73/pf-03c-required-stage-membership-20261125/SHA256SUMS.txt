@@ -1,0 +1,10 @@
+5c936e52fbb6ae7ca0f3f2faf5521e8c759d3c1e9a434fd51fbc003bea7816d8  app/services/task_decision_service.py
+1b5853fe3c6b87012f973149597a55a393f9ec7e900cb977f127909af038ea95  tests/test_task_decision_required_stages.py
+aa5671f506049e61f684c769ae3a2c949695b845100becfe1f2f8c4aa8e4e05d  docs/visual-qa/evidence/issue-73/pf-03c-required-stage-membership-20261125/REPORT.md
+fb6636b8403fd34552bb93993c48451ee44ba933bbca113e79b0b06da4414de5  docs/visual-qa/evidence/issue-73/pf-03c-required-stage-membership-20261125/before-red.log
+6849f25e9b8a34373fe7dbe70d4ff76e72a50b9a1de7e54df4f76297be5cb31b  docs/visual-qa/evidence/issue-73/pf-03c-required-stage-membership-20261125/before-red.xml
+550aebe3b54a52b2a21d4dec2b2ff21c3b752b10fc6fc692f4976e4f0b2c2d2a  docs/visual-qa/evidence/issue-73/pf-03c-required-stage-membership-20261125/after-green.log
+30aa7b88ece35cab56ab4354e3d534cda14bdcf7b7ee21ebbe720ed2d33d5b11  docs/visual-qa/evidence/issue-73/pf-03c-required-stage-membership-20261125/after-green.xml
+a8298445bb9fd8a0922bce0571fe9eccae214a15f45fc20997f77e0f2414f2ce  docs/visual-qa/evidence/issue-73/pf-03c-required-stage-membership-20261125/targeted.log
+2726367cbab1f95abc19ebbabf39c6f4cc989f8defc0db9316e7c4f38aa927c4  docs/visual-qa/evidence/issue-73/pf-03c-required-stage-membership-20261125/targeted.xml
+89fdc1a4ff7d453cec0c164736a4a9e7997f9814bc4e5b68506a60a249d70688  docs/visual-qa/evidence/issue-73/pf-03c-required-stage-membership-20261125/preflight.log

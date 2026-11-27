@@ -19,6 +19,7 @@ import pytest
 
 from tests.test_autonomous_execution import register, new_change
 from tests.test_autonomous_execution_real import _trust_claude_dir, _restore_claude_dir
+from tests.claude_test_config import prepare_claude_test_config, require_isolated_claude_auth
 
 pytestmark = pytest.mark.skipif(shutil.which("claude") is None, reason="real `claude` CLI not installed on this host")
 
@@ -47,8 +48,10 @@ def _seed_repo(repo):
 
 # ================================================================ E9.34: real CodeReview + Fix loop
 
-def test_real_code_review_catches_missing_spec_case_and_fix_loop_resolves_it(client, git_repo):
+def test_real_code_review_catches_missing_spec_case_and_fix_loop_resolves_it(client, git_repo, monkeypatch, request):
     root, repo = git_repo
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     real_checkout = Path(__file__).resolve().parent.parent
     before_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=real_checkout, capture_output=True, text=True).stdout.strip()
     before_status = subprocess.run(["git", "status", "--porcelain"], cwd=real_checkout, capture_output=True, text=True).stdout
@@ -121,7 +124,8 @@ def test_real_code_review_catches_missing_spec_case_and_fix_loop_resolves_it(cli
     # -- pre-register trust for the FIX worktree (SAME physical path,
     #    ownership transfer -- see review_fix_orchestrator.py's own
     #    docstring) before the real Fix Builder launches --
-    trust_key, trust_previous = _trust_claude_dir(worktree)
+    trust_registration = _trust_claude_dir(worktree, allowed_root=root,
+                                           monkeypatch=monkeypatch, request=request)
     svc = client.app.state.autonomous_execution_service
     svc.settings = dataclasses.replace(svc.settings, agents=("claude",))
     client.app.state.agent_sessions.prompt_ready_timeout = 25.0
@@ -157,7 +161,7 @@ def test_real_code_review_catches_missing_spec_case_and_fix_loop_resolves_it(cli
         except Exception:
             pass
         try:
-            _restore_claude_dir(trust_key, trust_previous)
+            _restore_claude_dir(trust_registration)
         except Exception:
             pass
 
@@ -190,8 +194,10 @@ def test_real_code_review_catches_missing_spec_case_and_fix_loop_resolves_it(cli
 
 # ================================================================ E9.35: real SecurityReview
 
-def test_real_security_review_catches_path_traversal(client, git_repo):
+def test_real_security_review_catches_path_traversal(client, git_repo, monkeypatch):
     root, repo = git_repo
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     real_checkout = Path(__file__).resolve().parent.parent
     before_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=real_checkout, capture_output=True, text=True).stdout.strip()
     before_status = subprocess.run(["git", "status", "--porcelain"], cwd=real_checkout, capture_output=True, text=True).stdout

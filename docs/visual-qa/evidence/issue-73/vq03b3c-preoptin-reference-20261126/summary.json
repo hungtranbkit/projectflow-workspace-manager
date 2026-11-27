@@ -1,0 +1,22 @@
+{
+  "milestone": "VQ-03c pre-opt-in configured reference inspection",
+  "source_commit": "5bc2a4bc8505bb030c20684c9713dc9a380d35b1",
+  "source_tree": "bf0d59c23a6139a789f105cc439dd408d8f052ba",
+  "tested_source_exact": true,
+  "tests": 96,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "exit_code": 0,
+  "started_utc": "2026-11-26T12:38:11.167750+00:00",
+  "finished_utc": "2026-11-26T12:39:31.465801+00:00",
+  "browser_run": false,
+  "docker_used": false,
+  "provider_invoked": false,
+  "full_suite_run": false,
+  "gate_effect": "none; A-F unchanged",
+  "junit_suite_time_seconds": 75.23,
+  "junit_case_time_sum_seconds": 74.935,
+  "wall_elapsed_seconds": 80.298051,
+  "duration_note": "Earlier report value 57.746s was stale/incorrect; raw JUnit unchanged."
+}

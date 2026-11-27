@@ -1,0 +1,54 @@
+COMMAND=PATH=/usr/bin:/bin /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/bin/python -m pytest -q -s tests/_pf04b8_launch_diag_temp.py
+START_UTC=2026-11-26T01:28:29,489719806+00:00
+START_ICT=2026-11-26T08:28:29,492687143+07:00
+{"launch_result": {"message": "Codex CLI ch\u01b0a \u0111\u01b0\u1ee3c c\u00e0i ho\u1eb7c kh\u00f4ng c\u00f3 trong PATH", "outcome": "EXECUTION_FAILED", "task_id": 1}, "launcher_keys": ["claude", "codex"], "planned_provider": "codex", "selected_provider": "codex", "sessions": [], "settings_agents": ["codex", "claude", "gemini", "aider", "other"], "wave_outcome": "NO_TASKS_LAUNCHED"}
+F
+=================================== FAILURES ===================================
+________________ test_record_actual_mismatched_launcher_result _________________
+
+client = <starlette.testclient.TestClient object at 0x7abe8e2e4ec0>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-648/test_record_actual_mismatched_0/root'), PosixPath('/tmp/pytest-of-dell/pytest-648/test_record_actual_mismatched_0/root/demo'))
+capsys = <_pytest.capture.CaptureFixture object at 0x7abe8e2e57f0>
+
+    def test_record_actual_mismatched_launcher_result(client, git_repo, capsys):
+        root, repo = git_repo
+        enable_parallel(repo, max_concurrent=2)
+        rid = register(client, repo, "diag")
+        cid = new_change(client, "Diagnostic mismatched provider", project_id=rid)
+        tid, _ = new_plan_task(client, cid, "A", "A", ["a.py"])
+        service = client.app.state.autonomous_execution_service
+        selected_provider = service._default_provider()
+        fake_launcher(client, "claude")
+        planned = _ews(client).plan_execution_wave(cid)
+        result = _ews(client).run_execution_wave(cid)
+        wave = _ews(client).get_wave(result["wave_id"])
+        failed = json.loads(wave["tasks"][0]["result_metadata"])
+        sessions = _db(client).all("SELECT id,agent,pid,status FROM agent_sessions WHERE task_id=?", (tid,))
+        print(json.dumps({"settings_agents": list(service.settings.agents), "selected_provider": selected_provider,
+                          "launcher_keys": sorted(client.app.state.agent_sessions.launchers),
+                          "planned_provider": planned["selected"][0]["provider"], "wave_outcome": result["outcome"],
+                          "launch_result": failed, "sessions": sessions}, sort_keys=True))
+        assert selected_provider == "codex"
+>       assert sorted(client.app.state.agent_sessions.launchers) == ["claude"]
+E       AssertionError: assert ['claude', 'codex'] == ['claude']
+E         
+E         Left contains one more item: 'codex'
+E         Use -v to get more diff
+
+tests/_pf04b8_launch_diag_temp.py:24: AssertionError
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/_pf04b8_launch_diag_temp.py: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/_pf04b8_launch_diag_temp.py::test_record_actual_mismatched_launcher_result
+COMMAND_EXIT=1
+END_UTC=2026-11-26T01:28:34,178470563+00:00
+END_ICT=2026-11-26T08:28:34,181296435+07:00

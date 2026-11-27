@@ -1,10 +1,18 @@
 from __future__ import annotations
+import itertools
+import ipaddress
+import json
+import os
 import subprocess
+import uuid
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
+from tests.docker_compose_ownership import ComposeRunOwnershipRegistry
+
+_active_compose_registry: ComposeRunOwnershipRegistry | None = None
 
 def run(path, *args): return subprocess.run(list(args),cwd=path,text=True,capture_output=True,check=True)
 
@@ -31,6 +39,69 @@ def build_client(settings):
     c=TestClient(create_app(settings))
     c.app.state.sandboxes.spawn=lambda fn,args=():fn(*args)
     c.app.state.deployer.spawn=lambda fn,args=():fn(*args)
+    runtime = c.app.state.sandboxes.runtime
+    compose_up = runtime.compose_up
+    compose_down = runtime.compose_down
+    compose_stop = runtime.compose_stop
+    registry = _active_compose_registry
+
+    def compose_up_with_test_ipam(compose_project, compose_file, env_file, cwd, services, sandbox_id, project_directory=None):
+        # Compose network definitions live in the repository fixture, but a
+        # task-integration sandbox can reuse that file while another sandbox
+        # from the same repo is still running. Choose an address per sandbox
+        # in the test-owned env file so each real bridge network stays unique.
+        subnet = next_test_docker_subnet()
+        env_path = Path(env_file)
+        with env_path.open("a", encoding="utf-8") as stream:
+            stream.write(f"WM_TEST_DOCKER_SUBNET={subnet}\n")
+        if registry is None:
+            raise RuntimeError("pytest Docker ownership registry is not active; refusing compose creation")
+        return registry.compose_up(
+            compose_up,
+            compose_project,
+            compose_file=compose_file,
+            env_file=env_path,
+            cwd=cwd,
+            services=services,
+            sandbox_id=sandbox_id,
+            project_directory=project_directory,
+        )
+
+    runtime.compose_up = compose_up_with_test_ipam
+
+    def compose_down_with_ownership(compose_project, compose_file, env_file, cwd,
+                                    remove_volumes=True, project_directory=None):
+        if registry is None:
+            raise RuntimeError("pytest Docker ownership registry is not active; refusing compose down")
+        return registry.run_project_operation(
+            lambda **kw: compose_down(**kw),
+            compose_project,
+            allow_missing_after=True,
+            compose_project=compose_project,
+            compose_file=compose_file,
+            env_file=env_file,
+            cwd=cwd,
+            remove_volumes=remove_volumes,
+            project_directory=project_directory,
+        )
+
+    def compose_stop_with_ownership(compose_project, compose_file, env_file, cwd,
+                                    project_directory=None):
+        if registry is None:
+            raise RuntimeError("pytest Docker ownership registry is not active; refusing compose stop")
+        return registry.run_project_operation(
+            lambda **kw: compose_stop(**kw),
+            compose_project,
+            allow_missing_after=False,
+            compose_project=compose_project,
+            compose_file=compose_file,
+            env_file=env_file,
+            cwd=cwd,
+            project_directory=project_directory,
+        )
+
+    runtime.compose_down = compose_down_with_ownership
+    runtime.compose_stop = compose_stop_with_ownership
     return c
 
 @pytest.fixture
@@ -81,7 +152,93 @@ services:
     image: nginx:1.28-alpine
     ports:
       - "${WM_PORT_APP}:80"
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${WM_TEST_DOCKER_SUBNET}
 """
+
+_test_docker_subnet_ids = itertools.count()
+_test_docker_pool: ipaddress.IPv4Network | None = None
+
+
+def _non_overlapping_test_docker_pool() -> ipaddress.IPv4Network:
+    """Return a private test-only pool verified against current routes/networks.
+
+    Do not edit the daemon's address pools: each pytest fixture gives its own
+    Compose project a /28 from this non-overlapping range. Override the default
+    candidate on hosts whose route inventory uses it.
+    """
+    global _test_docker_pool
+    if _test_docker_pool is not None:
+        return _test_docker_pool
+
+    pool = ipaddress.ip_network(
+        os.environ.get("PROJECTFLOW_TEST_DOCKER_IPAM_POOL", "10.252.0.0/16"),
+        strict=True,
+    )
+    if not isinstance(pool, ipaddress.IPv4Network) or pool.prefixlen > 28:
+        raise RuntimeError("PROJECTFLOW_TEST_DOCKER_IPAM_POOL must be an IPv4 pool no smaller than /28")
+
+    routes_result = subprocess.run(
+        ["ip", "-j", "route", "show"], capture_output=True, text=True, check=True,
+    )
+    routes = json.loads(routes_result.stdout)
+    occupied: list[ipaddress.IPv4Network] = []
+    for route in routes:
+        destination = route.get("dst")
+        if not destination or destination == "default":
+            continue
+        try:
+            network = ipaddress.ip_network(destination, strict=False)
+        except ValueError:
+            continue
+        if isinstance(network, ipaddress.IPv4Network):
+            occupied.append(network)
+
+    listed = subprocess.run(
+        ["docker", "network", "ls", "-q"], capture_output=True, text=True, check=True,
+    )
+    network_ids = listed.stdout.split()
+    if network_ids:
+        inspected = subprocess.run(
+            ["docker", "network", "inspect", *network_ids],
+            capture_output=True, text=True, check=True,
+        )
+        for docker_network in json.loads(inspected.stdout):
+            for config in (docker_network.get("IPAM") or {}).get("Config") or []:
+                subnet = config.get("Subnet")
+                if not subnet:
+                    continue
+                network = ipaddress.ip_network(subnet, strict=False)
+                if isinstance(network, ipaddress.IPv4Network):
+                    occupied.append(network)
+
+    conflicts = [str(network) for network in occupied if pool.overlaps(network)]
+    if conflicts:
+        raise RuntimeError(
+            f"test Docker pool {pool} overlaps host routes/networks {', '.join(conflicts)}; "
+            "set PROJECTFLOW_TEST_DOCKER_IPAM_POOL to an unused private IPv4 range"
+        )
+    _test_docker_pool = pool
+    return pool
+
+
+def nginx_compose_for_test() -> str:
+    """Compose fixture using a per-sandbox, route-checked test subnet."""
+    return NGINX_COMPOSE
+
+
+def next_test_docker_subnet() -> str:
+    pool = _non_overlapping_test_docker_pool()
+    subnet_index = next(_test_docker_subnet_ids)
+    subnet_count = 1 << (28 - pool.prefixlen)
+    if subnet_index >= subnet_count:
+        raise RuntimeError(f"test Docker pool {pool} exhausted its {subnet_count} isolated /28 networks")
+    address = int(pool.network_address) + subnet_index * 16
+    subnet = ipaddress.ip_network((address, 28))
+    return str(subnet)
 
 @pytest.fixture
 def sandboxable_repo_factory(tmp_path):
@@ -93,33 +250,25 @@ def sandboxable_repo_factory(tmp_path):
         counter["n"] += 1
         lo, hi = port_range
         repo = make_repo(root, name, NGINX_SANDBOX_CONTRACT.format(lo=lo, hi=hi))
-        (repo/"compose.yml").write_text(NGINX_COMPOSE)
+        (repo/"compose.yml").write_text(nginx_compose_for_test())
         run(repo,"git","add","."); run(repo,"git","commit","-m","sandbox contract")
         return repo
     return make
 
 @pytest.fixture(scope="session", autouse=True)
 def _docker_sandbox_safety_net():
-    """Session-end safety net for the real-Docker sandbox tests: even if an
-    individual test's own cleanup call fails to run (an assertion raised
-    before reaching its `finally`, etc.), never leave a `wm-*`-namespaced
-    container/network behind on this shared host. Narrowly scoped to the
-    exact `wm-` prefix this app always uses (docs section 15/66) -- never
-    touches any other container on the host, real or otherwise."""
+    """Clean only exact Compose resource IDs registered by this pytest run.
+
+    Project names are reserved before creation and checked for collisions.
+    If inspection or identity validation fails, cleanup raises visibly and
+    leaves unverified resources untouched. It never sweeps the shared `wm-*`
+    namespace used by real ProjectFlow services.
+    """
+    global _active_compose_registry
+    registry = ComposeRunOwnershipRegistry(run_id=f"pytest-{uuid.uuid4().hex}")
+    _active_compose_registry = registry
     yield
     try:
-        import subprocess as _sp
-        ids = _sp.run(
-            ["docker", "ps", "-aq", "--filter", "label=com.docker.compose.project"],
-            capture_output=True, text=True, timeout=15,
-        ).stdout.split()
-        for cid in ids:
-            name = _sp.run(["docker", "inspect", "-f", "{{.Name}}", cid], capture_output=True, text=True, timeout=5).stdout.strip().lstrip("/")
-            if name.startswith("wm-"):
-                _sp.run(["docker", "rm", "-f", cid], capture_output=True, timeout=15)
-        nets = _sp.run(["docker", "network", "ls", "--format", "{{.Name}}"], capture_output=True, text=True, timeout=15).stdout.split()
-        for net in nets:
-            if net.startswith("wm-"):
-                _sp.run(["docker", "network", "rm", net], capture_output=True, timeout=15)
-    except Exception:
-        pass  # best-effort safety net only -- never fail the test session over cleanup itself
+        registry.cleanup()
+    finally:
+        _active_compose_registry = None

@@ -1,0 +1,14 @@
+{
+  "negative-color-actual.png": "c7c3151f51a387a2090d93f61615a1156b21c347860efbfc6d4de803f0fd4e05",
+  "negative-color-diff.png": "b2bf173991ebaa1306e1ac7c005ff01ab20677757f87bf629e5b1d4788b16128",
+  "negative-color-metrics.json": "ff8cc37b1aa6ec267d7a7efbcabcc36fe4047f0ad1d4c573bd1db47bc8e27fef",
+  "negative-color-overlay.png": "84d6b0f2ada4215477db213a93d66f9d5b6eb63e48f322766b2888a5d4016f0b",
+  "positive-actual.png": "9f65d312989d0aae40de76358a6c49f2f383a3cc32fd13422c88f5cbac25c713",
+  "positive-diff.png": "dc66470136d96f054de3647d0b08648687c0b2744df71d0b575da09c138621cd",
+  "positive-metrics.json": "ff1da1e6ba235eef2ee45d60f15cbfbc3a17b52120d358e174c7b143c874486b",
+  "positive-overlay.png": "212ac54ebaead1e690fd53f0d443ff70f6902905edf45114ac4d6cf5168c79aa",
+  "reference.png": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e",
+  "report.md": "3e77b07823fa99d0fe80c1bc88948f0a6182b5b75772bfda2ad8eda82342c199",
+  "runner-results.json": "36cd4d922ac5cd32f2dfc46e3c2c540cc048cc75acb28637e98791a6ac9c6e5d",
+  "test-run.log": "3a950c3c93a81f6df6f10b259244fcd81377a503cce30ed560fc2cfd9213070e"
+}

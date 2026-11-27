@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="3" time="5.292" timestamp="2026-11-26T05:53:44.263393+07:00" hostname="task-runner"><testcase classname="tests.test_review_fix_loop" name="test_code_review_pass" time="1.284"><failure message="AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'}&#10;assert 'EXECUTION_FAILED' == 'REVIEWED'&#10;  &#10;  - REVIEWED&#10;  + EXECUTION_FAILED">client = &lt;starlette.testclient.TestClient object at 0x7fcd7e8ac980&gt;
+git_repo = (PosixPath('$PYTEST_TMP/test_code_review_pass0/root'), PosixPath('$PYTEST_TMP/test_code_review_pass0/root/demo'))
+
+    def test_code_review_pass(client, git_repo):
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Review pass change", project_id=rid)
+        tid, w = _committed_task(client, cid)
+        set_fake(client, PASS)
+        r = client.post(f"/api/tasks/{tid}/review/code")
+        body = r.json()
+&gt;       assert body["outcome"] == "REVIEWED", body
+E       AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'}
+E       assert 'EXECUTION_FAILED' == 'REVIEWED'
+E
+E         - REVIEWED
+E         + EXECUTION_FAILED
+
+tests/test_review_fix_loop.py:60: AssertionError</failure></testcase><testcase classname="tests.test_review_fix_loop" name="test_code_review_pass_with_findings" time="1.423"><failure message="AssertionError: assert None == 'PASS_WITH_FINDINGS'">client = &lt;starlette.testclient.TestClient object at 0x7fcd7d6b0410&gt;
+git_repo = (PosixPath('$PYTEST_TMP/test_code_review_pass_with_fin0/root'), PosixPath('$PYTEST_TMP/test_code_review_pass_with_fin0/root/demo'))
+
+    def test_code_review_pass_with_findings(client, git_repo):
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Review pass with findings change", project_id=rid)
+        tid, w = _committed_task(client, cid)
+        set_fake(client, {"verdict": "PASS_WITH_FINDINGS", "findings": [
+            {"category": "MAINTAINABILITY", "severity": "LOW", "title": "minor duplication", "description": "x"}]})
+        body = client.post(f"/api/tasks/{tid}/review/code").json()
+&gt;       assert body["verdict"] == "PASS_WITH_FINDINGS"
+E       AssertionError: assert None == 'PASS_WITH_FINDINGS'
+
+tests/test_review_fix_loop.py:72: AssertionError</failure></testcase><testcase classname="tests.test_review_fix_loop" name="test_security_review_produces_dedicated_work_product" time="2.410"><failure message="AssertionError: assert 'EXECUTION_FAILED' == 'REVIEWED'&#10;  &#10;  - REVIEWED&#10;  + EXECUTION_FAILED">client = &lt;starlette.testclient.TestClient object at 0x7fcd6bce0b90&gt;
+git_repo = (PosixPath('$PYTEST_TMP/test_security_review_produces_0/root'), PosixPath('$PYTEST_TMP/test_security_review_produces_0/root/demo'))
+
+    def test_security_review_produces_dedicated_work_product(client, git_repo):
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Security WP change", project_id=rid)
+        tid, w = _committed_task(client, cid)
+        client.app.state.security_review_service.invoker.runner = client.app.state.code_review_service.invoker.runner
+        set_fake(client, {"verdict": "PASS", "findings": []})
+        body = client.post(f"/api/tasks/{tid}/review/security")
+        body = body.json()
+&gt;       assert body["outcome"] == "REVIEWED"
+E       AssertionError: assert 'EXECUTION_FAILED' == 'REVIEWED'
+E
+E         - REVIEWED
+E         + EXECUTION_FAILED
+
+tests/test_review_fix_loop.py:255: AssertionError</failure></testcase></testsuite></testsuites>

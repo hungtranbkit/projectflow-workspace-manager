@@ -1,0 +1,17 @@
+2026-11-25T08:18:17Z
+x86_64
+claude_path=<home>/.local/bin/claude
+claude_version=2.1.332 (Claude Code)
+restricted_claude_path=python=Python 3.14.4
+pytest=pytest 9.2.0
+node=v26.7.0
+uifix_commit=97c4b9d83684c7d607cb8c4b146e3f8aa5356e53
+playwright=1.60.0
+chromium_path=<home>/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome
+uifix_cli_verify=
+PASS UIFix pinned source, build outputs, runtime dependencies, and CLI --help
+df=
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2       468G  340G  119G  75% /
+tmpfs            16G  816M   15G   6% /tmp
+auth_quota_probe=not_run_to_avoid_provider_invocation

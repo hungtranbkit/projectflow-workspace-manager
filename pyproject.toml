@@ -54,5 +54,9 @@ include = ["app*"]
 testpaths = ["tests"]
 # Plain `pytest` == `python -m pytest`: repo root importable (scripts/, app/)
 # on a clean clone without relying on the invoking cwd.
-pythonpath = ["."]
+# The local `tests` package marker prevents an installed package named
+# `tests` from shadowing `tests.conftest`. Keep the directory itself
+# importable too: legacy test modules import `conftest` and shared test
+# modules by their top-level names during collection.
+pythonpath = [".", "tests"]
 addopts = "-q"

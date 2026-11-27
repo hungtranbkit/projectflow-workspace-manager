@@ -1,0 +1,7 @@
+START_UTC=2026-11-25T08:14:31Z
+SOURCE_SHA=51ed141588da4533abaa530bdcae37bd73cea92b
+PYTHON=<task-venv>/bin/python
+PYTEST=pytest 9.2.0
+PATH=/usr/bin:/bin
+END_UTC=2026-11-25T08:15:42Z
+EXIT=0

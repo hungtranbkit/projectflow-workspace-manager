@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="2.757" timestamp="2026-11-26T08:17:55.389328+07:00" hostname="dell-Latitude-5511"><testcase classname="tests.test_execution_waves" name="test_double_tick_never_launches_same_task_twice" time="2.652"><failure message="AssertionError: Task launched 0 times, expected exactly once&#10;assert 0 == 1&#10; +  where 0 = len([])">client = &lt;starlette.testclient.TestClient object at 0x7256e28d5400&gt;
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root'), PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root/demo'))
+
+    def test_double_tick_never_launches_same_task_twice(client, git_repo):
+        root, repo = git_repo
+        enable_parallel(repo, max_concurrent=2)
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Double tick change", project_id=rid)
+        a, _ = new_plan_task(client, cid, "A", "A", ["a.py"])
+        fake_launcher(client, "claude")
+    
+        results = []
+        errors = []
+    
+        def run():
+            try:
+                results.append(_ews(client).run_execution_wave(cid))
+            except Exception as exc:
+                errors.append(exc)
+    
+        t1 = threading.Thread(target=run)
+        t2 = threading.Thread(target=run)
+        t1.start(); t2.start()
+        t1.join(timeout=15); t2.join(timeout=15)
+        assert not errors, errors
+    
+        sessions = _db(client).all("SELECT * FROM agent_sessions WHERE task_id=?", (a,))
+&gt;       assert len(sessions) == 1, f"Task launched {len(sessions)} times, expected exactly once"
+E       AssertionError: Task launched 0 times, expected exactly once
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+_          = 1
+a          = 1
+cid        = 1
+client     = &lt;starlette.testclient.TestClient object at 0x7256e28d5400&gt;
+errors     = []
+git_repo   = (PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root'), PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root/demo'))
+repo       = PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root/demo')
+results    = [{'outcome': 'NO_TASKS_LAUNCHED', 'change_id': 1, 'wave_id': 2, 'launched': [], ...}, {'outcome': 'NO_TASKS_LAUNCHED', 'change_id': 1, 'wave_id': 1, 'launched': [], ...}]
+rid        = 1
+root       = PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root')
+run        = &lt;function test_double_tick_never_launches_same_task_twice.&lt;locals&gt;.run at 0x7256e2787110&gt;
+sessions   = []
+t1         = &lt;Thread(Thread-9 (run), stopped 125717491734208)&gt;
+t2         = &lt;Thread(Thread-10 (run), stopped 125717483341504)&gt;
+
+tests/test_execution_waves.py:352: AssertionError</failure></testcase></testsuite></testsuites>

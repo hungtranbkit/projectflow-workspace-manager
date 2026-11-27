@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="3.977" timestamp="2026-11-26T06:42:19.086812+07:00" hostname="task-runner"><testcase classname="tests.test_review_fix_loop" name="test_fix_required_creates_fix_task_transfers_worktree" time="1.397"><failure message="KeyError: 'fix_task_id'">client = &lt;starlette.testclient.TestClient object at 0x705f9855d7f0&gt;
+git_repo = (PosixPath('PYTEST_TEMP/test_fix_required_creates_fix_0/root'), PosixPath('PYTEST_TEMP/test_fix_required_creates_fix_0/root/demo'))
+
+    def test_fix_required_creates_fix_task_transfers_worktree(client, git_repo):
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Fix loop change", project_id=rid)
+        tid, w = _committed_task(client, cid, scope_hints=["feature.py"])
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+        set_fake(client, {"verdict": "FIX_REQUIRED", "findings": [
+            {"category": "CORRECTNESS", "severity": "HIGH", "title": "wrong return value", "description": "should return 42"}]})
+        result = client.app.state.review_fix_orchestrator.tick(tid)
+        assert result["outcome"] == "CODE_REVIEW_RUN"
+        result2 = client.app.state.review_fix_orchestrator.tick(tid)
+        assert result2["outcome"] in ("FIX_BUILDER_LAUNCHED", "EXECUTION_FAILED", "FIX_BUILDER_ALREADY_RUNNING"), result2
+&gt;       fix_task_id = result2["fix_task_id"]
+                      ^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'fix_task_id'
+
+cid        = 1
+client     = &lt;starlette.testclient.TestClient object at 0x705f9855d7f0&gt;
+git_repo   = (PosixPath('PYTEST_TEMP/test_fix_required_creates_fix_0/root'), PosixPath('PYTEST_TEMP/test_fix_required_creates_fix_0/root/demo'))
+repo       = PosixPath('PYTEST_TEMP/test_fix_required_creates_fix_0/root/demo')
+result     = {'outcome': 'CODE_REVIEW_RUN', 'verdict': 'FIX_REQUIRED', 'review_id': 1, 'work_product_id': 2, ...}
+result2    = {'outcome': 'EXECUTION_FAILED', 'task_id': 1, 'governing_task_id': 2, 'message': 'Codex CLI chưa được cài hoặc không có trong PATH'}
+rid        = 1
+root       = PosixPath('PYTEST_TEMP/test_fix_required_creates_fix_0/root')
+tid        = 1
+w          = {'id': 1, 'repository_id': 1, 'agent': 'codex', 'task_name': 'auto-1-T1-1', ...}
+
+tests/test_review_fix_loop.py:347: KeyError</failure></testcase><testcase classname="tests.test_review_fix_loop" name="test_finding_from_original_task_resolved_after_fix_task_commit" time="2.324"><failure message="KeyError: 'fix_task_id'">client = &lt;starlette.testclient.TestClient object at 0x705f98464910&gt;
+git_repo = (PosixPath('PYTEST_TEMP/test_finding_from_original_tas0/root'), PosixPath('PYTEST_TEMP/test_finding_from_original_tas0/root/demo'))
+
+    def test_finding_from_original_task_resolved_after_fix_task_commit(client, git_repo):
+        """Real bug caught by this phase's own real Fix-loop test: a
+        Finding created under the ORIGINAL Task's id must still be
+        resolvable once ownership transfers to a Fix Task (a different
+        task_id) -- findings_store/review lookups must span the whole
+        fix-chain (task_chain_ids), never a single task_id in isolation."""
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Chain-aware resolve change", project_id=rid)
+        tid, w = _committed_task(client, cid, scope_hints=["feature.py"])
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+        set_fake(client, {"verdict": "FIX_REQUIRED", "findings": [
+            {"category": "CORRECTNESS", "severity": "HIGH", "title": "wrong value", "description": "x"}]})
+        orch = client.app.state.review_fix_orchestrator
+        orch.tick(tid)  # code review under the ORIGINAL task_id
+        original_finding = client.get(f"/api/tasks/{tid}/findings").json()[0]
+        assert original_finding["status"] == "OPEN"
+        assert original_finding["task_id"] == tid
+    
+        tick2 = orch.tick(tid)  # creates the Fix Task, transfers the worktree
+&gt;       fix_task_id = tick2["fix_task_id"]
+                      ^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'fix_task_id'
+
+cid        = 1
+client     = &lt;starlette.testclient.TestClient object at 0x705f98464910&gt;
+git_repo   = (PosixPath('PYTEST_TEMP/test_finding_from_original_tas0/root'), PosixPath('PYTEST_TEMP/test_finding_from_original_tas0/root/demo'))
+orch       = &lt;app.services.review_fix_orchestrator.ReviewFixOrchestratorService object at 0x705f982a2fd0&gt;
+original_finding = {'id': 1, 'change_id': 1, 'task_id': 1, 'review_id': 1, ...}
+repo       = PosixPath('PYTEST_TEMP/test_finding_from_original_tas0/root/demo')
+rid        = 1
+root       = PosixPath('PYTEST_TEMP/test_finding_from_original_tas0/root')
+tick2      = {'outcome': 'EXECUTION_FAILED', 'task_id': 1, 'governing_task_id': 2, 'message': 'Codex CLI chưa được cài hoặc không có trong PATH'}
+tid        = 1
+w          = {'id': 1, 'repository_id': 1, 'agent': 'codex', 'task_name': 'auto-1-T1-2', ...}
+
+tests/test_review_fix_loop.py:396: KeyError</failure></testcase></testsuite></testsuites>

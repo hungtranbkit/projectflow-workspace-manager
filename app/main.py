@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import sqlite3
 import time
@@ -11,10 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from app.config import load_settings
 from app.db import Database
@@ -41,6 +43,7 @@ from app.services.deployment_service import DeploymentService, DeploymentError
 from app.services.deployment_decision import deployment_view
 from app.services.repository_contract_editor import RepositoryContractEditor, ContractEditError
 from app.services.project_contract import ContractError
+from app.services.visual_qa_contract import visual_qa_prompt_lines
 from app.services.completion_report_parser import parse_completion_report, strip_ansi
 from app.services.spec_registry import SpecRegistry, SpecError
 from app.services.spec_gate import SpecGate, spec_id_list, ALL_CLASSIFICATIONS
@@ -153,11 +156,12 @@ def create_app(settings=None):
     # self-hosted mode), mandatory ephemeral-container isolation under
     # AUTH_MODE=required (never a silent unsandboxed fallback).
     sandboxed_exec = SandboxedCommandRunner(sandbox_runtime, mandatory=(settings.auth_mode == "required"))
-    runner = TestRunner(db, git, sandboxed_exec)
+    visual_evidence_root = settings.state_dir / "visual-qa-evidence"
+    runner = TestRunner(db, git, sandboxed_exec, visual_evidence_root=visual_evidence_root)
     sandboxes = SandboxManager(db, sandbox_runtime, ports, settings.state_dir, settings.max_running_sandboxes, settings.sandbox_retention_hours)
     cleanup_worker = CleanupWorker(db, sandboxes, settings.cleanup_poll_seconds)
     agent_sessions = AgentSessionManager(db)
-    decision = TaskDecisionService(db, git)
+    decision = TaskDecisionService(db, git, visual_evidence_root=visual_evidence_root)
     gate_waivers = GateWaiverService(db, git, sandboxed_exec)
     # B0.7's first real consumer (ADR-001, simplified per-org-token
     # variant -- see github_merge_service.py's own module docstring):
@@ -337,6 +341,8 @@ def create_app(settings=None):
     task_execution_context_builder = TaskExecutionContextBuilder(
         db, work_products, trace, specs_root, test_case_specs_store, executable_test_mapping_service)
     app = FastAPI(title="ProjectFlow Workspace Manager", docs_url=None, redoc_url=None)
+    from app.services.visual_qa_drafts import VisualDraftUploadBodyLimit
+    app.add_middleware(VisualDraftUploadBodyLimit)
     base = Path(__file__).parent; templates = Jinja2Templates(directory=base / "templates")
     templates.env.filters["humanize"] = humanize_enum
     templates.env.filters["humanize_blocker"] = humanize_blocker
@@ -1757,6 +1763,9 @@ def create_app(settings=None):
                 instr=(workspace.get("builder_instructions") or "").strip()
                 if instr: parts+=["## BUILDER INSTRUCTIONS (this workspace only)",instr,""]
             parts+=_spec_context_section(t)
+            if repo_row:
+                visual_repo = Path(workspace["worktree_path"]) if workspace else Path(repo_row["repo_path"])
+                parts+=visual_qa_prompt_lines(t, visual_repo, git=git)
             # E8.8/E8.9: bounded architecture/design/test-contract slice
             # for THIS Task's own governing PlanItem/requirement ids --
             # never the whole project's engineering state. A Task with
@@ -2239,7 +2248,11 @@ def create_app(settings=None):
         recompute_task_status(w.get("task_id"))
         return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/test")
-    def test_agent(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))): w=agent_row(wid); runner.start("agent",wid,Path(w["worktree_path"])); return RedirectResponse(f"/workspaces/{wid}",303)
+    def test_agent(wid:int, _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
+        w=agent_row(wid)
+        try: runner.start("agent",wid,Path(w["worktree_path"]))
+        except ContractError as exc: raise HTTPException(422,str(exc))
+        return RedirectResponse(f"/workspaces/{wid}",303)
     @app.post("/api/workspaces/{wid}/create-sandbox")
     def create_workspace_sandbox_standalone(wid:int,profile:str=Form(""), _authz: None = Depends(require_role("workspace", "wid", "MEMBER"))):
         w=agent_row(wid)
@@ -2861,7 +2874,7 @@ def create_app(settings=None):
         if active: return RedirectResponse(f"/integrations/{iid}",303)
         invalidate(iid)
         try: runner.start("integration",iid,Path(i["worktree_path"]))
-        except ContractError: pass
+        except ContractError as exc: raise HTTPException(422,str(exc))
         return RedirectResponse(f"/integrations/{iid}",303)
     @app.post("/api/integrations/{iid}/ready-for-main")
     def ready_main(iid:int, _authz: None = Depends(require_role("integration", "iid", "MEMBER"))):
@@ -3018,6 +3031,356 @@ def create_app(settings=None):
         row=db.one("SELECT * FROM test_runs WHERE id=?",(rid,));
         if not row: raise HTTPException(404)
         return f"STDOUT (tail)\n{row['stdout_tail']}\n\nSTDERR (tail)\n{row['stderr_tail']}"
+    @app.get("/tasks/{tid}/workspaces/{wid}/visual-reference/{tested_commit}/{viewport}")
+    def task_visual_reference(tid: int, wid: int, tested_commit: str, viewport: str,
+                              _authz: None = Depends(require_read_role("task", "tid"))):
+        """Serve only the current, committed reference configured for this Task's workspace."""
+        from app.services.visual_qa_contract import (
+            load_committed_visual_qa_contract, read_committed_visual_reference_png,
+        )
+
+        denied = HTTPException(404, "Configured visual reference unavailable")
+        if not re.fullmatch(r"[0-9a-f]{40}", tested_commit):
+            raise denied
+        workspace = db.one(
+            "SELECT w.*,r.repo_path AS registered_repo_path,r.git_fingerprint AS registered_git_fingerprint "
+            "FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id WHERE w.id=? AND w.task_id=?",
+            (wid, tid),
+        )
+        if not workspace:
+            raise denied
+        try:
+            repo_path = Path(workspace["registered_repo_path"]).resolve(strict=True)
+            worktree_path = git.validate_worktree(workspace["worktree_path"])
+            if not repo_path.is_dir() or not worktree_path.is_dir():
+                raise denied
+            repo_fingerprint = git.repo_fingerprint(repo_path)
+            worktree_fingerprint = git.repo_fingerprint(worktree_path)
+            if (not repo_fingerprint or repo_fingerprint != worktree_fingerprint
+                    or (workspace["registered_git_fingerprint"]
+                        and workspace["registered_git_fingerprint"] != repo_fingerprint)):
+                raise denied
+            before = git.source_state(worktree_path)
+            if not before["clean"] or before["head"] != tested_commit:
+                raise denied
+            contract = load_committed_visual_qa_contract(worktree_path, git, tested_commit)
+            if contract is None or viewport not in contract["reference"]:
+                raise denied
+            viewport_spec = next(
+                (item for item in contract["viewports"]
+                 if f"{item['width']}x{item['height']}" == viewport),
+                None,
+            )
+            if viewport_spec is None:
+                raise denied
+            image = read_committed_visual_reference_png(worktree_path, git, tested_commit, contract, viewport)
+            after = git.source_state(worktree_path)
+            if (not after["clean"] or after["head"] != before["head"]
+                    or after["tracked_diff_sha256"] != before["tracked_diff_sha256"]):
+                raise denied
+        except HTTPException:
+            raise
+        except Exception:
+            # Never reveal filesystem paths or contract-parser errors to a caller.
+            raise denied
+        return Response(
+            content=image, media_type="image/png",
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store",
+                "Content-Disposition": 'inline; filename="reference.png"',
+            },
+        )
+
+    @app.post("/api/tasks/{tid}/workspaces/{wid}/visual-reference-drafts")
+    async def create_visual_reference_draft(tid: int, wid: int, request: Request,
+                                            _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
+        """Save a private, unapproved Task design proposal outside repo/gate state."""
+        from app.services.visual_qa_drafts import (
+            DRAFT_VIEWPORTS, MAX_DESIGN_NOTE_CHARS, MAX_DRAFT_PNG_BYTES, MAX_DRAFTS_PER_WORKSPACE,
+            VisualDraftError, validate_visual_draft_png, write_visual_draft,
+            delete_visual_draft,
+        )
+
+        denied = HTTPException(404, "Visual reference draft unavailable")
+        workspace = db.one(
+            "SELECT w.*,r.repo_path AS registered_repo_path,r.git_fingerprint AS registered_git_fingerprint "
+            "FROM agent_workspaces w JOIN repositories r ON r.id=w.repository_id "
+            "WHERE w.id=? AND w.task_id=?", (wid, tid),
+        )
+        if not workspace:
+            raise denied
+        try:
+            repo_path = Path(workspace["registered_repo_path"]).resolve(strict=True)
+            worktree_path = git.validate_worktree(workspace["worktree_path"])
+            repo_fingerprint = git.repo_fingerprint(repo_path)
+            if (not repo_path.is_dir() or not worktree_path.is_dir() or not repo_fingerprint
+                    or repo_fingerprint != git.repo_fingerprint(worktree_path)
+                    or (workspace["registered_git_fingerprint"]
+                        and workspace["registered_git_fingerprint"] != repo_fingerprint)):
+                raise denied
+            source = git.source_state(worktree_path)
+            if not source.get("clean") or not re.fullmatch(r"[0-9a-f]{40}", source.get("head", "")):
+                raise HTTPException(409, "Commit and clean the workspace before importing a draft")
+        except HTTPException:
+            raise
+        except Exception:
+            raise denied
+
+        try:
+            form = await request.form(max_files=1, max_fields=3, max_part_size=4096)
+        except Exception as exc:
+            raise HTTPException(422, "Invalid Visual QA draft form") from exc
+        try:
+            allowed_fields = {"reference_png", "viewport", "design_note", "csrf_token"}
+            if any(key not in allowed_fields for key, _value in form.multi_items()):
+                raise HTTPException(422, "Unexpected form field")
+            uploads = form.getlist("reference_png")
+            if len(uploads) != 1 or not isinstance(uploads[0], StarletteUploadFile):
+                raise HTTPException(422, "Choose one PNG image")
+            viewport = str(form.get("viewport", "")).strip()
+            if viewport not in DRAFT_VIEWPORTS:
+                raise HTTPException(422, "Unsupported Visual QA viewport")
+            note = str(form.get("design_note", "")).strip()
+            if not note or len(note) > MAX_DESIGN_NOTE_CHARS:
+                raise HTTPException(422, "Add a design source note of at most 500 characters")
+            data = await uploads[0].read(MAX_DRAFT_PNG_BYTES + 1)
+            if len(data) > MAX_DRAFT_PNG_BYTES:
+                raise HTTPException(413, "PNG exceeds the 8 MiB limit")
+            try:
+                width, height, digest = validate_visual_draft_png(data, viewport)
+            except VisualDraftError as exc:
+                raise HTTPException(422, str(exc)) from exc
+
+            duplicate = db.one(
+                "SELECT id FROM work_products WHERE task_id=? AND kind='UI_UX_DESIGN' "
+                "AND status='DRAFT' AND content_digest=? "
+                "AND json_extract(content_metadata,'$.draft_kind')='visual-reference' "
+                "AND json_extract(content_metadata,'$.workspace_id')=? "
+                "AND json_extract(content_metadata,'$.viewport')=? LIMIT 1",
+                (tid, digest, wid, viewport),
+            )
+            if duplicate:
+                raise HTTPException(409, "This image is already a draft for this workspace and viewport")
+            count = db.one(
+                "SELECT COUNT(*) AS count FROM work_products WHERE task_id=? AND kind='UI_UX_DESIGN' "
+                "AND status='DRAFT' AND json_extract(content_metadata,'$.draft_kind')='visual-reference' "
+                "AND json_extract(content_metadata,'$.workspace_id')=?",
+                (tid, wid),
+            )["count"]
+            if count >= MAX_DRAFTS_PER_WORKSPACE:
+                raise HTTPException(409, "Workspace draft limit reached; ask an owner to review existing drafts")
+
+            try:
+                content_ref, stored_digest, stored_width, stored_height = write_visual_draft(
+                    settings.state_dir, data, viewport,
+                )
+            except VisualDraftError as exc:
+                raise HTTPException(500, "Private draft storage is unavailable") from exc
+            metadata = {
+                "schema": "visual-reference-draft-v1",
+                "draft_kind": "visual-reference",
+                "approval": "UNREVIEWED",
+                "workspace_id": wid,
+                "repository_id": workspace["repository_id"],
+                "source_commit": source["head"],
+                "source_clean": True,
+                "viewport": viewport,
+                "width": stored_width,
+                "height": stored_height,
+                "sha256": stored_digest,
+                "design_note": note,
+            }
+            try:
+                latest_source = git.source_state(worktree_path)
+                if (not latest_source.get("clean") or latest_source.get("head") != source["head"]
+                        or latest_source.get("tracked_diff_sha256") != source.get("tracked_diff_sha256")):
+                    raise HTTPException(409, "Workspace source changed during import; retry from a clean commit")
+                wpid = work_products.create(
+                    kind="UI_UX_DESIGN", title=f"Visual reference draft ({viewport})",
+                    project_id=None, change_id=None, task_id=tid, status="DRAFT",
+                    content_ref=content_ref, content_metadata=metadata, content_digest=stored_digest,
+                )
+            except HTTPException:
+                delete_visual_draft(settings.state_dir, content_ref)
+                raise
+            except Exception as exc:
+                delete_visual_draft(settings.state_dir, content_ref)
+                raise HTTPException(500, "Could not save the Visual QA draft") from exc
+            return RedirectResponse(f"/tasks/{tid}#visual-qa", status_code=303)
+        finally:
+            for upload in form.getlist("reference_png"):
+                if isinstance(upload, StarletteUploadFile):
+                    await upload.close()
+
+    def _visual_draft_for_scope(tid: int, wid: int, wpid: int):
+        from app.services.visual_qa_drafts import read_visual_draft
+        row = db.one(
+            "SELECT wp.* FROM work_products wp JOIN agent_workspaces w "
+            "ON w.task_id=wp.task_id WHERE wp.id=? AND wp.task_id=? AND w.id=? "
+            "AND wp.kind='UI_UX_DESIGN' AND wp.status='DRAFT' "
+            "AND wp.project_id IS NULL AND wp.change_id IS NULL",
+            (wpid, tid, wid),
+        )
+        if not row:
+            raise HTTPException(404, "Visual reference draft unavailable")
+        workspace = db.one(
+            "SELECT repository_id FROM agent_workspaces WHERE id=? AND task_id=?", (wid, tid),
+        )
+        try:
+            metadata = json.loads(row["content_metadata"] or "{}")
+        except (TypeError, ValueError):
+            raise HTTPException(404, "Visual reference draft unavailable")
+        if (not workspace or metadata.get("schema") != "visual-reference-draft-v1"
+                or metadata.get("draft_kind") != "visual-reference"
+                or metadata.get("approval") != "UNREVIEWED"
+                or metadata.get("workspace_id") != wid
+                or metadata.get("repository_id") != workspace["repository_id"]
+                or metadata.get("source_clean") is not True
+                or not re.fullmatch(r"[0-9a-f]{40}", metadata.get("source_commit", ""))
+                or metadata.get("sha256") != row["content_digest"]
+                or not isinstance(metadata.get("design_note"), str)
+                or len(metadata.get("design_note", "")) > 500
+                or type(metadata.get("width")) is not int
+                or type(metadata.get("height")) is not int
+                or f"{metadata.get('width')}x{metadata.get('height')}" != metadata.get("viewport")):
+            raise HTTPException(404, "Visual reference draft unavailable")
+        try:
+            data = read_visual_draft(
+                settings.state_dir, row["content_ref"], row["content_digest"],
+                metadata.get("viewport", ""), expected_size=None,
+            )
+        except Exception:
+            raise HTTPException(404, "Visual reference draft unavailable")
+        return row, metadata, data
+
+    @app.get("/tasks/{tid}/workspaces/{wid}/visual-reference-drafts/{wpid}/preview")
+    def preview_visual_reference_draft(tid: int, wid: int, wpid: int,
+                                       _authz: None = Depends(require_read_role("task", "tid"))):
+        _row, _metadata, data = _visual_draft_for_scope(tid, wid, wpid)
+        return Response(content=data, media_type="image/png", headers={
+            "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+            "Content-Disposition": 'inline; filename="visual-reference-draft.png"',
+        })
+
+    @app.get("/tasks/{tid}/workspaces/{wid}/visual-reference-drafts/{wpid}/download")
+    def download_visual_reference_draft(tid: int, wid: int, wpid: int,
+                                        _authz: None = Depends(require_read_role("task", "tid"))):
+        _row, _metadata, data = _visual_draft_for_scope(tid, wid, wpid)
+        return Response(content=data, media_type="image/png", headers={
+            "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+            "Content-Disposition": f'attachment; filename="visual-reference-draft-{wpid}.png"',
+        })
+
+    @app.get("/test-runs/{rid}/visual/{viewport}/{artifact}")
+    def visual_run_image(rid: int, viewport: str, artifact: str,
+                         _authz: None = Depends(require_read_role("test_run", "rid"))):
+        """Serve one validated PNG from an opted-in Task's current visual run."""
+        from app.services.visual_qa_contract import task_requires_visual_qa, load_committed_visual_qa_contract
+        from app.services.visual_qa_evidence import (
+            read_verified_visual_diagnostic_png, read_verified_visual_png,
+        )
+
+        denied = HTTPException(404, "Visual evidence unavailable")
+        row = db.one(
+            "SELECT * FROM test_runs WHERE id=? AND workspace_type='agent' "
+            "AND stage='visual_qa' AND status IN ('PASS','FAIL')", (rid,)
+        )
+        if not row:
+            raise denied
+        workspace = db.one(
+            "SELECT w.*,r.repo_path AS registered_repo_path,r.git_fingerprint AS registered_git_fingerprint "
+            "FROM agent_workspaces w "
+            "JOIN repositories r ON r.id=w.repository_id WHERE w.id=?",
+            (row["workspace_id"],),
+        )
+        if not workspace or not workspace["task_id"] or not row["tested_commit"]:
+            raise denied
+        task = db.one("SELECT * FROM tasks WHERE id=?", (workspace["task_id"],))
+        if not task or not task_requires_visual_qa(task):
+            raise denied
+
+        try:
+            repo_path = Path(workspace["registered_repo_path"]).resolve(strict=True)
+            worktree_path = git.validate_worktree(workspace["worktree_path"])
+            if not repo_path.is_dir() or not worktree_path.is_dir():
+                raise denied
+            repo_fingerprint = git.repo_fingerprint(repo_path)
+            worktree_fingerprint = git.repo_fingerprint(worktree_path)
+            if (not repo_fingerprint or repo_fingerprint != worktree_fingerprint
+                    or (workspace["registered_git_fingerprint"]
+                        and workspace["registered_git_fingerprint"] != repo_fingerprint)):
+                raise denied
+            source = git.source_state(worktree_path)
+            if not source["clean"] or source["head"] != row["tested_commit"]:
+                raise denied
+            latest = db.one(
+                "SELECT id FROM test_runs WHERE workspace_type='agent' AND workspace_id=? "
+                "AND stage='visual_qa' AND tested_commit=? ORDER BY id DESC LIMIT 1",
+                (workspace["id"], row["tested_commit"]),
+            )
+            if not latest or latest["id"] != row["id"]:
+                raise denied
+
+            contract = load_committed_visual_qa_contract(worktree_path, git, row["tested_commit"])
+            if contract is None:
+                raise denied
+            builder = {
+                "id": workspace["id"], "head": source["head"],
+                "worktree_path": str(worktree_path), "task_id": task["id"],
+            }
+            diagnostic = row["status"] == "FAIL"
+            if diagnostic:
+                verified = decision._visual_diagnostic_result(
+                    row, "agent", workspace["id"], source["head"], worktree_path, task
+                )
+            else:
+                if decision.builder_tests_status(builder) != "PASS":
+                    raise denied
+                verified = decision._visual_evidence_result(
+                    row, "agent", workspace["id"], source["head"], worktree_path, task
+                )
+            if verified is None:
+                raise denied
+            image_reader = read_verified_visual_diagnostic_png if diagnostic else read_verified_visual_png
+            image = image_reader(
+                visual_evidence_root / "agent" / str(workspace["id"]) / str(row["id"]),
+                run_id=row["id"], tested_commit=source["head"], repo_root=worktree_path,
+                contract=contract, expected_manifest_sha256=verified["manifest_sha256"],
+                viewport=viewport, artifact=artifact,
+            )
+            after = git.source_state(worktree_path)
+            if not after["clean"] or after["head"] != source["head"]:
+                raise denied
+            if diagnostic:
+                if decision._visual_diagnostic_result(
+                    row, "agent", workspace["id"], source["head"], worktree_path, task
+                ) is None:
+                    raise denied
+            elif decision.builder_tests_status(builder) != "PASS":
+                raise denied
+            still_latest = db.one(
+                "SELECT id,status,tested_commit FROM test_runs WHERE workspace_type='agent' "
+                "AND workspace_id=? AND stage='visual_qa' AND tested_commit=? ORDER BY id DESC LIMIT 1",
+                (workspace["id"], source["head"]),
+            )
+            expected_status = "FAIL" if diagnostic else "PASS"
+            if (not still_latest or still_latest["id"] != rid or still_latest["status"] != expected_status
+                    or still_latest["tested_commit"] != row["tested_commit"]):
+                raise denied
+        except HTTPException:
+            raise
+        except Exception:
+            # Do not expose tenant paths, manifest details, or filesystem errors.
+            raise denied
+        return Response(
+            content=image, media_type="image/png",
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store",
+                "Content-Disposition": f"inline; filename=\"{artifact}\"",
+            },
+        )
     @app.get("/settings",response_class=HTMLResponse)
     def settings_page(request:Request): return render(request,"settings.html",launchers=launcher.status())
 
@@ -3238,7 +3601,7 @@ def create_app(settings=None):
         regenerate_agent_prompt(tid,repo_row)
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/prompt")
-    def save_prompt(tid:int,implementation_prompt:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
+    def save_prompt(tid:int,implementation_prompt:str=Form(""), visual_qa_required: str = Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         """Edit the Implementation Prompt (section: 'do not rewrite the
         user's prompt silently' -- only the user changes this text, ever).
         Bumps brief_version on an actual content change, the exact same
@@ -3249,6 +3612,15 @@ def create_app(settings=None):
         agent_prompt so it always reflects the latest saved intent."""
         t=task_row(tid)
         new_prompt=implementation_prompt.strip()
+        from app.services.visual_qa_contract import task_requires_visual_qa
+        prompt_marker_task = {"implementation_prompt": t.get("implementation_prompt") or ""}
+        new_prompt_marker_task = {"implementation_prompt": new_prompt}
+        if visual_qa_required.strip().lower() == "true" and not task_requires_visual_qa(t):
+            new_prompt = (new_prompt + "\n\n" if new_prompt else "") + "VISUAL_QA_REQUIRED: true"
+        elif task_requires_visual_qa(prompt_marker_task) and not task_requires_visual_qa(new_prompt_marker_task):
+            # Keep an existing prompt marker when the user edits other text;
+            # a required marker in the separate brief remains untouched.
+            new_prompt = (new_prompt + "\n\n" if new_prompt else "") + "VISUAL_QA_REQUIRED: true"
         changed=(t.get("implementation_prompt") or "")!=new_prompt
         sets=["implementation_prompt=?","updated_at=CURRENT_TIMESTAMP"]
         params=[new_prompt]
@@ -3374,9 +3746,53 @@ def create_app(settings=None):
         t=task_row(tid)
         d=decision.evaluate(tid)
         workspaces=d["builders"]; ti=d["task_integration"]; ti_repos=d["integration_repos"]
+        task_visual_drafts = work_products.list_for_task(tid)
         sbxs=task_sandboxes(tid)
 
         for w in workspaces:
+            w["visual_qa_drafts"] = []
+            for draft in task_visual_drafts:
+                if draft.get("kind") != "UI_UX_DESIGN" or draft.get("status") != "DRAFT":
+                    continue
+                try:
+                    draft_meta = json.loads(draft.get("content_metadata") or "{}")
+                except (TypeError, ValueError):
+                    continue
+                if (draft_meta.get("draft_kind") != "visual-reference"
+                        or draft_meta.get("workspace_id") != w["id"]):
+                    continue
+                item = {
+                    "id": draft["id"], "viewport": draft_meta.get("viewport", ""),
+                    "sha256": draft_meta.get("sha256", ""),
+                    "design_note": draft_meta.get("design_note", ""),
+                    "source_commit": draft_meta.get("source_commit", ""),
+                    "integrity": "INVALID",
+                }
+                try:
+                    _draft_row, _draft_meta, _draft_bytes = _visual_draft_for_scope(tid, w["id"], draft["id"])
+                    item["integrity"] = "VALID"
+                    try:
+                        current_source = git.source_state(w["worktree_path"])
+                        item["source_changed"] = (not current_source.get("clean")
+                                                   or current_source.get("head") != item["source_commit"])
+                    except Exception:
+                        item["source_changed"] = True
+                    item["preview_url"] = f"/tasks/{tid}/workspaces/{w['id']}/visual-reference-drafts/{draft['id']}/preview"
+                    item["download_url"] = f"/tasks/{tid}/workspaces/{w['id']}/visual-reference-drafts/{draft['id']}/download"
+                    if not item["source_changed"]:
+                        # A handoff suggestion only. The owner must copy the
+                        # downloaded PNG into a reviewed source branch and
+                        # commit it; this page never edits PROJECT.yaml or
+                        # changes the active reference/gate.
+                        viewport = item["viewport"]
+                        item["handoff_path"] = (
+                            f"docs/design/visual-qa/drafts/task-{tid}-workspace-{w['id']}-"
+                            f"draft-{draft['id']}-{viewport}.png"
+                        )
+                        item["handoff_reference_entry"] = f"    {viewport}: {item['handoff_path']}"
+                except HTTPException:
+                    item["source_changed"] = True
+                w["visual_qa_drafts"].append(item)
             w["details"]=safe_details(w["worktree_path"]); w["status_label"]=workspace_status_label(w["status"])
             # E8.5.25: managed-worktree lifecycle/staleness -- computed,
             # cheap (no probe merge; integration-check is its own
@@ -4551,7 +4967,8 @@ def create_app(settings=None):
     workflow_service.review_gate=review_fix_orchestrator
 
     # ---- E10: Integration, Release, Deploy & Runtime Verification ----
-    integration_service=IntegrationService(db,work_products,worktree_manager,review_fix_orchestrator,git)
+    integration_service=IntegrationService(db,work_products,worktree_manager,review_fix_orchestrator,git,
+        visual_runner=sandboxed_exec)
     integration_service.reconcile_on_startup()
     app.state.integration_service=integration_service
     release_service=ReleaseService(db,changes,work_products,workflow_service,human_decisions,deployer,

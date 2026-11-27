@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="6" skipped="0" tests="11" time="17.036" timestamp="2026-11-26T15:22:34.167544+07:00" hostname="TASK_HOST"><testcase classname="tests.test_visual_qa_task_panel" name="test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers[reference.png]" time="1.333"><failure message="assert 404 == 200&#10; +  where 404 = &lt;Response [404 Not Found]&gt;.status_code">client = &lt;starlette.testclient.TestClient object at 0x7cef14a0cad0&gt;
+git_repo = (PosixPath('PYTEST_TMP/pytest-716/test_valid_visual_artifact_rou0/root'), PosixPath('PYTEST_TMP/pytest-716/test_valid_visual_artifact_rou0/root/demo'))
+artifact = 'reference.png'
+
+    @pytest.mark.parametrize("artifact", ["reference.png", "actual.png", "diff.png", "overlay.png"])
+    def test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers(client, git_repo, artifact):
+        _root, repo = git_repo
+        task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+        run_id = _add_visual_run(client, workspace_id, worktree, head)
+        expected = (client.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                    / str(workspace_id) / str(run_id) / "430x932" / artifact).read_bytes()
+
+        response = client.get(f"/test-runs/{run_id}/visual/430x932/{artifact}")
+
+&gt;       assert response.status_code == 200
+E       assert 404 == 200
+E        +  where 404 = &lt;Response [404 Not Found]&gt;.status_code
+
+tests/test_visual_qa_task_panel.py:217: AssertionError</failure></testcase><testcase classname="tests.test_visual_qa_task_panel" name="test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers[actual.png]" time="1.298"><failure message="assert 404 == 200&#10; +  where 404 = &lt;Response [404 Not Found]&gt;.status_code">client = &lt;starlette.testclient.TestClient object at 0x7cef14832850&gt;
+git_repo = (PosixPath('PYTEST_TMP/pytest-716/test_valid_visual_artifact_rou1/root'), PosixPath('PYTEST_TMP/pytest-716/test_valid_visual_artifact_rou1/root/demo'))
+artifact = 'actual.png'
+
+    @pytest.mark.parametrize("artifact", ["reference.png", "actual.png", "diff.png", "overlay.png"])
+    def test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers(client, git_repo, artifact):
+        _root, repo = git_repo
+        task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+        run_id = _add_visual_run(client, workspace_id, worktree, head)
+        expected = (client.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                    / str(workspace_id) / str(run_id) / "430x932" / artifact).read_bytes()
+
+        response = client.get(f"/test-runs/{run_id}/visual/430x932/{artifact}")
+
+&gt;       assert response.status_code == 200
+E       assert 404 == 200
+E        +  where 404 = &lt;Response [404 Not Found]&gt;.status_code
+
+tests/test_visual_qa_task_panel.py:217: AssertionError</failure></testcase><testcase classname="tests.test_visual_qa_task_panel" name="test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers[diff.png]" time="1.321"><failure message="assert 404 == 200&#10; +  where 404 = &lt;Response [404 Not Found]&gt;.status_code">client = &lt;starlette.testclient.TestClient object at 0x7cef05f5b110&gt;
+git_repo = (PosixPath('PYTEST_TMP/pytest-716/test_valid_visual_artifact_rou2/root'), PosixPath('PYTEST_TMP/pytest-716/test_valid_visual_artifact_rou2/root/demo'))
+artifact = 'diff.png'
+
+    @pytest.mark.parametrize("artifact", ["reference.png", "actual.png", "diff.png", "overlay.png"])
+    def test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers(client, git_repo, artifact):
+        _root, repo = git_repo
+        task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+        run_id = _add_visual_run(client, workspace_id, worktree, head)
+        expected = (client.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                    / str(workspace_id) / str(run_id) / "430x932" / artifact).read_bytes()
+
+        response = client.get(f"/test-runs/{run_id}/visual/430x932/{artifact}")
+
+&gt;       assert response.status_code == 200
+E       assert 404 == 200
+E        +  where 404 = &lt;Response [404 Not Found]&gt;.status_code
+
+tests/test_visual_qa_task_panel.py:217: AssertionError</failure></testcase><testcase classname="tests.test_visual_qa_task_panel" name="test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers[overlay.png]" time="1.755"><failure message="assert 404 == 200&#10; +  where 404 = &lt;Response [404 Not Found]&gt;.status_code">client = &lt;starlette.testclient.TestClient object at 0x7cef0737f230&gt;
+git_repo = (PosixPath('PYTEST_TMP/pytest-716/test_valid_visual_artifact_rou3/root'), PosixPath('PYTEST_TMP/pytest-716/test_valid_visual_artifact_rou3/root/demo'))
+artifact = 'overlay.png'
+
+    @pytest.mark.parametrize("artifact", ["reference.png", "actual.png", "diff.png", "overlay.png"])
+    def test_valid_visual_artifact_route_returns_exact_verified_bytes_and_private_headers(client, git_repo, artifact):
+        _root, repo = git_repo
+        task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+        run_id = _add_visual_run(client, workspace_id, worktree, head)
+        expected = (client.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                    / str(workspace_id) / str(run_id) / "430x932" / artifact).read_bytes()
+
+        response = client.get(f"/test-runs/{run_id}/visual/430x932/{artifact}")
+
+&gt;       assert response.status_code == 200
+E       assert 404 == 200
+E        +  where 404 = &lt;Response [404 Not Found]&gt;.status_code
+
+tests/test_visual_qa_task_panel.py:217: AssertionError</failure></testcase><testcase classname="tests.test_visual_qa_task_panel" name="test_visual_artifact_route_rejects_unlisted_viewport_and_artifact[../430x932-actual.png]" time="1.759" /><testcase classname="tests.test_visual_qa_task_panel" name="test_visual_artifact_route_rejects_unlisted_viewport_and_artifact[430x932-../../metrics.json]" time="1.544" /><testcase classname="tests.test_visual_qa_task_panel" name="test_visual_artifact_route_rejects_unlisted_viewport_and_artifact[9999x9999-actual.png]" time="1.455" /><testcase classname="tests.test_visual_qa_task_panel" name="test_visual_artifact_route_rejects_unlisted_viewport_and_artifact[430x932-report.md]" time="1.259" /><testcase classname="tests.test_visual_qa_task_panel" name="test_visual_artifact_route_fails_closed_for_tamper_stale_dirty_and_opt_out" time="1.470" /><testcase classname="tests.test_visual_qa_task_panel" name="test_task_page_embeds_only_authenticated_urls_for_current_verified_visual_images" time="1.819"><failure message="assert '/test-runs/3/visual/430x932/reference.png' in '&lt;!doctype html&gt;&lt;html&gt;&lt;head&gt;&lt;meta charset=&quot;utf-8&quot;&gt;&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width,initial-scale=1&quot;&gt;&lt;...ehind).\nsetTimeout(()=&gt;{if(document.querySelector(\'[data-running]\'))location.reload()},1500)&lt;/script&gt;&lt;/body&gt;&lt;/html&gt;'&#10;[+1 more line; full report in element text]">client = &lt;starlette.testclient.TestClient object at 0x7ceee60e58c0&gt;
+git_repo = (PosixPath('PYTEST_TMP/pytest-716/test_task_page_embeds_only_aut0/root'), PosixPath('PYTEST_TMP/pytest-716/test_task_page_embeds_only_aut0/root/demo'))
+
+    def test_task_page_embeds_only_authenticated_urls_for_current_verified_visual_images(client, git_repo):
+        _root, repo = git_repo
+        task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+        run_id = _add_visual_run(client, workspace_id, worktree, head)
+
+        response = client.get(f"/tasks/{task_id}")
+
+        assert response.status_code == 200
+        for artifact in ("reference.png", "actual.png", "diff.png", "overlay.png"):
+&gt;           assert f"/test-runs/{run_id}/visual/430x932/{artifact}" in response.text
+E           assert '/test-runs/3/visual/430x932/reference.png' in '&lt;!doctype html&gt;&lt;html&gt;&lt;head&gt;&lt;meta charset="utf-8"&gt;&lt;meta name="viewport" content="width=device-width,initial-scale=1"&gt;&lt;...ehind).\nsetTimeout(()=&gt;{if(document.querySelector(\'[data-running]\'))location.reload()},1500)&lt;/script&gt;&lt;/body&gt;&lt;/html&gt;'
+E            +  where '&lt;!doctype html&gt;&lt;html&gt;&lt;head&gt;&lt;meta charset="utf-8"&gt;&lt;meta name="viewport" content="width=device-width,initial-scale=1"&gt;&lt;...ehind).\nsetTimeout(()=&gt;{if(document.querySelector(\'[data-running]\'))location.reload()},1500)&lt;/script&gt;&lt;/body&gt;&lt;/html&gt;' = &lt;Response [200 OK]&gt;.text
+
+tests/test_visual_qa_task_panel.py:265: AssertionError</failure></testcase><testcase classname="tests.test_visual_qa_task_panel" name="test_image_route_uses_the_exact_run_workspace_within_a_task" time="1.829"><failure message="app.services.visual_qa_evidence.VisualEvidenceError: manifest run identity/schema mismatch">client = &lt;starlette.testclient.TestClient object at 0x7ceee4baabe0&gt;
+git_repo = (PosixPath('PYTEST_TMP/pytest-716/test_image_route_uses_the_exac0/root'), PosixPath('PYTEST_TMP/pytest-716/test_image_route_uses_the_exac0/root/demo'))
+
+    def test_image_route_uses_the_exact_run_workspace_within_a_task(client, git_repo):
+        _root, repo = git_repo
+        task_id, workspace_id, worktree, head = _task_workspace(client, repo, opted_in=True)
+        run_id = _add_visual_run(client, workspace_id, worktree, head)
+        branch, other_worktree, commit = client.app.state.git.create_agent(
+            repo, "claude", f"visual-panel-other-{task_id}", "main"
+        )
+        other_id = client.app.state.db.execute(
+            "INSERT INTO agent_workspaces(repository_id,agent,task_name,branch,worktree_path,base_branch,base_commit,last_commit,status,task_id,role,sandbox_profile) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (client.app.state.db.one("SELECT id FROM repositories WHERE repo_path=?", (str(repo),))["id"],
+             "claude", "visual-panel-other", branch, str(other_worktree), "main", commit, commit,
+             "CREATED", task_id, "UI", "NONE"),
+        )
+        other_run_id = _add_visual_run(client, other_id, Path(other_worktree), commit)
+        other_actual = png(430, 932, color=(200, 10, 30))
+        other_actual_path = (client.app.state.settings.state_dir / "visual-qa-evidence" / "agent"
+                             / str(other_id) / str(other_run_id) / "430x932" / "actual.png")
+        other_actual_path.write_bytes(other_actual)
+        # Rebuild valid manifest/metrics for the distinct workspace artifact.
+        exp = {
+            "run_id": other_run_id, "tested_commit": commit, "repo_root": Path(other_worktree),
+            "contract": {"reference": {"430x932": "docs/order.png"}, "route": "http://127.0.0.1:4173/orders",
+                         "viewports": [{"width": 430, "height": 932}], "threshold": 0.08},
+        }
+        from tests.test_visual_qa_evidence import create_run
+        import shutil
+        shutil.rmtree(other_actual_path.parent)
+        create_run(other_actual_path.parent.parent, exp, artifact_overrides={"actual.png": other_actual})
+        from app.services.visual_qa_evidence import validate_visual_qa_run
+&gt;       checked = validate_visual_qa_run(other_actual_path.parent.parent, **exp)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_visual_qa_task_panel.py:300:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+evidence_root = PosixPath('PYTEST_TMP/pytest-716/test_image_route_uses_the_exac0/state/visual-qa-evidence/agent/2/6')
+run_id = 6, tested_commit = '47477d63f8c514a64f36c3336fccdefc58c613a6'
+repo_root = PosixPath('PYTEST_TMP/pytest-716/test_image_route_uses_the_exac0/root/.worktrees/demo-claude-visual-panel-other-1')
+contract = {'reference': {'430x932': 'docs/order.png'}, 'route': 'http://127.0.0.1:4173/orders', 'viewports': [{'width': 430, 'height': 932}], 'threshold': 0.08}
+expected_manifest_sha256 = None
+
+    def validate_visual_qa_run(
+        evidence_root: Path, *, run_id: int, tested_commit: str, repo_root: Path,
+        contract: dict, expected_manifest_sha256: str | None = None,
+    ) -&gt; dict:
+        """Validate one output tree against the current project contract.
+
+        The caller chooses the coordinator-owned run path; no path from the
+        command's manifest is followed. Files are rehashed on each gate read.
+        """
+        evidence_root, repo_root = Path(evidence_root).absolute(), Path(repo_root).resolve()
+        _safe_directory(evidence_root)
+        viewports = contract.get("viewports")
+        if not isinstance(viewports, list) or not viewports:
+            raise VisualEvidenceError("contract has no required viewports")
+        expected_by_key = {}
+        for viewport in viewports:
+            key = f"{viewport['width']}x{viewport['height']}"
+            if key in expected_by_key:
+                raise VisualEvidenceError(f"duplicate contract viewport: {key}")
+            reference_name = contract["reference"].get(key)
+            if not reference_name:
+                raise VisualEvidenceError(f"contract reference missing for viewport {key}")
+            reference_path = repo_root / reference_name
+            if reference_path.is_symlink() or not reference_path.is_file():
+                raise VisualEvidenceError(f"configured reference is not a regular repo file: {key}")
+            reference_bytes = reference_path.read_bytes()
+            if _png_dimensions(reference_bytes, f"reference {key}") != (viewport["width"], viewport["height"]):
+                raise VisualEvidenceError(f"configured reference dimensions mismatch: {key}")
+            expected_by_key[key] = {
+                "viewport": viewport,
+                "reference_name": reference_name,
+                "reference_sha256": _sha(reference_bytes),
+            }
+        try:
+            children = list(evidence_root.iterdir())
+        except FileNotFoundError as exc:
+            raise VisualEvidenceMissing("evidence run is absent") from exc
+        if any(child.is_symlink() or not child.is_dir() for child in children):
+            raise VisualEvidenceError("run root contains an unexpected file or symlink")
+        actual_keys = {child.name for child in children}
+        if actual_keys != set(expected_by_key):
+            raise VisualEvidenceError("evidence viewport set does not match contract")
+
+        manifest_hashes = []
+        metrics_by_viewport = []
+        for key, spec in expected_by_key.items():
+            directory = evidence_root / key
+            _safe_directory(directory)
+            manifest_path = directory / "manifest.json"
+            manifest_bytes = _regular_file(manifest_path)
+            manifest_hash = _sha(manifest_bytes)
+            manifest = _json_no_duplicate_keys(manifest_bytes.decode("utf-8"))
+            if not isinstance(manifest, dict):
+                raise VisualEvidenceError("manifest JSON must be an object")
+            if {child.name for child in directory.iterdir()} != ARTIFACT_NAMES | {"manifest.json"}:
+                raise VisualEvidenceError(f"artifact inventory differs from pinned CLI output: {key}")
+            if manifest.get("schemaVersion") != 1 or manifest.get("runId") != str(run_id):
+&gt;               raise VisualEvidenceError("manifest run identity/schema mismatch")
+E               app.services.visual_qa_evidence.VisualEvidenceError: manifest run identity/schema mismatch
+
+app/services/visual_qa_evidence.py:242: VisualEvidenceError</failure></testcase></testsuite></testsuites>

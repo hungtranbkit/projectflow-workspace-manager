@@ -1,0 +1,11 @@
+HOST=kimex-HP-EliteDesk-800-G4-DM-35W-Japan
+ARCH=x86_64
+OS=Ubuntu 26.04 LTS
+Filesystem      Size  Used Avail Use% Mounted on
+tmpfs           7.5G  1.1G  6.5G  14% /tmp
+               total        used        free      shared  buff/cache   available
+Mem:            14Gi       6.8Gi       630Mi       279Mi       8.1Gi       8.1Gi
+Swap:          4.0Gi       3.9Gi        80Mi
+/usr/bin/python3
+Python 3.14.4
+SSH_EXIT=0

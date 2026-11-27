@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "tool": "UIFix",
+  "toolVersion": "1.2.6",
+  "toolCommit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+  "sourceCommit": "a60fa4e2bda0fe163bc79a22a4e9d3d8acd8688f",
+  "reference": "/workspace/docs/reference.png",
+  "referenceSha256": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e",
+  "actualSha256": "9f65d312989d0aae40de76358a6c49f2f383a3cc32fd13422c88f5cbac25c713",
+  "url": "http://127.0.0.1:43871/same",
+  "viewport": {
+    "width": 320,
+    "height": 240
+  },
+  "captureMode": "viewport",
+  "imageDimensions": {
+    "width": 320,
+    "height": 240
+  },
+  "deviceScaleFactor": 1,
+  "threshold": 0.08,
+  "percentDiff": 0,
+  "mismatchedPixels": 0,
+  "totalPixels": 76800,
+  "ssim": 1,
+  "changedRegions": [],
+  "horizontalOverflow": false,
+  "pageErrors": [],
+  "blockedRequests": [],
+  "passed": true
+}

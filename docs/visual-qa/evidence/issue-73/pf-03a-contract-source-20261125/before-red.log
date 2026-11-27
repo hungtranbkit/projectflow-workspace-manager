@@ -1,0 +1,114 @@
+FFFF                                                                     [100%]
+=================================== FAILURES ===================================
+____________ test_verification_uses_candidate_contract_and_timeout _____________
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-550/test_verification_uses_candida0')
+
+    def test_verification_uses_candidate_contract_and_timeout(tmp_path):
+        root, repo, _ = make_repo(tmp_path, project_yaml("printf canonical"))
+        candidate = candidate_commit(repo, project_yaml("printf candidate"))
+
+        result, seen = verify(root, repo, candidate)
+
+        assert result["passed"]
+>       assert [(item[1], item[3].strip()) for item in seen] == [(19, "candidate")]
+E       AssertionError: assert [(19, 'canonical')] == [(19, 'candidate')]
+E
+E         At index 0 diff: (19, 'canonical') != (19, 'candidate')
+E         Use -v to get more diff
+
+tests/test_integration_contract_probe.py:82: AssertionError
+_ test_required_visual_qa_fails_closed_on_candidate_contract[missing-project-contract] _
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-550/test_required_visual_qa_fails_0')
+candidate_yaml = None
+
+    @pytest.mark.parametrize(
+        "candidate_yaml",
+        [
+            None,
+            "schema_version: 1\nproject: {code: candidate}\nsource: {root: .}\ncommands:\n  test: {command: 'printf should-not-run'}\n  visual_qa: {command: 'printf should-not-run'}\nci: {required: [test]}\nvisual_qa: {enabled: true}\n",
+        ],
+        ids=["missing-project-contract", "invalid-visual-contract"],
+    )
+    def test_required_visual_qa_fails_closed_on_candidate_contract(tmp_path, candidate_yaml):
+        valid_visual = (
+            "schema_version: 1\nproject: {code: canonical}\nsource: {root: .}\n"
+            "commands:\n  test: {command: 'printf canonical'}\n  visual_qa: {command: 'printf visual'}\n"
+            "ci: {required: [test]}\n"
+            "visual_qa:\n  enabled: true\n  route: http://127.0.0.1:8765/\n"
+            "  viewports: [{width: 430, height: 932}]\n  reference: reference.png\n  threshold: 0.08\n"
+        )
+        root, repo, _ = make_repo(tmp_path, valid_visual)
+        candidate = candidate_commit(repo, candidate_yaml)
+        task = {"implementation_prompt": "VISUAL_QA_REQUIRED: true"}
+
+        result, seen = verify(root, repo, candidate, task)
+
+>       assert not result["passed"]
+E       assert not True
+
+tests/test_integration_contract_probe.py:108: AssertionError
+_ test_required_visual_qa_fails_closed_on_candidate_contract[invalid-visual-contract] _
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-550/test_required_visual_qa_fails_1')
+candidate_yaml = "schema_version: 1\nproject: {code: candidate}\nsource: {root: .}\ncommands:\n  test: {command: 'printf should-not-run'}\n  visual_qa: {command: 'printf should-not-run'}\nci: {required: [test]}\nvisual_qa: {enabled: true}\n"
+
+    @pytest.mark.parametrize(
+        "candidate_yaml",
+        [
+            None,
+            "schema_version: 1\nproject: {code: candidate}\nsource: {root: .}\ncommands:\n  test: {command: 'printf should-not-run'}\n  visual_qa: {command: 'printf should-not-run'}\nci: {required: [test]}\nvisual_qa: {enabled: true}\n",
+        ],
+        ids=["missing-project-contract", "invalid-visual-contract"],
+    )
+    def test_required_visual_qa_fails_closed_on_candidate_contract(tmp_path, candidate_yaml):
+        valid_visual = (
+            "schema_version: 1\nproject: {code: canonical}\nsource: {root: .}\n"
+            "commands:\n  test: {command: 'printf canonical'}\n  visual_qa: {command: 'printf visual'}\n"
+            "ci: {required: [test]}\n"
+            "visual_qa:\n  enabled: true\n  route: http://127.0.0.1:8765/\n"
+            "  viewports: [{width: 430, height: 932}]\n  reference: reference.png\n  threshold: 0.08\n"
+        )
+        root, repo, _ = make_repo(tmp_path, valid_visual)
+        candidate = candidate_commit(repo, candidate_yaml)
+        task = {"implementation_prompt": "VISUAL_QA_REQUIRED: true"}
+
+        result, seen = verify(root, repo, candidate, task)
+
+>       assert not result["passed"]
+E       assert not True
+
+tests/test_integration_contract_probe.py:108: AssertionError
+_ test_dirty_canonical_contract_cannot_replace_candidate_and_legacy_nonvisual_still_runs _
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-550/test_dirty_canonical_contract_0')
+
+    def test_dirty_canonical_contract_cannot_replace_candidate_and_legacy_nonvisual_still_runs(tmp_path):
+        root, repo, _ = make_repo(tmp_path, project_yaml("printf candidate"))
+        candidate = git(repo, "rev-parse", "HEAD")
+        (repo / "PROJECT.yaml").write_text(project_yaml("printf dirty-canonical"), encoding="utf-8")
+        result, seen = verify(root, repo, candidate)
+        assert result["passed"]
+>       assert [item[3].strip() for item in seen] == ["candidate"]
+E       AssertionError: assert ['dirty-canonical'] == ['candidate']
+E
+E         At index 0 diff: 'dirty-canonical' != 'candidate'
+E         Use -v to get more diff
+
+tests/test_integration_contract_probe.py:120: AssertionError
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_integration_contract_probe.py::test_verification_uses_candidate_contract_and_timeout
+FAILED tests/test_integration_contract_probe.py::test_required_visual_qa_fails_closed_on_candidate_contract[missing-project-contract]
+FAILED tests/test_integration_contract_probe.py::test_required_visual_qa_fails_closed_on_candidate_contract[invalid-visual-contract]
+FAILED tests/test_integration_contract_probe.py::test_dirty_canonical_contract_cannot_replace_candidate_and_legacy_nonvisual_still_runs

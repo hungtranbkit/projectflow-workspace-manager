@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="1.618" timestamp="2026-11-25T18:34:39.648566+07:00" hostname="dell-Latitude-5511"><testcase classname="tests.test_b06_sandbox" name="test_testrunner_uses_sandbox_under_auth_mode_required" time="1.541" /></testsuite></testsuites>

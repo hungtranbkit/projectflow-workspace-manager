@@ -22,10 +22,10 @@ def register(client, repo, name):
 
 
 def test_wizard_shows_the_latest_sandbox_not_an_old_closed_one(client, tmp_path):
-    from tests.conftest import make_repo, NGINX_SANDBOX_CONTRACT, NGINX_COMPOSE
+    from tests.conftest import make_repo, NGINX_SANDBOX_CONTRACT, nginx_compose_for_test
     root = tmp_path / "root"
     repo = make_repo(root, "wizard-sandbox-test", NGINX_SANDBOX_CONTRACT.format(lo=21540, hi=21559))
-    (repo / "compose.yml").write_text(NGINX_COMPOSE)
+    (repo / "compose.yml").write_text(nginx_compose_for_test())
     run(repo, "git", "add", ".")
     run(repo, "git", "commit", "-m", "sandbox contract")
     register(client, repo, "wizard-sandbox-test")

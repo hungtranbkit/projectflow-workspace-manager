@@ -1,0 +1,6 @@
+audit_utc=2026-11-26T05:49:29Z..2026-11-26T05:49:37Z
+events_query_window=2026-11-26T04:20:00Z..2026-11-26T05:05:00Z
+network_destroy_query_exit=0 lines=0 stderr_bytes=0
+container_destroy_query_exit=0 lines=0 stderr_bytes=0
+docker_server=29.7.2 running=62 stopped=9 total_containers=71 total_networks=29
+wm_containers_now=0 wm_networks_now=0

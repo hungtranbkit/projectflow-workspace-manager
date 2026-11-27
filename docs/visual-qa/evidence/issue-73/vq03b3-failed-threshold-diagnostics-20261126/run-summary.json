@@ -1,0 +1,48 @@
+{
+  "milestone": "VQ-03b3",
+  "tested_source_commit": "2c62565cfb2e962ce6e18c2614e746df20fafdc5",
+  "tested_source_tree": "dc7f5de4726914ba135671050fbfa5d14ae184ce",
+  "parent_pr_head": "56ed8b31a35dc7ba0c28a146b434871d5c09670f",
+  "parent_pr_tree": "21fd3f4c28dce7f1dfde20d6237f4c18c7b5ccdf",
+  "branch": "agent/codex/vq03b3-failed-visual-evidence-20261126",
+  "source_clean_before_replay": true,
+  "tests": {
+    "red": {
+      "cases": 1,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "exit_code": 1,
+      "timestamp_local": "2026-11-26T17:14:05.401037+07:00",
+      "duration_seconds": 0.384,
+      "source_state": "pre-fix app source restored from the task commit; captured after the green run to preserve a reproducible baseline without changing the final source commit"
+    },
+    "green": {
+      "cases": 121,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "exit_code": 0,
+      "timestamp_local": "2026-11-26T17:11:58.470127+07:00",
+      "duration_seconds": 95.245
+    }
+  },
+  "green_command": "DOCKER_HOST=unix:///tmp/projectflow-vq03b3-no-daemon.sock <TASK_VENV>/bin/python -m pytest -p no:cacheprovider -q -ra --junitxml=<EVIDENCE_DIR>/final-focused.xml tests/test_visual_qa_task_panel.py tests/test_visual_qa_evidence.py tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py tests/test_task_decision_required_stages.py tests/test_test_runner_source_identity.py tests/test_b1_read_isolation.py tests/test_b03_authz.py tests/test_engineering_lifecycle_ui.py::test_existing_task_detail_page_still_works tests/test_visual_qa_runner_subprocess.py::test_test_runner_retains_synthetic_threshold_diagnostic_without_passing_gate",
+  "synthetic_runner_test": true,
+  "browser_smoke": {
+    "status": "FAILED_BEFORE_SCREENSHOT",
+    "uifix_version": "1.2.6",
+    "uifix_commit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+    "playwright_version": "1.60.0",
+    "playwright_expected_chromium_revision": "1223",
+    "explicit_chrome_version": "153.0.8010.12",
+    "explicit_chrome_sha256": "8c599d43aec53f2460a31ae2f4af6bd863f8258b34ff519564bc5d4726bfaa1e",
+    "observed": "GPU process launch error 1002; Playwright emitted --no-sandbox by default; stopped further browser attempts"
+  },
+  "gate_effect": "Visual test_runs remains FAIL; diagnostic evidence is not PASS evidence and TaskDecisionService gate semantics are unchanged.",
+  "full_suite": "NOT_RUN",
+  "ci": "NOT_RUN",
+  "production_changes": false,
+  "shared_docker_mutation": false,
+  "source_diff": "Review the scoped source commit in PR #74; evidence bundle excludes a duplicate patch file."
+}

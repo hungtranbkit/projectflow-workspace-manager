@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "tool": "UIFix",
+  "toolVersion": "1.2.6",
+  "toolCommit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+  "sourceCommit": "b80a379098b28a09da47da8cd5829c94bf387b22",
+  "reference": "/home/dell/workspace/.worktrees/novaretail-visual-reference-fixture-001/docs/design/web-journey/06-order.png",
+  "referenceSha256": "a6406a15efeb0af044c83a19de836c4f78d8a1c80912b3c459383052424fb174",
+  "actualSha256": "32b7196890baf047116eb7da5d37d42455b1f99a7f996635cfb3012ae690e9cd",
+  "url": "http://127.0.0.1:8765/",
+  "viewport": {
+    "width": 1586,
+    "height": 992
+  },
+  "captureMode": "viewport",
+  "imageDimensions": {
+    "width": 1586,
+    "height": 992
+  },
+  "deviceScaleFactor": 1,
+  "threshold": 0.08,
+  "percentDiff": 0.16207401964772403,
+  "mismatchedPixels": 254993,
+  "totalPixels": 1573312,
+  "ssim": 0.923609181927787,
+  "changedRegions": [
+    {
+      "x": 192,
+      "y": 0,
+      "w": 1374,
+      "h": 992
+    },
+    {
+      "x": 19,
+      "y": 16,
+      "w": 150,
+      "h": 28
+    },
+    {
+      "x": 26,
+      "y": 84,
+      "w": 24,
+      "h": 24
+    },
+    {
+      "x": 62,
+      "y": 88,
+      "w": 77,
+      "h": 20
+    },
+    {
+      "x": 0,
+      "y": 122,
+      "w": 10,
+      "h": 50
+    },
+    {
+      "x": 25,
+      "y": 136,
+      "w": 23,
+      "h": 22
+    },
+    {
+      "x": 62,
+      "y": 137,
+      "w": 73,
+      "h": 19
+    },
+    {
+      "x": 24,
+      "y": 186,
+      "w": 24,
+      "h": 21
+    },
+    {
+      "x": 62,
+      "y": 186,
+      "w": 72,
+      "h": 21
+    },
+    {
+      "x": 62,
+      "y": 233,
+      "w": 31,
+      "h": 23
+    },
+    {
+      "x": 26,
+      "y": 234,
+      "w": 25,
+      "h": 27
+    },
+    {
+      "x": 25,
+      "y": 294,
+      "w": 22,
+      "h": 20
+    },
+    {
+      "x": 62,
+      "y": 294,
+      "w": 53,
+      "h": 16
+    },
+    {
+      "x": 110,
+      "y": 327,
+      "w": 18,
+      "h": 12
+    },
+    {
+      "x": 22,
+      "y": 346,
+      "w": 28,
+      "h": 40
+    },
+    {
+      "x": 65,
+      "y": 349,
+      "w": 64,
+      "h": 17
+    },
+    {
+      "x": 22,
+      "y": 402,
+      "w": 27,
+      "h": 32
+    },
+    {
+      "x": 62,
+      "y": 405,
+      "w": 65,
+      "h": 31
+    },
+    {
+      "x": 22,
+      "y": 458,
+      "w": 25,
+      "h": 23
+    },
+    {
+      "x": 62,
+      "y": 459,
+      "w": 68,
+      "h": 19
+    }
+  ],
+  "horizontalOverflow": false,
+  "pageErrors": [],
+  "blockedRequests": [],
+  "passed": false
+}

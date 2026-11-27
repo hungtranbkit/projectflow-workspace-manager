@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="1.429" timestamp="2026-11-26T22:17:13.513266+07:00" hostname="sanitized-runner"><testcase classname="tests.test_visual_qa_drafts" name="test_task_upload_creates_private_unapproved_draft_and_preview_download" time="1.155"><failure message="assert 404 == 303&#10; +  where 404 = &lt;Response [404 Not Found]&gt;.status_code">client = &lt;starlette.testclient.TestClient object at 0x7239830082f0&gt;
+git_repo = (PosixPath('$PYTEST_TMPDIR/pytest-778/test_task_upload_creates_priva0/root'), PosixPath('$PYTEST_TMPDIR/pytest-778/test_task_upload_creates_priva0/root/demo'))
+
+    def test_task_upload_creates_private_unapproved_draft_and_preview_download(client, git_repo):
+        _root, repo = git_repo
+        tid, wid, worktree, head = _task_workspace(client, repo, opted_in=False)
+        before_contract = _git(worktree, "rev-parse", "HEAD:PROJECT.yaml")
+        result = _upload(client, tid, wid)
+
+&gt;       assert result.status_code == 303
+E       assert 404 == 303
+E        +  where 404 = &lt;Response [404 Not Found]&gt;.status_code
+
+tests/test_visual_qa_drafts.py:51: AssertionError</failure></testcase></testsuite></testsuites>

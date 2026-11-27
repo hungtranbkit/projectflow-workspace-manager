@@ -1,0 +1,35 @@
+PF-04b6 replay commands
+
+Use the task's existing Python environment; set VENV to its Python venv path. Run these from the repository root at the source tree under test. The original captured pytest output did not record shell argv; these are reproducible commands for the exact node selections/results listed in REPORT.md.
+
+export VENV=/path/to/existing/projectflow-venv
+export E=docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126
+
+# Red reproduction on the exact start tree, before the fixture patch:
+PATH=/usr/bin:/bin "$VENV/bin/python" -m pytest -x -vv --showlocals \
+  tests/test_review_fix_loop.py::test_fix_required_creates_fix_task_transfers_worktree \
+  tests/test_review_fix_loop.py::test_finding_from_original_task_resolved_after_fix_task_commit \
+  --junitxml="$E/candidate-red.xml"
+
+# Three changed orchestration nodes after patch:
+PATH=/usr/bin:/bin "$VENV/bin/python" -m pytest -q -ra \
+  tests/test_review_fix_loop.py::test_fix_required_creates_fix_task_transfers_worktree \
+  tests/test_review_fix_loop.py::test_finding_from_original_task_resolved_after_fix_task_commit \
+  tests/test_review_fix_loop.py::test_fix_builder_launch_failure_keeps_transferred_worktree_recoverable \
+  --junitxml="$E/targeted.xml"
+
+# Entire affected module, no deselection:
+PATH=/usr/bin:/bin "$VENV/bin/python" -m pytest -q -ra tests/test_review_fix_loop.py \
+  --junitxml="$E/review-fix-loop.xml"
+
+# Related release / visual contract and execution regressions:
+PATH=/usr/bin:/bin "$VENV/bin/python" -m pytest -q -ra \
+  tests/test_release_pipeline.py tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py \
+  --junitxml="$E/release-visual-regressions.xml"
+
+# Selected builder failure/retry regressions:
+PATH=/usr/bin:/bin "$VENV/bin/python" -m pytest -q -ra \
+  tests/test_autonomous_execution.py::test_execution_failure_recorded \
+  tests/test_autonomous_execution.py::test_repeated_failure_resets_after_success \
+  tests/test_prompt_delivery.py::test_delivery_failure_then_manual_retry_succeeds \
+  --junitxml="$E/builder-orchestration.xml"

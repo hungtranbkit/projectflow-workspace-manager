@@ -1,0 +1,83 @@
+DIAGNOSTIC_COMMAND=PATH=/usr/bin:/bin /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/bin/python -m pytest -x -vv --showlocals [two failed node IDs]
+START_UTC=2026-11-26T01:17:53,056219126+00:00
+START_ICT=2026-11-26T08:17:53,060651084+07:00
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.2.0, pluggy-1.7.0 -- /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/dell/workspace/.worktrees/projectflow-issue73-engineering-fixture-20261125
+configfile: pyproject.toml
+plugins: anyio-4.16.0
+collecting ... collected 2 items
+
+tests/test_execution_waves.py::test_double_tick_never_launches_same_task_twice FAILED [ 50%]
+
+=================================== FAILURES ===================================
+_______________ test_double_tick_never_launches_same_task_twice ________________
+
+client = <starlette.testclient.TestClient object at 0x7256e28d5400>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root'), PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root/demo'))
+
+    def test_double_tick_never_launches_same_task_twice(client, git_repo):
+        root, repo = git_repo
+        enable_parallel(repo, max_concurrent=2)
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Double tick change", project_id=rid)
+        a, _ = new_plan_task(client, cid, "A", "A", ["a.py"])
+        fake_launcher(client, "claude")
+    
+        results = []
+        errors = []
+    
+        def run():
+            try:
+                results.append(_ews(client).run_execution_wave(cid))
+            except Exception as exc:
+                errors.append(exc)
+    
+        t1 = threading.Thread(target=run)
+        t2 = threading.Thread(target=run)
+        t1.start(); t2.start()
+        t1.join(timeout=15); t2.join(timeout=15)
+        assert not errors, errors
+    
+        sessions = _db(client).all("SELECT * FROM agent_sessions WHERE task_id=?", (a,))
+>       assert len(sessions) == 1, f"Task launched {len(sessions)} times, expected exactly once"
+E       AssertionError: Task launched 0 times, expected exactly once
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+_          = 1
+a          = 1
+cid        = 1
+client     = <starlette.testclient.TestClient object at 0x7256e28d5400>
+errors     = []
+git_repo   = (PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root'), PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root/demo'))
+repo       = PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root/demo')
+results    = [{'outcome': 'NO_TASKS_LAUNCHED', 'change_id': 1, 'wave_id': 2, 'launched': [], ...}, {'outcome': 'NO_TASKS_LAUNCHED', 'change_id': 1, 'wave_id': 1, 'launched': [], ...}]
+rid        = 1
+root       = PosixPath('/tmp/pytest-of-dell/pytest-641/test_double_tick_never_launche0/root')
+run        = <function test_double_tick_never_launches_same_task_twice.<locals>.run at 0x7256e2787110>
+sessions   = []
+t1         = <Thread(Thread-9 (run), stopped 125717491734208)>
+t2         = <Thread(Thread-10 (run), stopped 125717483341504)>
+
+tests/test_execution_waves.py:352: AssertionError
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_execution_waves.py: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /home/dell/workspace/.worktrees/projectflow-issue73-engineering-fixture-20261125/docs/visual-qa/evidence/issue-73/pf-04b8-execution-waves-20261126/candidate-diagnostic.xml -
+=========================== short test summary info ============================
+FAILED tests/test_execution_waves.py::test_double_tick_never_launches_same_task_twice
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+======================== 1 failed, 23 warnings in 2.78s ========================
+COMMAND_EXIT=1
+END_UTC=2026-11-26T01:17:58,654079096+00:00
+END_ICT=2026-11-26T08:17:58,656465762+07:00

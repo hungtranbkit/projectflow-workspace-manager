@@ -1,0 +1,14 @@
+STAGE=test STATUS=PASS EXIT=0 SHA=8913bda32a647bfb399f13497e273cbab424307f
+COMMAND=true
+STDOUT
+
+STDERR
+
+
+STAGE=visual_qa STATUS=FAIL EXIT=1 SHA=8913bda32a647bfb399f13497e273cbab424307f
+COMMAND=CHROME_PATH=$CHROME_PATH node $PROJECTFLOW_WORKTREE/tools/visual_qa/visual-qa.mjs --reference prototypes/baoyu/NWR-VISUAL-REFERENCE-FIXTURE-001/react-pilot/pos-proposal-20261124/reference.png --url http://127.0.0.1:45181/app/store-minh-anh/pos --viewport 1586x992 --out .artifacts/visual-qa/projectflow-stage --threshold 0.08
+STDOUT
+FAIL UIFix diff 26.681% at 1586x992; artifacts: $TASK_REPO/.artifacts/visual-qa/projectflow-stage
+
+STDERR
+

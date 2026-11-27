@@ -1,0 +1,629 @@
+{
+  "schemaVersion": 1,
+  "runDate": "2026-11-24",
+  "nova": {
+    "branch": "feature/nwr-visual-reference-fixture-001",
+    "sourceHead": "c21bc9c5d08be4e65e577f3c2d0ae61612cbc295",
+    "route": "/app/store-minh-anh/pos",
+    "referenceProposalSha256": "c263f6b9a8326d18111c583bf3450c446507261d1164456eb941850599d5e0cf",
+    "existingActualSha256": "38abc47ba3c3e91a523d43a02946f196b8309e452c18ee5b228a36d6d867dc0b",
+    "sourceFileSha256": {
+      "salesScreens": "cb443aa57221ae9e9843fef8d967777c0f4579896748cf503b230b99b98cfc6d",
+      "previewStyles": "82fb9a4a1d8d9a26f9776c00e655036a1b9c677055f3935fbe8d159879159289"
+    },
+    "proposalApproved": false,
+    "legacyReferenceSha256": "a6406a15efeb0af044c83a19de836c4f78d8a1c80912b3c459383052424fb174",
+    "legacyActualSha256": "7ca882abd4760d14218e3610b44219ecca91098d6d3caadffb9c87647f9c87ff",
+    "uifix": {
+      "version": "1.2.6",
+      "commit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+      "threshold": 0.08
+    },
+    "browser": {
+      "playwright": "1.60.0",
+      "chromium": "153.0.8010.12",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpr": 1
+      }
+    },
+    "positiveRestored": {
+      "pixelMismatch": 0.05784358092991091,
+      "mismatchedPixels": 91006,
+      "totalPixels": 1573312,
+      "pass": true,
+      "externalRequests": [],
+      "nonGetRequests": [],
+      "browserErrors": [],
+      "responsive": [
+        {
+          "width": 1586,
+          "height": 992,
+          "dpr": 1,
+          "httpStatus": 200,
+          "overflow": false,
+          "documentWidth": 1586,
+          "bodyWidth": 1586
+        },
+        {
+          "width": 430,
+          "height": 932,
+          "dpr": 1,
+          "httpStatus": 200,
+          "overflow": false,
+          "documentWidth": 430,
+          "bodyWidth": 430
+        },
+        {
+          "width": 768,
+          "height": 1024,
+          "dpr": 1,
+          "httpStatus": 200,
+          "overflow": false,
+          "documentWidth": 768,
+          "bodyWidth": 768
+        },
+        {
+          "width": 1366,
+          "height": 768,
+          "dpr": 1,
+          "httpStatus": 200,
+          "overflow": false,
+          "documentWidth": 1366,
+          "bodyWidth": 1366
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1,
+          "httpStatus": 200,
+          "overflow": false,
+          "documentWidth": 1920,
+          "bodyWidth": 1920
+        }
+      ]
+    },
+    "controlledRegression": {
+      "pixelMismatch": 0.09409958101126795,
+      "mismatchedPixels": 148048,
+      "totalPixels": 1573312,
+      "pass": false,
+      "sourceHead": "c21bc9c5d08be4e65e577f3c2d0ae61612cbc295",
+      "workingSourceSha256": {
+        "salesScreens": "cb443aa57221ae9e9843fef8d967777c0f4579896748cf503b230b99b98cfc6d",
+        "previewStyles": "82fb9a4a1d8d9a26f9776c00e655036a1b9c677055f3935fbe8d159879159289"
+      },
+      "chromium": "153.0.8010.12",
+      "playwrightVersion": "1.60.0",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpr": 1
+      },
+      "threshold": 0.08,
+      "externalRequests": [],
+      "nonGetRequests": [],
+      "browserErrors": [],
+      "responsive": [
+        {
+          "width": 1586,
+          "height": 992,
+          "dpr": 1,
+          "httpStatus": 200,
+          "overflow": false,
+          "documentWidth": 1586,
+          "bodyWidth": 1586
+        },
+        {
+          "width": 430,
+          "height": 932,
+          "dpr": 1,
+          "httpStatus": 200,
+          "overflow": false,
+          "documentWidth": 430,
+          "bodyWidth": 430
+        },
+        {
+          "width": 768,
+          "height": 1024,
+          "dpr": 1,
+          "httpStatus": 200,
+          "overflow": false,
+          "documentWidth": 768,
+          "bodyWidth": 768
+        },
+        {
+          "width": 1366,
+          "height": 768,
+          "dpr": 1,
+          "httpStatus": 200,
+          "overflow": false,
+          "documentWidth": 1366,
+          "bodyWidth": 1366
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "dpr": 1,
+          "httpStatus": 200,
+          "overflow": false,
+          "documentWidth": 1920,
+          "bodyWidth": 1920
+        }
+      ]
+    },
+    "restoredActualSameAsPublished": true,
+    "hashes": {
+      "controlled-regression/actual.png": "38179b6649e450e6032c0f2afaa089bf8cfbd001f5a685a10b3bc572f1d5fe21",
+      "controlled-regression/diff.png": "8882e3038e12f675ac6702bb2c9710f0edba42ac66b64a2e0fb031ec1faf334d",
+      "controlled-regression/overlay.png": "fa336fe466a0f6a63154e60aae6f83d38bd160db631bfce922b4f7dc4636624b",
+      "controlled-regression/metrics.json": "6029603a2767fa2fb3bb3a9e4481db7cab8ab690b3886b90a2b7aa98c340e57a"
+    }
+  },
+  "oneShot": {
+    "version": "0.12.0",
+    "repoCommit": "b3f90a72d241d971f47b45089a70b1c53d09c1c5",
+    "license": "MIT",
+    "runtime": "tsx on local TypeScript source; no network API",
+    "typecheck": "PASS/exit 0",
+    "build": "FAIL/exit 127: bun not found",
+    "scratchBytes": 461515461,
+    "scratchLimitBytes": 2147483648,
+    "installScripts": "ignored during npm install",
+    "pos": {
+      "mismatchPixels": 65298,
+      "mismatchRatio": 0.04150352886140829,
+      "matchedLayoutNodes": 66,
+      "refNodeCount": 67,
+      "builtNodeCount": 74,
+      "topGrid": [
+        {
+          "label": "top-left",
+          "mismatchRatio": 0.11046322366204261,
+          "contribution": 0.29621121627002356
+        },
+        {
+          "label": "center-left",
+          "mismatchRatio": 0.05981187785195804,
+          "contribution": 0.16038776072774052
+        },
+        {
+          "label": "center",
+          "mismatchRatio": 0.05565994094769245,
+          "contribution": 0.1492541884896934
+        }
+      ],
+      "issues": [
+        {
+          "code": "LAYOUT_COUNT_MISMATCH",
+          "message": "Detected layout region counts do not match.",
+          "suggestedFix": null,
+          "issueBounds": null
+        },
+        {
+          "code": "PIXEL_DIFFERENCE",
+          "message": "Pixel mismatch ratio is 4.15%.",
+          "suggestedFix": "Use the structural issues below to correct layout and style mismatches before relying on pixel polish.",
+          "issueBounds": null
+        },
+        {
+          "code": "REFLOW_CASCADE",
+          "message": "23 elements below removed/added content are shifted vertically — this is reflow from the element-count change, not 23 independent position bugs.",
+          "suggestedFix": "Fix the missing/extra element first; most of these vertical offsets resolve once the element count matches. Then re-run to check any remaining positions.",
+          "issueBounds": null
+        },
+        {
+          "code": "SIZE_MISMATCH",
+          "message": "main-content item 14 is ~8px too tall (ref: 1280x48, impl: 1280x56) — adjust height.",
+          "suggestedFix": "Set height to 48px (currently 56px)",
+          "issueBounds": {
+            "x": 272,
+            "y": 232,
+            "width": 1280,
+            "height": 48
+          }
+        },
+        {
+          "code": "SIZE_MISMATCH",
+          "message": "main-content item 24 is ~8px too wide and ~8px too short (ref: 424x80, impl: 432x72) — adjust width/height.",
+          "suggestedFix": "Set width to 424px (currently 432px) and Set min-height to 80px (currently 72px)",
+          "issueBounds": {
+            "x": 1096,
+            "y": 360,
+            "width": 424,
+            "height": 80
+          }
+        },
+        {
+          "code": "SPACING_MISMATCH",
+          "message": "Spacing between main-content item 56 and main-content item 59 differs by 16px — adjust gap.",
+          "suggestedFix": "Reduce gap or margin-bottom by 16px to ~8px.",
+          "issueBounds": null
+        },
+        {
+          "code": "SPACING_MISMATCH",
+          "message": "Spacing between main-content item 57 and main-content item 59 differs by 16px — adjust gap.",
+          "suggestedFix": "Reduce gap or margin-bottom by 16px to ~8px.",
+          "issueBounds": null
+        },
+        {
+          "code": "SPACING_MISMATCH",
+          "message": "Spacing between main-content item 47 and main-content item 52 differs by 40px — adjust gap.",
+          "suggestedFix": "Reduce gap or margin-bottom by 40px to ~32px.",
+          "issueBounds": null
+        },
+        {
+          "code": "SPACING_MISMATCH",
+          "message": "Spacing between header item 1 and main-content item 1 differs by 16px — adjust gap.",
+          "suggestedFix": "Reduce gap or margin-bottom by 16px to ~40px.",
+          "issueBounds": null
+        },
+        {
+          "code": "SPACING_MISMATCH",
+          "message": "Spacing between main-content item 19 and main-content item 27 differs by 16px — adjust gap.",
+          "suggestedFix": "Reduce gap or margin-bottom by 16px to ~56px.",
+          "issueBounds": null
+        }
+      ]
+    },
+    "controlledRegression": {
+      "mismatchPixels": 86165,
+      "mismatchRatio": 0.05476663242891429,
+      "issues": [
+        {
+          "code": "LAYOUT_COUNT_MISMATCH",
+          "message": "Detected layout region counts do not match.",
+          "suggestedFix": null,
+          "issueBounds": null
+        },
+        {
+          "code": "PIXEL_DIFFERENCE",
+          "message": "Pixel mismatch ratio is 5.48%.",
+          "suggestedFix": "Use the structural issues below to correct layout and style mismatches before relying on pixel polish.",
+          "issueBounds": null
+        },
+        {
+          "code": "REFLOW_CASCADE",
+          "message": "32 elements below removed/added content are shifted vertically — this is reflow from the element-count change, not 32 independent position bugs.",
+          "suggestedFix": "Fix the missing/extra element first; most of these vertical offsets resolve once the element count matches. Then re-run to check any remaining positions.",
+          "issueBounds": null
+        },
+        {
+          "code": "SIZE_MISMATCH",
+          "message": "main-content item 14 is ~8px too tall (ref: 1280x48, impl: 1280x56) — adjust height.",
+          "suggestedFix": "Set height to 48px (currently 56px)",
+          "issueBounds": {
+            "x": 272,
+            "y": 232,
+            "width": 1280,
+            "height": 48
+          }
+        },
+        {
+          "code": "SIZE_MISMATCH",
+          "message": "main-content item 24 is ~8px too wide and ~8px too short (ref: 424x80, impl: 432x72) — adjust width/height.",
+          "suggestedFix": "Set width to 424px (currently 432px) and Set min-height to 80px (currently 72px)",
+          "issueBounds": {
+            "x": 1096,
+            "y": 360,
+            "width": 424,
+            "height": 80
+          }
+        },
+        {
+          "code": "SPACING_MISMATCH",
+          "message": "Spacing between main-content item 56 and main-content item 59 differs by 16px — adjust gap.",
+          "suggestedFix": "Reduce gap or margin-bottom by 16px to ~8px.",
+          "issueBounds": null
+        },
+        {
+          "code": "SPACING_MISMATCH",
+          "message": "Spacing between main-content item 57 and main-content item 59 differs by 16px — adjust gap.",
+          "suggestedFix": "Reduce gap or margin-bottom by 16px to ~8px.",
+          "issueBounds": null
+        },
+        {
+          "code": "SPACING_MISMATCH",
+          "message": "Spacing between main-content item 47 and main-content item 52 differs by 40px — adjust gap.",
+          "suggestedFix": "Reduce gap or margin-bottom by 40px to ~32px.",
+          "issueBounds": null
+        },
+        {
+          "code": "SPACING_MISMATCH",
+          "message": "Spacing between header item 1 and main-content item 1 differs by 16px — adjust gap.",
+          "suggestedFix": "Reduce gap or margin-bottom by 16px to ~40px.",
+          "issueBounds": null
+        },
+        {
+          "code": "SPACING_MISMATCH",
+          "message": "Spacing between main-content item 19 and main-content item 27 differs by 16px — adjust gap.",
+          "suggestedFix": "Reduce gap or margin-bottom by 16px to ~56px.",
+          "issueBounds": null
+        }
+      ]
+    },
+    "legacyOrder": {
+      "mismatchPixels": 87619,
+      "mismatchRatio": 0.05569079750233902,
+      "topIssues": [
+        {
+          "code": "MISSING_NODE",
+          "message": "Missing element in main-content footer: 1336x32px bottom-center-bar region with background #F0F0FF.",
+          "issueBounds": {
+            "x": 224,
+            "y": 944,
+            "width": 1336,
+            "height": 32
+          }
+        },
+        {
+          "code": "EXTRA_NODE",
+          "message": "The implementation has an extra surface near main-content.",
+          "issueBounds": {
+            "x": 240,
+            "y": 256,
+            "width": 360,
+            "height": 64
+          }
+        },
+        {
+          "code": "EXTRA_NODE",
+          "message": "The implementation has an extra surface near main-content.",
+          "issueBounds": {
+            "x": 1120,
+            "y": 328,
+            "width": 360,
+            "height": 72
+          }
+        },
+        {
+          "code": "EXTRA_NODE",
+          "message": "The implementation has an extra surface near main-content item 85.",
+          "issueBounds": {
+            "x": 512,
+            "y": 800,
+            "width": 264,
+            "height": 72
+          }
+        },
+        {
+          "code": "EXTRA_NODE",
+          "message": "The implementation has an extra surface near main-content.",
+          "issueBounds": {
+            "x": 784,
+            "y": 800,
+            "width": 264,
+            "height": 64
+          }
+        },
+        {
+          "code": "EXTRA_NODE",
+          "message": "The implementation has an extra surface near main-content footer.",
+          "issueBounds": {
+            "x": 240,
+            "y": 944,
+            "width": 760,
+            "height": 24
+          }
+        },
+        {
+          "code": "LAYOUT_COUNT_MISMATCH",
+          "message": "Detected layout region counts do not match.",
+          "issueBounds": null
+        },
+        {
+          "code": "PIXEL_DIFFERENCE",
+          "message": "Pixel mismatch ratio is 5.57%.",
+          "issueBounds": null
+        }
+      ]
+    }
+  },
+  "dcgen": {
+    "repoCommit": "22af69b238fb5aa967cf3f05985a25b52481105f",
+    "repositoryLicenseFiles": 0,
+    "paperLicense": "CC BY 4.0",
+    "paperDoi": "10.1145/3729364",
+    "officialProgramExecuted": false,
+    "portedDetector": "published separation-line method only; no code generation/model/API",
+    "segments": [
+      {
+        "input": "reference.png",
+        "image": {
+          "width": 1586,
+          "height": 992
+        },
+        "params": {
+          "varThr": 50.0,
+          "diffThr": 45.0,
+          "diffPortion": 0.9,
+          "window": 50,
+          "depth": 2
+        },
+        "segments": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 1586,
+            "height": 992,
+            "depth": 0,
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "input": "actual.png",
+        "image": {
+          "width": 1586,
+          "height": 992
+        },
+        "params": {
+          "varThr": 50.0,
+          "diffThr": 45.0,
+          "diffPortion": 0.9,
+          "window": 50,
+          "depth": 2
+        },
+        "segments": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 1586,
+            "height": 992,
+            "depth": 0,
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "input": "06-order.png",
+        "image": {
+          "width": 1586,
+          "height": 992
+        },
+        "params": {
+          "varThr": 50.0,
+          "diffThr": 45.0,
+          "diffPortion": 0.9,
+          "window": 50,
+          "depth": 2
+        },
+        "segments": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 1586,
+            "height": 992,
+            "depth": 0,
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "input": "actual.png",
+        "image": {
+          "width": 1586,
+          "height": 992
+        },
+        "params": {
+          "varThr": 50.0,
+          "diffThr": 45.0,
+          "diffPortion": 0.9,
+          "window": 50,
+          "depth": 2
+        },
+        "segments": [
+          {
+            "x": 0,
+            "y": 0,
+            "width": 1586,
+            "height": 992,
+            "depth": 0,
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  "agentRuntimeProbe": {
+    "claude-code": {
+      "cli_available": true,
+      "cli_path": "claude",
+      "install_layout": [
+        {
+          "path": ".claude/skills/image-to-code",
+          "has_skill": true
+        }
+      ],
+      "runtime_invocation": "UNVERIFIED",
+      "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+    },
+    "codex": {
+      "cli_available": true,
+      "cli_path": "codex",
+      "install_layout": [
+        {
+          "path": ".agents/skills/image-to-code",
+          "has_skill": true
+        }
+      ],
+      "runtime_invocation": "UNVERIFIED",
+      "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+    },
+    "opencode": {
+      "cli_available": false,
+      "cli_path": null,
+      "install_layout": [
+        {
+          "path": ".opencode/skills/image-to-code",
+          "has_skill": false
+        }
+      ],
+      "runtime_invocation": "NOT_TESTED_CLI_UNAVAILABLE",
+      "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+    },
+    "hermes": {
+      "cli_available": false,
+      "cli_path": null,
+      "install_layout": [
+        {
+          "path": ".hermes/skills/image-to-code",
+          "has_skill": false
+        }
+      ],
+      "runtime_invocation": "NOT_TESTED_CLI_UNAVAILABLE",
+      "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+    },
+    "codebuff": {
+      "cli_available": false,
+      "cli_path": null,
+      "install_layout": [
+        {
+          "path": ".agents/skills/image-to-code",
+          "has_skill": true
+        }
+      ],
+      "runtime_invocation": "NOT_TESTED_CLI_UNAVAILABLE",
+      "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+    },
+    "cursor": {
+      "cli_available": false,
+      "cli_path": null,
+      "install_layout": [
+        {
+          "path": ".cursor/skills/image-to-code",
+          "has_skill": false
+        }
+      ],
+      "runtime_invocation": "NOT_TESTED_CLI_UNAVAILABLE",
+      "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+    },
+    "gemini-cli": {
+      "cli_available": true,
+      "cli_path": "gemini",
+      "install_layout": [
+        {
+          "path": ".gemini/skills/image-to-code",
+          "has_skill": false
+        }
+      ],
+      "runtime_invocation": "UNVERIFIED",
+      "notes": "No provider tokens or logins supplied; do not claim end-to-end agent execution."
+    }
+  },
+  "projectflow": {
+    "branch": "agent/codex/visual-qa-73",
+    "remotePrHead": "5f1c1b0c00fce3ed8222a3d660a84ec380521b9a",
+    "freshTargeted": "17 passed, exit 0",
+    "cliTests": "4 passed, exit 0",
+    "visualSmoke": "exit 0; exact 0%, negative 100%, repair 0%, missing ref/dimensions/server fail-closed",
+    "fullSuite": "19 failed / 1551 passed / 1 skipped, exit 1 (saved run; not repeated this turn)",
+    "baseImportShadow": "exit 2 at base ac288928; same test file 16 passed on branch; import fix does not explain 19 full-suite failures",
+    "exactShaCI": "zero workflow runs; manually disabled workflow"
+  },
+  "toolBounds": {
+    "oneShotDomDiff": "failed Chromium GPU initialization; DevTools viewport was host-scaled and not used as exact paired DOM",
+    "dcgenOfficialExecution": "not run because repository snapshot has no license file and model code imports providers"
+  }
+}

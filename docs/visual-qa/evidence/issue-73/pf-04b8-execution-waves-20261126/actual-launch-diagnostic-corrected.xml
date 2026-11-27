@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="2.266" timestamp="2026-11-26T08:29:16.482832+07:00" hostname="dell-Latitude-5511"><testcase classname="tests._pf04b8_launch_diag_temp" name="test_record_actual_mismatched_launcher_result" time="2.217" /></testsuite></testsuites>

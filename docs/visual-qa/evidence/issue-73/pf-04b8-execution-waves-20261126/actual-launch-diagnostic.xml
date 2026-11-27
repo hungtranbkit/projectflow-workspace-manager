@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="1" time="2.340" timestamp="2026-11-26T08:28:31.460938+07:00" hostname="dell-Latitude-5511"><testcase classname="tests._pf04b8_launch_diag_temp" name="test_record_actual_mismatched_launcher_result" time="2.266"><failure message="AssertionError: assert ['claude', 'codex'] == ['claude']&#10;  &#10;  Left contains one more item: 'codex'&#10;  Use -v to get more diff">client = &lt;starlette.testclient.TestClient object at 0x7abe8e2e4ec0&gt;
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-648/test_record_actual_mismatched_0/root'), PosixPath('/tmp/pytest-of-dell/pytest-648/test_record_actual_mismatched_0/root/demo'))
+capsys = &lt;_pytest.capture.CaptureFixture object at 0x7abe8e2e57f0&gt;
+
+    def test_record_actual_mismatched_launcher_result(client, git_repo, capsys):
+        root, repo = git_repo
+        enable_parallel(repo, max_concurrent=2)
+        rid = register(client, repo, "diag")
+        cid = new_change(client, "Diagnostic mismatched provider", project_id=rid)
+        tid, _ = new_plan_task(client, cid, "A", "A", ["a.py"])
+        service = client.app.state.autonomous_execution_service
+        selected_provider = service._default_provider()
+        fake_launcher(client, "claude")
+        planned = _ews(client).plan_execution_wave(cid)
+        result = _ews(client).run_execution_wave(cid)
+        wave = _ews(client).get_wave(result["wave_id"])
+        failed = json.loads(wave["tasks"][0]["result_metadata"])
+        sessions = _db(client).all("SELECT id,agent,pid,status FROM agent_sessions WHERE task_id=?", (tid,))
+        print(json.dumps({"settings_agents": list(service.settings.agents), "selected_provider": selected_provider,
+                          "launcher_keys": sorted(client.app.state.agent_sessions.launchers),
+                          "planned_provider": planned["selected"][0]["provider"], "wave_outcome": result["outcome"],
+                          "launch_result": failed, "sessions": sessions}, sort_keys=True))
+        assert selected_provider == "codex"
+&gt;       assert sorted(client.app.state.agent_sessions.launchers) == ["claude"]
+E       AssertionError: assert ['claude', 'codex'] == ['claude']
+E         
+E         Left contains one more item: 'codex'
+E         Use -v to get more diff
+
+tests/_pf04b8_launch_diag_temp.py:24: AssertionError</failure></testcase></testsuite></testsuites>

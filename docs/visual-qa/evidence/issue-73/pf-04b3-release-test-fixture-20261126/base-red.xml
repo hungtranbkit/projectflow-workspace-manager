@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="4.823" timestamp="2026-11-26T03:22:35.134879+07:00" hostname="task-runner"><testcase classname="tests.test_release_pipeline" name="test_build_produces_valid_artifact_with_digest" time="1.873"><failure message="AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'}&#10;assert ('EXECUTION_FAILED' == 'REVIEWED'&#10;  &#10;  - REVIEWED&#10;  + EXECUTION_FAILED)">tests/test_release_pipeline.py:336: in test_build_produces_valid_artifact_with_digest
+    tid, integ = _reviewed_and_integrated_task(client, repo, cid, rid)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_release_pipeline.py:159: in _reviewed_and_integrated_task
+    assert review["outcome"] == "REVIEWED" and review["verdict"] == "PASS", review
+E   AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'}
+E   assert ('EXECUTION_FAILED' == 'REVIEWED'
+E
+E     - REVIEWED
+E     + EXECUTION_FAILED)</failure></testcase><testcase classname="tests.test_release_pipeline" name="test_qualification_ready_when_all_evidence_passes" time="2.590"><failure message="AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'}&#10;assert ('EXECUTION_FAILED' == 'REVIEWED'&#10;  &#10;  - REVIEWED&#10;  + EXECUTION_FAILED)">tests/test_release_pipeline.py:399: in test_qualification_ready_when_all_evidence_passes
+    tid, integ = _reviewed_and_integrated_task(client, repo, cid, rid)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_release_pipeline.py:159: in _reviewed_and_integrated_task
+    assert review["outcome"] == "REVIEWED" and review["verdict"] == "PASS", review
+E   AssertionError: {'outcome': 'EXECUTION_FAILED', 'verdict': None, 'message': 'claude CLI not found in PATH'}
+E   assert ('EXECUTION_FAILED' == 'REVIEWED'
+E
+E     - REVIEWED
+E     + EXECUTION_FAILED)</failure></testcase></testsuite></testsuites>

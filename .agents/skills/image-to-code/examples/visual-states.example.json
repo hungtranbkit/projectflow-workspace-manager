@@ -1,0 +1,21 @@
+{
+  "url": "http://localhost:3000",
+  "out": "artifacts/visual-states",
+  "viewports": [
+    { "width": 390, "height": 844 },
+    { "width": 820, "height": 1180 },
+    { "width": 1440, "height": 900 }
+  ],
+  "states": [
+    {
+      "name": "default",
+      "clicks": [],
+      "mustFit": ["main", "main button:first-of-type"]
+    },
+    {
+      "name": "dialog",
+      "clicks": ["#open-demo"],
+      "mustFit": ["dialog[open]", "dialog[open] button", "dialog[open] .phone-frame"]
+    }
+  ]
+}

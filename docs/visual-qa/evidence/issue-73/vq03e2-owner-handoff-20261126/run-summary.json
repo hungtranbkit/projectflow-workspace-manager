@@ -1,0 +1,48 @@
+{
+  "milestone": "VQ-03e2 owner review handoff for private Visual QA draft",
+  "pr_number": 74,
+  "starting_remote_head": "b85dba75e95c6a72a7a54addaf071aaaefa2d2a1",
+  "evidence_hash_correction_commit": "1e2dc7afd05bff846e5f451156f8732ceee47989",
+  "source_commit": "674196199a5bdd4fdb152006922cb58d6bfab82e",
+  "source_tree": "540a2f7a6959b1ba5211489ce35668acf9b3017e",
+  "red": {
+    "baseline_code_commit": "1e2dc7afd05bff846e5f451156f8732ceee47989",
+    "test": "tests/test_visual_qa_drafts.py::test_visual_draft_has_owner_handoff_without_approval_or_repo_mutation",
+    "exit_code": 1,
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "skips": 0,
+    "junit_started_ict": "2026-11-26T23:16:16.069625+07:00",
+    "junit_seconds": 1.856,
+    "observed": "Task page lacked the owner handoff section before source change",
+    "junit_sha256": "c6d53728319ce07a3199712326c158091418cc2224f91bb193b46b67707b7445",
+    "log_sha256": "21dcb560e3c23a489c6364eb5c66096c42736824c685e2dd50b263f26b60d7f2"
+  },
+  "green": {
+    "command": "DOCKER_HOST=unix:///tmp/pf-vq03e1-no-docker.sock \"$TASK_VENV/bin/python\" -m pytest -p no:cacheprovider -q -ra tests/test_visual_qa_drafts.py tests/test_visual_qa_task_panel.py tests/test_visual_qa_evidence.py tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py tests/test_task_decision_required_stages.py tests/test_test_runner_source_identity.py tests/test_visual_qa_runner_subprocess.py tests/test_b1_read_isolation.py -k \"not test_visual_gate_runs_through_real_test_runner_subprocess_and_pins_current_head\" --junitxml=green.xml",
+    "python": "3.14.4",
+    "pytest": "9.2.0",
+    "exit_code": 0,
+    "tests": 140,
+    "passed": 140,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "browser_test_deselected": 1,
+    "junit_started_ict": "2026-11-26T23:22:04.239149+07:00",
+    "junit_suite_seconds": 115.586,
+    "junit_sha256": "3f07bc93b8d11e673d6bdb8ef8dd69b1dcfe3b63dbeee82b7219b774b7915eb1",
+    "log_sha256": "2a699bc45e2fd458077a03fc10aec717de6dbc885b55701ecf7c954d33c5befd"
+  },
+  "scope": {
+    "approval": false,
+    "test_runner_contract_unchanged": true,
+    "repo_source_or_project_yaml_mutated": false,
+    "visual_gate_enabled": false,
+    "browser_e2e_run": false,
+    "provider_or_docker_invoked": false
+  },
+  "review_boundary": "No Task-draft owner decision record is available: HumanDecisionService is scoped to Change/Plan/SpecProposal; generic WorkProduct status does not record a draft-bound owner actor; AUTH_MODE=none has no authenticated actor. Draft remains UNREVIEWED and is handed off to normal owner-reviewed repository PR. It does not change the gate or active reference.",
+  "published_hash_note": "Hashes in this summary are recomputed from the sanitized bytes stored in this evidence directory. Original unsanitized temporary logs are not included."
+}

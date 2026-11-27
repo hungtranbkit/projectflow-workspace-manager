@@ -23,12 +23,15 @@ from tests.test_autonomous_execution import register, new_change
 from tests.test_autonomous_execution_real import (
     _seed_buggy_fixture, _pytest_passes, _trust_claude_dir, _restore_claude_dir,
 )
+from tests.claude_test_config import prepare_claude_test_config, require_isolated_claude_auth
 
 pytestmark = pytest.mark.skipif(shutil.which("claude") is None, reason="real `claude` CLI not installed on this host")
 
 
-def test_real_worktree_isolation_fixture_end_to_end(client, git_repo):
+def test_real_worktree_isolation_fixture_end_to_end(client, git_repo, monkeypatch, request):
     root, repo = git_repo
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     real_checkout = Path(__file__).resolve().parent.parent
     before_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=real_checkout, capture_output=True, text=True).stdout.strip()
     before_status = subprocess.run(["git", "status", "--porcelain"], cwd=real_checkout, capture_output=True, text=True).stdout
@@ -74,7 +77,9 @@ def test_real_worktree_isolation_fixture_end_to_end(client, git_repo):
     #    proven in test_autonomous_execution_real.py) --
     from app.services.git_workspace import slugify
     worktree_path_precomputed = root / ".worktrees" / f"{slugify('demo')}-{slugify('claude')}-{slugify('fix-answer-e85-real-demo')}"
-    trust_key, trust_previous = _trust_claude_dir(worktree_path_precomputed)
+    trust_registration = _trust_claude_dir(worktree_path_precomputed, allowed_root=root,
+                                           monkeypatch=monkeypatch, request=request)
+    trust_key = trust_registration.project_key
 
     r = client.post(f"/api/changes/{cid}/autonomous-execution/tick")
     body = r.json()
@@ -151,7 +156,7 @@ def test_real_worktree_isolation_fixture_end_to_end(client, git_repo):
         except Exception:
             pass
         try:
-            _restore_claude_dir(trust_key, trust_previous)
+            _restore_claude_dir(trust_registration)
         except Exception:
             pass
 

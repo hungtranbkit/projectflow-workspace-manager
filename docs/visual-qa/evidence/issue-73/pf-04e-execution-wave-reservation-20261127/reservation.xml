@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="3.618" timestamp="2026-11-27T15:43:04.869163+07:00" hostname="dell-Latitude-5511"><testcase classname="tests.test_execution_wave_reservation_stuck_after_restart" name="test_stale_reservation_from_a_dead_process_blocks_scheduling_before_reconcile" time="1.480" /><testcase classname="tests.test_execution_wave_reservation_stuck_after_restart" name="test_restart_reconciliation_clears_stale_reservations_and_scheduling_works_again" time="2.063"><failure message="AssertionError: {'outcome': 'NO_TASKS_LAUNCHED', 'change_id': 1, 'wave_id': 1, 'launched': [], ...}&#10;assert 'NO_TASKS_LAUNCHED' == 'LAUNCHED'&#10;  &#10;  - LAUNCHED&#10;  + NO_TASKS_LAUNCHED">git_repo = (PosixPath('$TASK_TMP'), PosixPath('$TASK_TMP'))
+tmp_path = PosixPath('$TASK_TMP')
+
+    def test_restart_reconciliation_clears_stale_reservations_and_scheduling_works_again(git_repo, tmp_path):
+        """The real fix, proven with a real restart: a fresh create_app()
+        against the SAME DB (simulating the old process's own death) must
+        clear the stale reservation via reconcile_on_startup() alone, and
+        the exact same Task must be schedulable again afterward."""
+        root, repo = git_repo
+        settings = Settings(root, "127.0.0.1", 8765, tmp_path / "live.db", 30, configured_state_dir=tmp_path / "state")
+        client = build_client(settings)
+        enable_parallel(repo, max_concurrent=2)
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Restart reservation change", project_id=rid)
+        a, _ = new_plan_task(client, cid, "A", "A", ["a.py"])
+
+        db = client.app.state.db
+        db.execute("INSERT INTO task_reservations(task_id,wave_id,state) VALUES(?,?,?)", (a, None, "RESERVED"))
+        assert db.one("SELECT * FROM task_reservations WHERE task_id=?", (a,)), "sanity: the stale row is really there"
+
+        # A genuine restart: a brand-new create_app() against the same DB
+        # file -- execution_wave_service.reconcile_on_startup() runs
+        # exactly as it would in production.
+        restarted = build_client(settings)
+
+        assert not restarted.app.state.db.one("SELECT * FROM task_reservations WHERE task_id=?", (a,)), \
+            "stale reservation must be cleared by restart reconciliation"
+
+        fake_launcher(restarted, "claude")
+        run = restarted.app.state.execution_wave_service.run_execution_wave(cid)
+&gt;       assert run["outcome"] == "LAUNCHED", run
+E       AssertionError: {'outcome': 'NO_TASKS_LAUNCHED', 'change_id': 1, 'wave_id': 1, 'launched': [], ...}
+E       assert 'NO_TASKS_LAUNCHED' == 'LAUNCHED'
+E
+E         - LAUNCHED
+E         + NO_TASKS_LAUNCHED
+
+tests/test_execution_wave_reservation_stuck_after_restart.py:75: AssertionError</failure></testcase></testsuite></testsuites>

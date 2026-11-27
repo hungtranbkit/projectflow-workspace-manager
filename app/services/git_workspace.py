@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -91,6 +93,129 @@ class GitWorkspaceService:
         return self.git(repo, "rev-parse", "--verify", "--quiet", f"{branch}^{{commit}}", check=False).returncode == 0
     def head(self, repo, branch="HEAD"): return self.git(repo, "rev-parse", f"{branch}^{{commit}}").stdout.strip()
     def status(self, repo): return self.git(repo, "status", "--porcelain=v1").stdout
+    def source_state(self, repo):
+        """A stable observation of HEAD and tracked worktree content.
+
+        Untracked files make a run unbound to a commit, but are deliberately
+        excluded from the drift digest because test commands may create
+        disposable artifacts. Tracked changes are content-hashed so edits
+        during a run are detected even when the porcelain status stays 'M'.
+        """
+        repo = self.validate_repo(repo)
+        head_before = self.head(repo)
+        diff_before = self.git(repo, "diff", "HEAD", "--binary").stdout
+        status = self.status(repo)
+        diff_after = self.git(repo, "diff", "HEAD", "--binary").stdout
+        head_after = self.head(repo)
+        if head_before != head_after or diff_before != diff_after:
+            raise GitCommandError("Source changed while its state was being inspected")
+        return {
+            "head": head_before,
+            "tracked_diff_sha256": hashlib.sha256(diff_before.encode("utf-8")).hexdigest(),
+            "untracked_paths": tuple(sorted(
+                line[3:] for line in status.splitlines() if line.startswith("?? ")
+            )),
+            "clean": not bool(status.strip()),
+        }
+    def read_committed_file(self, repo, commit: str, relative_path: str, *, max_bytes: int) -> bytes:
+        """Read a regular worktree file only when it is the exact blob at HEAD.
+
+        Git status alone is insufficient for ignored files and index flags such
+        as assume-unchanged/skip-worktree. This narrow reader binds a configured
+        Visual QA input to the immutable commit, its stage-0 index entry, and
+        the bytes read without following symlinks. It deliberately does not
+        require unrelated ignored build outputs to be tracked.
+        """
+        repo = self.validate_repo(repo)
+        if (not isinstance(commit, str) or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit)
+                or not isinstance(relative_path, str) or not relative_path
+                or relative_path.startswith("/") or "\\" in relative_path or "\x00" in relative_path
+                or any(ord(char) < 0x20 for char in relative_path)):
+            raise GitSafetyError("Invalid committed source path or commit")
+        parts = relative_path.split("/")
+        if any(part in ("", ".", "..") for part in parts):
+            raise GitSafetyError("Committed source path is not a literal repository-relative path")
+        if type(max_bytes) is not int or max_bytes <= 0:
+            raise GitSafetyError("Invalid committed source size limit")
+        before = self.source_state(repo)
+        if not before["clean"] or before["head"] != commit:
+            raise GitSafetyError("Committed source is stale or the worktree is not clean")
+
+        pathspec = f":(literal){relative_path}"
+        tree_result = self.git(repo, "ls-tree", "-z", "--full-tree", commit, "--", pathspec)
+        records = [record for record in tree_result.stdout.split("\0") if record]
+        if len(records) != 1 or "\t" not in records[0]:
+            raise FileNotFoundError("Configured Visual QA file is not present in the tested commit")
+        metadata, tree_path = records[0].split("\t", 1)
+        fields = metadata.split()
+        if tree_path != relative_path or len(fields) != 3:
+            raise GitSafetyError("Committed source entry is ambiguous")
+        mode, object_type, tree_oid = fields
+        if mode not in ("100644", "100755") or object_type != "blob":
+            raise GitSafetyError("Configured Visual QA source must be a regular tracked blob")
+
+        index_result = self.git(repo, "ls-files", "--stage", "-z", "--", pathspec)
+        index_records = [record for record in index_result.stdout.split("\0") if record]
+        if len(index_records) != 1 or "\t" not in index_records[0]:
+            raise GitSafetyError("Configured Visual QA source has no single stage-0 index entry")
+        index_metadata, index_path = index_records[0].split("\t", 1)
+        index_fields = index_metadata.split()
+        if (index_path != relative_path or len(index_fields) != 3
+                or index_fields[0] != mode or index_fields[1] != tree_oid or index_fields[2] != "0"):
+            raise GitSafetyError("Configured Visual QA source index differs from the tested commit")
+        flags_result = self.git(repo, "ls-files", "-v", "-z", "--", pathspec)
+        flag_records = [record for record in flags_result.stdout.split("\0") if record]
+        if len(flag_records) != 1 or not flag_records[0].endswith(" " + relative_path):
+            raise GitSafetyError("Configured Visual QA source index flags are unavailable")
+        if flag_records[0][0] != "H":
+            raise GitSafetyError("Configured Visual QA source has assume-unchanged or skip-worktree flags")
+
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        directory_fd = os.open(repo, directory_flags)
+        file_fd = None
+        try:
+            for component in parts[:-1]:
+                next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+                os.close(directory_fd)
+                directory_fd = next_fd
+            file_fd = os.open(parts[-1], file_flags, dir_fd=directory_fd)
+            stat_before = os.fstat(file_fd)
+            if not stat.S_ISREG(stat_before.st_mode) or stat_before.st_size > max_bytes:
+                raise GitSafetyError("Configured Visual QA source is not a bounded regular file")
+            chunks = bytearray()
+            while len(chunks) <= max_bytes:
+                chunk = os.read(file_fd, min(1024 * 1024, max_bytes + 1 - len(chunks)))
+                if not chunk:
+                    break
+                chunks.extend(chunk)
+            stat_after = os.fstat(file_fd)
+            before_identity = (stat_before.st_dev, stat_before.st_ino, stat_before.st_size,
+                               stat_before.st_mtime_ns, stat_before.st_ctime_ns)
+            after_identity = (stat_after.st_dev, stat_after.st_ino, stat_after.st_size,
+                              stat_after.st_mtime_ns, stat_after.st_ctime_ns)
+            data = bytes(chunks)
+            if before_identity != after_identity or len(data) != stat_before.st_size or len(data) > max_bytes:
+                raise GitSafetyError("Configured Visual QA source changed while being read")
+        except OSError as exc:
+            raise GitSafetyError("Configured Visual QA source is missing or unsafe") from exc
+        finally:
+            if file_fd is not None:
+                os.close(file_fd)
+            os.close(directory_fd)
+
+        object_format = self.git(repo, "rev-parse", "--show-object-format").stdout.strip()
+        if object_format not in ("sha1", "sha256"):
+            raise GitSafetyError("Unsupported Git object format")
+        digest = hashlib.new(object_format)
+        digest.update(f"blob {len(data)}\0".encode("ascii"))
+        digest.update(data)
+        if digest.hexdigest() != tree_oid:
+            raise GitSafetyError("Configured Visual QA bytes differ from the tested commit blob")
+        after = self.source_state(repo)
+        if after != before:
+            raise GitSafetyError("Repository source changed while a committed Visual QA file was read")
+        return data
     def create_agent(self, repo, agent, task, base="main"):
         repo = self.validate_repo(repo); agent, task = slugify(agent), slugify(task)
         branch = self.validate_branch(f"agent/{agent}/{task}"); path = self.validate_worktree(self.worktree_root / f"{self.repo_slug(repo)}-{agent}-{task}")

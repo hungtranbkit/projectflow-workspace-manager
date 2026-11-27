@@ -1,0 +1,63 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.2.0, pluggy-1.7.0 -- <task-venv>/bin/python
+cachedir: .pytest_cache
+rootdir: <task-artifacts>/candidate-checkout
+configfile: pyproject.toml
+plugins: anyio-4.16.0
+collecting ... collected 2 items
+
+tests/test_architecture_design.py::test_architecture_analysis_structured_result HTTP_PROBE method=POST path=/api/changes/1/architecture/analyze status=200 content_type='application/json' body='{"outcome":"EXECUTION_FAILED","work_product":null,"message":"claude CLI not found in PATH"}'
+FAILED
+tests/test_architecture_design.py::test_technical_design_structured_result HTTP_PROBE method=POST path=/api/changes/1/design/technical status=200 content_type='application/json' body='{"outcome":"EXECUTION_FAILED","work_product":null,"message":"claude CLI not found in PATH"}'
+FAILED
+
+=================================== FAILURES ===================================
+_________________ test_architecture_analysis_structured_result _________________
+
+client = <starlette.testclient.TestClient object at 0x7f02fd9d8440>
+git_repo = (PosixPath('<pytest-tmp>/pytest-515/test_architecture_analysis_str0/root'), PosixPath('<pytest-tmp>/pytest-515/test_architecture_analysis_str0/root/demo'))
+arch_env = PosixPath('<pytest-tmp>/pytest-515/test_architecture_analysis_str0/specs')
+
+    def test_architecture_analysis_structured_result(client, git_repo, arch_env):
+        cid = new_change(client, "Add internal caching module", "Speed up repeated reads.")
+        result = do_analyze(client, cid, arch_payload(affected_components=["app/services/cache.py"], classification="LOCAL_ARCHITECTURE_CHANGE"))
+>       assert result["outcome"] == "READY"
+E       AssertionError: assert 'EXECUTION_FAILED' == 'READY'
+E
+E         - READY
+E         + EXECUTION_FAILED
+
+tests/test_architecture_design.py:174: AssertionError
+___________________ test_technical_design_structured_result ____________________
+
+client = <starlette.testclient.TestClient object at 0x7f02fd9b1590>
+git_repo = (PosixPath('<pytest-tmp>/pytest-515/test_technical_design_structur0/root'), PosixPath('<pytest-tmp>/pytest-515/test_technical_design_structur0/root/demo'))
+arch_env = PosixPath('<pytest-tmp>/pytest-515/test_technical_design_structur0/specs')
+
+    def test_technical_design_structured_result(client, git_repo, arch_env):
+        cid = new_change(client, "Design test change")
+        link_governing_feature(client, cid)
+        result = do_technical_design(client, cid)
+>       assert result["outcome"] == "READY"
+E       AssertionError: assert 'EXECUTION_FAILED' == 'READY'
+E
+E         - READY
+E         + EXECUTION_FAILED
+
+tests/test_architecture_design.py:268: AssertionError
+=============================== warnings summary ===============================
+../../../.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  <task-venv>/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../../../.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_architecture_design.py: 22 warnings
+  <task-venv>/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: <task-artifacts>/candidate-architecture-design-repro.xml -
+=========================== short test summary info ============================
+FAILED tests/test_architecture_design.py::test_architecture_analysis_structured_result
+FAILED tests/test_architecture_design.py::test_technical_design_structured_result
+======================== 2 failed, 34 warnings in 4.31s ========================

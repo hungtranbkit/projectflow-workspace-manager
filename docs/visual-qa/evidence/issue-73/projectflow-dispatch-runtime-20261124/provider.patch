@@ -1,0 +1,13 @@
+diff --git a/apps/ui-preview/src/style.css b/apps/ui-preview/src/style.css
+index f70a15b5..aa5707e0 100644
+--- a/apps/ui-preview/src/style.css
++++ b/apps/ui-preview/src/style.css
+@@ -140,7 +140,7 @@ body > #root > [data-runtime-evidence] > .nr-navigation { padding: 0 clamp(12px,
+ .nr-v3-main:has(.nr-pos-fixture) .nr-v3-page-header { align-items: flex-start; margin-bottom: 16px; }
+ .nr-v3-main:has(.nr-pos-fixture) .nr-v3-page-header h1 { font-size: 30px; line-height: 1.2; }
+ .nr-v3-main:has(.nr-pos-fixture) .nr-fixture-banner { width: 100%; max-width: none; margin: 0 0 16px; padding: 10px 12px; border-color: #e6d88f; border-radius: 8px; font-size: 14px; line-height: 1.5; }
+-.nr-pos-fixture { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 16px; }
++.nr-pos-fixture { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(360px, 1fr); align-items: stretch; gap: 16px; }
+ .nr-pos-fixture { line-height: 1.5; }
+ .nr-pos-cart, .nr-pos-payment { min-width: 0; border: 1px solid var(--nr-border); border-radius: var(--nr-panel-radius); background: #fff; box-shadow: 0 6px 18px rgb(15 61 112 / 6%); }
+ .nr-pos-cart__header, .nr-pos-payment__header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--nr-border); }

@@ -1,0 +1,392 @@
+........................................................................ [  4%]
+........................................................................ [  9%]
+........................................................................ [ 13%]
+........................................................................ [ 18%]
+........................................................................ [ 22%]
+........................................................................ [ 27%]
+........................................................................ [ 32%]
+........................................................................ [ 36%]
+........................................................................ [ 41%]
+........................................................................ [ 45%]
+........................................................................ [ 50%]
+........................................................................ [ 55%]
+........................................................................ [ 59%]
+........................................................................ [ 64%]
+........................................................................ [ 68%]
+........................................................................ [ 73%]
+........................................................................ [ 78%]
+........................................................................ [ 82%]
+........................................................................ [ 87%]
+........................................................................ [ 91%]
+..........................................F............................. [ 96%]
+........................................................F                [100%]
+=================================== FAILURES ===================================
+____ test_missing_requirements_lists_full_remaining_set_for_create_sandbox _____
+
+client = <starlette.testclient.TestClient object at 0x7d4080d648d0>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-248/test_missing_requirements_list0/root'), PosixPath('/tmp/pytest-of-dell/pytest-248/test_missing_requirements_list0/root/demo'))
+sandboxable_repo_factory = <function sandboxable_repo_factory.<locals>.make at 0x7d3fadfb9c70>
+
+    def test_missing_requirements_lists_full_remaining_set_for_create_sandbox(client, git_repo, sandboxable_repo_factory):
+        """Section 12's exact worked example (this is the real Task #6
+        regression: a sandbox: contract exists and the workspace never opted
+        out with profile NONE, yet no sandbox exists at Runtime Verification
+        time -- in production that happened because auto-create silently hit
+        a capacity/runtime limit at Builder-Workspace-creation time
+        (auto_create_sandbox swallows SandboxError); here it is simulated
+        directly by removing the auto-created sandbox, which is
+        observationally identical to the decision layer). Create Sandbox
+        must still list 'Manual verification has not been completed'
+        alongside it, not only the one thing blocking right now."""
+        root, repo = git_repo
+        sb_repo = sandboxable_repo_factory(root, "qa-center")
+        register(client, sb_repo, "qa-center")
+        rid = client.get("/api/repositories").json()[0]["id"]
+        tid = new_task(client, "Runtime verification regression", risk="NORMAL")
+        client.post(f"/api/tasks/{tid}/select")
+        w = add_workspace(client, tid, rid, sandbox_profile=None)  # AUTO -> required
+        db = client.app.state.db
+        sb_ids = [r["id"] for r in db.all("SELECT id FROM sandboxes WHERE owner_type='AGENT_WORKSPACE' AND owner_id=?", (w["id"],))]
+        for sid in sb_ids:
+            db.execute("DELETE FROM sandbox_sources WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM sandbox_ports WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM sandbox_operations WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM manual_verifications WHERE sandbox_id=?", (sid,))
+            db.execute("DELETE FROM sandboxes WHERE id=?", (sid,))
+        submit_for_review(client, w)
+        review(client, w, "PASS")
+        d = decision(client, tid)
+        assert d["current_step"] == "TEST_QA"
+        assert d["next_action"]["action"] == "CREATE_SANDBOX"
+        assert d["missing_requirements"] == ["A Sandbox has not been created", "Manual verification has not been completed"]
+        assert d["next_action"]["target"] == f"/api/tasks/{tid}/workspaces/{w['id']}/create-sandbox"
+        assert d["next_action"]["method"] == "POST"
+    
+        # Successful action must advance the UI (section 6): once created,
+        # Create Sandbox never lingers as the primary action again.
+        r = client.post(d["next_action"]["target"], follow_redirects=False)
+        assert r.status_code == 303
+        d2 = decision(client, tid)
+        assert d2["next_action"]["action"] != "CREATE_SANDBOX"
+>       assert d2["next_action"]["action"] in ("SANDBOX_PROVISIONING", "START_QA")
+E       AssertionError: assert 'REBUILD_SANDBOX' in ('SANDBOX_PROVISIONING', 'START_QA')
+
+tests/test_workflow_decision_ux.py:186: AssertionError
+_______________ test_real_worktree_isolation_fixture_end_to_end ________________
+
+client = <starlette.testclient.TestClient object at 0x7d3fadee6250>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-248/test_real_worktree_isolation_f0/root'), PosixPath('/tmp/pytest-of-dell/pytest-248/test_real_worktree_isolation_f0/root/demo'))
+
+    def test_real_worktree_isolation_fixture_end_to_end(client, git_repo):
+        root, repo = git_repo
+        real_checkout = Path(__file__).resolve().parent.parent
+        before_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=real_checkout, capture_output=True, text=True).stdout.strip()
+        before_status = subprocess.run(["git", "status", "--porcelain"], cwd=real_checkout, capture_output=True, text=True).stdout
+    
+        _seed_buggy_fixture(repo)
+        assert not _pytest_passes(repo)  # 1. canonical checkout: bug is real
+    
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Fix answer() via managed worktree", project_id=rid,
+                          description="calc.answer() must return 42 per REQ-1; test_calc.py already asserts this.")
+        work_products = client.app.state.work_products
+        from app.services.architecture_design_service import design_state_digest
+        from app.services.test_design_service import test_design_state_digest
+        work_products.create(kind="FEATURE_SPEC", title="Fix answer()", change_id=cid, status="APPROVED",
+                              content_metadata={"requirements": [{"id": "REQ-1", "text": "calc.answer() must return 42, not 41"}]})
+        work_products.create(kind="TECHNICAL_DESIGN", title="Fix answer() design", change_id=cid, status="APPROVED",
+                              content_metadata={"design_summary": "Change the literal return constant in calc.answer() from 41 to 42."})
+        r = client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "AGENTIC_STANDARD"})
+        assert r.status_code == 200, r.text
+    
+        db = client.app.state.db
+        plan_id = db.execute(
+            "INSERT INTO plans(change_id,revision,status,planner_provider,input_context_digest,design_baseline_digest,test_design_baseline_digest) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (cid, 1, "MATERIALIZED", "claude", "x", design_state_digest(work_products, cid), test_design_state_digest(work_products, cid)))
+        tid = db.execute("INSERT INTO tasks(slug,title,status,change_id,task_type) VALUES(?,?,?,?,?)",
+                          ("fix-answer-e85-real", "Fix answer() via worktree", "BACKLOG", cid, "IMPLEMENTATION"))
+        db.execute(
+            "INSERT INTO plan_items(plan_id,item_key,title,task_type,depends_on_keys,requirement_ids,scope_hints,materialized_task_id) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (plan_id, "T1", "Fix answer()", "IMPLEMENTATION", "[]", json.dumps(["REQ-1"]), json.dumps(["calc.py"]), tid))
+    
+        svc = client.app.state.autonomous_execution_service
+        svc.settings = dataclasses.replace(svc.settings, agents=("claude",))
+        client.app.state.agent_sessions.prompt_ready_timeout = 25.0
+        client.app.state.agent_sessions.prompt_quiet_window = 2.0
+    
+        readiness = client.get(f"/api/tasks/{tid}/execution-readiness").json()
+        print("REAL E8.5 TEST -- readiness:", readiness)
+        assert readiness["readiness"] == "AUTO_READY", readiness
+    
+        # -- pre-register trust for the exact worktree path (same technique
+        #    proven in test_autonomous_execution_real.py) --
+        from app.services.git_workspace import slugify
+        worktree_path_precomputed = root / ".worktrees" / f"{slugify('demo')}-{slugify('claude')}-{slugify('fix-answer-e85-real-demo')}"
+        trust_key, trust_previous = _trust_claude_dir(worktree_path_precomputed)
+    
+        r = client.post(f"/api/changes/{cid}/autonomous-execution/tick")
+        body = r.json()
+        print("REAL E8.5 TEST -- tick result:", body)
+        assert body["launched"], body
+        result = body["results"][0]
+        assert result["outcome"] == "LAUNCHED", result
+        sid, wid = result["session_id"], result["workspace_id"]
+    
+        # 2/3/4. worktree identity: NOT the canonical checkout, real branch/base
+        ws = client.get(f"/api/tasks/{tid}/worktree").json()
+        print("REAL E8.5 TEST -- managed worktree:", ws)
+        assert Path(ws["worktree_path"]).resolve() != repo.resolve()
+        assert ws["branch"].startswith("agent/claude/")
+        assert ws["base_commit"]
+        assert str(Path(ws["worktree_path"]).resolve()) == trust_key, "worktree path prediction was wrong -- trust registered for the wrong path"
+        worktree = ws["worktree_path"]
+    
+        try:
+            deadline = time.time() + 420
+            fixed = False
+            while time.time() < deadline:
+                if _pytest_passes(worktree):  # 7/8. Builder edits WORKTREE; real test passes there
+                    fixed = True
+                    break
+                time.sleep(5)
+            print("REAL E8.5 TEST -- final calc.py:", (Path(worktree) / "calc.py").read_text())
+            assert fixed, "real Claude Builder did not make test_calc.py pass in the managed worktree within the timeout"
+    
+            # 9. Task commit exists (allow a short grace period, same as E8.24's own real test)
+            commit_deadline = time.time() + 60
+            committed = False
+            while time.time() < commit_deadline:
+                if not client.app.state.git.status(worktree).strip():
+                    committed = True
+                    break
+                time.sleep(5)
+            assert committed, "Builder fixed the file but never committed within the grace period"
+    
+            r = client.post(f"/api/workspaces/{wid}/verification-report",
+                             data={"work_status": "READY", "what_changed": "Fixed calc.answer() to return 42",
+                                   "files_changed": "calc.py"}, follow_redirects=False)
+            assert r.status_code == 303, r.text
+    
+            # 10. CODE_CHANGE WorkProduct references worktree/branch/base/head
+            wp = db.one("SELECT * FROM work_products WHERE task_id=? AND kind='CODE_CHANGE'", (tid,))
+            meta = json.loads(wp["content_metadata"])
+            print("REAL E8.5 TEST -- CODE_CHANGE metadata:", meta)
+            assert meta["worktree_path"] == worktree
+            assert meta["branch_name"] == ws["branch"]
+            assert meta["base_commit"] == ws["base_commit"]
+            assert meta["head_commit"]
+            assert len(meta["commits"]) >= 1
+>           assert meta["scope_check"]["violation"] is False
+E           assert True is False
+
+tests/test_worktree_manager_real.py:131: AssertionError
+----------------------------- Captured stdout call -----------------------------
+REAL E8 TEST -- pytest in /tmp/pytest-of-dell/pytest-248/test_real_worktree_isolation_f0/root/demo -> 1
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______________________________ test_answer_is_42 _______________________________
+
+    def test_answer_is_42():
+>       assert answer() == 42
+E       assert 41 == 42
+E        +  where 41 = answer()
+
+test_calc.py:5: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_answer_is_42 - assert 41 == 42
+1 failed in 0.02s
+
+REAL E8.5 TEST -- readiness: {'readiness': 'AUTO_READY', 'reason': 'Eligible to auto-start', 'task_id': 1, 'repository_id': 1, 'provider': 'claude'}
+REAL E8.5 TEST -- tick result: {'results': [{'outcome': 'LAUNCHED', 'task_id': 1, 'session_id': 1, 'workspace_id': 1, 'change_id': 1}], 'launched': True}
+REAL E8.5 TEST -- managed worktree: {'id': 1, 'repository_id': 1, 'agent': 'claude', 'task_name': 'fix-answer-e85-real', 'branch': 'agent/claude/fix-answer-e85-real-demo', 'worktree_path': '/tmp/pytest-of-dell/pytest-248/test_real_worktree_isolation_f0/root/.worktrees/demo-claude-fix-answer-e85-real-demo', 'base_branch': 'main', 'base_commit': '13748a8316c9f0298db3a9c1aa3883511771aca8', 'status': 'CREATED', 'created_at': '2026-11-23 13:12:35', 'updated_at': '2026-11-23 13:12:35', 'last_commit': '13748a8316c9f0298db3a9c1aa3883511771aca8', 'ready_for_integration': 0, 'notes': '', 'closed_at': None, 'task_id': 1, 'role': 'BUILDER', 'sandbox_profile': None, 'reviewer_agent': None, 'review_status': None, 'review_notes': '', 'review_commit': None, 'tester_agent': None, 'qa_status': None, 'qa_notes': '', 'builder_instructions': '', 'abandoned_at': None, 'canonical_status_snapshot': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', 'repo_path': '/tmp/pytest-of-dell/pytest-248/test_real_worktree_isolation_f0/root/demo', 'repo_name': 'demo', 'lifecycle_status': 'IN_USE', 'worktree_isolation': True, 'staleness': {'stale': False, 'reason': None, 'base_commit': '13748a8316c9f0298db3a9c1aa3883511771aca8', 'current_base_head': '13748a8316c9f0298db3a9c1aa3883511771aca8'}}
+REAL E8 TEST -- pytest in /tmp/pytest-of-dell/pytest-248/test_real_worktree_isolation_f0/root/.worktrees/demo-claude-fix-answer-e85-real-demo -> 1
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______________________________ test_answer_is_42 _______________________________
+
+    def test_answer_is_42():
+>       assert answer() == 42
+E       assert 41 == 42
+E        +  where 41 = answer()
+
+test_calc.py:5: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_answer_is_42 - assert 41 == 42
+1 failed in 0.03s
+
+REAL E8 TEST -- pytest in /tmp/pytest-of-dell/pytest-248/test_real_worktree_isolation_f0/root/.worktrees/demo-claude-fix-answer-e85-real-demo -> 1
+F                                                                        [100%]
+=================================== FAILURES ===================================
+______________________________ test_answer_is_42 _______________________________
+
+    def test_answer_is_42():
+>       assert answer() == 42
+E       assert 41 == 42
+E        +  where 41 = answer()
+
+test_calc.py:5: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_answer_is_42 - assert 41 == 42
+1 failed in 0.02s
+
+REAL E8 TEST -- pytest in /tmp/pytest-of-dell/pytest-248/test_real_worktree_isolation_f0/root/.worktrees/demo-claude-fix-answer-e85-real-demo -> 0
+.                                                                        [100%]
+1 passed in 0.01s
+
+REAL E8.5 TEST -- final calc.py: def answer():
+    return 42
+
+REAL E8.5 TEST -- CODE_CHANGE metadata: {'workspace_id': 1, 'repository_id': 1, 'worktree_path': '/tmp/pytest-of-dell/pytest-248/test_real_worktree_isolation_f0/root/.worktrees/demo-claude-fix-answer-e85-real-demo', 'branch_name': 'agent/claude/fix-answer-e85-real-demo', 'base_commit': '13748a8316c9f0298db3a9c1aa3883511771aca8', 'head_commit': 'ff04d63bc2301826c32d2cf0f18d65a6803e6c6f', 'commits': ['ff04d63 fix: answer() returns 42'], 'agent_session_id': 1, 'provider': 'claude', 'role': 'BUILDER', 'modified_files': ['calc.py'], 'source_revision': 'ff04d63bc2301826c32d2cf0f18d65a6803e6c6f', 'requirement_ids': ['REQ-1'], 'test_case_spec_ids': [], 'design_baseline_work_product_id': 2, 'spec_baseline_work_product_id': 1, 'scope_check': {'violation': True, 'reason': 'SCOPE_VIOLATION', 'out_of_scope_files': ['PROJECT_CONTEXT.md'], 'changed_files': ['PROJECT_CONTEXT.md', 'calc.py'], 'declared_scope': ['calc.py']}, 'canonical_repo_check': {'checked': True, 'modified': False}}
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_action_feedback.py: 187 warnings
+tests/test_agent_observability.py: 11 warnings
+tests/test_agent_observability_p0_final.py: 22 warnings
+tests/test_agent_observability_p0_repair.py: 66 warnings
+tests/test_agent_observability_security.py: 22 warnings
+tests/test_agent_possibly_stuck.py: 33 warnings
+tests/test_architecture_design.py: 528 warnings
+tests/test_autonomous_execution.py: 396 warnings
+tests/test_autonomous_execution_real.py: 11 warnings
+tests/test_b01_authn.py: 220 warnings
+tests/test_b02_organizations.py: 286 warnings
+tests/test_b03_authz.py: 154 warnings
+tests/test_b04_csrf.py: 121 warnings
+tests/test_b05_ratelimit.py: 88 warnings
+tests/test_b06_sandbox.py: 22 warnings
+tests/test_b07_secrets.py: 242 warnings
+tests/test_b0_final_qualification.py: 143 warnings
+tests/test_b1_read_isolation.py: 110 warnings
+tests/test_b2_release_concurrency.py: 44 warnings
+tests/test_b3_github_app.py: 110 warnings
+tests/test_b4_github_webhook_ingestion.py: 132 warnings
+tests/test_b5_tenant_isolation_completeness.py: 88 warnings
+tests/test_b6_trusted_proxy.py: 66 warnings
+tests/test_b7_repository_identity.py: 154 warnings
+tests/test_backup_restore.py: 44 warnings
+tests/test_baseline_reproduction_duplicate_click.py: 11 warnings
+tests/test_baseline_waivers.py: 44 warnings
+tests/test_builder_completion_vs_session.py: 121 warnings
+tests/test_builder_exec_ux.py: 88 warnings
+tests/test_builder_workspace_ux.py: 88 warnings
+tests/test_change_overview.py: 99 warnings
+tests/test_cleanup_and_restart.py: 44 warnings
+tests/test_control_plane.py: 176 warnings
+tests/test_cross_repo_integration.py: 11 warnings
+tests/test_db_locked_handled_cleanly.py: 22 warnings
+tests/test_deployment.py: 165 warnings
+tests/test_deployment_hardening.py: 121 warnings
+tests/test_deployment_stuck_after_restart.py: 33 warnings
+tests/test_engineering_catalog.py: 275 warnings
+tests/test_engineering_domain.py: 319 warnings
+tests/test_engineering_lifecycle_ui.py: 297 warnings
+tests/test_execution_wave_reservation_stuck_after_restart.py: 33 warnings
+tests/test_execution_waves.py: 253 warnings
+tests/test_exited_no_report_recovery.py: 176 warnings
+tests/test_golden_e2e.py: 22 warnings
+tests/test_help_guide.py: 121 warnings
+tests/test_incidents.py: 242 warnings
+tests/test_integration_create_idempotent.py: 11 warnings
+tests/test_integration_lock_stuck_after_restart.py: 33 warnings
+tests/test_integration_push.py: 110 warnings
+tests/test_integration_test_run_stuck_after_restart.py: 33 warnings
+tests/test_live_terminal_routing.py: 88 warnings
+tests/test_merge_reconciliation.py: 143 warnings
+tests/test_operations_stuck_after_restart.py: 33 warnings
+tests/test_performance_regression.py: 55 warnings
+tests/test_planner_service.py: 451 warnings
+tests/test_product_acceptance.py: 253 warnings
+tests/test_productization_audit.py: 88 warnings
+tests/test_prompt_delivery.py: 55 warnings
+tests/test_prompt_ux.py: 99 warnings
+tests/test_qa_center_sandbox_contract.py: 110 warnings
+tests/test_real_merge.py: 132 warnings
+tests/test_release_pipeline.py: 319 warnings
+tests/test_repo_rename_worktree_repair.py: 22 warnings
+tests/test_repository_runtime_sandbox.py: 176 warnings
+tests/test_review_fix_loop.py: 319 warnings
+tests/test_review_fix_loop_real.py: 22 warnings
+tests/test_runtime_dependency_staleness.py: 11 warnings
+tests/test_sandbox_dies_self_heals.py: 22 warnings
+tests/test_sandbox_docker.py: 33 warnings
+tests/test_sandbox_reset_data.py: 33 warnings
+tests/test_sandbox_stuck_busy_after_restart.py: 33 warnings
+tests/test_sidebar_nav.py: 77 warnings
+tests/test_simple_mode.py: 154 warnings
+tests/test_smoke.py: 11 warnings
+tests/test_soak_multi_repo_resource_leak.py: 11 warnings
+tests/test_spec_compliance.py: 88 warnings
+tests/test_spec_lifecycle.py: 407 warnings
+tests/test_spec_supervisor_gate.py: 99 warnings
+tests/test_state_invariants.py: 99 warnings
+tests/test_task_centric_ux.py: 143 warnings
+tests/test_task_lifecycle_engine.py: 275 warnings
+tests/test_task_sandbox_views.py: 44 warnings
+tests/test_task_wizard.py: 99 warnings
+tests/test_test_design.py: 473 warnings
+tests/test_transcript_tail_persistence.py: 22 warnings
+tests/test_verification_ux.py: 88 warnings
+tests/test_web.py: 110 warnings
+tests/test_wizard_sandbox_picks_latest.py: 11 warnings
+tests/test_workflow_dead_anchors.py: 143 warnings
+tests/test_workflow_decision_ux.py: 121 warnings
+tests/test_workflow_engine.py: 462 warnings
+tests/test_workspace_branch_collision.py: 22 warnings
+tests/test_workspace_detail_ux.py: 110 warnings
+tests/test_worktree_manager.py: 209 warnings
+tests/test_worktree_manager_real.py: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_agent_possibly_stuck.py: 3 warnings
+tests/test_autonomous_execution.py: 3 warnings
+tests/test_autonomous_execution_real.py: 1 warning
+tests/test_builder_completion_vs_session.py: 9 warnings
+tests/test_builder_exec_ux.py: 3 warnings
+tests/test_builder_workspace_ux.py: 1 warning
+tests/test_control_plane.py: 6 warnings
+tests/test_engineering_catalog.py: 8 warnings
+tests/test_engineering_domain.py: 1 warning
+tests/test_execution_wave_reservation_stuck_after_restart.py: 1 warning
+tests/test_execution_waves.py: 7 warnings
+tests/test_exited_no_report_recovery.py: 18 warnings
+tests/test_golden_e2e.py: 6 warnings
+tests/test_live_terminal_routing.py: 6 warnings
+tests/test_planner_service.py: 1 warning
+tests/test_productization_audit.py: 2 warnings
+tests/test_prompt_delivery.py: 5 warnings
+tests/test_review_fix_loop.py: 2 warnings
+tests/test_review_fix_loop_real.py: 1 warning
+tests/test_soak_multi_repo_resource_leak.py: 3 warnings
+tests/test_spec_lifecycle.py: 1 warning
+tests/test_spec_supervisor_gate.py: 3 warnings
+tests/test_state_invariants.py: 3 warnings
+tests/test_transcript_tail_persistence.py: 2 warnings
+tests/test_workflow_engine.py: 7 warnings
+tests/test_workspace_detail_ux.py: 7 warnings
+tests/test_worktree_manager.py: 2 warnings
+tests/test_worktree_manager_real.py: 1 warning
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=2925161) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/_pytest/python.py:191: PytestReturnNotNoneWarning: Test functions should return None, but tests/test_golden_e2e.py::test_golden_end_to_end_inventory_app_reaches_complete returned <class 'tuple'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/test_simple_mode.py::test_mode_query_param_sets_cookie_and_persists
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/starlette/testclient.py:518: DeprecationWarning: Setting per-request cookies=<...> is being deprecated, because the expected behaviour on cookie persistence is ambiguous. Set cookies directly on the client instance instead.
+    return super().request(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_workflow_decision_ux.py::test_missing_requirements_lists_full_remaining_set_for_create_sandbox
+FAILED tests/test_worktree_manager_real.py::test_real_worktree_isolation_fixture_end_to_end
+2 failed, 1567 passed, 1 skipped, 12161 warnings in 3969.14s (1:06:09)

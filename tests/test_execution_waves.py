@@ -331,7 +331,12 @@ def test_double_tick_never_launches_same_task_twice(client, git_repo):
     rid = register(client, repo, "demo")
     cid = new_change(client, "Double tick change", project_id=rid)
     a, _ = new_plan_task(client, cid, "A", "A", ["a.py"])
-    fake_launcher(client, "claude")
+    assert client.app.state.autonomous_execution_service._default_provider() == "codex"
+    # The scheduler picks the configured default provider (Codex first in
+    # Settings.agents); keep the disposable real-PTY launcher on that same
+    # provider so this race test exercises launch/reservation, not a missing
+    # Claude CLI.
+    fake_launcher(client, "codex")
 
     results = []
     errors = []
@@ -373,7 +378,9 @@ def test_sibling_failure_does_not_stop_safe_sibling(client, git_repo):
             raise RuntimeError("Builder A failed to start")
         return real_start(ws)
 
-    fake_launcher(client, "claude")
+    # Match the launchable default provider used by the scheduler.
+    assert client.app.state.autonomous_execution_service._default_provider() == "codex"
+    fake_launcher(client, "codex")
     client.app.state.autonomous_execution_service._start_builder_session = flaky
     run = _ews(client).run_execution_wave(cid)
     assert run["outcome"] == "LAUNCHED"
@@ -581,7 +588,7 @@ _pytestmark_real = _pytest.mark.skipif(_shutil.which("claude") is None, reason="
 
 
 @_pytestmark_real
-def test_real_claude_builder_launches_through_execution_wave_path(client, git_repo):
+def test_real_claude_builder_launches_through_execution_wave_path(client, git_repo, monkeypatch, request):
     """E13.42: 'run at least one real Claude Builder separately through
     the same path' -- run_execution_wave() (never a second launch
     mechanism) genuinely starts a real `claude --dangerously-skip-
@@ -593,9 +600,12 @@ def test_real_claude_builder_launches_through_execution_wave_path(client, git_re
     and works with the real external provider, not a second copy of
     E8's own real-fix proof."""
     from tests.test_autonomous_execution_real import _trust_claude_dir, _restore_claude_dir
+    from tests.claude_test_config import prepare_claude_test_config, require_isolated_claude_auth
     from app.services.git_workspace import slugify
 
     root, repo = git_repo
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     (repo / "calc.py").write_text("def answer():\n    return 41\n")
     (repo / "test_calc.py").write_text("from calc import answer\n\n\ndef test_answer_is_42():\n    assert answer() == 42\n")
     (repo / ".gitignore").write_text("__pycache__/\n.pytest_cache/\n*.pyc\n")
@@ -614,7 +624,8 @@ def test_real_claude_builder_launches_through_execution_wave_path(client, git_re
 
     task_slug = _db(client).one("SELECT slug FROM tasks WHERE id=?", (a,))["slug"]
     worktree_path_precomputed = root / ".worktrees" / f"{slugify('demo')}-{slugify('claude')}-{slugify(task_slug + '-demo')}"
-    trust_key, trust_previous = _trust_claude_dir(worktree_path_precomputed)
+    trust_registration = _trust_claude_dir(worktree_path_precomputed, allowed_root=root,
+                                           monkeypatch=monkeypatch, request=request)
     try:
         run = _ews(client).run_execution_wave(cid)
         assert run["outcome"] == "LAUNCHED", run
@@ -638,4 +649,4 @@ def test_real_claude_builder_launches_through_execution_wave_path(client, git_re
             client.app.state.agent_sessions.stop(session_id)
         except Exception:
             pass
-        _restore_claude_dir(trust_key, trust_previous)
+        _restore_claude_dir(trust_registration)

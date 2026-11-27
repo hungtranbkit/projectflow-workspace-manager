@@ -1,0 +1,54 @@
+tests/test_visual_qa_contract.py::test_visual_qa_contract_is_absent_by_default
+tests/test_visual_qa_contract.py::test_visual_qa_contract_resolves_only_repo_local_reference
+tests/test_visual_qa_contract.py::test_multiple_viewports_require_a_reference_for_each_size
+tests/test_visual_qa_contract.py::test_invalid_visual_qa_contract_fails_closed[visual_qa: []\n-must be a mapping]
+tests/test_visual_qa_contract.py::test_invalid_visual_qa_contract_fails_closed[block1-repo-relative]
+tests/test_visual_qa_contract.py::test_invalid_visual_qa_contract_fails_closed[block2-does not exist]
+tests/test_visual_qa_contract.py::test_invalid_visual_qa_contract_fails_closed[visual_qa:\n  enabled: true\n  reference: docs/reference.png\n  route: https://example.com\n-loopback]
+tests/test_visual_qa_contract.py::test_visual_qa_task_marker_is_explicit_and_backend_tasks_stay_opted_out
+tests/test_visual_qa_contract.py::test_visual_qa_stage_is_added_only_for_explicit_task_opt_in
+tests/test_visual_qa_contract.py::test_task_opt_in_without_project_contract_fails_closed
+tests/test_visual_qa_contract.py::test_prompt_adds_visual_qa_instructions_only_for_marked_ui_task
+tests/test_visual_qa_contract.py::test_marked_task_prompt_explains_missing_visual_qa_config
+tests/test_visual_qa_contract.py::test_test_runner_requires_visual_stage_only_for_marked_task
+tests/test_visual_qa_contract.py::test_task_decision_requires_current_visual_qa_evidence_for_opted_in_task
+tests/test_visual_qa_execution.py::test_opted_in_ui_task_exit_zero_without_coordinator_evidence_fails_closed
+tests/test_visual_qa_execution.py::test_visual_failure_fails_opted_in_task_decision
+tests/test_visual_qa_execution.py::test_backend_task_without_marker_dispatches_only_existing_test_stage
+tests/test_task_decision_required_stages.py::test_integration_requires_each_contract_stage_not_same_number_of_unrelated_rows
+tests/test_task_decision_required_stages.py::test_builder_requires_each_contract_stage_and_ignores_unrelated_pass
+tests/test_task_decision_required_stages.py::test_stale_sha_rows_cannot_supply_missing_required_stage
+tests/test_task_decision_required_stages.py::test_latest_pending_or_skipped_required_stage_is_not_run[QUEUED]
+tests/test_task_decision_required_stages.py::test_latest_pending_or_skipped_required_stage_is_not_run[RUNNING]
+tests/test_task_decision_required_stages.py::test_latest_pending_or_skipped_required_stage_is_not_run[SKIPPED]
+tests/test_task_decision_required_stages.py::test_latest_required_pass_supersedes_older_failure_and_valid_waiver_keeps_named_failure_semantics
+tests/test_task_decision_required_stages.py::test_timeout_or_mismatched_waiver_fingerprint_does_not_pass_required_gate
+tests/test_task_decision_required_stages.py::test_visual_opt_in_requires_visual_stage_and_visual_timeout_cannot_be_waived
+tests/test_task_decision_required_stages.py::test_backend_builder_does_not_require_optional_visual_stage
+tests/test_task_decision_required_stages.py::test_exit_zero_visual_stage_without_coordinator_evidence_fails_integration_gate
+tests/test_task_decision_required_stages.py::test_integration_without_contract_and_zero_stage_legacy_behavior_is_preserved
+tests/test_task_decision_required_stages.py::test_visual_opt_in_with_invalid_contract_fails_closed_for_both_gates
+tests/test_task_decision_required_stages.py::test_invalid_present_nonvisual_contract_is_not_treated_as_missing_legacy_contract
+tests/test_test_runner_source_identity.py::test_commit_change_after_queue_is_rejected_before_shell_command
+tests/test_test_runner_source_identity.py::test_commit_change_during_real_shell_command_cannot_record_pass_for_queued_sha
+tests/test_test_runner_source_identity.py::test_dirty_tracked_source_can_run_but_is_not_commit_bound
+tests/test_test_runner_source_identity.py::test_tracked_source_drift_during_dirty_run_fails_closed
+tests/test_test_runner_source_identity.py::test_new_untracked_source_during_clean_run_cannot_inherit_commit_sha
+tests/test_test_runner_source_identity.py::test_clean_pass_becomes_not_run_after_head_advances
+tests/test_test_runner_source_identity.py::test_clean_pass_becomes_not_run_when_same_head_becomes_dirty
+tests/test_test_runner_source_identity.py::test_integration_pass_becomes_not_run_when_source_drifts
+tests/test_test_runner_source_identity.py::test_failed_stage_still_skips_later_stages
+tests/test_project_test_timeout.py::test_project_test_timeout_reaches_test_runner_and_remains_bounded[False-PASS-TEST_PASS]
+tests/test_project_test_timeout.py::test_project_test_timeout_reaches_test_runner_and_remains_bounded[True-TIMEOUT-TEST_FAIL]
+
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+42 tests collected in 0.14s

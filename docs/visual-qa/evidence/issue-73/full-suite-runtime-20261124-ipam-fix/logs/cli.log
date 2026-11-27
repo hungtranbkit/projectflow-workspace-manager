@@ -1,0 +1,12 @@
+✔ visual-qa parses local URL, exact viewport, output, threshold and full-page capture (1.705451ms)
+✔ visual-qa rejects network URLs to prevent accidental external access (0.762927ms)
+✔ visual-qa rejects invalid viewport and threshold (0.482946ms)
+✔ visual-qa rejects missing required arguments (1.083427ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 96.188612

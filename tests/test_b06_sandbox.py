@@ -69,9 +69,9 @@ def svc():
 def test_ephemeral_run_basic_success(svc, tmp_path):
     wt = _worktree(tmp_path)
     (wt / "hello.txt").write_text("world\n")
-    r = svc.run_ephemeral("cat hello.txt && whoami", wt, ".", 30, DEFAULT_EXEC_IMAGE, "none", "256m", "1.0", 128)
+    r = svc.run_ephemeral("cat hello.txt && id -u", wt, ".", 30, DEFAULT_EXEC_IMAGE, "none", "256m", "1.0", 128)
     assert r.returncode == 0
-    assert "world" in r.stdout
+    assert r.stdout.splitlines() == ["world", str(wt.stat().st_uid)]
 
 
 def test_ephemeral_run_respects_working_directory_within_full_worktree(svc, tmp_path):

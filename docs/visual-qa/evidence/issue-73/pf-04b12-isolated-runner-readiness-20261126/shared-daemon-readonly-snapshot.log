@@ -1,0 +1,7 @@
+snapshot_utc=2026-11-26T06:53:38Z
+docker_context=default
+docker_endpoint=unix:///var/run/docker.sock (shared daemon; not used by tests)
+server=29.7.2 root=/var/lib/docker containers=71 running=62 stopped=9
+networks=29
+wm_containers=0
+wm_networks=0

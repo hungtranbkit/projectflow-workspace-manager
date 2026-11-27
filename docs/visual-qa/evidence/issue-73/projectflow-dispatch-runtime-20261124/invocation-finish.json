@@ -1,0 +1,13 @@
+{
+  "session_id": 1,
+  "status": "EXITED",
+  "exit_code": 0,
+  "exited_at": "2026-11-24T13:41:46.205945+00:00",
+  "prompt_status": "DELIVERED",
+  "completion_marker_seen": true,
+  "skill_path_seen_in_transcript": true,
+  "folder_trust_prompt_accepted": false,
+  "provider_invocations": 1,
+  "max_repair_iterations": 3,
+  "completion_recorded_at_ict": "2026-11-24T20:41:47.171921+07:00"
+}

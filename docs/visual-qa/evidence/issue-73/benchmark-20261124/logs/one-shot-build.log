@@ -1,0 +1,5 @@
+
+> one-shot-ui@0.12.0 build
+> bun scripts/build.ts
+
+sh: 1: bun: not found

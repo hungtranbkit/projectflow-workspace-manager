@@ -224,10 +224,10 @@ def test_create_pr_backend_blocked_while_not_ready(client, git_repo):
 # =============================================== Closed/stopped sandbox ==
 
 def test_closed_sandbox_restarts_instead_of_duplicating(client, tmp_path):
-    from tests.conftest import make_repo, NGINX_SANDBOX_CONTRACT, NGINX_COMPOSE
+    from tests.conftest import make_repo, NGINX_SANDBOX_CONTRACT, nginx_compose_for_test
     root = tmp_path / "root"
     repo = make_repo(root, "closed-test", NGINX_SANDBOX_CONTRACT.format(lo=21500, hi=21519))
-    (repo / "compose.yml").write_text(NGINX_COMPOSE)
+    (repo / "compose.yml").write_text(nginx_compose_for_test())
     run(repo, "git", "add", ".")
     run(repo, "git", "commit", "-m", "sandbox contract")
     register(client, repo, "closed-test")
@@ -260,10 +260,10 @@ def test_closed_sandbox_restarts_instead_of_duplicating(client, tmp_path):
 
 
 def test_closed_stale_sandbox_needs_rebuild_not_plain_restart(client, tmp_path):
-    from tests.conftest import make_repo, NGINX_SANDBOX_CONTRACT, NGINX_COMPOSE
+    from tests.conftest import make_repo, NGINX_SANDBOX_CONTRACT, nginx_compose_for_test
     root = tmp_path / "root"
     repo = make_repo(root, "closed-stale-test", NGINX_SANDBOX_CONTRACT.format(lo=21520, hi=21539))
-    (repo / "compose.yml").write_text(NGINX_COMPOSE)
+    (repo / "compose.yml").write_text(nginx_compose_for_test())
     run(repo, "git", "add", ".")
     run(repo, "git", "commit", "-m", "sandbox contract")
     register(client, repo, "closed-stale-test")

@@ -1,0 +1,60 @@
+{
+  "source_commit": "b0e55c5a15fef8e7515c8effc0c7d3296f1215a4",
+  "source_tree": "20fc76b6bb2ade31fe61d094e91ee7982706b612",
+  "parent": "e96a3d0b5560a1d5e5376538a94670cc102f8de3",
+  "red_before_fix": {
+    "tests": 3,
+    "failures": 3,
+    "errors": 0,
+    "skipped": 0,
+    "exit_code": 1,
+    "junit_duration_seconds": 10.906,
+    "ended_utc": "2026-11-27T11:27:19Z",
+    "started_utc": null,
+    "note": "aggregate start time not captured; separate one-test visual red was 11:25:55–11:26:02 UTC"
+  },
+  "green_exact_source_transaction": {
+    "tests": 5,
+    "passed": 5,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "exit_code": 0,
+    "started_utc": "2026-11-27T11:43:33Z",
+    "ended_utc": "2026-11-27T11:43:51Z"
+  },
+  "green_exact_source_focused": {
+    "tests": 78,
+    "passed": 78,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "exit_code": 0,
+    "started_utc": "2026-11-27T11:45:01Z",
+    "ended_utc": "2026-11-27T11:47:13Z"
+  },
+  "runtime": {
+    "python": "3.14.4",
+    "pytest": "9.2.0",
+    "browser": "not run",
+    "provider": "not run",
+    "docker": "not used",
+    "full_suite": "not run"
+  },
+  "raw_local_sha256": {
+    "red-before-fix.xml": "62926ad62866ca2a51d42a67efe2ee61722b9164a2892789e766c5622d101fd4",
+    "red-before-fix.log": "124bd545d23e1f4414eb278e25963e7225b840e2974058b93c782e8c2ec6e809",
+    "green-exact-source-78.xml": "8897ab4c1333ac8750ec0d2d763ae4cf1a75464c44b7aacaa1f5a3f5c1749ff0",
+    "green-exact-source-78.log": "d0cf20317dcdb6902ffce0f7fe5bc96588601db949fb13ef50ebfbe76705d89b",
+    "green-exact-source-transaction-5.xml": "5be92bb0cd0110152c84a24c1f12ba81f93b50ed63ef7b06a1052e0a85835e19",
+    "green-exact-source-transaction-5.log": "c32895901a2c2d37d34b0cbdc9e0ed8d892b1371e9311c74d549a3ed2e12e317"
+  },
+  "published_sanitized_sha256": {
+    "green-exact-source-78.log": "732e8967b32dfce46fc690fa4130b294ff58db7b08691b9b287a3f1c5c5020e4",
+    "green-exact-source-78.xml": "0f73836f90f050beb91a665604c9a5f119fb0c1fe4a036ddaf4c5736c5d97bd2",
+    "green-exact-source-transaction-5.log": "dcbc52a01b5357da2fb03f3943e6387c17d25fecc17366966b7299242bbcbb05",
+    "green-exact-source-transaction-5.xml": "83f13b03fce24bcd79b94e3056b458be48ace6057af0e62a2fc28d78cde5fd65",
+    "red-before-fix.log": "7723d3216655f4392a4525c07b5f545e027f98bff9c22cc36bfd087ed720e20c",
+    "red-before-fix.xml": "9bcdce5ae15d73e2950df11c8eab5fa8a218a6c87daf8fce09ebde5c8919adb1"
+  }
+}

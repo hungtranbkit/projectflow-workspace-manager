@@ -1,0 +1,28 @@
+BASE_HEAD=45ed1a25b6dd9bdbe420bc5bb00767e25196c2c5
+BASE_TREE=3316adb87418d7a05adba7fbd6cc18a7c14be40f
+WORKTREE_TEST_BLOB=1dedf9a2c1daf5b3dfab8d6cb5a4677c7ac627bd
+PYTHON=Python 3.14.4
+PYTEST=pytest 9.2.0
+COMMAND=PATH=/usr/bin:/bin /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/bin/python -m pytest -q -ra tests/test_autonomous_execution.py::test_ready_implementation_task_is_auto_ready tests/test_autonomous_execution.py::test_no_duplicate_launch_for_same_task tests/test_autonomous_execution.py::test_execution_failure_recorded tests/test_review_fix_loop.py::test_fix_required_creates_fix_task_transfers_worktree tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py --junitxml=docs/visual-qa/evidence/issue-73/pf-04b8-execution-waves-20261126/related-final.xml
+START_UTC=2026-11-26T01:24:54,664456539+00:00
+START_ICT=2026-11-26T08:24:54,668326797+07:00
+.....................                                                    [100%]
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_autonomous_execution.py: 33 warnings
+tests/test_review_fix_loop.py: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_autonomous_execution.py::test_no_duplicate_launch_for_same_task
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=2473856) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+COMMAND_EXIT=0
+END_UTC=2026-11-26T01:25:06,614062863+00:00
+END_ICT=2026-11-26T08:25:06,616988583+07:00

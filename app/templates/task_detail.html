@@ -4,7 +4,7 @@
 {% if t.implementation_prompt %}
 <p><small>Nguồn (Prompt source)</small><b>Detailed Prompt</b></p>
 <pre class="prompt-box">{{t.implementation_prompt}}</pre>
-<details><summary>+ Edit</summary>
+<details id="prompt-edit"><summary>+ Edit</summary>
 <form method="post" action="/api/tasks/{{t.id}}/prompt"><textarea name="implementation_prompt" rows="6">{{t.implementation_prompt}}</textarea><button>Save Prompt</button></form>
 </details>
 {% else %}
@@ -103,6 +103,94 @@
 {% if blocking_reasons|length > 1 %}<details><summary>{{blocking_reasons|length}} vấn đề kỹ thuật (xem chi tiết)</summary><div class="alert"><ul>{% for b in blocking_reasons %}<li>{{b}}</li>{% endfor %}</ul></div></details>{% endif %}
 
 <h2>{{t.title}}</h2>
+
+<section class="panel" id="visual-qa" aria-labelledby="visual-qa-title">
+<div class="row"><div><h3 id="visual-qa-title">Visual QA</h3><small>Kết quả từ TestRunner và TaskDecisionService hiện có.</small></div>
+<span class="badge {{'pending' if decision.visual_qa_required else ''}}">{{'Bắt buộc theo Task' if decision.visual_qa_required else 'Không bắt buộc'}}</span></div>
+{% if not decision.visual_qa_required %}
+<p>Task này đang opt-out. Cấu hình <code>visual_qa</code> trong <code>PROJECT.yaml</code> chỉ để xem trước, không tự bật gate. Xem reference bên dưới rồi chủ động dùng biểu mẫu opt-in. Việc lưu prompt không tự chạy test.</p>
+{% else %}
+<p>Gate chỉ áp dụng vì prompt Task có <code>VISUAL_QA_REQUIRED: true</code>. Opt-in chỉ yêu cầu đo kiểm; agent Builder và nút Run Test hiện có vẫn là luồng thực thi.</p>
+{% endif %}
+{% if not workspaces %}<div class="warning">Chưa có Builder workspace để đọc contract hoặc chạy Visual QA.</div>{% endif %}
+{% set reference_available = namespace(value=false) %}
+{% for w in workspaces %}
+<div class="nested" data-visual-qa-workspace="{{w.id}}">
+<div class="row"><b>{{w.repo_name}}</b>{% if decision.visual_qa_required %}<span class="badge">Automated tests: {{w.tests_status}}</span>{% endif %}</div>
+<details class="nested" id="visual-qa-draft-import-{{w.id}}">
+<summary>Thêm ảnh thiết kế nháp cho workspace này</summary>
+<p><b>Chỉ tạo bản nháp riêng tư.</b> Ảnh chưa được duyệt; thao tác này không sửa <code>PROJECT.yaml</code>, không đổi reference đang chạy, không bật opt-in và không chạy test.</p>
+<form method="post" enctype="multipart/form-data" action="/api/tasks/{{t.id}}/workspaces/{{w.id}}/visual-reference-drafts">
+<label for="visual-draft-file-{{w.id}}">Ảnh PNG (tối đa 8 MiB)</label>
+<input id="visual-draft-file-{{w.id}}" type="file" name="reference_png" accept="image/png" required>
+<label for="visual-draft-viewport-{{w.id}}">Viewport gốc</label>
+<select id="visual-draft-viewport-{{w.id}}" name="viewport" required>
+<option value="">Chọn kích thước PNG</option><option value="430x932">430 × 932</option><option value="768x1024">768 × 1024</option><option value="1366x768">1366 × 768</option><option value="1586x992">1586 × 992</option><option value="1920x1080">1920 × 1080</option>
+</select>
+<label for="visual-draft-note-{{w.id}}">Nguồn / ghi chú thiết kế (tối đa 500 ký tự)</label>
+<textarea id="visual-draft-note-{{w.id}}" name="design_note" maxlength="500" rows="2" required></textarea>
+<button type="submit">Lưu ảnh nháp</button>
+</form>
+{% if w.visual_qa_drafts %}<h4>Ảnh thiết kế nháp — chưa được duyệt</h4>
+{% for draft in w.visual_qa_drafts %}<article class="nested" data-visual-reference-draft="{{draft.id}}">
+<div class="row"><b>{{draft.viewport}}</b><span class="badge {{'failed' if draft.integrity != 'VALID' or draft.source_changed else 'pending'}}">{% if draft.integrity != 'VALID' %}Không khả dụng — kiểm tra integrity thất bại{% elif draft.source_changed %}Bản nháp từ SHA cũ hoặc source đã thay đổi{% else %}DRAFT · UNREVIEWED{% endif %}</span></div>
+<p>{{draft.design_note}}</p><p>SHA-256 <code>{{draft.sha256}}</code></p><p>SHA lúc nhập <code>{{draft.source_commit}}</code></p>
+{% if draft.integrity == 'VALID' %}<figure><figcaption>Ảnh tải lên · {{draft.viewport}} · bản nháp, không phải reference của gate</figcaption><img src="{{draft.preview_url}}" alt="Ảnh thiết kế nháp chưa được duyệt, viewport {{draft.viewport}}" loading="lazy" decoding="async"></figure><a class="ghost" href="{{draft.download_url}}">Tải PNG để owner xem xét</a>{% if draft.source_changed %}<p class="warning">Không tạo hướng dẫn bàn giao: source đã đổi hoặc chưa sạch. Hãy nhập lại ảnh sau khi workspace có commit sạch.</p>{% elif draft.handoff_path %}<details class="nested"><summary>Bàn giao cho owner xem xét</summary><p>Đây vẫn là <b>DRAFT · UNREVIEWED</b>. ProjectFlow chưa ghi nhận phê duyệt. Owner cần kiểm tra nguồn thiết kế, kích thước và SHA-256 ở trên qua quy trình review/PR bình thường.</p><ol><li>Tải PNG nháp xuống.</li><li>Trên branch Builder được owner chọn, lưu ảnh theo đường dẫn repo-relative dưới đây (không ghi đè file khác).</li><li>Mở PR để owner review ảnh và cấu hình. Chỉ thêm viewport nếu chưa có; nếu key đã tồn tại, không ghi đè máy móc mà cần owner review việc thay ảnh. Giữ nguyên route, threshold, viewport list và lệnh hiện có.</li><li>Sau khi owner phê duyệt qua quy trình repo và thay đổi được commit, quay lại Task, refresh workspace rồi opt-in và bấm Run Test theo ý muốn.</li></ol><p>Đường dẫn đề xuất:</p><pre><code>{{draft.handoff_path}}</code></pre><p>Dòng cấu hình đề xuất để owner hợp nhất vào <code>visual_qa.references</code> hiện có:</p><pre><code>{{draft.handoff_reference_entry}}</code></pre><p class="info">Không tự thay <code>PROJECT.yaml</code>, không đổi reference đang chạy, không bật gate và không chạy TestRunner từ bước bàn giao này.</p></details>{% endif %}{% endif %}
+</article>{% endfor %}{% endif %}
+</details>
+{% if w.visual_qa.contract_state == 'VALID' %}{% set reference_available.value = true %}{% endif %}
+{% if w.visual_qa.contract_state == 'SOURCE_NOT_CLEAN' %}<div class="warning">Source chưa sạch hoặc SHA đã đổi. Commit/clean source để xem reference an toàn.</div><div class="warning">Bằng chứng thiếu hoặc không hợp lệ khi source chưa sạch; gate vẫn bị chặn.</div>
+{% elif w.visual_qa.contract_state == 'INVALID' %}
+<div class="warning">Contract Visual QA không hợp lệ. Reference chưa hợp lệ hoặc không thể xem an toàn.</div>
+{% elif w.visual_qa.contract_state == 'MISSING' %}
+<div class="info">Workspace chưa có contract Visual QA hợp lệ trong <code>PROJECT.yaml</code>; trang này không cho chọn đường dẫn hoặc URL tùy ý.</div>{% if decision.visual_qa_required %}<div class="warning">Task đã opt-in nhưng repo chưa có contract Visual QA hợp lệ</div>{% endif %}
+{% endif %}
+{% if w.visual_qa.contract_state == 'VALID' %}
+<dl class="facts">
+<div class="wide"><dt>Route loopback</dt><dd><code>{{w.visual_qa.contract.route}}</code></dd></div>
+<div><dt>Ngưỡng</dt><dd>{{'%.1f%%'|format(w.visual_qa.contract.threshold * 100)}}</dd></div>
+<div class="wide"><dt>SHA source hiện tại (clean)</dt><dd><code>{{w.visual_qa.tested_commit}}</code></dd></div>
+<div><dt>Phê duyệt thiết kế</dt><dd>Chưa ghi nhận — không đồng nghĩa đã được duyệt.</dd></div>
+{% for ref in w.visual_qa.contract.references %}<div class="wide"><dt>Reference {{ref.viewport}}</dt><dd><code>{{ref.path}}</code><br><small>SHA-256 <code>{{ref.sha256}}</code></small></dd></div>{% endfor %}
+</dl>
+<div class="visual-qa-previews" aria-label="Reference thiết kế đã cấu hình">{% for ref in w.visual_qa.contract.references %}<figure><figcaption>Reference {{ref.viewport}}</figcaption><img src="{{ref.preview_url}}" alt="Ảnh reference đã cấu hình, viewport {{ref.viewport}}" loading="lazy" decoding="async"></figure>{% endfor %}</div>
+{% endif %}
+{% if decision.visual_qa_required %}
+{% if w.visual_qa.run %}
+<div class="row"><div><small>Visual QA run #{{w.visual_qa.run.id}}</small><br><small>SHA đã đo</small> <code>{{w.visual_qa.run.tested_commit or '—'}}</code></div>
+<span class="badge {{'failed' if w.visual_qa.evidence_state in ['FAIL','TIMEOUT','INVALID','BLOCKED','DIAGNOSTIC'] else ('ready' if w.visual_qa.evidence_state == 'VALID' else 'pending')}}">{{w.visual_qa.evidence_state}}{% if not w.visual_qa.run.is_current %} · STALE{% endif %}</span></div>
+<p>Stage: <b>{{w.visual_qa.run.status}}</b> · Exit: <code>{{w.visual_qa.run.exit_code if w.visual_qa.run.exit_code is not none else '—'}}</code> · SHA hiện tại: <code>{{w.visual_qa.tested_commit or '—'}}</code></p>
+<a class="ghost" href="{{w.visual_qa.run.log_url}}">Xem log run này</a>
+{% else %}<p class="empty">Chưa chạy Visual QA trên workspace này.</p>{% endif %}
+{% if w.visual_qa.evidence_state == 'VALID' and w.visual_qa.metrics %}
+<ul aria-label="Visual QA metrics">{% for metric in w.visual_qa.metrics %}<li>{{metric.viewport}}: {{'%.3f%%'|format(metric.percent_diff * 100)}} pixel mismatch · {{metric.mismatched_pixels}} / {{metric.total_pixels}} pixels</li>{% endfor %}</ul>
+<div class="visual-qa-previews" aria-label="Visual QA image evidence">{% for preview in w.visual_qa.previews %}<figure><figcaption>{{preview.label}} · {{preview.viewport}}</figcaption><img src="{{preview.url}}" alt="{{preview.alt}}" loading="lazy" decoding="async"></figure>{% endfor %}</div>
+<p class="success">Evidence đã xác minh lại bằng verifier hiện có. Ảnh PNG dùng route read-only có kiểm tra quyền; report và metrics file không được phục vụ trực tiếp.</p>
+{% elif w.visual_qa.evidence_state == 'DIAGNOSTIC' and w.visual_qa.metrics %}
+<div class="warning"><b>Không đạt — dùng để sửa.</b> UIFix xác nhận sai lệch vượt ngưỡng. Stage vẫn là FAIL; ảnh này chỉ hỗ trợ sửa UI và không thể làm gate PASS.</div>
+<ul aria-label="Visual QA diagnostic metrics">{% for metric in w.visual_qa.metrics %}<li>{{metric.viewport}}: {{'%.3f%%'|format(metric.percent_diff * 100)}} pixel mismatch · {{metric.mismatched_pixels}} / {{metric.total_pixels}} pixels · FAIL</li>{% endfor %}</ul>
+<div class="visual-qa-previews" aria-label="Visual QA failed diagnostic images">{% for preview in w.visual_qa.previews %}<figure><figcaption>{{preview.label}} · {{preview.viewport}} · FAIL</figcaption><img src="{{preview.url}}" alt="{{preview.alt}}" loading="lazy" decoding="async"></figure>{% endfor %}</div>
+{% elif w.visual_qa.evidence_state == 'INVALID' %}<div class="warning">Bằng chứng thiếu hoặc không hợp lệ; không hiển thị metric và không coi stage PASS là gate PASS.</div>
+{% elif w.visual_qa.evidence_state == 'STALE' %}<div class="warning">Run này thuộc SHA cũ; chạy lại bằng nút Test hiện có để tạo evidence cho source hiện tại.</div>
+{% elif w.visual_qa.required and w.visual_qa.evidence_state in ['FAIL','TIMEOUT','QUEUED','RUNNING','SKIPPED','BLOCKED'] %}<div class="warning">Chưa có evidence PASS hợp lệ cho run này: {{w.visual_qa.evidence_state}}.</div>{% endif %}
+<form method="post" action="/api/workspaces/{{w.id}}/test"><button class="ghost">Run Test</button></form>
+{% endif %}
+</div>
+{% endfor %}
+{% if not decision.visual_qa_required and reference_available.value %}
+<details id="visual-qa-opt-in" class="nested"><summary>Bật Visual QA bắt buộc sau khi đã xem reference</summary>
+<form method="post" action="/api/tasks/{{t.id}}/prompt">
+<label for="visual-qa-prompt-{{t.id}}">Prompt hiện tại (có thể giữ nguyên hoặc chỉnh sửa)</label>
+<textarea id="visual-qa-prompt-{{t.id}}" name="implementation_prompt" rows="6">{{t.implementation_prompt or ''}}</textarea>
+<label><input type="checkbox" name="visual_qa_required" value="true" required> Tôi muốn bật gate Visual QA cho Task này</label>
+<p><small>Lưu prompt sẽ thêm marker opt-in nếu cần. Không sửa brief, không thay <code>PROJECT.yaml</code> và không tự chạy test.</small></p>
+<button type="submit">Lưu prompt và bật Visual QA</button>
+</form>
+</details>
+{% elif not decision.visual_qa_required and workspaces %}
+<p class="info">Chỉ có thể bật từ panel này sau khi ít nhất một reference hợp lệ được đọc từ source sạch hiện tại.</p>
+{% endif %}
+</section>
 
 {% if current_step == 'TASK' %}
 <!-- STEP 1: TASK -->

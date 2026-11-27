@@ -1,0 +1,107 @@
+{
+  "positiveHead": "ccbc35c3b759d611c24991c9e2c684284bdbd380",
+  "negativeHead": "21d705328aba2e5eff9c52483ed4e85c850892a0",
+  "dimensionMismatchHead": "cf7106c2152851f41457003690a56ab48247b622",
+  "missingReferenceHead": "f7ffee7334c5f5654823473c9cdad832f8e9a3df",
+  "unavailableServerHead": "8377c84de952054b71cf8396bf77a9db6e4de6bf",
+  "backendHead": "8377c84de952054b71cf8396bf77a9db6e4de6bf",
+  "testStage": "PASS / exit 0 (real subprocess)",
+  "positiveVisualStage": "PASS / exit 0 (real pinned UIFix CLI subprocess)",
+  "negativeVisualStage": "FAIL / exit 1 (real color deviation)",
+  "dimensionVisualStage": "FAIL / exit 2 (reference dimensions rejected)",
+  "missingReference": "TestRunner contract rejected before dispatch: visual_qa reference does not exist: docs/missing.png",
+  "unavailableServer": "FAIL / exit 2 (real CLI SERVER_NOT_READY)",
+  "backendOptOut": "PASS / only test stage dispatched",
+  "staleEvidence": "NOT_RUN after source HEAD changed",
+  "externalRequests": [],
+  "httpMethods": [
+    "GET"
+  ],
+  "referenceSha256": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e",
+  "captures": {
+    "positive": {
+      "actual.png": {
+        "file": "positive-actual.png",
+        "sha256": "9f65d312989d0aae40de76358a6c49f2f383a3cc32fd13422c88f5cbac25c713"
+      },
+      "diff.png": {
+        "file": "positive-diff.png",
+        "sha256": "dc66470136d96f054de3647d0b08648687c0b2744df71d0b575da09c138621cd"
+      },
+      "overlay.png": {
+        "file": "positive-overlay.png",
+        "sha256": "212ac54ebaead1e690fd53f0d443ff70f6902905edf45114ac4d6cf5168c79aa"
+      },
+      "metrics": {
+        "schemaVersion": 1,
+        "tool": "UIFix",
+        "toolVersion": "1.2.6",
+        "toolCommit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+        "sourceCommit": "ccbc35c3b759d611c24991c9e2c684284bdbd380",
+        "referenceSha256": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e",
+        "actualSha256": "9f65d312989d0aae40de76358a6c49f2f383a3cc32fd13422c88f5cbac25c713",
+        "viewport": {
+          "width": 320,
+          "height": 240
+        },
+        "captureMode": "viewport",
+        "imageDimensions": {
+          "width": 320,
+          "height": 240
+        },
+        "deviceScaleFactor": 1,
+        "threshold": 0,
+        "percentDiff": 0,
+        "mismatchedPixels": 0,
+        "totalPixels": 76800,
+        "ssim": 1,
+        "horizontalOverflow": false,
+        "pageErrors": [],
+        "blockedRequests": [],
+        "passed": true
+      }
+    },
+    "negative-color": {
+      "actual.png": {
+        "file": "negative-color-actual.png",
+        "sha256": "c7c3151f51a387a2090d93f61615a1156b21c347860efbfc6d4de803f0fd4e05"
+      },
+      "diff.png": {
+        "file": "negative-color-diff.png",
+        "sha256": "b2bf173991ebaa1306e1ac7c005ff01ab20677757f87bf629e5b1d4788b16128"
+      },
+      "overlay.png": {
+        "file": "negative-color-overlay.png",
+        "sha256": "84d6b0f2ada4215477db213a93d66f9d5b6eb63e48f322766b2888a5d4016f0b"
+      },
+      "metrics": {
+        "schemaVersion": 1,
+        "tool": "UIFix",
+        "toolVersion": "1.2.6",
+        "toolCommit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+        "sourceCommit": "21d705328aba2e5eff9c52483ed4e85c850892a0",
+        "referenceSha256": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e",
+        "actualSha256": "c7c3151f51a387a2090d93f61615a1156b21c347860efbfc6d4de803f0fd4e05",
+        "viewport": {
+          "width": 320,
+          "height": 240
+        },
+        "captureMode": "viewport",
+        "imageDimensions": {
+          "width": 320,
+          "height": 240
+        },
+        "deviceScaleFactor": 1,
+        "threshold": 0,
+        "percentDiff": 1,
+        "mismatchedPixels": 76800,
+        "totalPixels": 76800,
+        "ssim": 0.9637040358126364,
+        "horizontalOverflow": false,
+        "pageErrors": [],
+        "blockedRequests": [],
+        "passed": false
+      }
+    }
+  }
+}

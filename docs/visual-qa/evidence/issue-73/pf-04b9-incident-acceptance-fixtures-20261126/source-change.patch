@@ -1,0 +1,21 @@
+diff --git a/tests/test_product_acceptance.py b/tests/test_product_acceptance.py
+index f852a37..c16c1b1 100644
+--- a/tests/test_product_acceptance.py
++++ b/tests/test_product_acceptance.py
+@@ -542,9 +542,13 @@ def test_real_full_acceptance_flow_reaches_change_complete(client, git_repo, tmp
+     # checklist item (test_runs, workspace_type='agent', pinned to the
+     # exact submitted HEAD) -- the same construction test_workflow_
+     # engine.py's own CONTROLLED test uses.
+-    db.execute(
+-        "INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit) VALUES('agent',?,?,?,?,?)",
+-        (task_workspace["id"], "pytest", "test", "PASS", task_workspace["last_commit"]))
++    # The committed fixture's PROJECT.yaml requires both preflight and test;
++    # seed current-HEAD evidence for each declared stage so the real
++    # TaskDecisionService checklist can satisfy TESTS_PASS.
++    for stage, command in (("preflight", "true"), ("test", "python3 -m pytest -q test_src.py")):
++        db.execute(
++            "INSERT INTO test_runs(workspace_type,workspace_id,command,stage,status,tested_commit) VALUES('agent',?,?,?,?,?)",
++            (task_workspace["id"], command, stage, "PASS", task_workspace["last_commit"]))
+     db.execute(
+         "INSERT INTO test_case_specs(change_id,item_key,requirement_ids,test_level,test_type,title,expected_results,status) "
+         "VALUES(?,?,?,?,?,?,?,?)",

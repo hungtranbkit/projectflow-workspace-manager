@@ -1,0 +1,237 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.2.0, pluggy-1.7.0 -- /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/dell/workspace/.worktrees/projectflow-issue73-engineering-fixture-20261125
+configfile: pyproject.toml
+plugins: anyio-4.16.0
+collecting ... collected 13 items
+
+tests/test_task_decision_required_stages.py::test_integration_requires_each_contract_stage_not_same_number_of_unrelated_rows FAILED [  7%]
+tests/test_task_decision_required_stages.py::test_builder_requires_each_contract_stage_and_ignores_unrelated_pass FAILED [ 15%]
+tests/test_task_decision_required_stages.py::test_stale_sha_rows_cannot_supply_missing_required_stage FAILED [ 23%]
+tests/test_task_decision_required_stages.py::test_latest_pending_or_skipped_required_stage_is_not_run[QUEUED] FAILED [ 30%]
+tests/test_task_decision_required_stages.py::test_latest_pending_or_skipped_required_stage_is_not_run[RUNNING] FAILED [ 38%]
+tests/test_task_decision_required_stages.py::test_latest_pending_or_skipped_required_stage_is_not_run[SKIPPED] FAILED [ 46%]
+tests/test_task_decision_required_stages.py::test_latest_required_pass_supersedes_older_failure_and_valid_waiver_keeps_named_failure_semantics FAILED [ 53%]
+tests/test_task_decision_required_stages.py::test_timeout_or_mismatched_waiver_fingerprint_does_not_pass_required_gate PASSED [ 61%]
+tests/test_task_decision_required_stages.py::test_visual_opt_in_requires_visual_stage_and_visual_timeout_cannot_be_waived FAILED [ 69%]
+tests/test_task_decision_required_stages.py::test_backend_builder_does_not_require_optional_visual_stage FAILED [ 76%]
+tests/test_task_decision_required_stages.py::test_integration_without_contract_and_zero_stage_legacy_behavior_is_preserved PASSED [ 84%]
+tests/test_task_decision_required_stages.py::test_visual_opt_in_with_invalid_contract_fails_closed_for_both_gates PASSED [ 92%]
+tests/test_task_decision_required_stages.py::test_invalid_present_nonvisual_contract_is_not_treated_as_missing_legacy_contract FAILED [100%]
+
+=================================== FAILURES ===================================
+_ test_integration_requires_each_contract_stage_not_same_number_of_unrelated_rows _
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-579/test_integration_requires_each0')
+
+    def test_integration_requires_each_contract_stage_not_same_number_of_unrelated_rows(tmp_path):
+        db, service, _repo, head = make_fixture(tmp_path, required=("test", "build"))
+        add_run(db, stage="test", sha=head)
+        add_run(db, stage="unrelated", sha=head)
+    
+        result = integration(service, _repo)
+    
+>       assert result["tests_status"] == "NOT_RUN"
+E       AssertionError: assert 'PASS' == 'NOT_RUN'
+E         
+E         - NOT_RUN
+E         + PASS
+
+tests/test_task_decision_required_stages.py:78: AssertionError
+_____ test_builder_requires_each_contract_stage_and_ignores_unrelated_pass _____
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-579/test_builder_requires_each_con0')
+
+    def test_builder_requires_each_contract_stage_and_ignores_unrelated_pass(tmp_path):
+        db, service, repo, head = make_fixture(tmp_path, required=("test", "build"))
+        add_run(db, workspace_type="agent", workspace_id=9, stage="test", sha=head)
+        add_run(db, workspace_type="agent", workspace_id=9, stage="unrelated", sha=head)
+    
+>       assert service.builder_tests_status({"id": 9, "task_id": 1, "head": head, "worktree_path": str(repo)}) == "NOT_RUN"
+E       AssertionError: assert 'PASS' == 'NOT_RUN'
+E         
+E         - NOT_RUN
+E         + PASS
+
+tests/test_task_decision_required_stages.py:88: AssertionError
+___________ test_stale_sha_rows_cannot_supply_missing_required_stage ___________
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-579/test_stale_sha_rows_cannot_sup0')
+
+    def test_stale_sha_rows_cannot_supply_missing_required_stage(tmp_path):
+        db, service, _repo, head = make_fixture(tmp_path, required=("test", "build"))
+        add_run(db, stage="test", sha=head)
+        add_run(db, stage="build", sha="stale-" + head)
+        add_run(db, stage="extra", sha=head)
+    
+>       assert integration(service, _repo)["tests_status"] == "NOT_RUN"
+E       AssertionError: assert 'PASS' == 'NOT_RUN'
+E         
+E         - NOT_RUN
+E         + PASS
+
+tests/test_task_decision_required_stages.py:97: AssertionError
+_______ test_latest_pending_or_skipped_required_stage_is_not_run[QUEUED] _______
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-579/test_latest_pending_or_skipped0')
+status = 'QUEUED'
+
+    @pytest.mark.parametrize("status", ["QUEUED", "RUNNING", "SKIPPED"])
+    def test_latest_pending_or_skipped_required_stage_is_not_run(tmp_path, status):
+        db, service, _repo, head = make_fixture(tmp_path, required=("test", "build"))
+        add_run(db, stage="test", sha=head)
+        add_run(db, stage="build", status="PASS", sha=head)
+        add_run(db, stage="build", status=status, sha=head)
+    
+>       assert integration(service, _repo)["tests_status"] == "NOT_RUN"
+E       AssertionError: assert 'FAIL' == 'NOT_RUN'
+E         
+E         - NOT_RUN
+E         + FAIL
+
+tests/test_task_decision_required_stages.py:107: AssertionError
+______ test_latest_pending_or_skipped_required_stage_is_not_run[RUNNING] _______
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-579/test_latest_pending_or_skipped1')
+status = 'RUNNING'
+
+    @pytest.mark.parametrize("status", ["QUEUED", "RUNNING", "SKIPPED"])
+    def test_latest_pending_or_skipped_required_stage_is_not_run(tmp_path, status):
+        db, service, _repo, head = make_fixture(tmp_path, required=("test", "build"))
+        add_run(db, stage="test", sha=head)
+        add_run(db, stage="build", status="PASS", sha=head)
+        add_run(db, stage="build", status=status, sha=head)
+    
+>       assert integration(service, _repo)["tests_status"] == "NOT_RUN"
+E       AssertionError: assert 'FAIL' == 'NOT_RUN'
+E         
+E         - NOT_RUN
+E         + FAIL
+
+tests/test_task_decision_required_stages.py:107: AssertionError
+______ test_latest_pending_or_skipped_required_stage_is_not_run[SKIPPED] _______
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-579/test_latest_pending_or_skipped2')
+status = 'SKIPPED'
+
+    @pytest.mark.parametrize("status", ["QUEUED", "RUNNING", "SKIPPED"])
+    def test_latest_pending_or_skipped_required_stage_is_not_run(tmp_path, status):
+        db, service, _repo, head = make_fixture(tmp_path, required=("test", "build"))
+        add_run(db, stage="test", sha=head)
+        add_run(db, stage="build", status="PASS", sha=head)
+        add_run(db, stage="build", status=status, sha=head)
+    
+>       assert integration(service, _repo)["tests_status"] == "NOT_RUN"
+E       AssertionError: assert 'FAIL' == 'NOT_RUN'
+E         
+E         - NOT_RUN
+E         + FAIL
+
+tests/test_task_decision_required_stages.py:107: AssertionError
+_ test_latest_required_pass_supersedes_older_failure_and_valid_waiver_keeps_named_failure_semantics _
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-579/test_latest_required_pass_supe0')
+
+    def test_latest_required_pass_supersedes_older_failure_and_valid_waiver_keeps_named_failure_semantics(tmp_path):
+        db, service, _repo, head = make_fixture(tmp_path, required=("test",))
+        add_run(db, stage="test", status="FAIL", sha=head)
+        add_run(db, stage="test", status="PASS", sha=head)
+        add_run(db, stage="unrelated", status="FAIL", sha=head)
+>       assert integration(service, _repo)["tests_status"] == "PASS"
+E       AssertionError: assert 'FAIL' == 'PASS'
+E         
+E         - PASS
+E         + FAIL
+
+tests/test_task_decision_required_stages.py:115: AssertionError
+_ test_visual_opt_in_requires_visual_stage_and_visual_timeout_cannot_be_waived _
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-579/test_visual_opt_in_requires_vi0')
+
+    def test_visual_opt_in_requires_visual_stage_and_visual_timeout_cannot_be_waived(tmp_path):
+        db, service, _repo, head = make_fixture(tmp_path, required=("test",), visual=True)
+        add_run(db, stage="test", sha=head)
+        result = integration(service, _repo)
+        assert result["tests_status"] == "NOT_RUN"
+        assert result["tests_required"] == 2
+    
+        row_id = add_run(db, stage="visual_qa", status="TIMEOUT", sha=head)
+        fp = fingerprint_of("visual_qa", "TIMEOUT")
+        db.execute(
+            "INSERT INTO gate_waivers(task_id,integration_id,gate,test_identifier,failure_fingerprint,baseline_commit,baseline_run_id,reason,approved_by) VALUES(1,1,'visual_qa','visual_qa',?,'base-sha',?,'must not waive visual gate','reviewer')",
+            (fp, row_id),
+        )
+        result = integration(service, _repo)
+>       assert result["tests_status"] == "FAIL"
+E       AssertionError: assert 'PASS_WITH_AP...SELINE_WAIVER' == 'FAIL'
+E         
+E         - FAIL
+E         + PASS_WITH_APPROVED_BASELINE_WAIVER
+
+tests/test_task_decision_required_stages.py:155: AssertionError
+_________ test_backend_builder_does_not_require_optional_visual_stage __________
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-579/test_backend_builder_does_not_0')
+
+    def test_backend_builder_does_not_require_optional_visual_stage(tmp_path):
+        db, service, repo, head = make_fixture(tmp_path, required=("test", "build"), visual=True)
+        add_run(db, workspace_type="agent", workspace_id=9, stage="test", sha=head)
+        add_run(db, workspace_type="agent", workspace_id=9, stage="build", sha=head)
+        add_run(db, workspace_type="agent", workspace_id=9, stage="visual_qa", status="FAIL", sha=head)
+    
+>       assert service.builder_tests_status({"id": 9, "task_id": 1, "head": head, "worktree_path": str(repo)}) == "PASS"
+E       AssertionError: assert 'FAIL' == 'PASS'
+E         
+E         - PASS
+E         + FAIL
+
+tests/test_task_decision_required_stages.py:166: AssertionError
+_ test_invalid_present_nonvisual_contract_is_not_treated_as_missing_legacy_contract _
+
+tmp_path = PosixPath('/tmp/pytest-of-dell/pytest-579/test_invalid_present_nonvisual0')
+
+    def test_invalid_present_nonvisual_contract_is_not_treated_as_missing_legacy_contract(tmp_path):
+        db, service, repo, head = make_fixture(tmp_path, required=("test",))
+        (repo / "PROJECT.yaml").write_text(
+            "schema_version: 1\nproject: {code: invalid}\ncommands: []\nci: {required: [test]}\n",
+            encoding="utf-8",
+        )
+        git(repo, "add", "PROJECT.yaml")
+        git(repo, "commit", "-m", "invalid project contract")
+        invalid_head = git(repo, "rev-parse", "HEAD")
+        add_run(db, stage="test", sha=invalid_head)
+        add_run(db, workspace_type="agent", workspace_id=9, stage="test", sha=invalid_head)
+    
+        result = integration(service, repo)
+>       assert result["tests_status"] == "UNKNOWN"
+E       AssertionError: assert 'PASS' == 'UNKNOWN'
+E         
+E         - UNKNOWN
+E         + PASS
+
+tests/test_task_decision_required_stages.py:216: AssertionError
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /home/dell/workspace/task-artifacts/issue-73-pf-03c-stage-membership-20261125/before-red.xml -
+=========================== short test summary info ============================
+FAILED tests/test_task_decision_required_stages.py::test_integration_requires_each_contract_stage_not_same_number_of_unrelated_rows
+FAILED tests/test_task_decision_required_stages.py::test_builder_requires_each_contract_stage_and_ignores_unrelated_pass
+FAILED tests/test_task_decision_required_stages.py::test_stale_sha_rows_cannot_supply_missing_required_stage
+FAILED tests/test_task_decision_required_stages.py::test_latest_pending_or_skipped_required_stage_is_not_run[QUEUED]
+FAILED tests/test_task_decision_required_stages.py::test_latest_pending_or_skipped_required_stage_is_not_run[RUNNING]
+FAILED tests/test_task_decision_required_stages.py::test_latest_pending_or_skipped_required_stage_is_not_run[SKIPPED]
+FAILED tests/test_task_decision_required_stages.py::test_latest_required_pass_supersedes_older_failure_and_valid_waiver_keeps_named_failure_semantics
+FAILED tests/test_task_decision_required_stages.py::test_visual_opt_in_requires_visual_stage_and_visual_timeout_cannot_be_waived
+FAILED tests/test_task_decision_required_stages.py::test_backend_builder_does_not_require_optional_visual_stage
+FAILED tests/test_task_decision_required_stages.py::test_invalid_present_nonvisual_contract_is_not_treated_as_missing_legacy_contract
+================== 10 failed, 3 passed, 12 warnings in 2.87s ===================
+EXIT_CODE=1

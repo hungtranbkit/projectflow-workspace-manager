@@ -1,0 +1,28 @@
+assessment_utc=2026-11-26T06:55:27Z
+assessment_ict=2026-11-26T13:55:27Z
+node=Linux 7.0.0-43-generic x86_64
+uid=1000
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda2       468G  344G  114G  76% /
+               total        used        free      shared  buff/cache   available
+Mem:            30Gi        12Gi       2.4Gi       787Mi        16Gi        17Gi
+Swap:           23Gi        12Gi        11Gi
+rootless_commands:
+/usr/bin/dockerd-rootless.sh
+/usr/bin/rootlesskit
+newuidmap=missing
+newgidmap=missing
+slirp4netns=missing
+pasta=missing
+fuse-overlayfs=missing
+subuid/subgid:
+/etc/subuid:dell:100000:65536
+/etc/subgid:dell:100000:65536
+unprivileged_userns=1
+max_user_namespaces=124541
+user_socket=absent
+docker_cli_processes=0
+python_pytest_process_count=0
+python_playwright_present=False
+node=v26.7.0
+docker_context_env=unset

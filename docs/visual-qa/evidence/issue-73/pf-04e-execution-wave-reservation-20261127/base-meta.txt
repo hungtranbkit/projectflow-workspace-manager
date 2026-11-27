@@ -1,0 +1,5 @@
+base_head=ac288928ab559799e6a6f34ff9be1de5fdfa5af3
+f719f25dbb2208dc55c276c00a0acbed10fb5e608eef9098c5745f6b742e3cb2  /tmp/pf04e-base-20261127/tests/test_execution_wave_reservation_stuck_after_restart.py
+start_utc=2026-11-27T08:46:13Z
+exit_code=1
+finish_utc=2026-11-27T08:46:19Z

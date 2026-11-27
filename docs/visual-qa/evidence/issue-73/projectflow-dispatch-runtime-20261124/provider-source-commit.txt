@@ -1,0 +1,10 @@
+commit d308d481441eaea23e151e0126a92dfa4b596cd2
+Author:     Visual QA Task Executor <visual-qa-task@localhost.invalid>
+AuthorDate: Tue Nov 24 20:42:25 2026 +0700
+Commit:     Visual QA Task Executor <visual-qa-task@localhost.invalid>
+CommitDate: Tue Nov 24 20:42:25 2026 +0700
+
+    fix: repair POS grid through ProjectFlow Builder dispatch
+
+ apps/ui-preview/src/style.css | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)

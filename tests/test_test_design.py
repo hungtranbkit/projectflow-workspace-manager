@@ -58,6 +58,15 @@ def envelope(payload):
     return {"is_error": False, "subtype": "success", "result": json.dumps(payload)}
 
 
+def set_fake_runner(client, runner):
+    """Inject deterministic behavior at the full shared invoker boundary."""
+    invoker = client.app.state.planner_service.invoker
+    for service_name in ("test_design_service", "test_review_service"):
+        assert getattr(client.app.state, service_name).invoker is invoker
+    invoker.which = lambda name: "/test-only/claude" if name == "claude" else None
+    invoker.runner = runner
+
+
 def set_fake(client, payload):
     env = envelope(payload)
 
@@ -67,7 +76,7 @@ def set_fake(client, payload):
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    set_fake_runner(client, runner)
 
 
 def tc(key, req=None, acc=None, inv=None, level="INTEGRATION", ttype="POSITIVE", **overrides):
@@ -95,14 +104,18 @@ def do_design(client, cid, payload=None):
     set_fake(client, payload or design_payload())
     r = client.post(f"/api/changes/{cid}/tests/design", data={"provider": "claude"})
     assert r.status_code == 200, r.text
-    return r.json()
+    result = r.json()
+    assert result.get("outcome") == "READY", result
+    return result
 
 
 def do_review(client, cid, verdict="PASS", **overrides):
     set_fake(client, review_payload(verdict, **overrides))
     r = client.post(f"/api/changes/{cid}/tests/review", data={"provider": "claude"})
     assert r.status_code == 200, r.text
-    return r.json()
+    result = r.json()
+    assert result.get("outcome") == "REVIEWED", result
+    return result
 
 
 def create_workflow(client, cid, profile="AGENTIC_STANDARD"):
@@ -144,6 +157,21 @@ def test_test_design_structured_result(client, git_repo, tdesign_env):
     assert result["test_case_set"]["kind"] == "TEST_CASE_SET"
     assert len(result["test_cases"]) == 1
     assert result["test_cases"][0]["requirement_ids"] == ["REQ-001"]
+
+
+def test_test_design_fails_closed_when_provider_cli_is_unavailable(client, git_repo, tdesign_env):
+    cid = new_change(client, "Unavailable provider fails closed")
+    invoker = client.app.state.planner_service.invoker
+    runner_calls = []
+    invoker.which = lambda name: None
+    invoker.runner = lambda *args: runner_calls.append(args)
+
+    response = client.post(f"/api/changes/{cid}/tests/design", data={"provider": "claude"})
+
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "EXECUTION_FAILED"
+    assert response.json()["test_plan"] is None
+    assert runner_calls == []
 
 
 def test_test_design_valid_spec_ids_stored(client, git_repo, tdesign_env):
@@ -351,7 +379,7 @@ def test_review_receives_real_deterministic_coverage_not_model_claim(client, git
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    set_fake_runner(client, runner)
     client.post(f"/api/changes/{cid}/tests/review", data={"provider": "claude"})
     assert "deterministic_coverage_report" in captured["prompt"]
     assert "REQ-002" in captured["prompt"]  # the uncovered requirement is visible to the reviewer
@@ -377,7 +405,7 @@ def test_bounded_refinement_loop_never_infinite(client, git_repo, tdesign_env):
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = cycling_runner
+    set_fake_runner(client, cycling_runner)
 
     result = client.app.state.test_design_lifecycle_service.run_design(cid, provider="claude")
     assert result["outcome"] == "NEEDS_REFINEMENT"
@@ -616,7 +644,7 @@ def test_production_specs_root_never_touched_by_this_suite():
     assert "feat-thing.yaml" not in names
 
 
-def test_real_test_design_lifecycle_end_to_end(client, git_repo, tdesign_env):
+def test_real_test_design_lifecycle_end_to_end(client, git_repo, tdesign_env, monkeypatch):
     """E7.23: one safe, real, non-fake Test Design lifecycle run against
     a disposable Change and an isolated tmp_path specs_root (tdesign_env)
     -- NO fake runner is installed anywhere in this test, so every Test
@@ -628,6 +656,9 @@ def test_real_test_design_lifecycle_end_to_end(client, git_repo, tdesign_env):
     import subprocess
     from pathlib import Path
     root, repo = git_repo
+    from tests.claude_test_config import prepare_claude_test_config, require_isolated_claude_auth
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     rid = register(client, repo, "demo")
     cid = new_change(
         client,

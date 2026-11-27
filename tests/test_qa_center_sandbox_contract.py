@@ -17,7 +17,7 @@ import subprocess
 
 import pytest
 
-from tests.conftest import make_repo, run, NGINX_SANDBOX_CONTRACT, NGINX_COMPOSE
+from tests.conftest import make_repo, run, NGINX_SANDBOX_CONTRACT, nginx_compose_for_test
 
 
 def register(client, repo, name):
@@ -81,7 +81,7 @@ def test_stale_task_branch_still_finds_contract_added_to_main_later(client, tmp_
         "commands:\n  preflight: {command: 'true'}\n  test: {command: 'true'}\nci: {required: [preflight, test]}\n"
         + NGINX_SANDBOX_CONTRACT.format(lo=21400, hi=21419)
     )
-    (repo / "compose.yml").write_text(NGINX_COMPOSE)
+    (repo / "compose.yml").write_text(nginx_compose_for_test())
     run(repo, "git", "add", ".")
     run(repo, "git", "commit", "-m", "add sandbox contract")
 
@@ -116,7 +116,7 @@ def test_source_still_pinned_to_exact_worktree_commit_not_main(client, tmp_path,
         "commands:\n  preflight: {command: 'true'}\n  test: {command: 'true'}\nci: {required: [preflight, test]}\n"
         + NGINX_SANDBOX_CONTRACT.format(lo=21420, hi=21439)
     )
-    (repo / "compose.yml").write_text(NGINX_COMPOSE)
+    (repo / "compose.yml").write_text(nginx_compose_for_test())
     run(repo, "git", "add", ".")
     run(repo, "git", "commit", "-m", "add sandbox contract, plus this should never be what gets pinned")
 
@@ -145,7 +145,7 @@ def _register_two_repos_with_dependency(client, tmp_path):
     )
     assert dep_extra != base_contract
     frontend = make_repo(root, "qa-front", dep_extra)
-    (frontend / "compose.yml").write_text(NGINX_COMPOSE)
+    (frontend / "compose.yml").write_text(nginx_compose_for_test())
     run(frontend, "git", "add", ".")
     run(frontend, "git", "commit", "-m", "sandbox contract with runtime dependency")
     register(client, frontend, "qa-front")
@@ -236,7 +236,7 @@ def test_sandbox_view_finds_arbitrarily_named_url_output(client, tmp_path, clean
     root = tmp_path / "root"
     contract = NGINX_SANDBOX_CONTRACT.format(lo=21460, hi=21479).replace("backend_url:", "qa_center_url:")
     repo = make_repo(root, "qa-url-test", contract)
-    (repo / "compose.yml").write_text(NGINX_COMPOSE)
+    (repo / "compose.yml").write_text(nginx_compose_for_test())
     run(repo, "git", "add", ".")
     run(repo, "git", "commit", "-m", "qa_center_url output")
     register(client, repo, "qa-url-test")
@@ -340,7 +340,7 @@ def test_manual_verification_pass_pins_built_commit_and_operator(client, tmp_pat
     sandbox was built) and records who/how (operator)."""
     root = tmp_path / "root"
     repo = make_repo(root, "pin-test", NGINX_SANDBOX_CONTRACT.format(lo=21480, hi=21499))
-    (repo / "compose.yml").write_text(NGINX_COMPOSE)
+    (repo / "compose.yml").write_text(nginx_compose_for_test())
     run(repo, "git", "add", ".")
     run(repo, "git", "commit", "-m", "sandbox contract")
     register(client, repo, "pin-test")

@@ -1,0 +1,135 @@
+{
+  "timestamp_local": "2026-11-24 (Asia/Bangkok; exact run duration recorded by pytest)",
+  "repository": "hungtranbkit/projectflow-workspace-manager",
+  "branch": "agent/codex/visual-qa-73",
+  "head_at_run_start": "2805bcd37fa9f183f7e38a887fc8891884051961",
+  "working_tree_dirty_at_run": true,
+  "command": "./scripts/test.sh",
+  "exit_code": 1,
+  "duration_seconds": 2795.43,
+  "passed": 1561,
+  "failed": 14,
+  "skipped": 1,
+  "failed_node_ids": [
+    "tests/test_sandbox_reset_data.py::test_reset_data_does_not_touch_an_unrelated_sandbox",
+    "tests/test_soak_multi_repo_resource_leak.py::test_multi_repo_task_session_sandbox_soak_leaves_no_leak",
+    "tests/test_state_invariants.py::test_invariant_cleanup_eligible_still_counts_toward_capacity",
+    "tests/test_task_centric_ux.py::test_task_detail_aggregates_child_state_and_never_duplicates_it",
+    "tests/test_task_centric_ux.py::test_blocking_workspace_shown_and_next_action_progresses",
+    "tests/test_task_sandbox_views.py::test_global_list_and_task_detail_agree_on_one_sandbox_each",
+    "tests/test_task_sandbox_views.py::test_integration_sandbox_shows_multiple_source_repos_in_task_detail",
+    "tests/test_task_sandbox_views.py::test_stopped_and_cleanup_countdown_state_consistent_everywhere",
+    "tests/test_verification_ux.py::test_sandbox_running_displays_urls_and_ports",
+    "tests/test_verification_ux.py::test_manual_pass_stores_exact_source_commit_and_stales_on_new_commit",
+    "tests/test_verification_ux.py::test_next_action_progresses_through_every_state",
+    "tests/test_verification_ux.py::test_task_detail_and_sandbox_detail_show_identical_runtime_identity",
+    "tests/test_workflow_dead_anchors.py::test_closed_sandbox_restarts_instead_of_duplicating",
+    "tests/test_workflow_decision_ux.py::test_missing_requirements_lists_full_remaining_set_for_create_sandbox"
+  ],
+  "sandbox_db_root_cause_proofs": [
+    {
+      "test": "test_blocking_workspace_shown_and_next_action_progresses",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_closed_sandbox_restarts_instead_of_duplicating",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_global_list_and_task_detail_agree_on_one_sandbox_each",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_integration_sandbox_shows_multiple_source_repos_in_task_detail",
+      "operation_count": 2,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_invariant_cleanup_eligible_still_counts_toward_capacity",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_manual_pass_stores_exact_source_commit_and_stales_on_new_commit",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_missing_requirements_lists_full_remaining_set_for_create_sandbox",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_multi_repo_task_session_sandbox_soak_leaves_no_leak",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_next_action_progresses_through_every_state",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_reset_data_does_not_touch_an_unrelated_sandbox",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_sandbox_running_displays_urls_and_ports",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_stopped_and_cleanup_countdown_state_consistent_everywhere",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_task_detail_aggregates_child_state_and_never_duplicates_it",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    },
+    {
+      "test": "test_task_detail_and_sandbox_detail_show_identical_runtime_identity",
+      "operation_count": 1,
+      "all_ipam_pool_exhausted": true
+    }
+  ],
+  "proof_test_count": 14,
+  "default_address_pools_docker_info": "null",
+  "network_count_after_run_read_only": 29,
+  "collection_old_pythonpath_exit": 2,
+  "collection_old_pythonpath_errors": 11,
+  "collection_fixed_pythonpath_tests": 1575,
+  "targeted_visual_runner_tests_passed": 18,
+  "targeted_visual_runner_exit_code": 0,
+  "evidence_sha256": {
+    "full-suite.log": "9db67741b618544f91b1433b3f8d9795660ebad2d178466e7095a69e8804e121",
+    "REPORT.md": "58dec0f010d216f0f43d9dcf584a220983c45bed299146280bff4dddcc90bf3d",
+    "runner-integration-subprocess-20261124-02/SHA256SUMS.json": "e11d755ecafbc27f191de1072917ef6928178b84b599382b9e529be78913ef00",
+    "summary.json": "b9101c2fc661e54222cf1847bafcee08617bfad7deca76fd79faa5fe1f5ba313",
+    "preflight.log": "53c41730f4187288ceb926407151168588f4ca97ffb34dda247c68b2c281edfd",
+    "visual-cli-contract.log": "8060ff312d471368484087f992868e9d0b99ee7622ae0db04b9d213d102e667f",
+    "visual-smoke.log": "8f053bd8c4239f5245d8c09babee2de73e766ad6ade6f91036ecd7ec1811a730",
+    "collect-proof.log": "2096aa5991c19160afaeefb109e41601d1cf17e9fe34f26dc329c97fdd5fa6db"
+  },
+  "collection_probe_exit_code": 0,
+  "full_suite_summary_outcomes": 1576,
+  "full_suite_vs_collection_count_discrepancy": 1,
+  "count_discrepancy_status": "unexplained; no inference",
+  "tested_file_blob_matches_pr_head": "4e98802a8cba94e1a68bfc1b5b8b3f7ca4b1f174",
+  "tested_file_blob_matches_count": 8,
+  "tested_file_blob_shas": {
+    "pyproject.toml": "57369b643ff2c599f638f34cac898664a9df46cf",
+    "app/services/test_runner.py": "c1595c38e07d4e26923d8ec4537a53865a7acce5",
+    "app/services/task_decision_service.py": "08623da17050fb85709980060c1e25cfd90c196d",
+    "app/services/project_contract.py": "17acab7051a7390f305fcb4bdcdb79ec7a22e7eb",
+    "tests/test_visual_qa_contract.py": "c3d1e09c44417691c493305580d88c0a9026d396",
+    "tests/test_visual_qa_execution.py": "182ba90e100458ed467dd874b96ec6809470768b",
+    "tests/test_visual_qa_runner_subprocess.py": "f730fb9ab85ad4f7e09fb434937ea9f49620a4d4",
+    "tools/visual_qa/visual-qa.mjs": "a77c67dc05aedee8188a0a0e45f8fbfc0e0068a6"
+  }
+}

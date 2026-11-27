@@ -1,0 +1,18 @@
+✔ CLI and smoke route Chromium through the shared secure launch policy (7.092525ms)
+✔ sandbox-required minimum Playwright version is enforced (1.307101ms)
+✔ an explicit unsupported runtime fails closed instead of falling back to the pinned package (7.039143ms)
+✔ sandbox stays enabled with or without the optional executable override (0.477969ms)
+✔ sandbox launch failure is reported without a weaker retry (0.43015ms)
+✔ an unsupported browser object fails before any launch attempt (0.162895ms)
+✔ visual-qa parses local URL, exact viewport, output, threshold and full-page capture (1.482511ms)
+✔ visual-qa rejects network URLs to prevent accidental external access (0.553772ms)
+✔ visual-qa rejects invalid viewport and threshold (1.263884ms)
+✔ visual-qa rejects missing required arguments (0.321745ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 82.73266

@@ -1,0 +1,12 @@
+{
+  "session_id": 1,
+  "agent": "claude",
+  "command_profile": "Claude",
+  "cwd": "<task-owned scratch worktree>",
+  "status": "RUNNING",
+  "prompt_status": "DELIVERED",
+  "prompt_sha256": "2d58f47188378ba0b68ac9e68ab675c141309e6b59d90fc34306d59e1982b3e3",
+  "started_at": null,
+  "dispatch_returned_at_ict": "2026-11-24T20:41:22.129234+07:00",
+  "provider_start_window": "after negative visual stage completed at 20:41:20 ICT and before session completion at 20:41:46 ICT"
+}

@@ -1,0 +1,6 @@
+start_utc=2026-11-27T09:59:05Z
+end_utc=2026-11-27T09:59:17Z
+source=572ef11df59bc2f4a7b1db25bb2478ea794add57
+tree_at_start=730c64c9958cc00fe8ff8fa5775e0929545aca5c
+command=python -m pytest -p no:cacheprovider -q -ra tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py tests/test_task_decision_required_stages.py tests/test_visual_qa_runner_subprocess.py::test_test_runner_retains_synthetic_threshold_diagnostic_without_passing_gate
+exit=0

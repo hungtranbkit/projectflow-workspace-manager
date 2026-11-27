@@ -1,0 +1,43 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____________ test_builder_prompt_makes_declared_scope_authoritative ____________
+
+client = <starlette.testclient.TestClient object at 0x7f01e443cec0>
+git_repo = (PosixPath('/tmp/pytest-of-dell/pytest-266/test_builder_prompt_makes_decl0/root'), PosixPath('/tmp/pytest-of-dell/pytest-266/test_builder_prompt_makes_decl0/root/demo'))
+
+    def test_builder_prompt_makes_declared_scope_authoritative(client, git_repo):
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Scoped prompt task", project_id=rid)
+        tid, _ = materialize_task(client, cid, scope_hints=["calc.py"])
+        w = _select_and_create_workspace(client, tid, rid)
+        client.app.state.agent_sessions.launchers = {"codex": AgentLauncher("Codex", "bash", ("-c", "echo READY; cat"))}
+        client.app.state.agent_sessions.prompt_ready_timeout = 3.0
+        client.app.state.agent_sessions.prompt_quiet_window = 0.1
+        client.post(f"/api/workspaces/{w['id']}/sessions", data={"mode": "INTERACTIVE"})
+        prompt = client.app.state.db.one(
+            "SELECT content FROM prompts WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],)
+        )["content"]
+        assert "## SCOPE" in prompt
+        assert "- calc.py" in prompt
+>       assert "Only create, edit, or delete files inside these listed paths." in prompt
+E       AssertionError: assert 'Only create, edit, or delete files inside these listed paths.' in '# Task: Task T1\n\n## TASK\nTask T1\n\n## TASK TITLE\nTask T1\n\n## REPOSITORY\ndemo (/tmp/pytest-of-dell/pytest-266/... report EXPECTED_RESULT\n- report RISKS\n- Submit for Review (use the format in templates/agent-completion-report.md).'
+
+tests/test_worktree_manager.py:170: AssertionError
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_worktree_manager.py: 11 warnings
+  /home/dell/workspace/.worktrees/projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/test_worktree_manager.py::test_builder_prompt_makes_declared_scope_authoritative
+  /usr/lib/python3.14/pty.py:66: DeprecationWarning: This process (pid=3855650) is multi-threaded, use of forkpty() may lead to deadlocks in the child.
+    pid, fd = os.forkpty()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_worktree_manager.py::test_builder_prompt_makes_declared_scope_authoritative

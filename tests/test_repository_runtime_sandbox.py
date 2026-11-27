@@ -10,7 +10,7 @@ import subprocess
 
 import pytest
 
-from tests.conftest import make_repo, run, NGINX_COMPOSE
+from tests.conftest import make_repo, run, nginx_compose_for_test
 
 
 def register(client, repo, name):
@@ -46,7 +46,7 @@ def make_sandboxable_no_contract(root, name):
     compose.sandbox.yml to match RepositoryContractEditor's own default
     compose_file convention."""
     repo = make_repo(root, name)
-    (repo / "compose.sandbox.yml").write_text(NGINX_COMPOSE)
+    (repo / "compose.sandbox.yml").write_text(nginx_compose_for_test())
     run(repo, "git", "add", ".")
     run(repo, "git", "commit", "-m", "add compose (no sandbox contract yet)")
     return repo
@@ -223,7 +223,7 @@ def test_page_refresh_reflects_project_yaml_state(client, git_repo):
 # ------------------------------------------------------- task integration
 def test_configured_repo_shows_create_sandbox_on_workspace_page(client, git_repo):
     root, repo = git_repo
-    (repo / "compose.yml").write_text(NGINX_COMPOSE)
+    (repo / "compose.yml").write_text(nginx_compose_for_test())
     run(repo, "git", "add", "compose.yml")
     run(repo, "git", "commit", "-m", "add compose")
     register(client, repo, "demo")

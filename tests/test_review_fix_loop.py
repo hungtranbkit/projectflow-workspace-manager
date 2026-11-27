@@ -17,6 +17,16 @@ def envelope(payload):
     return {"is_error": False, "subtype": "success", "result": json.dumps(payload)}
 
 
+def set_fake_runner(client, runner):
+    """Inject deterministic behavior at the shared reviewer invoker boundary."""
+    code_invoker = client.app.state.code_review_service.invoker
+    security_invoker = client.app.state.security_review_service.invoker
+    planner_invoker = client.app.state.planner_service.invoker
+    assert code_invoker is security_invoker is planner_invoker
+    code_invoker.which = lambda name: "/test-only/claude" if name == "claude" else None
+    code_invoker.runner = runner
+
+
 def set_fake(client, payload):
     env = envelope(payload)
 
@@ -26,7 +36,19 @@ def set_fake(client, payload):
             stdout = json.dumps(env)
             stderr = ""
         return R()
-    client.app.state.code_review_service.invoker.runner = runner
+    set_fake_runner(client, runner)
+
+
+def stub_fix_builder_session(client):
+    """Replace only the injected launcher callback; do not start a process."""
+    calls = []
+
+    def start_builder(workspace_row):
+        calls.append(dict(workspace_row))
+        return f"test-session-{workspace_row['id']}"
+
+    client.app.state.review_fix_orchestrator._start_builder_session = start_builder
+    return calls
 
 
 PASS = {"verdict": "PASS", "findings": [], "summary": "looks good"}
@@ -59,6 +81,28 @@ def test_code_review_pass(client, git_repo):
     body = r.json()
     assert body["outcome"] == "REVIEWED", body
     assert body["verdict"] == "PASS"
+
+
+def test_review_unavailable_claude_fails_closed_without_fabricated_review(client, git_repo):
+    root, repo = git_repo
+    rid = register(client, repo, "demo")
+    cid = new_change(client, "Unavailable review provider", project_id=rid)
+    tid, _ = _committed_task(client, cid)
+    calls = []
+    invoker = client.app.state.code_review_service.invoker
+    invoker.which = lambda name: None
+    invoker.runner = lambda *args: calls.append(args)
+
+    body = client.post(f"/api/tasks/{tid}/review/code").json()
+
+    assert body["outcome"] == "EXECUTION_FAILED"
+    assert body["verdict"] is None
+    assert "claude CLI not found in PATH" in body["message"]
+    assert calls == []
+    assert client.app.state.db.all("SELECT * FROM review_runs WHERE task_id=?", (tid,)) == []
+    assert client.app.state.db.all(
+        "SELECT * FROM work_products WHERE task_id=? AND kind='REVIEW_REPORT'", (tid,)
+    ) == []
 
 
 def test_code_review_pass_with_findings(client, git_repo):
@@ -181,7 +225,7 @@ def test_code_review_uses_real_diff_not_builder_reasoning(client, git_repo):
             stdout = json.dumps(envelope(PASS))
             stderr = ""
         return R()
-    client.app.state.code_review_service.invoker.runner = runner
+    set_fake_runner(client, runner)
     client.post(f"/api/tasks/{tid}/review/code")
     assert "def feature():" in captured["prompt"]  # the real diff content, verbatim
     assert "feature.py" in captured["prompt"]
@@ -248,7 +292,6 @@ def test_security_review_produces_dedicated_work_product(client, git_repo):
     rid = register(client, repo, "demo")
     cid = new_change(client, "Security WP change", project_id=rid)
     tid, w = _committed_task(client, cid)
-    client.app.state.security_review_service.invoker.runner = client.app.state.code_review_service.invoker.runner
     set_fake(client, {"verdict": "PASS", "findings": []})
     body = client.post(f"/api/tasks/{tid}/review/security")
     body = body.json()
@@ -311,9 +354,14 @@ def test_fix_required_creates_fix_task_transfers_worktree(client, git_repo):
         {"category": "CORRECTNESS", "severity": "HIGH", "title": "wrong return value", "description": "should return 42"}]})
     result = client.app.state.review_fix_orchestrator.tick(tid)
     assert result["outcome"] == "CODE_REVIEW_RUN"
+    launcher_calls = stub_fix_builder_session(client)
     result2 = client.app.state.review_fix_orchestrator.tick(tid)
-    assert result2["outcome"] in ("FIX_BUILDER_LAUNCHED", "EXECUTION_FAILED", "FIX_BUILDER_ALREADY_RUNNING"), result2
+    assert result2["outcome"] == "FIX_BUILDER_LAUNCHED", result2
     fix_task_id = result2["fix_task_id"]
+    assert result2["session_id"] == f"test-session-{w['id']}"
+    assert len(launcher_calls) == 1
+    assert launcher_calls[0]["id"] == w["id"]
+    assert launcher_calls[0]["task_id"] == fix_task_id
     fix_task = client.app.state.db.one("SELECT * FROM tasks WHERE id=?", (fix_task_id,))
     assert fix_task["fix_of_task_id"] == tid
     assert fix_task["task_type"] == "FIX"
@@ -361,9 +409,15 @@ def test_finding_from_original_task_resolved_after_fix_task_commit(client, git_r
     assert original_finding["status"] == "OPEN"
     assert original_finding["task_id"] == tid
 
+    launcher_calls = stub_fix_builder_session(client)
     tick2 = orch.tick(tid)  # creates the Fix Task, transfers the worktree
+    assert tick2["outcome"] == "FIX_BUILDER_LAUNCHED", tick2
     fix_task_id = tick2["fix_task_id"]
     assert fix_task_id != tid
+    assert tick2["session_id"] == f"test-session-{w['id']}"
+    assert len(launcher_calls) == 1
+    assert launcher_calls[0]["id"] == w["id"]
+    assert launcher_calls[0]["task_id"] == fix_task_id
 
     # A real commit + PASS from the (simulated) Fix Builder, then re-review.
     worktree = client.app.state.git.validate_worktree(w["worktree_path"])
@@ -382,6 +436,43 @@ def test_finding_from_original_task_resolved_after_fix_task_commit(client, git_r
     assert client.get(f"/api/tasks/{fix_task_id}/findings").json()
     assert not client.app.state.findings_store.open_blocking(tid)
     assert not client.app.state.findings_store.open_blocking(fix_task_id)
+
+
+def test_fix_builder_launch_failure_keeps_transferred_worktree_recoverable(client, git_repo):
+    root, repo = git_repo
+    rid = register(client, repo, "demo")
+    cid = new_change(client, "Failed fix builder launch remains recoverable", project_id=rid)
+    tid, workspace = _committed_task(client, cid, scope_hints=["feature.py"])
+    client.post(f"/api/workspaces/{workspace['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+    set_fake(client, {"verdict": "FIX_REQUIRED", "findings": [
+        {"category": "CORRECTNESS", "severity": "HIGH", "title": "wrong value", "description": "must be corrected"}]})
+    orch = client.app.state.review_fix_orchestrator
+    assert orch.tick(tid)["outcome"] == "CODE_REVIEW_RUN"
+
+    def fail_to_start(_workspace_row):
+        raise RuntimeError("Codex CLI unavailable in test")
+
+    orch._start_builder_session = fail_to_start
+    result = orch.tick(tid)
+
+    assert result["outcome"] == "EXECUTION_FAILED"
+    assert "verdict" not in result
+    assert "Codex CLI unavailable in test" in result["message"]
+    assert "fix_task_id" not in result
+    assert "session_id" not in result
+    fix_tasks = client.app.state.db.all("SELECT * FROM tasks WHERE fix_of_task_id=?", (tid,))
+    assert len(fix_tasks) == 1
+    fix_task = fix_tasks[0]
+    ws_now = client.app.state.db.one("SELECT * FROM agent_workspaces WHERE id=?", (workspace["id"],))
+    assert ws_now["task_id"] == fix_task["id"]
+    assert ws_now["branch"] == workspace["branch"]
+    assert ws_now["worktree_path"] == workspace["worktree_path"]
+    events = client.app.state.db.all(
+        "SELECT action FROM workspace_events WHERE entity_type='task' AND entity_id=? ORDER BY id", (fix_task["id"],)
+    )
+    actions = [event["action"] for event in events]
+    assert "AUTO_EXECUTION_FAILED" in actions
+    assert "AUTO_BUILDER_LAUNCHED" not in actions
 
 
 # ================================================================ Human escalation (E9.21/E9.37)
@@ -427,8 +518,7 @@ def test_security_critical_finding_blocks(client, git_repo):
             stdout = json.dumps(envelope(payload))
             stderr = ""
         return R()
-    client.app.state.code_review_service.invoker.runner = runner
-    client.app.state.security_review_service.invoker.runner = runner
+    set_fake_runner(client, runner)
 
     client.app.state.review_fix_orchestrator.tick(tid)  # code review runs
     result = client.app.state.review_fix_orchestrator.tick(tid)  # security review runs

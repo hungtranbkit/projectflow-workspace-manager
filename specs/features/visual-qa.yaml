@@ -1,0 +1,87 @@
+schema_version: 1
+id: FEAT-VISUAL-QA
+title: Task-Opt-In Visual QA
+version: 1
+status: approved
+summary: >
+  Add deterministic screenshot comparison for explicitly marked UI Tasks,
+  using project-local references, pinned tooling, loopback-only browser
+  capture, and the existing commit-pinned test evidence and Task gates.
+scope:
+  includes:
+    - Project-local Image-to-code skill installation for Codex and Claude Code
+    - Pinned UIFix source bootstrap with lifecycle scripts disabled
+    - Loopback Playwright capture and UIFix image comparison with replayable artifacts
+    - VISUAL_QA_REQUIRED Task prompt opt-in and conditional test stage
+    - Reuse of test_runs and TaskDecisionService for current-commit evidence
+  excludes:
+    - New PASS/status tables or separate readiness state
+    - Implicit visual QA requirements for backend, firmware, or unmarked Tasks
+    - Production deployment or automatic production API access
+    - Automatic edits by the comparison CLI
+requirements:
+  - id: VQA-REQ-001
+    text: >
+      A repository without a visual_qa contract and a Task without the exact
+      VISUAL_QA_REQUIRED: true opt-in retain their existing prompts and CI
+      stages unchanged.
+  - id: VQA-REQ-002
+    text: >
+      A marked Task requires a valid enabled project-local PNG reference for
+      every configured viewport, an explicit loopback HTTP route, one or more
+      bounded viewports, a threshold from 0 through 1, and
+      commands.visual_qa.command; invalid or missing configuration fails closed.
+  - id: VQA-REQ-003
+    text: >
+      The visual_qa stage is scheduled only for explicitly marked Tasks and
+      is stored as an ordinary test_runs row at the exact tested commit.
+      TaskDecisionService requires a current PASS row before reporting the
+      marked Builder's automated tests as PASS.
+  - id: VQA-REQ-004
+    text: >
+      The CLI refuses missing or non-PNG references, URL access outside
+      loopback, server/capture errors, and reference/actual dimension
+      mismatches; it saves reference.png, actual.png, diff.png, overlay.png,
+      metrics.json, and report.md for every completed comparison.
+  - id: VQA-REQ-005
+    text: >
+      UIFix is identified as UIFix only when the pinned UIFix source API is
+      executed. No masks or dynamic-content hiding are applied implicitly;
+      pixel metrics remain diagnostic and do not replace behavioral review.
+acceptance_criteria:
+  - id: VQA-AC-001
+    text: >
+      A backend Task without the marker does not schedule visual_qa and its
+      prompt contains no visual QA instructions.
+  - id: VQA-AC-002
+    text: >
+      A marked UI Task with valid project configuration receives reference,
+      route, viewport, and replay instructions; the visual_qa stage is
+      scheduled and its test evidence is pinned to the current HEAD.
+  - id: VQA-AC-003
+    text: >
+      An exact image comparison passes, a changed-color/position negative
+      control fails, and missing reference/server cases fail with a non-zero
+      exit code.
+  - id: VQA-AC-004
+    text: >
+      Browser capture waits for network idle and document.fonts.ready, uses
+      the requested viewport at DPR 1, blocks non-loopback requests, and fails
+      on browser/page errors or horizontal document overflow.
+  - id: VQA-AC-005
+    text: >
+      The configured visual stage is required by the existing Builder and
+      Integration test gates for marked Tasks; no second PASS state is added.
+invariants:
+  - id: VQA-INV-001
+    text: >
+      Backend and firmware Tasks remain unaffected unless their own prompt
+      explicitly contains VISUAL_QA_REQUIRED: true.
+  - id: VQA-INV-002
+    text: >
+      A visual comparison PASS never writes Task status or readiness and
+      cannot make a Task READY_FOR_MAIN by itself.
+  - id: VQA-INV-003
+    text: >
+      Reference images are immutable inputs; the CLI never changes or
+      substitutes a reference to improve a score.

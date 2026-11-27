@@ -1,0 +1,105 @@
+============================= test session starts ==============================
+platform linux -- Python 3.14.4, pytest-9.2.0, pluggy-1.7.0 -- <task-python-venv>/bin/python
+cachedir: .pytest_cache
+rootdir: <disposable-candidate-checkout>
+configfile: pyproject.toml
+plugins: anyio-4.16.0
+collecting ... collected 2 items
+
+tests/test_review_fix_loop.py::test_fix_required_creates_fix_task_transfers_worktree FAILED [ 50%]
+tests/test_review_fix_loop.py::test_finding_from_original_task_resolved_after_fix_task_commit FAILED [100%]
+
+=================================== FAILURES ===================================
+____________ test_fix_required_creates_fix_task_transfers_worktree _____________
+
+client = <starlette.testclient.TestClient object at 0x705f9855d7f0>
+git_repo = (PosixPath('<pytest-tmp>/test_fix_required_creates_fix_0/root'), PosixPath('<pytest-tmp>/test_fix_required_creates_fix_0/root/demo'))
+
+    def test_fix_required_creates_fix_task_transfers_worktree(client, git_repo):
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Fix loop change", project_id=rid)
+        tid, w = _committed_task(client, cid, scope_hints=["feature.py"])
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+        set_fake(client, {"verdict": "FIX_REQUIRED", "findings": [
+            {"category": "CORRECTNESS", "severity": "HIGH", "title": "wrong return value", "description": "should return 42"}]})
+        result = client.app.state.review_fix_orchestrator.tick(tid)
+        assert result["outcome"] == "CODE_REVIEW_RUN"
+        result2 = client.app.state.review_fix_orchestrator.tick(tid)
+        assert result2["outcome"] in ("FIX_BUILDER_LAUNCHED", "EXECUTION_FAILED", "FIX_BUILDER_ALREADY_RUNNING"), result2
+>       fix_task_id = result2["fix_task_id"]
+                      ^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'fix_task_id'
+
+cid        = 1
+client     = <starlette.testclient.TestClient object at 0x705f9855d7f0>
+git_repo   = (PosixPath('<pytest-tmp>/test_fix_required_creates_fix_0/root'), PosixPath('<pytest-tmp>/test_fix_required_creates_fix_0/root/demo'))
+repo       = PosixPath('<pytest-tmp>/test_fix_required_creates_fix_0/root/demo')
+result     = {'outcome': 'CODE_REVIEW_RUN', 'verdict': 'FIX_REQUIRED', 'review_id': 1, 'work_product_id': 2, ...}
+result2    = {'outcome': 'EXECUTION_FAILED', 'task_id': 1, 'governing_task_id': 2, 'message': 'Codex CLI chưa được cài hoặc không có trong PATH'}
+rid        = 1
+root       = PosixPath('<pytest-tmp>/test_fix_required_creates_fix_0/root')
+tid        = 1
+w          = {'id': 1, 'repository_id': 1, 'agent': 'codex', 'task_name': 'auto-1-T1-1', ...}
+
+tests/test_review_fix_loop.py:347: KeyError
+________ test_finding_from_original_task_resolved_after_fix_task_commit ________
+
+client = <starlette.testclient.TestClient object at 0x705f98464910>
+git_repo = (PosixPath('<pytest-tmp>/test_finding_from_original_tas0/root'), PosixPath('<pytest-tmp>/test_finding_from_original_tas0/root/demo'))
+
+    def test_finding_from_original_task_resolved_after_fix_task_commit(client, git_repo):
+        """Real bug caught by this phase's own real Fix-loop test: a
+        Finding created under the ORIGINAL Task's id must still be
+        resolvable once ownership transfers to a Fix Task (a different
+        task_id) -- findings_store/review lookups must span the whole
+        fix-chain (task_chain_ids), never a single task_id in isolation."""
+        root, repo = git_repo
+        rid = register(client, repo, "demo")
+        cid = new_change(client, "Chain-aware resolve change", project_id=rid)
+        tid, w = _committed_task(client, cid, scope_hints=["feature.py"])
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+        set_fake(client, {"verdict": "FIX_REQUIRED", "findings": [
+            {"category": "CORRECTNESS", "severity": "HIGH", "title": "wrong value", "description": "x"}]})
+        orch = client.app.state.review_fix_orchestrator
+        orch.tick(tid)  # code review under the ORIGINAL task_id
+        original_finding = client.get(f"/api/tasks/{tid}/findings").json()[0]
+        assert original_finding["status"] == "OPEN"
+        assert original_finding["task_id"] == tid
+    
+        tick2 = orch.tick(tid)  # creates the Fix Task, transfers the worktree
+>       fix_task_id = tick2["fix_task_id"]
+                      ^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'fix_task_id'
+
+cid        = 1
+client     = <starlette.testclient.TestClient object at 0x705f98464910>
+git_repo   = (PosixPath('<pytest-tmp>/test_finding_from_original_tas0/root'), PosixPath('<pytest-tmp>/test_finding_from_original_tas0/root/demo'))
+orch       = <app.services.review_fix_orchestrator.ReviewFixOrchestratorService object at 0x705f982a2fd0>
+original_finding = {'id': 1, 'change_id': 1, 'task_id': 1, 'review_id': 1, ...}
+repo       = PosixPath('<pytest-tmp>/test_finding_from_original_tas0/root/demo')
+rid        = 1
+root       = PosixPath('<pytest-tmp>/test_finding_from_original_tas0/root')
+tick2      = {'outcome': 'EXECUTION_FAILED', 'task_id': 1, 'governing_task_id': 2, 'message': 'Codex CLI chưa được cài hoặc không có trong PATH'}
+tid        = 1
+w          = {'id': 1, 'repository_id': 1, 'agent': 'codex', 'task_name': 'auto-1-T1-2', ...}
+
+tests/test_review_fix_loop.py:396: KeyError
+=============================== warnings summary ===============================
+../..<task-python-venv>/lib/python3.14/site-packages/fastapi/testclient.py:1
+  <task-python-venv>/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../..<task-python-venv>/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_review_fix_loop.py: 22 warnings
+  <task-python-venv>/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: <task-worktree>/docs/visual-qa/evidence/issue-73/pf-04b6-fix-builder-callback-20261126/candidate-red.xml -
+=========================== short test summary info ============================
+FAILED tests/test_review_fix_loop.py::test_fix_required_creates_fix_task_transfers_worktree
+FAILED tests/test_review_fix_loop.py::test_finding_from_original_task_resolved_after_fix_task_commit
+======================== 2 failed, 34 warnings in 4.01s ========================
+
+COMMAND_EXIT=1

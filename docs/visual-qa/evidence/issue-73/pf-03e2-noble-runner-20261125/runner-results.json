@@ -1,0 +1,339 @@
+{
+  "positiveHead": "2809edebb9c03dc8c96e7027794e15466f23ba5d",
+  "tamperCurrentHead": "f1a67a4ed26c2ca33ff343f69d2baefcae22f527",
+  "negativeHead": "22019f936f06ae1b72e6c17318cf5a9c2dbe7268",
+  "dimensionMismatchHead": "dee87bfcdf91279a1a91160af9c5eebd3a70cba2",
+  "missingReferenceHead": "c502cd8379f989802979bb4dde92621bbd346cc8",
+  "unavailableServerHead": "bf4ed459707711604db46e29df660898ac454d7f",
+  "backendHead": "bf4ed459707711604db46e29df660898ac454d7f",
+  "exitZeroWithoutEvidenceHead": "f84274a928a3d0cee6f83fa49be1b9d79bf3d879",
+  "testStage": "PASS / exit 0 (real subprocess)",
+  "positiveVisualStage": "PASS / exit 0 (real pinned UIFix CLI subprocess)",
+  "negativeVisualStage": "FAIL / exit 1 (real color deviation)",
+  "dimensionVisualStage": "FAIL / exit 2 (reference dimensions rejected)",
+  "missingReference": "TestRunner contract rejected before dispatch: visual_qa reference does not exist: docs/missing.png",
+  "unavailableServer": "FAIL / exit 2 (real CLI SERVER_NOT_READY)",
+  "backendOptOut": "PASS / only test stage dispatched",
+  "exitZeroWithoutEvidence": "FAIL / exit 0 without valid run-scoped evidence",
+  "tamperedEvidence": "FAIL after a current-head visual PASS was confirmed; not masked by stale SHA",
+  "staleEvidence": "NOT_RUN after source HEAD changed",
+  "captureRunIds": {
+    "positive": 2,
+    "negativeColor": 4,
+    "tamperCurrentPositive": 13
+  },
+  "routeByCase": {
+    "positive": "http://127.0.0.1:45855/same",
+    "negativeColor": "http://127.0.0.1:45855/wrong",
+    "tamperCurrentPositive": "http://127.0.0.1:42041/same"
+  },
+  "projectFlowSourceCommit": "10455bb4b0b52beb2c06fc3fbd9b339183a49fc0",
+  "projectFlowSourceTree": "4c9011ec3e0694b87e889077819b2a195e7ce6be",
+  "publishedPrHead": "10455bb4b0b52beb2c06fc3fbd9b339183a49fc0",
+  "taskDecisionResults": {
+    "positive": "PASS",
+    "staleAfterSourceChange": "NOT_RUN",
+    "negativeColor": "FAIL",
+    "dimensionMismatch": "FAIL",
+    "missingReference": "NOT_RUN",
+    "unavailableServer": "FAIL",
+    "backendOptOut": "PASS",
+    "exitZeroWithoutEvidence": "FAIL",
+    "tamperCurrentBeforeMutation": "PASS",
+    "tamperCurrentAfterMutation": "FAIL"
+  },
+  "stageRuns": [
+    {
+      "id": 1,
+      "workspace_id": 1,
+      "stage": "test",
+      "status": "PASS",
+      "started_at": "2026-11-25T16:41:48.398568+00:00",
+      "finished_at": "2026-11-25T16:41:48.418049+00:00",
+      "exit_code": 0,
+      "tested_commit": "2809edebb9c03dc8c96e7027794e15466f23ba5d",
+      "stdout_tail": "fixture-test-command-ran\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": 2,
+      "workspace_id": 1,
+      "stage": "visual_qa",
+      "status": "PASS",
+      "started_at": "2026-11-25T16:41:48.429093+00:00",
+      "finished_at": "2026-11-25T16:41:49.709218+00:00",
+      "exit_code": 0,
+      "tested_commit": "2809edebb9c03dc8c96e7027794e15466f23ba5d",
+      "stdout_tail": "PASS UIFix diff 0.000% at 320x240; artifacts: ***REDACTED***/320x240\n\nPROJECTFLOW_VISUAL_EVIDENCE_SHA256=68b892a0d00eb0aedb7673868ce87f8e0ffcae4b8802ee44718c32351cce645b\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": 3,
+      "workspace_id": 1,
+      "stage": "test",
+      "status": "PASS",
+      "started_at": "2026-11-25T16:41:49.805490+00:00",
+      "finished_at": "2026-11-25T16:41:49.825437+00:00",
+      "exit_code": 0,
+      "tested_commit": "22019f936f06ae1b72e6c17318cf5a9c2dbe7268",
+      "stdout_tail": "fixture-test-command-ran\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": 4,
+      "workspace_id": 1,
+      "stage": "visual_qa",
+      "status": "FAIL",
+      "started_at": "2026-11-25T16:41:49.834159+00:00",
+      "finished_at": "2026-11-25T16:41:51.239191+00:00",
+      "exit_code": 1,
+      "tested_commit": "22019f936f06ae1b72e6c17318cf5a9c2dbe7268",
+      "stdout_tail": "FAIL UIFix diff 100.000% at 320x240; artifacts: ***REDACTED***/320x240\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": 5,
+      "workspace_id": 1,
+      "stage": "test",
+      "status": "PASS",
+      "started_at": "2026-11-25T16:41:51.302589+00:00",
+      "finished_at": "2026-11-25T16:41:51.325245+00:00",
+      "exit_code": 0,
+      "tested_commit": "dee87bfcdf91279a1a91160af9c5eebd3a70cba2",
+      "stdout_tail": "fixture-test-command-ran\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": 6,
+      "workspace_id": 1,
+      "stage": "visual_qa",
+      "status": "FAIL",
+      "started_at": "2026-11-25T16:41:51.335114+00:00",
+      "finished_at": "2026-11-25T16:41:51.399249+00:00",
+      "exit_code": 2,
+      "tested_commit": "dee87bfcdf91279a1a91160af9c5eebd3a70cba2",
+      "stdout_tail": "",
+      "stderr_tail": "visual-qa: REFERENCE_DIMENSIONS_MISMATCH: 320x240 != 321x240\n"
+    },
+    {
+      "id": 7,
+      "workspace_id": 1,
+      "stage": "test",
+      "status": "PASS",
+      "started_at": "2026-11-25T16:41:51.965092+00:00",
+      "finished_at": "2026-11-25T16:41:51.986996+00:00",
+      "exit_code": 0,
+      "tested_commit": "bf4ed459707711604db46e29df660898ac454d7f",
+      "stdout_tail": "fixture-test-command-ran\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": 8,
+      "workspace_id": 1,
+      "stage": "visual_qa",
+      "status": "FAIL",
+      "started_at": "2026-11-25T16:41:51.996082+00:00",
+      "finished_at": "2026-11-25T16:41:52.578587+00:00",
+      "exit_code": 2,
+      "tested_commit": "bf4ed459707711604db46e29df660898ac454d7f",
+      "stdout_tail": "",
+      "stderr_tail": "visual-qa: SERVER_NOT_READY: page.goto: net::ERR_CONNECTION_REFUSED at http://127.0.0.1:45855/same\nCall log:\n  - navigating to \"http://127.0.0.1:45855/same\", waiting until \"networkidle\"\n\n"
+    },
+    {
+      "id": 9,
+      "workspace_id": 2,
+      "stage": "test",
+      "status": "PASS",
+      "started_at": "2026-11-25T16:41:52.693935+00:00",
+      "finished_at": "2026-11-25T16:41:52.715193+00:00",
+      "exit_code": 0,
+      "tested_commit": "bf4ed459707711604db46e29df660898ac454d7f",
+      "stdout_tail": "fixture-test-command-ran\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": 10,
+      "workspace_id": 1,
+      "stage": "test",
+      "status": "PASS",
+      "started_at": "2026-11-25T16:41:52.790283+00:00",
+      "finished_at": "2026-11-25T16:41:52.809381+00:00",
+      "exit_code": 0,
+      "tested_commit": "f84274a928a3d0cee6f83fa49be1b9d79bf3d879",
+      "stdout_tail": "fixture-test-command-ran\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": 11,
+      "workspace_id": 1,
+      "stage": "visual_qa",
+      "status": "FAIL",
+      "started_at": "2026-11-25T16:41:52.817802+00:00",
+      "finished_at": "2026-11-25T16:41:52.831386+00:00",
+      "exit_code": 0,
+      "tested_commit": "f84274a928a3d0cee6f83fa49be1b9d79bf3d879",
+      "stdout_tail": "",
+      "stderr_tail": "VISUAL_EVIDENCE_REJECTED: VisualEvidenceError: evidence viewport set does not match contract"
+    },
+    {
+      "id": 12,
+      "workspace_id": 1,
+      "stage": "test",
+      "status": "PASS",
+      "started_at": "2026-11-25T16:41:52.887043+00:00",
+      "finished_at": "2026-11-25T16:41:52.911524+00:00",
+      "exit_code": 0,
+      "tested_commit": "f1a67a4ed26c2ca33ff343f69d2baefcae22f527",
+      "stdout_tail": "fixture-test-command-ran\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": 13,
+      "workspace_id": 1,
+      "stage": "visual_qa",
+      "status": "PASS",
+      "started_at": "2026-11-25T16:41:52.922339+00:00",
+      "finished_at": "2026-11-25T16:41:54.237857+00:00",
+      "exit_code": 0,
+      "tested_commit": "f1a67a4ed26c2ca33ff343f69d2baefcae22f527",
+      "stdout_tail": "PASS UIFix diff 0.000% at 320x240; artifacts: ***REDACTED***/320x240\n\nPROJECTFLOW_VISUAL_EVIDENCE_SHA256=f7b62fe2189635d574c9c5c19cbbe145bb106b201b999d00f927557630a1aa3d\n",
+      "stderr_tail": ""
+    }
+  ],
+  "externalRequests": [],
+  "httpMethods": [
+    "GET"
+  ],
+  "referenceSha256": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e",
+  "captures": {
+    "positive": {
+      "actual.png": {
+        "file": "positive-actual.png",
+        "sha256": "9f65d312989d0aae40de76358a6c49f2f383a3cc32fd13422c88f5cbac25c713"
+      },
+      "diff.png": {
+        "file": "positive-diff.png",
+        "sha256": "dc66470136d96f054de3647d0b08648687c0b2744df71d0b575da09c138621cd"
+      },
+      "overlay.png": {
+        "file": "positive-overlay.png",
+        "sha256": "212ac54ebaead1e690fd53f0d443ff70f6902905edf45114ac4d6cf5168c79aa"
+      },
+      "metrics": {
+        "schemaVersion": 1,
+        "tool": "UIFix",
+        "toolVersion": "1.2.6",
+        "toolCommit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+        "sourceCommit": "2809edebb9c03dc8c96e7027794e15466f23ba5d",
+        "referenceSha256": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e",
+        "actualSha256": "9f65d312989d0aae40de76358a6c49f2f383a3cc32fd13422c88f5cbac25c713",
+        "url": "http://127.0.0.1:45855/same",
+        "viewport": {
+          "width": 320,
+          "height": 240
+        },
+        "captureMode": "viewport",
+        "imageDimensions": {
+          "width": 320,
+          "height": 240
+        },
+        "deviceScaleFactor": 1,
+        "threshold": 0,
+        "percentDiff": 0,
+        "mismatchedPixels": 0,
+        "totalPixels": 76800,
+        "ssim": 1,
+        "horizontalOverflow": false,
+        "pageErrors": [],
+        "blockedRequests": [],
+        "passed": true
+      }
+    },
+    "negative-color": {
+      "actual.png": {
+        "file": "negative-color-actual.png",
+        "sha256": "c7c3151f51a387a2090d93f61615a1156b21c347860efbfc6d4de803f0fd4e05"
+      },
+      "diff.png": {
+        "file": "negative-color-diff.png",
+        "sha256": "b2bf173991ebaa1306e1ac7c005ff01ab20677757f87bf629e5b1d4788b16128"
+      },
+      "overlay.png": {
+        "file": "negative-color-overlay.png",
+        "sha256": "84d6b0f2ada4215477db213a93d66f9d5b6eb63e48f322766b2888a5d4016f0b"
+      },
+      "metrics": {
+        "schemaVersion": 1,
+        "tool": "UIFix",
+        "toolVersion": "1.2.6",
+        "toolCommit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+        "sourceCommit": "22019f936f06ae1b72e6c17318cf5a9c2dbe7268",
+        "referenceSha256": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e",
+        "actualSha256": "c7c3151f51a387a2090d93f61615a1156b21c347860efbfc6d4de803f0fd4e05",
+        "url": "http://127.0.0.1:45855/wrong",
+        "viewport": {
+          "width": 320,
+          "height": 240
+        },
+        "captureMode": "viewport",
+        "imageDimensions": {
+          "width": 320,
+          "height": 240
+        },
+        "deviceScaleFactor": 1,
+        "threshold": 0,
+        "percentDiff": 1,
+        "mismatchedPixels": 76800,
+        "totalPixels": 76800,
+        "ssim": 0.9637040358126364,
+        "horizontalOverflow": false,
+        "pageErrors": [],
+        "blockedRequests": [],
+        "passed": false
+      }
+    },
+    "tamper-current-positive": {
+      "actual.png": {
+        "file": "tamper-current-positive-actual.png",
+        "sha256": "9f65d312989d0aae40de76358a6c49f2f383a3cc32fd13422c88f5cbac25c713"
+      },
+      "diff.png": {
+        "file": "tamper-current-positive-diff.png",
+        "sha256": "dc66470136d96f054de3647d0b08648687c0b2744df71d0b575da09c138621cd"
+      },
+      "overlay.png": {
+        "file": "tamper-current-positive-overlay.png",
+        "sha256": "212ac54ebaead1e690fd53f0d443ff70f6902905edf45114ac4d6cf5168c79aa"
+      },
+      "metrics": {
+        "schemaVersion": 1,
+        "tool": "UIFix",
+        "toolVersion": "1.2.6",
+        "toolCommit": "97c4b9d83684c7d607cb8c4b146e3f8aa5356e53",
+        "sourceCommit": "f1a67a4ed26c2ca33ff343f69d2baefcae22f527",
+        "referenceSha256": "b89caa21bde04741f0909b0e9e62a1d33fa90c4c1d927ead91d7d8a0b119237e",
+        "actualSha256": "9f65d312989d0aae40de76358a6c49f2f383a3cc32fd13422c88f5cbac25c713",
+        "url": "http://127.0.0.1:42041/same",
+        "viewport": {
+          "width": 320,
+          "height": 240
+        },
+        "captureMode": "viewport",
+        "imageDimensions": {
+          "width": 320,
+          "height": 240
+        },
+        "deviceScaleFactor": 1,
+        "threshold": 0,
+        "percentDiff": 0,
+        "mismatchedPixels": 0,
+        "totalPixels": 76800,
+        "ssim": 1,
+        "horizontalOverflow": false,
+        "pageErrors": [],
+        "blockedRequests": [],
+        "passed": true
+      }
+    }
+  }
+}

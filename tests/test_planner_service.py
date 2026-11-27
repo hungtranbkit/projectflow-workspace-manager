@@ -38,6 +38,14 @@ def fake_envelope(plan_dict):
     return {"is_error": False, "subtype": "success", "result": json.dumps(plan_dict)}
 
 
+def set_fake_runner(client, runner):
+    """Inject deterministic behavior at the complete planner invoker boundary."""
+    invoker = client.app.state.planner_service.invoker
+    assert invoker is not None
+    invoker.which = lambda name: "/test-only/claude" if name == "claude" else None
+    invoker.runner = runner
+
+
 def set_fake_plan(client, plan_dict):
     envelope = fake_envelope(plan_dict)
 
@@ -47,7 +55,7 @@ def set_fake_plan(client, plan_dict):
             stdout = json.dumps(envelope)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = fake_runner
+    set_fake_runner(client, fake_runner)
 
 
 def minimal_valid_plan(**overrides):
@@ -178,10 +186,55 @@ def test_malformed_envelope_produces_execution_failed_no_plan_row(client, git_re
             stdout = "not json at all {{{"
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = bad_runner
+    set_fake_runner(client, bad_runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLANNER_EXECUTION_FAILED"
     assert r.json()["plan"] is None
+    assert client.get(f"/api/changes/{cid}/plans").json() == []
+
+
+def test_unavailable_claude_fails_closed_before_runner_or_plan(client, git_repo):
+    root, repo = git_repo
+    rid = register(client, repo, "demo")
+    cid = new_change(client, "Unavailable planner stays fail closed", project_id=rid)
+    client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "VIBE"})
+    calls = []
+    invoker = client.app.state.planner_service.invoker
+    invoker.which = lambda name: None
+    invoker.runner = lambda *args: calls.append(args)
+
+    response = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
+
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "PLANNER_EXECUTION_FAILED"
+    assert "claude CLI not found in PATH" in response.json()["message"]
+    assert calls == []
+    assert client.get(f"/api/changes/{cid}/plans").json() == []
+
+
+def test_planner_reports_allowlisted_provider_usage_limit_without_raw_payload(client, git_repo):
+    root, repo = git_repo
+    rid = register(client, repo, "demo")
+    cid = new_change(client, "Provider limit is sanitized", project_id=rid)
+    client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "VIBE"})
+
+    def limited_runner(argv, cwd, timeout):
+        class R:
+            returncode = 1
+            stdout = json.dumps({
+                "is_error": True, "subtype": "success", "api_error": "usage_limit_reached",
+                "api_error_status": 429, "api_error_type": "rate_limit_error",
+                "result": "private provider diagnostics must never escape",
+            })
+            stderr = ""
+        return R()
+
+    set_fake_runner(client, limited_runner)
+    response = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "PLANNER_EXECUTION_FAILED"
+    assert "subtype=usage_limit_reached" in response.json()["message"]
+    assert "private provider diagnostics" not in response.text
     assert client.get(f"/api/changes/{cid}/plans").json() == []
 
 
@@ -198,7 +251,7 @@ def test_malformed_inner_result_produces_output_invalid_no_plan_row(client, git_
             stdout = json.dumps(envelope)
             stderr = ""
         return R()
-    client.app.state.planner_service.invoker.runner = runner
+    set_fake_runner(client, runner)
     r = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
     assert r.json()["outcome"] == "PLANNER_OUTPUT_INVALID"
     assert client.get(f"/api/changes/{cid}/plans").json() == []
@@ -526,6 +579,46 @@ def test_spec_gate_unaffected(client, git_repo):
     assert client.get(f"/api/tasks/{tid}/spec-gate").json()["outcome"] == "NOT_APPLICABLE"
 
 
+def test_planner_retries_once_with_validator_errors_and_canonical_ids(client, git_repo):
+    root, repo = git_repo
+    rid = register(client, repo, "demo")
+    cid = new_change(client, "Planner repairs invalid requirement IDs", project_id=rid)
+    client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "VIBE"})
+    invalid = minimal_valid_plan(tasks=[{
+        "key": "T1", "title": "Implement it", "task_type": "IMPLEMENTATION",
+        "preferred_role": "BUILDER", "depends_on": [], "requirements": ["return workflow profile"],
+    }])
+    valid = minimal_valid_plan()
+    replies = [json.dumps(fake_envelope(invalid)), json.dumps(fake_envelope(valid))]
+    calls = []
+
+    def sequence_runner(argv, cwd, timeout):
+        calls.append(argv)
+        class R:
+            returncode = 0
+            stderr = ""
+            stdout = replies.pop(0)
+        return R()
+
+    set_fake_runner(client, sequence_runner)
+    response = client.post(f"/api/changes/{cid}/plan", data={"provider": "claude"})
+    assert response.status_code == 200, response.text
+    assert response.json()["outcome"] in ("PLAN_READY", "HUMAN_DECISION_REQUIRED")
+    assert len(calls) == 2
+    repair_prompt = calls[1][2]
+    assert "repair" in repair_prompt.lower()
+    assert "unknown requirement id" in repair_prompt
+    assert "SpecRegistry" in repair_prompt
+    schema = json.loads(calls[0][6])
+    task = schema["properties"]["tasks"]["items"]["properties"]
+    context = client.app.state.planner_service.context_builder.build(cid, "VIBE")
+    assert task["requirements"]["items"]["enum"] == sorted(
+        item["id"] for item in context["spec"]["approved_requirements"]
+    )
+    assert task["task_type"]["enum"] == sorted(context["engineering"]["task_types"])
+    assert task["preferred_role"]["enum"] == [None, *sorted(context["engineering"]["roles"])]
+
+
 def test_task_decision_service_unaffected_by_materialized_task(client, git_repo):
     cid, r = create_and_plan(client, git_repo)
     plan_id = r.json()["plan"]["id"]
@@ -538,13 +631,16 @@ def test_task_decision_service_unaffected_by_materialized_task(client, git_repo)
 # ============================================================= Real Planner test (E4.21)
 
 @pytest.mark.skipif(not shutil.which("claude"), reason="real `claude` CLI not available in this environment")
-def test_real_planner_invocation_end_to_end(client, git_repo):
+def test_real_planner_invocation_end_to_end(client, git_repo, monkeypatch):
     """E4.21: one safe, real, non-fake Planner invocation. Disposable
     Change/workflow, real `claude -p --json-schema` subprocess call, no
     production repository mutation, no Task execution -- materializes
     only into disposable Task records and asserts no Agent session was
     ever started for them."""
     root, repo = git_repo
+    from tests.claude_test_config import prepare_claude_test_config, require_isolated_claude_auth
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     rid = register(client, repo, "demo")
     cid = new_change(client, "Add an endpoint returning the current workflow profile", project_id=rid)
     client.post(f"/api/changes/{cid}/workflow", data={"profile_key": "VIBE"})

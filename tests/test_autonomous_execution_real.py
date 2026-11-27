@@ -59,52 +59,30 @@ def _seed_buggy_fixture(repo):
                     cwd=repo, check=True, capture_output=True)
 
 
-CLAUDE_CONFIG = Path.home() / ".claude.json"
-_TRUST_ENTRY = {"allowedTools": [], "mcpContextUris": [], "mcpServers": {}, "enabledMcpjsonServers": [],
-                 "disabledMcpjsonServers": [], "hasTrustDialogAccepted": True,
-                 "hasClaudeMdExternalIncludesApproved": False, "hasClaudeMdExternalIncludesWarningShown": False}
+from tests.claude_test_config import (
+    ProjectTrust, prepare_claude_test_config, register_project_trust,
+    require_isolated_claude_auth,
+)
 
 
-def _trust_claude_dir(path):
-    """Claude Code shows a one-time 'is this a project you trust?'
-    dialog for any directory it has never seen before, even under
-    --dangerously-skip-permissions -- confirmed via this test's own
-    earlier real run: the live PTY transcript showed exactly that
-    prompt, then went silent forever (nothing in this test ever answers
-    an interactive dialog). Production Builder Workspaces never hit
-    this because they're created under .worktrees/ inside the already-
-    -trusted live repo checkout; this test's disposable tmp_path root
-    is a brand-new path Claude Code has never seen. Pre-registers trust
-    the same way a real operator already has for their own project
-    root, in ~/.claude.json's per-directory `projects` map (the exact
-    field observed on this host's own already-trusted project entries).
-    Returns the previous value (None if the key was new) so the caller
-    can restore it afterward -- this only ever ADDS/restores one key,
-    never touches any other entry in this shared, persistent file."""
-    key = str(Path(path).resolve())
-    data = json.loads(CLAUDE_CONFIG.read_text())
-    previous = data.get("projects", {}).get(key)
-    data.setdefault("projects", {})[key] = dict(_TRUST_ENTRY)
-    CLAUDE_CONFIG.write_text(json.dumps(data))
-    return key, previous
+def _trust_claude_dir(path, *, allowed_root, monkeypatch, request):
+    """Register only this fixture's trust key under pytest's temp root.
+
+    The config directory holds synthetic trust state only. Any authorized
+    provider credentials must already be injected into the test process
+    environment; this helper never reads or copies home credentials. The
+    finalizer is installed before any provider launch.
+    """
+    return register_project_trust(
+        path,
+        allowed_root=allowed_root,
+        monkeypatch=monkeypatch,
+        add_finalizer=request.addfinalizer,
+    )
 
 
-def _restore_claude_dir(key, previous):
-    """Restores the one key this test explicitly set, PLUS sweeps any
-    other /tmp/pytest-of-dell/... entry Claude Code itself may have
-    additionally written during the real session (observed in practice:
-    it also registers the worktree's main-repo path on its own, not
-    just the exact key pre-seeded here) -- every such path is a
-    disposable pytest tmp_path this test run owns, never anything a
-    real user configured, so removing them all is safe cleanup, not
-    data loss."""
-    data = json.loads(CLAUDE_CONFIG.read_text())
-    projects = data.get("projects", {})
-    for other_key in [k for k in projects if k.startswith("/tmp/pytest-of-dell/")]:
-        projects.pop(other_key, None)
-    if previous is not None:
-        projects[key] = previous
-    CLAUDE_CONFIG.write_text(json.dumps(data))
+def _restore_claude_dir(registration: ProjectTrust):
+    registration.restore()
 
 
 def _pytest_passes(cwd) -> bool:
@@ -117,8 +95,10 @@ def _pytest_passes(cwd) -> bool:
     return result.returncode == 0
 
 
-def test_real_autonomous_builder_fixture_end_to_end(client, git_repo):
+def test_real_autonomous_builder_fixture_end_to_end(client, git_repo, monkeypatch, request):
     root, repo = git_repo
+    config_dir = prepare_claude_test_config(root, monkeypatch=monkeypatch)
+    require_isolated_claude_auth(config_dir)
     real_checkout = Path(__file__).resolve().parent.parent
     before_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=real_checkout,
                                   capture_output=True, text=True).stdout.strip()
@@ -203,7 +183,9 @@ def test_real_autonomous_builder_fixture_end_to_end(client, git_repo):
     # naming add_task_workspace() uses, so this test never guesses.
     from app.services.git_workspace import slugify
     worktree_path_precomputed = root / ".worktrees" / f"{slugify('demo')}-{slugify('claude')}-{slugify('fix-answer-e8-real-demo')}"
-    trust_key, trust_previous = _trust_claude_dir(worktree_path_precomputed)
+    trust_registration = _trust_claude_dir(worktree_path_precomputed, allowed_root=root,
+                                           monkeypatch=monkeypatch, request=request)
+    trust_key = trust_registration.project_key
     print("REAL E8 TEST -- pre-trusted worktree path for Claude Code:", trust_key)
 
     readiness = client.get(f"/api/tasks/{tid}/execution-readiness").json()
@@ -282,7 +264,7 @@ def test_real_autonomous_builder_fixture_end_to_end(client, git_repo):
         except Exception:
             pass
         try:
-            _restore_claude_dir(trust_key, trust_previous)
+            _restore_claude_dir(trust_registration)
         except Exception:
             pass
 

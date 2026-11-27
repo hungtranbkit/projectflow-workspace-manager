@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+<title id="title">Image to Code — Layer First</title>
+<desc id="desc">Ícone com fotografia de montanhas se convertendo em código sobre camadas translúcidas violeta, rosa e azul.</desc>
+<defs>
+ <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FE7CA7"/><stop offset=".38" stop-color="#9D5DF7"/><stop offset=".7" stop-color="#595DF8"/><stop offset="1" stop-color="#50D8FA"/></linearGradient>
+ <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#111020"/><stop offset="1" stop-color="#050A17"/></linearGradient>
+ <linearGradient id="mount" x1=".05" y1="0" x2=".9" y2="1"><stop stop-color="#FC4C8D"/><stop offset=".5" stop-color="#8457C8"/><stop offset="1" stop-color="#3B66C8"/></linearGradient>
+ <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#D768FC" stop-opacity=".68"/><stop offset=".52" stop-color="#585DF7" stop-opacity=".57"/><stop offset="1" stop-color="#34CFF8" stop-opacity=".5"/></linearGradient>
+ <linearGradient id="code" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#282340"/><stop offset="1" stop-color="#151B33"/></linearGradient>
+ <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="23"/></filter>
+ <clipPath id="picclip"><rect x="215" y="218" width="600" height="430" rx="65"/></clipPath>
+</defs>
+<!-- transparent outside badge -->
+<rect x="68" y="78" width="888" height="868" rx="197" fill="#5E2AB8" opacity=".2" filter="url(#shadow)"/>
+<rect x="74" y="72" width="876" height="876" rx="184" fill="url(#bg)" stroke="url(#frame)" stroke-width="20"/>
+<rect x="115" y="113" width="794" height="794" rx="145" fill="none" stroke="#FFFFFF" stroke-opacity=".08" stroke-width="3"/>
+<!-- layers under the image -->
+<g transform="translate(2 16)">
+ <rect x="230" y="315" width="584" height="415" rx="64" fill="url(#glass)" stroke="#7E8AFE" stroke-width="10" opacity=".57" transform="rotate(-10 522 522)"/>
+ <rect x="229" y="296" width="584" height="416" rx="64" fill="url(#glass)" stroke="#EA7BF1" stroke-width="10" opacity=".67" transform="rotate(8 522 504)"/>
+</g>
+<!-- photographic graphic card -->
+<g>
+<rect x="202" y="206" width="626" height="456" rx="75" fill="#161D32" stroke="#B878FA" stroke-width="13"/>
+<g clip-path="url(#picclip)">
+ <rect x="215" y="218" width="600" height="430" fill="#252047"/>
+ <rect x="215" y="218" width="600" height="260" fill="url(#mount)" opacity=".83"/>
+ <circle cx="665" cy="323" r="65" fill="#FFC79B"/>
+ <path d="M215 525 L365 346 L479 454 L565 365 L815 610 L815 648 L215 648Z" fill="#161D39"/>
+ <path d="M254 600 L410 383 L493 505 L551 444 L680 648 L215 648Z" fill="#283F74"/>
+ <path d="M340 479 L410 383 L458 449 L410 428Z" fill="#BCB9E5" opacity=".85"/>
+ <path d="M513 438 L565 365 L623 438 L568 414Z" fill="#D8D9F0" opacity=".7"/>
+ <path d="M215 625 L356 550 L454 584 L556 535 L815 640 L815 648 L215 648Z" fill="#10182E"/>
+</g>
+</g>
+<!-- floating code panel -->
+<rect x="338" y="514" width="490" height="257" rx="56" fill="#061021" stroke="#94A5FF" stroke-width="11"/>
+<rect x="357" y="533" width="451" height="219" rx="39" fill="url(#code)"/>
+<path d="M476 600 L426 642 L476 684" fill="none" stroke="#FFFFFF" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M663 600 L713 642 L663 684" fill="none" stroke="#FFFFFF" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M601 574 L541 710" fill="none" stroke="#B18AFF" stroke-width="28" stroke-linecap="round"/>
+<!-- tiny directional signal -->
+<path d="M244 772 L295 798 L244 823" fill="none" stroke="#FB7BC1" stroke-width="18" stroke-linejoin="round" stroke-linecap="round" opacity=".84"/>
+<path d="M735 804 L784 804" fill="none" stroke="#56DDFD" stroke-width="16" stroke-linecap="round" opacity=".92"/>
+</svg>

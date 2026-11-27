@@ -1,0 +1,6 @@
+{
+  "regions": [
+    {"id": "sample-logo", "kind": "logo", "bounds": [20, 20, 120, 60], "remove_border_background": false, "notes": "Replace coordinates with measured XYWH in input image; use true only for flat solid background."},
+    {"id": "sample-icon", "kind": "icon", "bounds": [180, 20, 40, 40], "remove_border_background": true, "tolerance": 12, "notes": "Background removal may damage antialiasing. Inspect exported PNG."}
+  ]
+}

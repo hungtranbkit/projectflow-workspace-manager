@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -179,9 +180,10 @@ class TaskDecisionService:
     against the source branch's current HEAD (staleness), same discipline
     `sandboxes.is_stale()` already established."""
 
-    def __init__(self, db, git):
+    def __init__(self, db, git, visual_evidence_root: Path | None = None):
         self.db = db
         self.git = git
+        self.visual_evidence_root = Path(visual_evidence_root).resolve() if visual_evidence_root else None
         # Track A1 (A1.4/A1.5) perf fix: request-scoped memoization of
         # evaluate(), NOT a global/app-lifetime cache. evaluate_workflow()
         # calls evaluate() on the same task_id several times per Change
@@ -291,7 +293,7 @@ class TaskDecisionService:
         # honest absence of any session row for this workspace (Workspace
         # READY must never be misread as Agent RUNNING).
         agent_status = session["status"] if session else "NOT_STARTED"
-        return {
+        view = {
             "id": w["id"], "agent": w["agent"], "role": w["role"], "repo_name": w["repo_name"],
             "repository_id": w["repository_id"], "worktree_path": w["worktree_path"], "branch": w["branch"],
             "base_commit": w["base_commit"], "task_id": w["task_id"],
@@ -302,6 +304,168 @@ class TaskDecisionService:
             "builder_instructions": w.get("builder_instructions") or "",
             "sandbox_state": self.builder_sandbox_state(w, head),
         }
+        # Keep the Task detail's evidence panel inside this same evaluated
+        # view model. The panel exposes the existing TestRunner row and the
+        # same run verifier used by builder_tests_status; it does not create
+        # another gate or decision source.
+        view["tests_status"] = self.builder_tests_status(view)
+        view["visual_qa"] = self._visual_qa_panel(w, head)
+        return view
+
+    def _visual_qa_panel(self, workspace, head):
+        """Read-only, task-scoped contract preview and existing gate data."""
+        from app.services.visual_qa_contract import (
+            task_requires_visual_qa, load_committed_visual_qa_contract,
+            read_committed_visual_reference_png,
+        )
+
+        task = self.db.one("SELECT * FROM tasks WHERE id=?", (workspace.get("task_id"),)) if workspace.get("task_id") else None
+        required = task_requires_visual_qa(task)
+        panel = {
+            "required": required,
+            "repo_name": workspace.get("repo_name") or "Repository",
+            "tested_commit": head,
+            "contract_state": "MISSING",
+            "contract": None,
+            "run": None,
+            "evidence_state": "NOT_REQUIRED" if not required else "NOT_RUN",
+            "metrics": [],
+            "previews": [],
+        }
+        if not task:
+            return panel
+
+        repo_path = Path(workspace["worktree_path"])
+        contract = None
+        try:
+            source = self.git.source_state(repo_path)
+            if not source["clean"] or source["head"] != head:
+                panel["contract_state"] = "SOURCE_NOT_CLEAN"
+                if required:
+                    panel["evidence_state"] = "BLOCKED"
+                return panel
+            contract = load_committed_visual_qa_contract(repo_path, self.git, head)
+        except Exception:
+            panel["contract_state"] = "INVALID"
+            if required:
+                panel["evidence_state"] = "BLOCKED"
+            return panel
+        if contract is None:
+            panel["contract_state"] = "MISSING"
+            if required:
+                panel["evidence_state"] = "BLOCKED"
+            return panel
+        if contract is not None:
+            references = []
+            try:
+                for viewport in contract["viewports"]:
+                    key = f"{viewport['width']}x{viewport['height']}"
+                    relative_path = contract["reference"][key]
+                    reference_bytes = read_committed_visual_reference_png(repo_path, self.git, head, contract, key)
+                    references.append({
+                        "viewport": key,
+                        "path": relative_path,
+                        "sha256": hashlib.sha256(reference_bytes).hexdigest(),
+                        "preview_url": f"/tasks/{task['id']}/workspaces/{workspace['id']}/visual-reference/{head}/{key}",
+                    })
+            except Exception:
+                contract = None
+                panel["contract_state"] = "INVALID"
+                if required:
+                    panel["evidence_state"] = "BLOCKED"
+            else:
+                panel["contract_state"] = "VALID"
+                panel["contract"] = {
+                    "route": contract["route"],
+                    "threshold": contract["threshold"],
+                    "references": references,
+                    "approval": "NOT_RECORDED",
+                }
+        if not required:
+            return panel
+        row = self.db.one(
+            "SELECT * FROM test_runs "
+            "WHERE workspace_type='agent' AND workspace_id=? AND stage='visual_qa' AND tested_commit=? ORDER BY id DESC LIMIT 1",
+            (workspace["id"], head),
+        ) if head else None
+        if row is None:
+            row = self.db.one(
+                "SELECT * FROM test_runs "
+                "WHERE workspace_type='agent' AND workspace_id=? AND stage='visual_qa' ORDER BY id DESC LIMIT 1",
+                (workspace["id"],),
+            )
+        if row is None:
+            return panel
+        is_current = bool(head and row["tested_commit"] == head)
+        panel["run"] = {
+            "id": row["id"], "status": row["status"],
+            "tested_commit": row["tested_commit"], "is_current": is_current,
+            "exit_code": row["exit_code"], "finished_at": row["finished_at"],
+            "log_url": f"/test-runs/{row['id']}/log",
+        }
+        if not is_current:
+            panel["evidence_state"] = "STALE"
+            return panel
+        if contract is None:
+            panel["evidence_state"] = "BLOCKED"
+            return panel
+        if row["status"] != "PASS":
+            panel["evidence_state"] = row["status"]
+            if row["status"] == "FAIL":
+                diagnostic = self._visual_diagnostic_result(
+                    row, "agent", workspace["id"], head, repo_path, task
+                )
+                if diagnostic is not None:
+                    panel["evidence_state"] = "DIAGNOSTIC"
+                    panel["metrics"] = diagnostic["metrics"]
+                    labels = {
+                        "reference.png": "Reference",
+                        "actual.png": "Actual",
+                        "diff.png": "Diff",
+                        "overlay.png": "Overlay",
+                    }
+                    panel["previews"] = [
+                        {
+                            "viewport": viewport,
+                            "artifact": artifact,
+                            "label": labels[artifact],
+                            "url": f"/test-runs/{row['id']}/visual/{viewport}/{artifact}",
+                            "alt": f"{labels[artifact]} {viewport} — kết quả FAIL dùng để sửa",
+                        }
+                        for viewport in diagnostic["viewports"]
+                        for artifact in labels
+                    ]
+                elif "PROJECTFLOW_VISUAL_DIAGNOSTIC_SHA256=" in (row["stderr_tail"] or ""):
+                    panel["evidence_state"] = "INVALID"
+            return panel
+
+        verified = self._visual_evidence_result(
+            row, "agent", workspace["id"], head, repo_path, task
+        )
+        if verified is None:
+            panel["evidence_state"] = "INVALID"
+            return panel
+
+        panel["evidence_state"] = "VALID"
+        panel["metrics"] = verified["metrics"]
+        labels = {
+            "reference.png": "Reference",
+            "actual.png": "Actual",
+            "diff.png": "Diff",
+            "overlay.png": "Overlay",
+        }
+        panel["previews"] = [
+            {
+                "viewport": viewport,
+                "artifact": artifact,
+                "label": labels[artifact],
+                "url": f"/test-runs/{row['id']}/visual/{viewport}/{artifact}",
+                "alt": f"{labels[artifact]} {viewport}",
+            }
+            for viewport in verified["viewports"]
+            for artifact in labels
+        ]
+        return panel
 
     # ---- Runtime Verification sandbox gating (section 12-15) ------------
     def builder_sandbox_state(self, w, head=None):
@@ -492,6 +656,42 @@ class TaskDecisionService:
         return "READY_FOR_MAIN"
 
     # ---- baseline-waiver failure classification (section 11) -----------
+    def _required_test_stage_names(self, worktree_path, *, visual_qa_required=False, tested_commit=None):
+        """Return the contract's required stage names, or None for legacy
+        repositories with no PROJECT.yaml / no configured required stages.
+
+        A present but invalid contract is never treated as the legacy case.
+        The stage list comes from the same loader used by TestRunner.
+        """
+        contract_path = Path(worktree_path) / "PROJECT.yaml"
+        if not contract_path.is_file() and not visual_qa_required:
+            return None
+        try:
+            if visual_qa_required:
+                from app.services.visual_qa_contract import load_committed_visual_qa_contract
+                source = self.git.source_state(worktree_path)
+                tested_commit = tested_commit or source["head"]
+                if not source["clean"] or source["head"] != tested_commit:
+                    raise ContractError("Required Visual QA source is not clean at its tested commit")
+                project_bytes = self.git.read_committed_file(
+                    worktree_path, tested_commit, "PROJECT.yaml", max_bytes=1024 * 1024,
+                )
+                visual_contract = load_committed_visual_qa_contract(
+                    Path(worktree_path), self.git, tested_commit, project_bytes=project_bytes,
+                )
+                if visual_contract is None:
+                    raise ContractError("Task requires visual QA, but tested commit has no enabled visual contract")
+                stages = load_contract(
+                    Path(worktree_path), visual_qa_required=True, project_bytes=project_bytes,
+                )
+            else:
+                stages = load_contract(Path(worktree_path), visual_qa_required=False)
+        except ContractError as exc:
+            if not visual_qa_required and str(exc) == "PROJECT.yaml declares no required CI stages":
+                return None
+            raise
+        return [stage for stage, _command, _working_dir, _timeout in stages]
+
     def integration_gate_status(self, ti_repo, task_id):
         """Classifies one per-repo Integration Workspace's required-gate
         result at its current HEAD: PASS / FAIL / NOT_RUN /
@@ -510,30 +710,57 @@ class TaskDecisionService:
             head = self.git.head(ti_repo["worktree_path"])
         except Exception:
             return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": 0, "head": None}
+        task = self.db.one("SELECT * FROM tasks WHERE id=?", (task_id,))
+        from app.services.visual_qa_contract import task_requires_visual_qa
+        visual_qa_required = task_requires_visual_qa(task)
         try:
-            required = len(load_contract(Path(ti_repo["worktree_path"])))
-        except ContractError:
-            required = 0
+            required_stages = self._required_test_stage_names(
+                ti_repo["worktree_path"], visual_qa_required=visual_qa_required, tested_commit=head,
+            )
+        except Exception:
+            return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": 1 if visual_qa_required else 0, "head": head, "summary": {}}
+        required = len(required_stages) if required_stages is not None else 0
+        if required:
+            try:
+                source_state = self.git.source_state(ti_repo["worktree_path"])
+            except Exception:
+                return {"tests_pass": False, "tests_status": "UNKNOWN", "failures": [], "tests_required": required, "head": head, "summary": {}}
+            if source_state["head"] != head or not source_state["clean"]:
+                return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required, "head": head, "summary": {}}
         rows = self.db.all(
             "SELECT * FROM test_runs WHERE workspace_type='integration' AND workspace_id=? AND tested_commit=? ORDER BY id DESC",
             (iid, head))
         latest = {}
         for r in rows:
             latest.setdefault(r["stage"], r)  # first seen per stage, DESC id -> most recent
-        if required == 0:
-            # No PROJECT.yaml at all, or one that declares zero required CI
-            # stages: nothing is required, so there is nothing to wait on --
-            # NOT_RUN would otherwise be permanent (Run Integration Tests
-            # has no stages to queue, so test_runs/tested_commit rows are
-            # never written and this branch would never be left).
+        if required_stages is None or not required_stages:
+            # No PROJECT.yaml or a valid legacy contract with zero required
+            # stages keeps its pre-existing integration PASS behavior.
             return {"tests_pass": True, "tests_status": "PASS", "failures": [], "tests_required": 0,
-                     "tests_passed": 0, "head": head, "summary": {}}
-        if len(latest) < required:
+                    "tests_passed": 0, "head": head, "summary": {}}
+        missing = [stage for stage in required_stages if stage not in latest]
+        if missing:
             return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required,
-                     "tests_passed": sum(1 for v in latest.values() if v["status"] == "PASS"), "head": head, "summary": {}}
+                     "tests_passed": sum(1 for stage in required_stages if latest.get(stage, {}).get("status") == "PASS"), "head": head, "summary": {}}
+        required_rows = {stage: latest[stage] for stage in required_stages}
+        if visual_qa_required and not self._visual_evidence_valid(
+            required_rows.get("visual_qa"), "integration", iid, head, Path(ti_repo["worktree_path"]), task
+        ):
+            row = required_rows.get("visual_qa")
+            if row is not None and row["status"] == "PASS":
+                row = dict(row); row["status"] = "FAIL"; row["stderr_tail"] = "Visual QA evidence is missing, stale, or invalid."
+                required_rows["visual_qa"] = row
+                latest["visual_qa"] = row
+        if any(row["status"] in ("QUEUED", "RUNNING", "SKIPPED") for row in required_rows.values()):
+            return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required,
+                    "tests_passed": sum(1 for row in required_rows.values() if row["status"] == "PASS"), "head": head, "summary": {}}
+        if any(row["status"] not in ("PASS", "FAIL", "TIMEOUT") for row in required_rows.values()):
+            return {"tests_pass": False, "tests_status": "NOT_RUN", "failures": [], "tests_required": required,
+                    "tests_passed": sum(1 for row in required_rows.values() if row["status"] == "PASS"), "head": head, "summary": {}}
         failures = []
         summary = {"passed": 0, "failed": 0, "skipped": 0}
-        for stage, row in latest.items():
+        for stage in required_stages:
+            row = required_rows[stage]
             if row["stage"] == "test":
                 for k, v in parse_summary(row["stdout_tail"] or "").items():
                     summary[k] = max(summary[k], v)
@@ -542,7 +769,7 @@ class TaskDecisionService:
             parsed = parse_failures(row["stdout_tail"] or "") or [{"test_identifier": stage, "reason": row["status"]}]
             for f in parsed:
                 fp = fingerprint_of(f["test_identifier"], f["reason"])
-                waiver = self.db.one(
+                waiver = None if stage == "visual_qa" else self.db.one(
                     "SELECT * FROM gate_waivers WHERE task_id=? AND integration_id=? AND gate=? AND test_identifier=? AND failure_fingerprint=? AND revoked_at IS NULL ORDER BY id DESC LIMIT 1",
                     (task_id, iid, stage, f["test_identifier"], fp))
                 evidence = self.db.one(
@@ -572,7 +799,7 @@ class TaskDecisionService:
         return {
             "tests_pass": tests_status in ("PASS", "PASS_WITH_APPROVED_BASELINE_WAIVER"),
             "tests_status": tests_status, "failures": failures, "tests_required": required,
-            "tests_passed": sum(1 for v in latest.values() if v["status"] == "PASS"),
+            "tests_passed": sum(1 for v in required_rows.values() if v["status"] == "PASS"),
             "head": head, "summary": summary,
         }
 
@@ -946,20 +1173,119 @@ class TaskDecisionService:
         20): PASS only if every automated test stage run FOR THE BUILDER'S
         EXACT CURRENT HEAD passed -- a test run against an older commit
         proves nothing about the current one."""
+        if "tests_status" in b:
+            return b["tests_status"]
         head = b.get("head")
         if not head:
             return "NOT_RUN"
         rows = self.db.all("SELECT * FROM test_runs WHERE workspace_type='agent' AND workspace_id=? AND tested_commit=? ORDER BY id DESC", (b["id"], head))
         if not rows:
             return "NOT_RUN"
+        try:
+            source_state = self.git.source_state(b["worktree_path"])
+        except Exception:
+            return "NOT_RUN"
+        if source_state["head"] != head or not source_state["clean"]:
+            return "NOT_RUN"
+        task = self.db.one("SELECT * FROM tasks WHERE id=?", (b.get("task_id"),)) if b.get("task_id") else None
+        from app.services.visual_qa_contract import task_requires_visual_qa
+        visual_qa_required = bool(task and task_requires_visual_qa(task))
+        try:
+            required_stages = self._required_test_stage_names(
+                b["worktree_path"], visual_qa_required=visual_qa_required, tested_commit=head,
+            )
+        except Exception:
+            return "FAIL"
         latest = {}
         for r in rows:
             latest.setdefault(r["stage"], r)
-        if any(r["status"] == "FAIL" for r in latest.values()):
+        if required_stages is None:
+            # Keep the historical no-contract builder behavior: existing
+            # current-SHA rows are evaluated as one legacy set.
+            required_rows = latest
+        else:
+            if any(stage not in latest for stage in required_stages):
+                return "NOT_RUN"
+            required_rows = {stage: latest[stage] for stage in required_stages}
+        if visual_qa_required and not self._visual_evidence_valid(
+            required_rows.get("visual_qa"), "agent", b["id"], head, Path(b["worktree_path"]), task
+        ):
+            row = required_rows.get("visual_qa")
+            if row is not None and row["status"] == "PASS":
+                return "FAIL"
+            return "NOT_RUN"
+        statuses = [row["status"] for row in required_rows.values()]
+        if any(status in ("QUEUED", "RUNNING", "SKIPPED") for status in statuses):
+            return "NOT_RUN"
+        if any(status in ("FAIL", "TIMEOUT") for status in statuses):
             return "FAIL"
-        if all(r["status"] == "PASS" for r in latest.values()):
+        if all(status == "PASS" for status in statuses):
             return "PASS"
         return "NOT_RUN"
+
+    def _visual_evidence_valid(self, row, workspace_type, workspace_id, head, repo_path, task):
+        """Revalidate coordinator-owned evidence whenever the authoritative gate reads a visual PASS."""
+        return self._visual_evidence_result(row, workspace_type, workspace_id, head, repo_path, task) is not None
+
+    def _visual_evidence_result(self, row, workspace_type, workspace_id, head, repo_path, task):
+        """Return the verifier's validated summary, never rereading unverified metrics for display."""
+        if row is None:
+            return None
+        if row["status"] != "PASS":
+            return {"not_applicable": True}  # FAIL/TIMEOUT/pending remain governed by their existing stage states.
+        if not head or self.visual_evidence_root is None:
+            return None
+        import re
+        matches = re.findall(r"(?:^|\n)PROJECTFLOW_VISUAL_EVIDENCE_SHA256=([0-9a-f]{64})(?:\n|$)", row["stdout_tail"] or "")
+        if not matches:
+            return None
+        try:
+            from app.services.visual_qa_contract import task_requires_visual_qa, load_committed_visual_qa_contract
+            from app.services.visual_qa_evidence import validate_visual_qa_run
+            if not task_requires_visual_qa(task):
+                return None
+            contract = load_committed_visual_qa_contract(repo_path, self.git, head)
+            if contract is None:
+                return None
+            run_path = self.visual_evidence_root / workspace_type / str(workspace_id) / str(row["id"])
+            return validate_visual_qa_run(
+                run_path, run_id=row["id"], tested_commit=head, repo_root=repo_path,
+                contract=contract, expected_manifest_sha256=matches[-1],
+            )
+        except Exception:
+            return None
+
+    def _visual_diagnostic_result(self, row, workspace_type, workspace_id, head, repo_path, task):
+        """Validate repair-only images without changing any gate result."""
+        if (row is None or row["status"] != "FAIL" or row["exit_code"] != 1 or not head
+                or self.visual_evidence_root is None):
+            return None
+        import re
+        matches = re.findall(
+            r"(?:^|\n)PROJECTFLOW_VISUAL_DIAGNOSTIC_SHA256=([0-9a-f]{64})(?:\n|$)",
+            row["stderr_tail"] or "",
+        )
+        if not matches:
+            return None
+        try:
+            from app.services.visual_qa_contract import task_requires_visual_qa, load_committed_visual_qa_contract
+            from app.services.visual_qa_evidence import validate_visual_qa_diagnostic_run
+            source = self.git.source_state(repo_path)
+            if not source.get("clean") or source.get("head") != head:
+                return None
+            if not task_requires_visual_qa(task):
+                return None
+            contract = load_committed_visual_qa_contract(repo_path, self.git, head)
+            if contract is None:
+                return None
+            run_path = self.visual_evidence_root / workspace_type / str(workspace_id) / str(row["id"])
+            return validate_visual_qa_diagnostic_run(
+                run_path, run_id=row["id"], tested_commit=head,
+                repo_root=repo_path, contract=contract,
+                expected_manifest_sha256=matches[-1],
+            )
+        except Exception:
+            return None
 
     def _checklist(self, status, builders, risk, current_step, all_builders_ready, all_reviews_current_pass, qa_ok, integration_ok, all_merged):
         if status == "CANCELLED":
@@ -1029,6 +1355,7 @@ class TaskDecisionService:
 
     def _result(self, t, status, stage, next_action, blocking, test_readiness, integration_eligible, ready_for_main,
                 builders, qa, ti, ti_repos, merges, risk, integration_eligibility=None, current_step=None):
+        from app.services.visual_qa_contract import task_requires_visual_qa
         all_builders_ready = bool(builders) and all(b["ready"] for b in builders)
         all_reviews_current_pass = bool(builders) and all(b["review_status"] == "PASS" for b in builders)
         qa_ok = (not self.requires_qa(risk)) or (qa is not None and qa["status"] == "PASS" and self._qa_current(qa, t))
@@ -1042,6 +1369,7 @@ class TaskDecisionService:
             "merge_records": merges, "current_step": current_step,
             "integration_eligibility": integration_eligibility or {"required": self.requires_integration(risk), "eligible": integration_eligible, "exists": bool(ti)},
             "effective_task_prompt": effective_task_prompt(t), "prompt_source": prompt_source(t),
+            "visual_qa_required": task_requires_visual_qa(t),
             "checklist": self._checklist(status, builders, risk, current_step, all_builders_ready, all_reviews_current_pass, qa_ok, integration_ok, all_merged),
             "missing_requirements": self._missing_requirements(next_action, blocking),
             "previous_step_summary": self._previous_step_summary(builders, current_step),

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="3" time="3.690" timestamp="2026-11-26T02:38:52.737035+07:00" hostname="task-runner"><testcase classname="tests.test_test_design" name="test_test_design_structured_result" time="0.918"><failure message="AssertionError: assert 'EXECUTION_FAILED' == 'READY'&#10;  &#10;  - READY&#10;  + EXECUTION_FAILED">tests/test_test_design.py:142: in test_test_design_structured_result
+    assert result["outcome"] == "READY"
+E   AssertionError: assert 'EXECUTION_FAILED' == 'READY'
+E
+E     - READY
+E     + EXECUTION_FAILED</failure></testcase><testcase classname="tests.test_test_design" name="test_review_pass_approves_test_case_set_and_plan" time="0.932"><failure message="AssertionError: {&quot;detail&quot;:&quot;No Test Design exists for this Change yet -- run /tests/design first&quot;}&#10;assert 404 == 200&#10; +  where 404 = &lt;Response [404 Not Found]&gt;.status_code">tests/test_test_design.py:307: in test_review_pass_approves_test_case_set_and_plan
+    review = do_review(client, cid, "PASS")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_test_design.py:104: in do_review
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"No Test Design exists for this Change yet -- run /tests/design first"}
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404 Not Found]&gt;.status_code</failure></testcase><testcase classname="tests.test_test_design" name="test_coverage_full" time="1.704"><failure message="AssertionError: assert ['REQ-001', 'REQ-002'] == []&#10;  &#10;  Left contains 2 more items, first extra item: 'REQ-001'&#10;  Use -v to get more diff">tests/test_test_design.py:237: in test_coverage_full
+    assert coverage["requirements_uncovered"] == []
+E   AssertionError: assert ['REQ-001', 'REQ-002'] == []
+E
+E     Left contains 2 more items, first extra item: 'REQ-001'
+E     Use -v to get more diff</failure></testcase></testsuite></testsuites>
