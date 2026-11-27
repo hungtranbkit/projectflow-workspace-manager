@@ -1,0 +1,173 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+_ test_required_visual_failure_keeps_target_ref_and_success_evidence_unchanged _
+
+client = <starlette.testclient.TestClient object at 0x7325cabcd6a0>
+git_repo = (PosixPath('[TASK_ARTIFACTS][PYTEST_TMP]/pyt...ssue-73-pf05c-integration-transaction-20261127[PYTEST_TMP]/pytest-2/test_required_visual_failure_k0/root/demo'))
+tmp_path = PosixPath('[TASK_ARTIFACTS][PYTEST_TMP]/pytest-2/test_required_visual_failure_k0')
+
+    def test_required_visual_failure_keeps_target_ref_and_success_evidence_unchanged(client, git_repo, tmp_path):
+        """A candidate rejected by the required visual gate must never be published."""
+        root, _ = git_repo
+        repo = make_release_repo(root, name="visual-reject", port=19051)
+        project = (repo / "PROJECT.yaml").read_text(encoding="utf-8")
+        project = project.replace(
+            "ci: {required: [preflight, test]}",
+            "ci: {required: [preflight, test, visual_qa]}",
+        )
+        project += (
+            "  visual_qa: {command: 'true', working_directory: ., timeout_seconds: 30}\n"
+            "visual_qa:\n  enabled: true\n  route: http://127.0.0.1:8765/orders\n"
+            "  viewports: [{width: 320, height: 240}]\n  reference: reference.png\n"
+            "  threshold: 0.08\n"
+        )
+        (repo / "PROJECT.yaml").write_text(project, encoding="utf-8")
+        (repo / "reference.png").write_bytes(png(320, 240))
+        run(repo, "git", "add", "PROJECT.yaml", "reference.png")
+        run(repo, "git", "commit", "-m", "require visual integration evidence")
+
+        rid = _register_repo(client, repo, "demo")
+        cid = new_change(client, "Visual integration reject", project_id=rid)
+        tid, _ = materialize_task(client, cid, scope_hints=["src.py", "test_src.py"])
+        client.app.state.db.execute(
+            "UPDATE tasks SET implementation_prompt=? WHERE id=?",
+            ("VISUAL_QA_REQUIRED: true\nVerify the integrated interface.", tid),
+        )
+        w = _select_and_create_workspace(client, tid, rid, agent="claude")
+        worktree = client.app.state.git.validate_worktree(w["worktree_path"])
+        (worktree / "src.py").write_text("def feature():\n    return 2\n")
+        (worktree / "test_src.py").write_text(
+            "from src import feature\n\n\ndef test_feature():\n    assert feature() == 2\n"
+        )
+        subprocess.run(["git", "add", "src.py", "test_src.py"], cwd=worktree, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "reviewed visual candidate"], cwd=worktree, check=True, capture_output=True)
+        client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+        set_fake(client, PASS)
+        review = client.post(f"/api/tasks/{tid}/review/code").json()
+        assert review["outcome"] == "REVIEWED" and review["verdict"] == "PASS", review
+
+        # The canonical checkout contains unrelated staged/untracked operator WIP.
+        staged = repo / "operator-staged.txt"
+        staged.write_text("keep staged operator content\n")
+        subprocess.run(["git", "add", "operator-staged.txt"], cwd=repo, check=True, capture_output=True)
+        untracked = repo / "operator-note.txt"
+        untracked.write_text("keep untracked operator content\n")
+        base_before = client.app.state.git.head(repo, "main")
+        status_before = client.app.state.git.status(repo)
+        staged_before = client.app.state.git.git(repo, "diff", "--cached", "--binary").stdout
+        staged_bytes = staged.read_bytes()
+        untracked_bytes = untracked.read_bytes()
+
+        result = client.post(f"/api/tasks/{tid}/integrate").json()
+
+        assert result["outcome"] == "INTEGRATION_VERIFY_FAILED", result
+        assert not result["verification"]["passed"]
+        assert all(item["ok"] for item in result["verification"]["results"] if item["stage"] != "visual_qa")
+        visual = next(item for item in result["verification"]["results"] if item["stage"] == "visual_qa")
+        assert not visual["ok"] and "evidence" in visual["stderr"].lower()
+>       assert client.app.state.git.head(repo, "main") == base_before, "a rejected candidate advanced the target ref"
+E       AssertionError: a rejected candidate advanced the target ref
+E       assert '4d67a1544681...5709cffb17d6e' == 'b27fa0ea86c8...96f4a66756b2a'
+E
+E         - b27fa0ea86c8ead2b70c6595d0c96f4a66756b2a
+E         + 4d67a1544681ea8a7ad42f4fa665709cffb17d6e
+
+tests/test_release_pipeline.py:381: AssertionError
+____ test_task_head_change_during_candidate_verification_prevents_promotion ____
+
+client = <starlette.testclient.TestClient object at 0x7325cafd11d0>
+git_repo = (PosixPath('[TASK_ARTIFACTS][PYTEST_TMP]/pyt...ssue-73-pf05c-integration-transaction-20261127[PYTEST_TMP]/pytest-2/test_task_head_change_during_c0/root/demo'))
+tmp_path = PosixPath('[TASK_ARTIFACTS][PYTEST_TMP]/pytest-2/test_task_head_change_during_c0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7325cafeeb10>
+
+    def test_task_head_change_during_candidate_verification_prevents_promotion(client, git_repo, tmp_path, monkeypatch):
+        root, _ = git_repo
+        repo = make_release_repo(root, name="task-head-race", port=19052)
+        rid = _register_repo(client, repo, "demo")
+        cid = new_change(client, "Task head race", project_id=rid)
+        tid, w = _prepare_reviewed_integration_task(client, repo, cid, rid, scope_hints=["src.py", "test_src.py"])
+        before = client.app.state.git.head(repo, "main")
+        service = client.app.state.integration_service
+        verify = service.verify_integrated_state
+
+        def verify_then_commit_unreviewed_change(repo_path, commit, task_id=None):
+            result = verify(repo_path, commit, task_id=task_id)
+            worktree = client.app.state.git.validate_worktree(w["worktree_path"])
+            (worktree / "late-change.txt").write_text("not part of the reviewed candidate\n")
+            subprocess.run(["git", "add", "late-change.txt"], cwd=worktree, check=True, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "unreviewed concurrent change"], cwd=worktree, check=True, capture_output=True)
+            return result
+
+        monkeypatch.setattr(service, "verify_integrated_state", verify_then_commit_unreviewed_change)
+        result = client.post(f"/api/tasks/{tid}/integrate").json()
+
+>       assert result["outcome"] == "INTEGRATION_SOURCE_CHANGED", result
+E       AssertionError: {'outcome': 'INTEGRATED', 'task_id': 1, 'integrated_commit': '99f89dedf1a991e942fb151d9f9c64d1f6d6fd22', 'work_product_id': 3, ...}
+E       assert 'INTEGRATED' == 'INTEGRATION_SOURCE_CHANGED'
+E
+E         - INTEGRATION_SOURCE_CHANGED
+E         + INTEGRATED
+
+tests/test_release_pipeline.py:417: AssertionError
+_________ test_target_ref_compare_and_swap_preserves_concurrent_writer _________
+
+client = <starlette.testclient.TestClient object at 0x7325bafa4b90>
+git_repo = (PosixPath('[TASK_ARTIFACTS][PYTEST_TMP]/pyt...ssue-73-pf05c-integration-transaction-20261127[PYTEST_TMP]/pytest-2/test_target_ref_compare_and_sw0/root/demo'))
+tmp_path = PosixPath('[TASK_ARTIFACTS][PYTEST_TMP]/pytest-2/test_target_ref_compare_and_sw0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7325c85e62c0>
+
+    def test_target_ref_compare_and_swap_preserves_concurrent_writer(client, git_repo, tmp_path, monkeypatch):
+        root, _ = git_repo
+        repo = make_release_repo(root, name="target-ref-race", port=19053)
+        rid = _register_repo(client, repo, "demo")
+        cid = new_change(client, "Target ref race", project_id=rid)
+        tid, _ = _prepare_reviewed_integration_task(client, repo, cid, rid, scope_hints=["src.py", "test_src.py"])
+        base_before = client.app.state.git.head(repo, "main")
+        writer = tmp_path / "concurrent-writer"
+        run(repo, "git", "worktree", "add", "-b", "concurrent-writer", str(writer), base_before)
+        (writer / "independent.txt").write_text("concurrent writer commit\n")
+        run(writer, "git", "add", "independent.txt")
+        run(writer, "git", "commit", "-m", "independent target update")
+        concurrent_head = client.app.state.git.head(writer)
+        git_service = client.app.state.git
+        original_git = git_service.git
+        moved = False
+
+        def advance_target_before_cas(repo_path, *args, **kwargs):
+            nonlocal moved
+            if not moved and len(args) >= 2 and args[0] == "update-ref" and args[1] == "refs/heads/main":
+                run(repo, "git", "update-ref", "refs/heads/main", concurrent_head, base_before)
+                moved = True
+            return original_git(repo_path, *args, **kwargs)
+
+        monkeypatch.setattr(git_service, "git", advance_target_before_cas)
+        try:
+            result = client.post(f"/api/tasks/{tid}/integrate").json()
+        finally:
+            monkeypatch.setattr(git_service, "git", original_git)
+            run(repo, "git", "worktree", "remove", "--force", str(writer))
+
+        assert moved
+>       assert result["outcome"] == "INTEGRATION_TARGET_CHANGED", result
+E       AssertionError: {'outcome': 'INTEGRATED', 'task_id': 1, 'integrated_commit': '27a09de4441548b7162cc8e3414453abb0c11f06', 'work_product_id': 3, ...}
+E       assert 'INTEGRATED' == 'INTEGRATION_TARGET_CHANGED'
+E
+E         - INTEGRATION_TARGET_CHANGED
+E         + INTEGRATED
+
+tests/test_release_pipeline.py:455: AssertionError
+=============================== warnings summary ===============================
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/fastapi/testclient.py:1
+  [EXISTING_VENV]/lib/python3.14/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../projectflow-visual-qa-73/.venv/lib/python3.14/site-packages/slowapi/extension.py:720: 11 warnings
+tests/test_release_pipeline.py: 33 warnings
+  [EXISTING_VENV]/lib/python3.14/site-packages/slowapi/extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_release_pipeline.py::test_required_visual_failure_keeps_target_ref_and_success_evidence_unchanged
+FAILED tests/test_release_pipeline.py::test_task_head_change_during_candidate_verification_prevents_promotion
+FAILED tests/test_release_pipeline.py::test_target_ref_compare_and_swap_preserves_concurrent_writer
