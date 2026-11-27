@@ -37,7 +37,9 @@ def test_stale_reservation_from_a_dead_process_blocks_scheduling_before_reconcil
     # reserve/launch/release sequence ran, the DELETE never did.
     db.execute("INSERT INTO task_reservations(task_id,wave_id,state) VALUES(?,?,?)", (a, None, "RESERVED"))
 
-    fake_launcher(client, "claude")
+    selected_provider = client.app.state.autonomous_execution_service._default_provider()
+    assert selected_provider == "codex", "fixture must target the scheduler's selected provider"
+    fake_launcher(client, selected_provider)
     run = client.app.state.execution_wave_service.run_execution_wave(cid)
     assert run["outcome"] == "NO_TASKS_LAUNCHED", run
     wt = db.one("SELECT * FROM execution_wave_tasks WHERE task_id=?", (a,))
@@ -70,7 +72,9 @@ def test_restart_reconciliation_clears_stale_reservations_and_scheduling_works_a
     assert not restarted.app.state.db.one("SELECT * FROM task_reservations WHERE task_id=?", (a,)), \
         "stale reservation must be cleared by restart reconciliation"
 
-    fake_launcher(restarted, "claude")
+    selected_provider = restarted.app.state.autonomous_execution_service._default_provider()
+    assert selected_provider == "codex", "fixture must target the restarted scheduler's selected provider"
+    fake_launcher(restarted, selected_provider)
     run = restarted.app.state.execution_wave_service.run_execution_wave(cid)
     assert run["outcome"] == "LAUNCHED", run
     wt = restarted.app.state.db.one("SELECT * FROM execution_wave_tasks WHERE task_id=?", (a,))
