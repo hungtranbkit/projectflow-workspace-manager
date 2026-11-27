@@ -57,6 +57,7 @@ class IntegrationService:
                     "VISUAL_RUNNER_UNAVAILABLE: configured visual command runner is required."}
 
         output = probe / ".runtime" / "projectflow-visual-qa" / str(secrets.randbelow(10**18) + 1)
+        output_owned = False
         try:
             if output.exists() or output.is_symlink():
                 raise VisualEvidenceError("visual evidence run identity already exists")
@@ -67,6 +68,7 @@ class IntegrationService:
             if contract is None:
                 raise VisualEvidenceError("integrated commit has no enabled committed visual contract")
             ensure_private_directory(output)
+            output_owned = True
             container_path = (f"/workspace/.runtime/projectflow-visual-qa/{output.name}"
                               if getattr(self.visual_runner, "mandatory", False) else str(output))
             env = {
@@ -109,7 +111,7 @@ class IntegrationService:
                     "stderr": f"VISUAL_EVIDENCE_REJECTED: {type(exc).__name__}: {detail}"[-2000:]}
         finally:
             parent = probe / ".runtime" / "projectflow-visual-qa"
-            if output.exists() and output.is_relative_to(parent) and not output.is_symlink():
+            if output_owned and output.exists() and output.is_relative_to(parent) and not output.is_symlink():
                 shutil.rmtree(output)
 
     def reconcile_on_startup(self) -> None:

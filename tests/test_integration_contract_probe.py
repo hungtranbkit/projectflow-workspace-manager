@@ -254,3 +254,27 @@ def test_visual_integration_requires_fresh_validated_run_artifacts(tmp_path, act
         assert visual["evidence_run_id"] == runner.envs[0]["VISUAL_QA_RUN_ID"]
     else:
         assert "VISUAL_EVIDENCE_REJECTED" in visual["stderr"]
+
+
+def test_visual_integration_run_id_collision_preserves_existing_directory(tmp_path, monkeypatch):
+    import app.services.integration_service as integration_module
+
+    root, repo, commit = visual_repo(tmp_path)
+    git_service = GitWorkspaceService(root, worktree_root=root / ".worktrees")
+    probe = git_service.create_baseline_probe(repo, commit)
+    run_id = 4242
+    output = probe / ".runtime" / "projectflow-visual-qa" / str(run_id)
+    output.mkdir(parents=True)
+    marker = output / "pre-existing.txt"
+    marker.write_text("belongs to a different run", encoding="utf-8")
+    monkeypatch.setattr(integration_module.secrets, "randbelow", lambda _: run_id - 1)
+    runner = VisualRunner("valid")
+    service = IntegrationService(TaskDB(), None, None, None, git_service, visual_runner=runner)
+
+    try:
+        result = service._verify_integrated_visual_stage(probe, commit, "true", ".", 19)
+        assert not result["ok"]
+        assert marker.read_text(encoding="utf-8") == "belongs to a different run"
+        assert runner.envs == []
+    finally:
+        git_service.remove_baseline_probe(repo, probe)
