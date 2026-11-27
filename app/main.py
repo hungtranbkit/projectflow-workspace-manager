@@ -4967,7 +4967,8 @@ def create_app(settings=None):
     workflow_service.review_gate=review_fix_orchestrator
 
     # ---- E10: Integration, Release, Deploy & Runtime Verification ----
-    integration_service=IntegrationService(db,work_products,worktree_manager,review_fix_orchestrator,git)
+    integration_service=IntegrationService(db,work_products,worktree_manager,review_fix_orchestrator,git,
+        visual_runner=sandboxed_exec)
     integration_service.reconcile_on_startup()
     app.state.integration_service=integration_service
     release_service=ReleaseService(db,changes,work_products,workflow_service,human_decisions,deployer,

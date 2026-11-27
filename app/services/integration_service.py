@@ -1,9 +1,17 @@
 from __future__ import annotations
 import subprocess
+import secrets
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.services.project_contract import load_contract, ContractError
+from app.services.visual_qa_evidence import (
+    VisualEvidenceError,
+    ensure_private_directory,
+    validate_visual_qa_run,
+)
+from app.services.visual_qa_contract import load_committed_visual_qa_contract
 
 """Integration (Phase E10.1-E10.6). ProjectFlow, never the Builder or
 Reviewer, owns integration -- this is the ONE place a Task's reviewed
@@ -28,13 +36,81 @@ class IntegrationError(ValueError):
 
 
 class IntegrationService:
-    def __init__(self, db, work_products, worktree_manager, review_fix_orchestrator, git, runner=_default_runner):
+    def __init__(self, db, work_products, worktree_manager, review_fix_orchestrator, git,
+                 runner=_default_runner, visual_runner=None):
         self.db = db
         self.work_products = work_products
         self.worktree_manager = worktree_manager
         self.review_fix_orchestrator = review_fix_orchestrator
         self.git = git
         self.runner = runner
+        # Visual verification must use the application's configured command
+        # boundary (mandatory sandbox in hosted mode). There is deliberately
+        # no direct-host fallback when that boundary is absent.
+        self.visual_runner = visual_runner
+
+    def _verify_integrated_visual_stage(self, probe: Path, commit: str, command: str,
+                                        working_dir: str, timeout: int) -> dict:
+        """Run one fresh visual check and accept it only with commit-bound evidence."""
+        if self.visual_runner is None:
+            return {"ok": False, "stdout": "", "stderr":
+                    "VISUAL_RUNNER_UNAVAILABLE: configured visual command runner is required."}
+
+        output = probe / ".runtime" / "projectflow-visual-qa" / str(secrets.randbelow(10**18) + 1)
+        try:
+            if output.exists() or output.is_symlink():
+                raise VisualEvidenceError("visual evidence run identity already exists")
+            before = self.git.source_state(probe)
+            if not before["clean"] or before["head"] != commit:
+                raise VisualEvidenceError("integrated probe is not clean at the requested commit")
+            contract = load_committed_visual_qa_contract(probe, self.git, commit)
+            if contract is None:
+                raise VisualEvidenceError("integrated commit has no enabled committed visual contract")
+            ensure_private_directory(output)
+            container_path = (f"/workspace/.runtime/projectflow-visual-qa/{output.name}"
+                              if getattr(self.visual_runner, "mandatory", False) else str(output))
+            env = {
+                "VISUAL_QA_RUN_ID": output.name,
+                "VISUAL_QA_TESTED_COMMIT": commit,
+                "VISUAL_QA_EVIDENCE_OUTPUT": container_path,
+            }
+            proc = self.visual_runner.run(command, probe, working_dir, timeout, env=env)
+            stdout, stderr = (proc.stdout or "")[-2000:], (proc.stderr or "")[-2000:]
+            if proc.returncode != 0:
+                return {"ok": False, "stdout": stdout, "stderr": stderr or
+                        f"visual command exited {proc.returncode}"}
+
+            after = self.git.source_state(probe)
+            if not after["clean"] or after["head"] != commit:
+                raise VisualEvidenceError("integrated source changed during visual verification")
+            current_contract = load_committed_visual_qa_contract(probe, self.git, commit)
+            if current_contract is None:
+                raise VisualEvidenceError("committed visual contract disappeared during verification")
+            captured = validate_visual_qa_run(
+                output, run_id=int(output.name), tested_commit=commit,
+                repo_root=probe, contract=current_contract,
+            )
+            verified = validate_visual_qa_run(
+                output, run_id=int(output.name), tested_commit=commit,
+                repo_root=probe, contract=current_contract,
+                expected_manifest_sha256=captured["manifest_sha256"],
+            )
+            return {
+                "ok": True, "stdout": stdout, "stderr": stderr,
+                "evidence_sha256": verified["manifest_sha256"],
+                "evidence_run_id": output.name,
+            }
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "stdout": "", "stderr": "timed out"}
+        except Exception as exc:
+            # Fail closed without returning host paths or untrusted details.
+            detail = str(exc).replace(str(probe), "[integrated-probe]")
+            return {"ok": False, "stdout": "",
+                    "stderr": f"VISUAL_EVIDENCE_REJECTED: {type(exc).__name__}: {detail}"[-2000:]}
+        finally:
+            parent = probe / ".runtime" / "projectflow-visual-qa"
+            if output.exists() and output.is_relative_to(parent) and not output.is_symlink():
+                shutil.rmtree(output)
 
     def reconcile_on_startup(self) -> None:
         """P0 BLOCKER (docs/CORE_USABILITY_QUALIFICATION.md, final
@@ -99,13 +175,26 @@ class IntegrationService:
             passed = True
             for stage, command, working_dir, timeout in contract:
                 cwd = (probe / working_dir).resolve()
+                visual = {}
                 try:
-                    r = self.runner(["bash", "-lc", command], cwd, timeout)
-                    ok = r.returncode == 0
-                    stdout, stderr = (r.stdout or "")[-2000:], (r.stderr or "")[-2000:]
+                    if stage == "visual_qa":
+                        visual = self._verify_integrated_visual_stage(
+                            probe, commit, command, working_dir, timeout,
+                        )
+                        ok = visual["ok"]
+                        stdout, stderr = visual["stdout"], visual["stderr"]
+                    else:
+                        r = self.runner(["bash", "-lc", command], cwd, timeout)
+                        ok = r.returncode == 0
+                        stdout, stderr = (r.stdout or "")[-2000:], (r.stderr or "")[-2000:]
                 except subprocess.TimeoutExpired:
                     ok, stdout, stderr = False, "", "timed out"
-                results.append({"stage": stage, "ok": ok, "stdout": stdout, "stderr": stderr})
+                result = {"stage": stage, "ok": ok, "stdout": stdout, "stderr": stderr}
+                if stage == "visual_qa":
+                    for key in ("evidence_sha256", "evidence_run_id"):
+                        if visual.get(key):
+                            result[key] = visual[key]
+                results.append(result)
                 passed = passed and ok
             return {"passed": passed, "results": results}
         finally:

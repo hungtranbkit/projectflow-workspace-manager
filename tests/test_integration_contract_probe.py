@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from app.services.git_workspace import GitWorkspaceService
 from app.services.integration_service import IntegrationService
+from tests.test_visual_qa_evidence import png
+from tests.test_visual_qa_evidence import create_run
+from app.services.visual_qa_contract import load_committed_visual_qa_contract
 
 
 class TaskDB:
@@ -45,7 +49,7 @@ def make_repo(tmp_path, yaml_text):
     return root, repo, canonical
 
 
-def verify(root, repo, commit, task=None):
+def verify(root, repo, commit, task=None, visual_runner=None):
     seen = []
 
     def runner(argv, cwd, timeout):
@@ -54,7 +58,8 @@ def verify(root, repo, commit, task=None):
         return result
 
     git_service = GitWorkspaceService(root, worktree_root=root / ".worktrees")
-    service = IntegrationService(TaskDB(task), None, None, None, git_service, runner=runner)
+    service = IntegrationService(TaskDB(task), None, None, None, git_service,
+                                 runner=runner, visual_runner=visual_runner)
     result = service.verify_integrated_state(str(repo), commit, task_id=1 if task else None)
     return result, seen
 
@@ -137,3 +142,108 @@ def test_dirty_canonical_contract_cannot_replace_candidate_and_legacy_nonvisual_
     legacy_result, legacy_seen = verify(legacy_root, moved, legacy_head)
     assert legacy_result["passed"]
     assert [item[3].strip() for item in legacy_seen] == ["legacy"]
+
+
+def test_required_visual_integration_does_not_pass_from_exit_zero_without_evidence(tmp_path):
+    root = tmp_path / "visual-workspace"
+    repo = root / "repo"
+    repo.mkdir(parents=True)
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.email", "test@example.invalid")
+    git(repo, "config", "user.name", "Integration visual evidence test")
+    visual_project = (
+        "schema_version: 1\nproject: {code: probe}\nsource: {root: .}\n"
+        "commands:\n  test: {command: 'true'}\n  visual_qa: {command: 'true'}\n"
+        "ci: {required: [test]}\n"
+        "visual_qa:\n  enabled: true\n  route: http://127.0.0.1:8765/orders\n"
+        "  viewports: [{width: 320, height: 240}]\n  reference: reference.png\n  threshold: 0.08\n"
+    )
+    (repo / "PROJECT.yaml").write_text(visual_project, encoding="utf-8")
+    (repo / "reference.png").write_bytes(png(320, 240))
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "valid opted-in visual contract")
+    tested_commit = git(repo, "rev-parse", "HEAD")
+    task = {"implementation_prompt": "Verify merged UI\nVISUAL_QA_REQUIRED: true"}
+
+    result, seen = verify(root, repo, tested_commit, task)
+
+    assert not result["passed"], "exit 0 from `true` must not qualify required visual integration without validated evidence"
+    visual = next(item for item in result["results"] if item["stage"] == "visual_qa")
+    assert not visual["ok"]
+    assert "evidence" in visual["stderr"].lower() or "runner" in visual["stderr"].lower()
+    # The ordinary runner executed only the non-visual `test` stage. Missing
+    # visual wiring must not silently fall back to its direct-host boundary.
+    assert len(seen) == 1
+
+
+def visual_repo(tmp_path):
+    root = tmp_path / "visual-workspace"
+    repo = root / "repo"
+    repo.mkdir(parents=True)
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.email", "test@example.invalid")
+    git(repo, "config", "user.name", "Integration visual evidence test")
+    (repo / ".gitignore").write_text(".runtime/\n", encoding="utf-8")
+    (repo / "PROJECT.yaml").write_text(
+        "schema_version: 1\nproject: {code: probe}\nsource: {root: .}\n"
+        "commands:\n  test: {command: 'true'}\n  visual_qa: {command: 'true'}\n"
+        "ci: {required: [test, visual_qa]}\n"
+        "visual_qa:\n  enabled: true\n  route: http://127.0.0.1:8765/orders\n"
+        "  viewports: [{width: 320, height: 240}]\n  reference: reference.png\n  threshold: 0.08\n",
+        encoding="utf-8",
+    )
+    (repo / "reference.png").write_bytes(png(320, 240))
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "valid opted-in visual contract")
+    return root, repo, git(repo, "rev-parse", "HEAD")
+
+
+class VisualRunner:
+    mandatory = False
+
+    def __init__(self, action="empty"):
+        self.action = action
+        self.envs = []
+
+    def run(self, command, worktree_root, working_dir, timeout, env=None):
+        self.envs.append(dict(env or {}))
+        if self.action == "empty":
+            return subprocess.run(command, cwd=Path(worktree_root) / working_dir,
+                                  shell=True, check=False, capture_output=True, text=True,
+                                  timeout=timeout, env={**__import__("os").environ, **(env or {})})
+        run_id = int(env["VISUAL_QA_RUN_ID"])
+        commit = env["VISUAL_QA_TESTED_COMMIT"]
+        repo = Path(worktree_root)
+        contract = load_committed_visual_qa_contract(repo, GitWorkspaceService(repo.parent), commit)
+        output = Path(env["VISUAL_QA_EVIDENCE_OUTPUT"])
+        expected = {"run_id": run_id, "tested_commit": commit, "repo_root": repo, "contract": contract}
+        if self.action == "valid":
+            create_run(output, expected, manifest_overrides={"runId": str(run_id)})
+        elif self.action == "stale":
+            create_run(output, expected, manifest_overrides={"runId": str(run_id), "testedCommit": "f" * 40})
+        elif self.action == "tampered":
+            result = create_run(output, expected, manifest_overrides={"runId": str(run_id)})
+            (result / "actual.png").write_bytes(b"tampered")
+        return subprocess.CompletedProcess(command, 0, "fixture runner complete", "")
+
+
+@pytest.mark.parametrize("action,expected_pass", [
+    ("valid", True), ("empty", False), ("stale", False), ("tampered", False),
+])
+def test_visual_integration_requires_fresh_validated_run_artifacts(tmp_path, action, expected_pass):
+    root, repo, commit = visual_repo(tmp_path)
+    runner = VisualRunner(action)
+
+    result, _ = verify(root, repo, commit, {"implementation_prompt": "VISUAL_QA_REQUIRED: true"}, runner)
+
+    visual = next(item for item in result["results"] if item["stage"] == "visual_qa")
+    assert result["passed"] is expected_pass
+    assert visual["ok"] is expected_pass
+    assert len(runner.envs) == 1
+    assert runner.envs[0]["VISUAL_QA_TESTED_COMMIT"] == commit
+    assert runner.envs[0]["VISUAL_QA_RUN_ID"].isdigit()
+    if expected_pass:
+        assert len(visual["evidence_sha256"]) == 64
+        assert visual["evidence_run_id"] == runner.envs[0]["VISUAL_QA_RUN_ID"]
+    else:
+        assert "VISUAL_EVIDENCE_REJECTED" in visual["stderr"]
