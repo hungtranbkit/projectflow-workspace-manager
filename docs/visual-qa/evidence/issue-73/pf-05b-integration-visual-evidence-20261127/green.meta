@@ -1,9 +1,9 @@
-start_utc=2026-11-27T10:47:29Z
+start_utc=2026-11-27T10:58:05Z
 source_head=2f887ebfb010221b0a89e4c132407c211114c82d
 source_tree=569f5aca021bb9214f3f0e1798e32d03c329b90c
-candidate_source_test_tree=51b038dc1090d046fd90e4692f4399e240f107aa
+candidate_source_test_tree=06f2b53ebdd1987d7454a26609a86fd6475e98b0
 python=Python 3.14.4
 pytest=pytest 9.2.0
 command=python -m pytest -q -ra tests/test_integration_contract_probe.py tests/test_visual_qa_contract.py tests/test_visual_qa_execution.py tests/test_task_decision_required_stages.py --junitxml=<task-artifact>/green.xml
-end_utc=2026-11-27T10:47:44Z
+end_utc=2026-11-27T10:58:24Z
 exit_code=0

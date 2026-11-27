@@ -13,6 +13,13 @@ from tests.test_visual_qa_evidence import create_run
 from app.services.visual_qa_contract import load_committed_visual_qa_contract
 
 
+def test_app_wires_integration_visual_stage_to_test_runner_command_boundary(client):
+    integration = client.app.state.integration_service
+    test_runner = client.app.state.runner
+
+    assert integration.visual_runner is test_runner.runner
+
+
 class TaskDB:
     def __init__(self, task=None):
         self.task = task
