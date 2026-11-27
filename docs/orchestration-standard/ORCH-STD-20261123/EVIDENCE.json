@@ -1073,7 +1073,20 @@
       },
       "production_touched": false,
       "provider_invoked": false,
-      "next_action": "Commit scoped changes after diff review, recheck remote PR head and push normally to existing PR ref only if still expected; verify exact-head CI/review. Obtain exact B20 packet from its owner if still required."
+      "next_action": "Commit scoped changes after diff review, recheck remote PR head and push normally to existing PR ref only if still expected; verify exact-head CI/review. Obtain exact B20 packet from its owner if still required.",
+      "source_commit": "76aaa6cd6a2cc89c0abd58a0b00a41f419a19e19",
+      "push": {
+        "method": "normal fast-forward",
+        "previous_remote_head": "b49a217fe6018c9d897201c3b951682145da917f",
+        "remote_readback": "76aaa6cd6a2cc89c0abd58a0b00a41f419a19e19"
+      },
+      "official_ci": {
+        "context": "local-ci/verify",
+        "commit": "76aaa6cd6a2cc89c0abd58a0b00a41f419a19e19",
+        "state": "PENDING",
+        "observed_at_utc": "2026-11-27T02:41:36Z"
+      },
+      "independent_reviews": 0
     }
   ]
 }
