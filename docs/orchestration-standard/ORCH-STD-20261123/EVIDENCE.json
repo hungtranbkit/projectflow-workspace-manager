@@ -1260,7 +1260,27 @@
       },
       "diff_check": "PASS",
       "private_artifacts": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-real-reconcile-20261127/",
-      "release_state": "No new-head CI/review inferred yet; no merge/deploy/production mutation; B18 receipt and full-suite gates remain outstanding"
+      "release_state": "No new-head CI/review inferred yet; no merge/deploy/production mutation; B18 receipt and full-suite gates remain outstanding",
+      "source_commit": "5b160b06f27517e186ccb6efa5e9e02280bf3285",
+      "push_readback": {
+        "method": "normal fast-forward",
+        "expected_parent": "0c773f7e2610d0686674bb76dee183c70a87fc03",
+        "remote_ref": "agent/codex/orch-std-20261123-release",
+        "remote_sha": "5b160b06f27517e186ccb6efa5e9e02280bf3285",
+        "result": "PASS"
+      },
+      "github_readback": {
+        "pr": "https://github.com/hungtranbkit/projectflow-workspace-manager/pull/92",
+        "state": "open",
+        "merged": false,
+        "head_sha": "5b160b06f27517e186ccb6efa5e9e02280bf3285",
+        "base_sha": "cbeaffe417765f2778eeb9ad96cd0db21a9acb69",
+        "combined_status_contexts": [],
+        "pull_request_workflow_runs": [],
+        "independent_reviews": [],
+        "observed_at_utc": "2026-11-27T05:26:59Z"
+      },
+      "acceptance_state": "B20 implementation/test candidate ready for independent acceptance; exact-head CI, independent review and broader release gates remain pending"
     }
   ]
 }
