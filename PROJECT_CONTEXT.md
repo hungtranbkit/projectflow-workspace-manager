@@ -9,7 +9,7 @@
 - Verification after B20: focused suites **288 passed, exit 0, 248.14s**; B20 + supervisor slice **12 passed, exit 0**; isolated CleanupWorker callback canary **2 passed, exit 0**, including one actual local shell marker start and exhausted-budget blocker/UI 200. `scripts/preflight.sh`, `scripts/build.sh`, `scripts/smoke.sh` passed (smoke 1 passed). Full `scripts/test.sh` with required import path failed to complete: `PYTHONPATH=.` first produced 11 collection import errors; with `PYTHONPATH=.:tests`, `timeout 900s` exited 124 at about 47% while many tests outside ORCH had failed. Its JUnit path was overwritten by a nested pytest process, so it is not a suite report. No full-suite pass or baseline classification is claimed.
 - One authorized B18 real `RecoveryDecisionService.advise()` invocation ran against a disposable SQLite DB with one Claude candidate, requested `claude-opus-5-5/high`, one attempt and a $0.10 cap. Incident `f3c8c66ac871ffe8a5d05ad936e5a9d4f139fa712f77586ca25b64b11de2ebcb`; the CLI returned `PlannerAgentError`, no valid receipt/model/tool attestation was accepted, and service returned deterministic `VERIFY`. No action ran; do not retry this incident blindly. Effective model, effort, tool-use proof and usage remain UNKNOWN. Sanitized receipt is in the private B20 evidence directory, not raw output.
 - Private evidence files are under `/home/dell/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-macbook-handoff-20261127/integrated-pr92-20261127/` (mode 0700 directory / 0600 files). No production service, DB, credentials, Docker, or GitHub workflow was changed.
-- Release remains blocked: exact `b6dc80c` local-ci/verify is pending with no status context at latest read, and independent review list is empty; B18 accepted provider receipt is absent; full test suite did not pass. No merge/deploy. `PROJECT.yaml` production deployment remains disabled.
+- At the latest pre-correction read, PR head `0c773f7` had genuine `local-ci/verify=success`; the B20 correction is a new source change and requires fresh exact-head CI. Independent review list was empty; B18 accepted provider receipt is absent; full test suite did not pass. No merge/deploy. `PROJECT.yaml` production deployment remains disabled.
 
 ## Architecture constraints
 
@@ -18,6 +18,6 @@
 
 ## Next actions
 
-1. Commit scoped B20 code/test/evidence and fast-forward only the same PR ref after checking the expected remote head.
-2. Read genuine exact-head `local-ci/verify`, obtain an independent review, and resolve/document full-suite failures against the same approved base; do not self-approve.
-3. Treat B18 advisory as blocked after the one failed provider call. A future attempt requires an authorized new incident/budget decision. No protected merge or production release until all independent gates pass.
+1. Finish the B20 actual-CI path with the exact focused receipt, then normal fast-forward only the existing PR #92 ref after an exact remote-head check.
+2. Read genuine exact-head `local-ci/verify` and obtain independent review; do not treat old-head success as current.
+3. Keep B18 blocked after its one failed provider call; no retry, merge, or production release without fresh authorization and all independent gates.

@@ -33,13 +33,9 @@ def test_independent_dag_progress(client, git_repo, monkeypatch, mode):
             decision=svc.decision.evaluate(blocked_task)
             gate=svc.decision.merge_gate_status(decision,rid,merge_record)
             assert "CI_FAIL" in gate["blockers"]
-            reconcile=svc.reconcile_change
-            def failed_ci_is_change_local(change_id):
-                if change_id==blocked:
-                    return [{"change_id":blocked,"task_id":blocked_task,"outcome":"BLOCKED","code":"CI_FAIL",
-                             "owner":"Change owner","next_action":"Repair the failed CI on this Change."}]
-                return reconcile(change_id)
-            monkeypatch.setattr(svc,"reconcile_change",failed_ci_is_change_local)
+            assert decision["merge_records"] and any(x["ci_status"]=="FAIL" for x in decision["merge_records"])
+            corrective_task,_=materialize_task(
+                client,blocked,task_type="FIX",key="CI-FIX",title="Repair the failed CI in a scoped task")
     svc.recovery_advisor=None
     svc._project_policy_resolver=lambda _c:{"autonomous_execution":{"enabled":True,"auto_start_ready_tasks":True,"goal_reconciliation_enabled":True,"max_concurrent_builders":1}}
     fake_launcher(client)
@@ -59,6 +55,8 @@ def test_independent_dag_progress(client, git_repo, monkeypatch, mode):
     assert svc.evaluate_task(descendant)["readiness"]=="WAITING_DEPENDENCY"
     for tid in ready:
         assert svc.evaluate_task(tid)["readiness"]=="AUTO_READY"
+    if mode=="ci_failure":
+        assert svc.evaluate_task(corrective_task)["readiness"]=="AUTO_READY"
     session_count_before=db.one("SELECT COUNT(*) c FROM agent_sessions")["c"]
     launches=[]
     def launch(tid, repository_id, provider):
@@ -73,13 +71,17 @@ def test_independent_dag_progress(client, git_repo, monkeypatch, mode):
     expected={"ownerless":"BLOCKED","unknown":"UNKNOWN","running":"ALREADY_RUNNING","backoff":"BACKOFF","retry_exhausted":"BLOCKED","ci_failure":"BLOCKED"}[mode]
     assert any(x.get("change_id")==blocked and x.get("outcome")==expected for x in first["recovery"]),first
     if mode=="ci_failure":
-        assert any(x.get("change_id")==blocked and x.get("code")=="CI_FAIL" for x in first["recovery"]),first
+        ci_block=next(x for x in first["recovery"] if x.get("change_id")==blocked and x.get("code")=="CI_FAIL")
+        assert ci_block["outcome"]=="BLOCKED"
     assert first["outcome"]=="TICKED",first
-    assert launches==ready[:1]
+    expected_launches=[corrective_task] if mode=="ci_failure" else ready[:1]
+    assert launches==expected_launches
     assert svc.scheduled_reconcile_tick()["outcome"]=="TICKED"
-    assert launches==ready
+    assert launches==([corrective_task,*ready[:1]] if mode=="ci_failure" else ready)
     assert svc.scheduled_reconcile_tick()["outcome"]=="TICKED"
-    assert launches==ready
+    assert launches==([corrective_task,*ready] if mode=="ci_failure" else ready)
+    assert svc.scheduled_reconcile_tick()["outcome"]=="TICKED"
+    assert launches==([corrective_task,*ready] if mode=="ci_failure" else ready)
     assert svc.evaluate_task(descendant)["readiness"]=="WAITING_DEPENDENCY"
     assert db.one("SELECT COUNT(*) c FROM agent_sessions WHERE task_id IN (?,?)",tuple(ready))["c"]==0
     assert db.one("SELECT COUNT(*) c FROM agent_sessions")["c"]==session_count_before

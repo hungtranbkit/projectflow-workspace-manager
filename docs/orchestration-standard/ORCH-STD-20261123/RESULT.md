@@ -303,3 +303,22 @@ PR #92 remains open and unchanged on the remote until this scoped commit is push
 
 - Scoped source/test commit `d73743490ba48ae4f5fce38843b860fcd1551c16` and evidence checkpoint `b6dc80ca884a5c6df4a49200ee2ceded3c6dc705` were normally fast-forward pushed to the existing PR branch after verifying the expected remote head `15e8fed50f2058b8d976f74bd7ec618a7cd867fa`. `git ls-remote` and GitHub PR readback both match `b6dc80c`; PR #92 remains open.
 - Exact-head `local-ci/verify` is pending with zero published status contexts at latest read; independent PR review list is empty. Old `15e8fed` success is not current-head evidence. No merge/deploy.
+
+
+## B20 actual CI reconciliation correction — 2026-11-27 05:24 UTC
+
+**State: implementation and targeted verification PASS; exact-head CI/review remain separate.** The prior B20 case injected a CI_FAIL recovery result by monkeypatching `reconcile_change()`. That did not prove the real path. This continuation removes that seam and reads the CI gate from the existing TaskDecisionService.
+
+- `AutonomousExecutionService.reconcile_change()` now calls the authoritative `TaskDecisionService.merge_gate_status()` on required MergeRecords. A CI_FAIL creates a factual blocker for that Task only. During the same scheduled tick, that failed Task is excluded from auto-selection; the Change itself remains eligible, so an explicit corrective `FIX` Task and unrelated eligible Changes are still considered. Active sessions remain protected by the existing live-session guard. Dependency readiness and merge/CI truth remain in their existing services.
+- `tests/test_b20_actual_db_starvation.py` now uses a real SQLite `merge_records.ci_status='FAIL'`, verifies the actual merge gate, does not monkeypatch `reconcile_change()`, and adds a same-Change corrective `FIX` Task. It asserts CI_FAIL is visible in the scheduled recovery result, the correction and independent tasks can launch one per tick, blocked descendants stay `WAITING_DEPENDENCY`, and later quiescent ticks create no extra sessions. Only the launch/session boundary is stubbed.
+- Red/green: with only the changed autonomous service temporarily restored to exact PR baseline `0c773f7`, the new CI-failure case failed (exit 1: no CI_FAIL recovery classification; original scheduler behavior selected an unrelated task first). The source was restored byte-for-byte (SHA256 `abed791827a678b80fa8082bac3186690e5aaeaa5210259c4b8148c04f985fd6`). The final focused command below passed **49 tests, exit 0, 70.99s**. No full suite rerun.
+
+```text
+PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b20_actual_db_starvation.py tests/test_orchestrator_supervisor_tick.py tests/test_autonomous_execution.py --junitxml=/tmp/orch-b20-real-ci-20261127.xml
+exit=0; 49 passed
+git diff --check: PASS
+```
+
+Private red/green artifacts: `~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-real-reconcile-20261127/`; red log SHA256 `84b023fb631fbe5c1286f2b5cd60e83c6de167615bc48670c6e31627bcfe07e6`, red JUnit SHA256 `df4b9f2d73b187d9b257359fed6c3de660c47e3dd070090b3222fa4200c9a728`, green JUnit SHA256 `ace0b970e9a4877c4236ecb8219493518ae94260bfed29d15139672bcc95372c`. No production data/service was touched. Baseline remote PR head `0c773f7` had `local-ci/verify=success`; this does not apply to the correction commit.
+
+The single existing owner session inspected was `pf-orchestration-closure-p0-20261123` on Dell; Terminal MCP readback had no native `task_id`, and no dispatch was issued. The authorized PR checkout was clean at the exact remote head before edits. Scope is ready for independent acceptance after normal push/readback; do not infer new-head CI/review until GitHub reports them. B18 provider receipt, full-suite resolution, independent review, and release/deployment remain outstanding; no merge or production change.

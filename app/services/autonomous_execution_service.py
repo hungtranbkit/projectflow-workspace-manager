@@ -81,6 +81,7 @@ _DEFAULT_POLICY = {"enabled": False, "max_concurrent_builders": 1, "auto_start_r
 
 _SUPERVISOR_LEASE_OWNER: ContextVar[str | None] = ContextVar("projectflow_supervisor_lease_owner", default=None)
 _RECOVERY_SKIPPED_CHANGES: ContextVar[frozenset[int]] = ContextVar("projectflow_recovery_skipped_changes", default=frozenset())
+_RECOVERY_SKIPPED_TASKS: ContextVar[frozenset[int]] = ContextVar("projectflow_recovery_skipped_tasks", default=frozenset())
 
 def _recovery_is_observation(item: dict) -> bool:
     outcome = item.get("outcome")
@@ -391,11 +392,16 @@ class AutonomousExecutionService:
                 if not self._supervisor_lease_is_current(owner_id):
                     return {"outcome": "LEASE_LOST", "recovery": recovery, "action": []}
                 skipped = frozenset(item["change_id"] for item in recovery
-                                    if item.get("outcome") not in ("NO_RECOVERY_REQUIRED", "DISABLED"))
+                                    if item.get("outcome") not in ("NO_RECOVERY_REQUIRED", "DISABLED")
+                                    and not (item.get("code") == "CI_FAIL" and item.get("task_id")))
+                skipped_tasks = frozenset(item["task_id"] for item in recovery
+                                          if item.get("code") == "CI_FAIL" and item.get("task_id"))
                 skip_token = _RECOVERY_SKIPPED_CHANGES.set(skipped)
+                task_skip_token = _RECOVERY_SKIPPED_TASKS.set(skipped_tasks)
                 try:
                     action = self.tick()
                 finally:
+                    _RECOVERY_SKIPPED_TASKS.reset(task_skip_token)
                     _RECOVERY_SKIPPED_CHANGES.reset(skip_token)
             result = {"outcome": "RECOVERY_ACTION" if action_required else "TICKED",
                       "recovery": recovery, "action": action}
@@ -428,6 +434,20 @@ class AutonomousExecutionService:
                 d=self.decision.evaluate(task["id"])
                 if d["status"] in ("DONE","CANCELLED"):
                     continue
+                # The Change's merge gate is already the authoritative
+                # source for CI state. Isolate the blocked Task, rather
+                # than suppressing this whole Change, so an explicit
+                # corrective Task and unrelated eligible work can still
+                # run through the normal scheduler.
+                for merge_record in d.get("merge_records", []):
+                    if not merge_record.get("required"):
+                        continue
+                    gate = self.decision.merge_gate_status(d, merge_record["repository_id"], merge_record)
+                    if "CI_FAIL" in gate.get("blockers", []):
+                        return self._recovery_block(
+                            change_id, task["id"], "CI_FAIL",
+                            "Review the failed CI on this Task; create or select a scoped corrective Task before retrying it.",
+                        )
                 last=self.db.one("SELECT * FROM agent_sessions WHERE task_id=? ORDER BY id DESC LIMIT 1",(task["id"],))
                 # AgentSessionManager marks any in-process PTY as FAILED
                 # during startup reconciliation because the owning process
@@ -692,7 +712,10 @@ class AutonomousExecutionService:
         tasks = [t for t in self.changes.list_tasks_for_change(change_id)
                  if (t.get("task_type") or "").strip().upper() in AUTO_ELIGIBLE_TASK_TYPES]
         ready = []
+        recovery_skipped = _RECOVERY_SKIPPED_TASKS.get()
         for t in tasks:
+            if t["id"] in recovery_skipped:
+                continue
             result = self.evaluate_task(t["id"])
             if result["readiness"] == "AUTO_READY":
                 plan_item = self.db.one("SELECT * FROM plan_items WHERE materialized_task_id=?", (t["id"],))

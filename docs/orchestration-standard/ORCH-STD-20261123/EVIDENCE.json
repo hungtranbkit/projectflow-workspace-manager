@@ -1216,6 +1216,51 @@
         "observed_at_utc": "2026-11-27"
       },
       "independent_reviews": 0
+    },
+    {
+      "date_utc": "2026-11-27T05:24:38Z",
+      "scope": "B20 actual CI-failure reconciliation; existing PR #92 only",
+      "owner": {
+        "terminal_session": "pf-orchestration-closure-p0-20261123",
+        "node": "dell-linux",
+        "native_task_id": null,
+        "dispatch_issued": false,
+        "exclusive_pr_checkout": "clean at 0c773f7 before edits"
+      },
+      "base_readback": {
+        "pr_head": "0c773f7e2610d0686674bb76dee183c70a87fc03",
+        "pr_base": "cbeaffe417765f2778eeb9ad96cd0db21a9acb69",
+        "pr_state": "open",
+        "remote_ref_match": true,
+        "ci": "local-ci/verify success on baseline head only"
+      },
+      "implementation": {
+        "files": [
+          "app/services/autonomous_execution_service.py",
+          "tests/test_b20_actual_db_starvation.py"
+        ],
+        "uses_authoritative": "TaskDecisionService.merge_gate_status required merge records",
+        "behavior": "CI_FAIL blocks only the failed task in scheduled recovery selection; same-Change corrective FIX and other eligible Changes remain schedulable; dependent descendants remain governed by TaskDependencyService",
+        "reconcile_change_monkeypatched": false,
+        "external_launch_boundary_stubbed": true
+      },
+      "red": {
+        "source_pin": "0c773f7e2610d0686674bb76dee183c70a87fc03 service blob restored temporarily for regression proof",
+        "command": "PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b20_actual_db_starvation.py -k ci_failure",
+        "exit": 1,
+        "result": "1 failed: actual CI_FAIL recovery classification absent on prior source; no reconcile_change mock",
+        "log_sha256": "84b023fb631fbe5c1286f2b5cd60e83c6de167615bc48670c6e31627bcfe07e6",
+        "junit_sha256": "df4b9f2d73b187d9b257359fed6c3de660c47e3dd070090b3222fa4200c9a728"
+      },
+      "green": {
+        "command": "PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b20_actual_db_starvation.py tests/test_orchestrator_supervisor_tick.py tests/test_autonomous_execution.py --junitxml=/tmp/orch-b20-real-ci-20261127.xml",
+        "exit": 0,
+        "result": "49 passed in 70.99s",
+        "junit_sha256": "ace0b970e9a4877c4236ecb8219493518ae94260bfed29d15139672bcc95372c"
+      },
+      "diff_check": "PASS",
+      "private_artifacts": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-real-reconcile-20261127/",
+      "release_state": "No new-head CI/review inferred yet; no merge/deploy/production mutation; B18 receipt and full-suite gates remain outstanding"
     }
   ]
 }
