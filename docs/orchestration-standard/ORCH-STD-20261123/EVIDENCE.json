@@ -1010,6 +1010,70 @@
       ],
       "selection_reason": "Claude was the only provider allowed for this one-shot probe because Codex command_execution cannot be disabled per invocation; this does not assert Codex account availability.",
       "repository_checkpoint": "JSON prompt/schema and per-call budget refinement committed locally; no PR push or production change."
+    },
+    {
+      "timestamp_local": "2026-11-27",
+      "task": "PR #92 B17 finite lease and B18 recovery proposal/receipt integration checkpoint",
+      "checkout": {
+        "path": "/home/dell/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/sidebar-ci-exact-2ul9qtq4/repo",
+        "base_head": "b49a217fe6018c9d897201c3b951682145da917f",
+        "branch": "agent/codex/orch-std-20261123-release",
+        "remote_head_before_change": "b49a217fe6018c9d897201c3b951682145da917f"
+      },
+      "changes": [
+        "B18 strict proposal scope revalidation and provider/model/requested-effort/tool-less receipt validation in RecoveryDecisionService; deterministic fallback preserved",
+        "B17 scheduled supervisor owner must be nonempty string; expiry must be numeric, finite, future; explicit manual None compatibility preserved"
+      ],
+      "artifact_hashes": {
+        "b18_patch_sha256": "77d7ecc204fd08ac37f97e6bdb4c29e4917e6ee22b8f665fa3b9298cc22f37ad",
+        "b18_test_sha256": "51f3bd7348445c15e459258008befaef2c5197badac02f98d10226344be506d1",
+        "b17_test_sha256": "a92d239c8bc9c05ed9a4b098ed2e0dac8d4aea74b0d24f73e6490f77553aa1cb",
+        "green_junit_sha256": "2cf8fa8e5ee6ff58324f288d310b2f862927e94d788748595cabc2d36aac568b"
+      },
+      "verification": [
+        {
+          "command": "HOME=/tmp/pf92-green-home-20261127 XDG_CONFIG_HOME=/tmp/pf92-green-home-20261127/.config PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b18_actual_db.py tests/test_b17_finite_lease.py --junitxml=/tmp/pf92-b17-b18-green-20261127.xml",
+          "exit": 0,
+          "result": "39 passed in 18.56s"
+        },
+        {
+          "command": "./scripts/preflight.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "./scripts/build.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "./scripts/smoke.sh",
+          "exit": 0,
+          "result": "1 passed"
+        },
+        {
+          "command": "focused recovery/security/dispatch/supervisor pytest command covering tests/test_b18_actual_db.py, tests/test_b17_finite_lease.py, tests/test_autonomous_execution_real.py, tests/test_exited_no_report_recovery.py, tests/test_orchestration_v2_dispatch.py, tests/test_orchestrator_supervisor_tick.py, tests/test_recovery_model_policy.py, tests/test_native_callback_recovery.py, tests/test_lease_takeover_external.py, tests/test_spec_supervisor_gate.py, tests/test_agent_observability_security.py",
+          "exit": 1,
+          "result": "233 passed, 1 failed in 137.22s; sole failure was the real-provider fixture needing isolated HOME .claude.json. No provider invocation was made."
+        },
+        {
+          "command": "git diff --check",
+          "exit": 0,
+          "result": "PASS"
+        }
+      ],
+      "gates": {
+        "b17_b18_local_regressions": "PASS",
+        "broader_focused_suite": "BLOCKED_EXTERNAL_FIXTURE_HOME",
+        "official_ci_new_head": "PENDING",
+        "independent_review": "PENDING",
+        "b20_exact_packet": "NOT_AVAILABLE_LOCALLY",
+        "merge": "NOT_DONE",
+        "deployment": "NOT_AUTHORIZED_OR_PERFORMED"
+      },
+      "production_touched": false,
+      "provider_invoked": false,
+      "next_action": "Commit scoped changes after diff review, recheck remote PR head and push normally to existing PR ref only if still expected; verify exact-head CI/review. Obtain exact B20 packet from its owner if still required."
     }
   ]
 }

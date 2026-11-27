@@ -238,3 +238,26 @@ The follow-up focused suite was rerun after adding budget/auth refusal and no-re
 ### JSON receipt refinement commit
 
 The schema-in-prompt change, per-call `$0.10` cap, fail-reason/receipt logging, malformed-output blocker preservation tests, one-shot probe record and handoff were committed locally as `0c10690c622f23abe0ee24c40760507fb8f423b5` (`fix: bound and receipt recovery JSON advice`) on `integration/orchestrator-v1-20261123`. The commit is not pushed. Send this exact SHA to the steward for inclusion in existing PR #92; no other PR was created.
+
+## PR #92 B17/B18 integration checkpoint — 2026-11-27
+
+**State: local corrections verified; PR update/release gates pending.** Work used the pre-existing exact-head PR checkout at `/home/dell/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/sidebar-ci-exact-2ul9qtq4/repo`, detached at `b49a217fe6018c9d897201c3b951682145da917f`. PR #92 remains open on `agent/codex/orch-std-20261123-release`, base `cbeaffe417765f2778eeb9ad96cd0db21a9acb69`. Remote branch readback matched `b49a217` before edits. No new task, branch, worktree, or agent was created.
+
+### Changes
+
+- Integrated the exact B18 `RecoveryDecisionService` patch from the private verified packet (patch SHA256 `77d7ecc204fd08ac37f97e6bdb4c29e4917e6ee22b8f665fa3b9298cc22f37ad`). Cached proposals are revalidated against the current incident/evidence scope. Provider, canonical resolved model, requested effort and explicit tool-less receipt fields must match before response acceptance. Deterministic VERIFY fallback and the original blocker remain authoritative; model advice cannot execute an action or approve itself.
+- Added B17 finite-expiry parity in `_supervisor_lease_is_current()`: scheduled owner must be a nonempty string; persisted expiry must be numeric, finite and strictly in the future. Explicit `None` for the human-directed legacy path remains compatible. Lease acquisition and production state are untouched.
+- Added `tests/test_b18_actual_db.py` from the verified actual-Database packet (SHA256 `51f3bd7348445c15e459258008befaef2c5197badac02f98d10226344be506d1`) and `tests/test_b17_finite_lease.py` covering finite/future, expired, positive/negative infinity, NaN/NULL, malformed text, missing row/table, empty/nonstring owner, wrong owner/successor and manual compatibility.
+
+### Verification
+
+- Exact combined B18+B17 command: `HOME=/tmp/pf92-green-home-20261127 XDG_CONFIG_HOME=/tmp/pf92-green-home-20261127/.config PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts='' -q tests/test_b18_actual_db.py tests/test_b17_finite_lease.py --junitxml=/tmp/pf92-b17-b18-green-20261127.xml` — **39 passed, exit 0**, 18.56s. JUnit SHA256 `2cf8fa8e5ee6ff58324f288d310b2f862927e94d788748595cabc2d36aac568b`.
+- Project scripts: `scripts/preflight.sh` PASS (exit 0); `scripts/build.sh` PASS (exit 0); `scripts/smoke.sh` PASS, 1 passed (exit 0).
+- Wider focused recovery/security/dispatch/supervisor suite: **233 passed, 1 failed**, exit 1, 137.22s. The sole failure was `tests/test_autonomous_execution_real.py::test_real_autonomous_builder_fixture_end_to_end`, which tried to read `/tmp/pf92-regression-home-20261127/.claude.json` and failed because HOME was intentionally isolated. This external real-provider fixture was not rerun with the user's shared Claude credentials and no provider invocation was made. It is not counted as a code pass or regression determination.
+- `git diff --check` PASS. No full repository suite, provider-backed advisory receipt, official CI on the new head, independent review, merge, or deployment is claimed. Old `local-ci/verify=success` is only for pre-change head `b49a217`.
+
+### Remaining evidence and release gates
+
+- B20 starvation patch/test packet from PR comment 7207463907 was not found in the authorized local evidence stores during this bounded task. It is not reconstructed from prose and remains a separate dependency if required for PR acceptance.
+- No production service/database, credentials, workflow dispatch, or Docker state was touched. `PROJECT.yaml` keeps production deployment disabled. Require fresh exact-head PR CI and independent review before considering protected merge; production remains a separate owner-controlled backup/rollback/release action.
+- Next: finalize scoped commit and normal push only after fresh remote-head ancestry check; then record actual new-head CI/review. Retrieve the exact B20 packet from its owner if still required. Preserve this checkpoint and do not claim PR/release completion.

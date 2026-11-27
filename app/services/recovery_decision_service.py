@@ -163,6 +163,26 @@ class RecoveryDecisionService:
         except (sqlite3.Error, ValueError, TypeError, AttributeError, OverflowError):
             return "AI_ATTEMPT_LEDGER_UNAVAILABLE"
 
+    @staticmethod
+    def _proposal_valid(proposal, fingerprint, incident, allowed_refs):
+        required = set(RECOVERY_DECISION_SCHEMA["required"])
+        if not isinstance(proposal, dict) or set(proposal) != required:
+            return False
+        if proposal.get("incident_id") != fingerprint or proposal.get("allowed_action") not in RECOVERY_ACTIONS:
+            return False
+        if (not isinstance(proposal.get("confidence"), (int, float))
+                or isinstance(proposal.get("confidence"), bool)
+                or not 0 <= proposal["confidence"] <= 1
+                or proposal.get("risk") not in ("LOW", "NORMAL", "HIGH", "UNKNOWN")
+                or any(not isinstance(proposal.get(k), str) for k in
+                       ("cause", "owner", "target", "checkpoint", "expected_verification", "stop_condition", "rollback"))):
+            return False
+        refs = proposal.get("evidence_refs")
+        if not isinstance(refs, list) or any(not isinstance(ref, str) or ref not in allowed_refs for ref in refs):
+            return False
+        permitted_owners = {str(incident.get("owner") or "Unassigned"), "Change owner", "Release owner", ""}
+        return proposal["owner"] in permitted_owners and proposal["target"] in set(allowed_refs) | {"", "current-task"}
+
     def advise(self, incident: dict, evidence_refs: list[str], *, lease_owner=None) -> dict:
         fingerprint = self.fingerprint(incident)
         task_id = incident.get("task_id")
@@ -176,6 +196,7 @@ class RecoveryDecisionService:
             return self._fallback("AI_ATTEMPT_LEDGER_UNAVAILABLE")
         same = [(row, event, stamp) for row, event, stamp in prior if event["fingerprint"] == fingerprint]
         now = datetime.now(timezone.utc)
+        allowed_refs = sorted(set(evidence_refs))[:12]
         for row, event, stamp in same:
             if row["action"] == "RECOVERY_AI_PROPOSAL":
                 stored_receipt = event.get("provider_receipt") or {}
@@ -184,6 +205,8 @@ class RecoveryDecisionService:
                 proposal = event.get("proposal")
                 if not isinstance(proposal, dict):
                     return self._fallback("AI_ATTEMPT_LEDGER_UNAVAILABLE")
+                if not self._proposal_valid(proposal, fingerprint, incident, allowed_refs):
+                    return self._fallback("AI_CACHED_SCOPE_CHANGED")
                 try:
                     with self.db.connect() as conn:
                         if not self._lease_matches(conn, lease_owner):
@@ -201,7 +224,6 @@ class RecoveryDecisionService:
                and stamp >= now - timedelta(days=1)) >= self.daily_call_limit:
             return self._fallback("AI_DAILY_BUDGET_EXHAUSTED")
 
-        allowed_refs = sorted(set(evidence_refs))[:12]
         packet = {k: self._bounded(incident.get(k)) for k in (
             "task_id", "change_id", "failure", "epoch", "task_goal", "session_state",
             "process_liveness", "receipt_state", "owner", "dependencies", "authorization",
@@ -262,7 +284,10 @@ class RecoveryDecisionService:
                 self._event("RECOVERY_AI_CANDIDATE_UNVERIFIED", fingerprint, {"provider": provider,
                     "requested_model": model, "effort": effort, "reason": fallback_reason}, task_id)
                 continue
-            if receipt.get("resolved_model") != model or receipt.get("toolless_verified") is not True:
+            if (not isinstance(receipt, dict) or receipt.get("provider") != provider
+                    or receipt.get("resolved_model") != model
+                    or receipt.get("effort_requested") != effort
+                    or receipt.get("toolless_verified") is not True):
                 fallback_reason = "EFFECTIVE_MODEL_RECEIPT_MISMATCH"
                 self._event("RECOVERY_AI_CANDIDATE_UNVERIFIED", fingerprint, {"provider": provider,
                     "requested_model": model, "effort": effort, "reason": fallback_reason}, task_id)
@@ -274,26 +299,8 @@ class RecoveryDecisionService:
             return {"source": "DETERMINISTIC_FALLBACK", "allowed_action": "VERIFY", "reason": fallback_reason}
         try:
             proposal = json.loads(receipt["text"])
-            required = set(RECOVERY_DECISION_SCHEMA["required"])
-            if not isinstance(proposal, dict) or set(proposal) != required:
-                raise PlannerAgentError("Recovery proposal shape failed local validation")
-            if proposal.get("incident_id") != fingerprint or proposal.get("allowed_action") not in RECOVERY_ACTIONS:
-                raise PlannerAgentError("Recovery proposal identity or action failed validation")
-            if (not isinstance(proposal.get("confidence"), (int, float))
-                    or isinstance(proposal.get("confidence"), bool)
-                    or not 0 <= proposal["confidence"] <= 1
-                    or proposal.get("risk") not in {"LOW", "NORMAL", "HIGH", "UNKNOWN"}
-                    or any(not isinstance(proposal.get(k), str) for k in
-                           ("cause", "owner", "target", "checkpoint", "expected_verification", "stop_condition", "rollback"))):
-                raise PlannerAgentError("Recovery proposal fields failed local validation")
-            refs = proposal.get("evidence_refs")
-            if not isinstance(refs, list) or not set(refs).issubset(set(allowed_refs)):
-                raise PlannerAgentError("Recovery proposal cited evidence outside this incident")
-            permitted_owners = {str(incident.get("owner") or "Unassigned"), "Change owner", "Release owner", ""}
-            if proposal.get("owner") not in permitted_owners:
-                raise PlannerAgentError("Recovery proposal selected an unowned actor")
-            if proposal.get("target") not in set(allowed_refs) | {"", "current-task"}:
-                raise PlannerAgentError("Recovery proposal selected an unverified target")
+            if not self._proposal_valid(proposal, fingerprint, incident, allowed_refs):
+                raise PlannerAgentError("Recovery proposal failed local validation")
             proposal["cause"] = self._bounded(proposal.get("cause"), 400)
             for field in ("owner", "target", "checkpoint", "expected_verification", "stop_condition", "rollback"):
                 proposal[field] = self._bounded(proposal.get(field), 400)

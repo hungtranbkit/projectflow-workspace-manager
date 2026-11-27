@@ -330,14 +330,20 @@ class AutonomousExecutionService:
         owner_id = _SUPERVISOR_LEASE_OWNER.get() if owner_id is None else owner_id
         if owner_id is None:
             return True  # Explicit, human-directed legacy start remains compatible.
-        if not owner_id:
+        if not isinstance(owner_id, str) or not owner_id:
             return False
         try:
             # The request memo is not authoritative for fencing across processes.
             with self.db.connect() as conn:
                 row = conn.execute(
                     "SELECT owner_id,expires_at FROM orchestration_leases WHERE lease_key='projectflow-supervisor'").fetchone()
-                return bool(row and row["owner_id"] == owner_id and row["expires_at"] > time.time())
+                expires_at = row["expires_at"] if row else None
+                return bool(
+                    row
+                    and row["owner_id"] == owner_id
+                    and isinstance(expires_at, (int, float))
+                    and time.time() < expires_at < float("inf")
+                )
         except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
             return False
 
