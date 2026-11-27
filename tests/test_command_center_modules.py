@@ -97,3 +97,33 @@ def test_unicode_label_roundtrips_canonical_utf8():
     raw = canonical_json(m, expected_project=PROJECT, expected_commit=SHA).encode("utf-8")
     assert json.loads(raw)["modules"][0]["label"] == m["modules"][0]["label"]
     assert canonical_json(json.loads(raw), expected_project=PROJECT, expected_commit=SHA).encode("utf-8") == raw
+
+@pytest.mark.parametrize("point", [0x0a, 0x7f, 0x80, 0x85, 0x9f, 0x2028, 0x2029, 0xd800])
+def test_label_single_line_contract_rejects_controls(point):
+    m = sample()
+    m["modules"][0]["label"] = "Module" + chr(point) + "Name"
+    with pytest.raises(ModuleManifestError, match="^module: invalid label$"):
+        canonical_json(m, expected_project=PROJECT, expected_commit=SHA)
+
+
+@pytest.mark.parametrize("label", ["Điều phối 🚀", "الوحدة"])
+def test_label_single_line_contract_accepts_unicode(label):
+    m = sample()
+    m["modules"][0]["label"] = label
+    value = canonical_json(m, expected_project=PROJECT, expected_commit=SHA)
+    assert json.loads(value.encode("utf-8"))["modules"][0]["label"] == label
+
+
+def test_label_single_line_contract_keeps_identity():
+    m = sample()
+    old = stable_key(PROJECT, m["modules"][0]["id"])
+    m["modules"][0]["label"] = "Điều phối"
+    valid(m)
+    assert stable_key(PROJECT, m["modules"][0]["id"]) == old
+
+
+def test_label_single_line_contract_rejects_wrong_pin():
+    m = sample()
+    m["modules"][0]["label"] = "Điều phối"
+    with pytest.raises(ModuleManifestError):
+        canonical_json(m, expected_project=PROJECT, expected_commit="b" * 40)
