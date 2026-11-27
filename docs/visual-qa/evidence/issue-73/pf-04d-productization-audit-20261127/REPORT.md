@@ -37,3 +37,8 @@ Sanitized logs and JUnit files are alongside this report. Their hashes in `SHA25
 ## Scope and gates
 
 No source changes, provider calls, Docker daemon use, shared resource mutation, browser execution, or full suite. `git diff --exit-code` showed no code changes before evidence capture. PR #74 remains draft. This advances only two deterministic modules, not Gate A: full suite is still required before A can pass. No CI, merge, deploy, production or main mutation.
+
+
+## Metadata correction (2026-11-27)
+
+The original `run-summary.json` accidentally copied the baseline-waiver command window into the productization audit row. Preserved command ledgers record productization at 08:34:32–08:34:51 UTC and baseline waivers at 08:35:35–08:35:54 UTC. Their JUnit starts are 15:34:34.841043 and 15:35:38.242762 ICT respectively. The summary now labels command start/end separately from JUnit start time. Test counts, exit codes, logs, XML and source identity are unchanged. See `TIMESTAMP-CORRECTION.md` and regenerated SHA256SUMS.

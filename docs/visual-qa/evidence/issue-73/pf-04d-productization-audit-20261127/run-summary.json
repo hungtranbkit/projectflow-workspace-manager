@@ -11,12 +11,12 @@
       "errors": 0,
       "skipped": 0,
       "exit_code": 0,
-      "started_ict": "2026-11-27T15:34:34.841043+07:00",
       "suite_seconds": 15.64,
-      "started_utc": "2026-11-27T08:35:35Z",
-      "finished_utc": "2026-11-27T08:35:54Z",
       "xml_sha256": "596a368bedd40b4d3e451c47787c09f1adcad38e5d8d622c70019777cc5bb6ef",
-      "log_sha256": "53ce39b4b104ce000bf7e622bac9a82f45ebb70efed7f9f8794b0d72bf1a0c62"
+      "log_sha256": "53ce39b4b104ce000bf7e622bac9a82f45ebb70efed7f9f8794b0d72bf1a0c62",
+      "command_started_utc": "2026-11-27T08:34:32Z",
+      "command_finished_utc": "2026-11-27T08:34:51Z",
+      "junit_started_ict": "2026-11-27T15:34:34.841043+07:00"
     },
     "baseline_waivers": {
       "tests": 4,
@@ -25,12 +25,12 @@
       "errors": 0,
       "skipped": 0,
       "exit_code": 0,
-      "started_ict": "2026-11-27T15:35:38.242762+07:00",
       "suite_seconds": 15.076,
-      "started_utc": "2026-11-27T08:35:35Z",
-      "finished_utc": "2026-11-27T08:35:54Z",
       "xml_sha256": "266a1db63cd365c488f931b17cd5fc9a0f47dcd7b7f4f583d72a8b83882ea6aa",
-      "log_sha256": "188099978bfaf0b6199c888ac44c5fec8cb37bdb37bcc635b7d135e5fcb23bdd"
+      "log_sha256": "188099978bfaf0b6199c888ac44c5fec8cb37bdb37bcc635b7d135e5fcb23bdd",
+      "command_started_utc": "2026-11-27T08:35:35Z",
+      "command_finished_utc": "2026-11-27T08:35:54Z",
+      "junit_started_ict": "2026-11-27T15:35:38.242762+07:00"
     }
   },
   "scope": {
