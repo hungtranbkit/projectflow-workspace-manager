@@ -358,7 +358,8 @@ async def verify_external_task(task_id: str) -> dict[str, Any]:
             or str(actual.get("task_id")) != task_id
             or actual.get("mode") not in {"agent", "shell"}
             or actual.get("state") not in
-            {"QUEUED", "PENDING", "DISPATCHED", "RUNNING", "WAITING_INPUT",
+            {"QUEUED", "PENDING", "DISPATCHED", "DISPATCHING", "EXECUTION_ACCEPTED",
+             "DISPATCH_UNCERTAIN", "STUCK_COMPOSER", "RUNNING", "WAITING_INPUT",
              "BLOCKED", "DONE", "FAILED", "CANCELLED", "EXPIRED", "IDLE"}):
         raise HarnessError("missing or mismatched real durable task readback")
     return response
@@ -444,7 +445,8 @@ def observe_attested(
             or remote.get("task_id") != task_ref
             or remote.get("target") != row["session_name"]
             or remote.get("state") not in {"RUNNING", "PENDING", "QUEUED",
-                "DISPATCHED", "DONE", "FAILED", "BLOCKED", "WAITING_INPUT",
+                "DISPATCHED", "DISPATCHING", "EXECUTION_ACCEPTED",
+                "DISPATCH_UNCERTAIN", "STUCK_COMPOSER", "DONE", "FAILED", "BLOCKED", "WAITING_INPUT",
                 "CANCELLED", "EXPIRED"}):
         raise HarnessError("controller attestation task/target mismatch")
     task = store.get(row["task_id"])
