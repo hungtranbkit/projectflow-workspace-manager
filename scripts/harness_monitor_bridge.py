@@ -393,26 +393,33 @@ def register(
     store = HarnessStore(db_path)
     with connect(db_path) as db:
         init_schema(db)
+        db.execute("BEGIN IMMEDIATE")
         entry, binding = require_binding(ident, registry, db)
         if (not entry["configured_enabled"] or entry["mode"] != "observe_and_register"
                 or entry["role"] != "parent"):
             raise HarnessError("paused/maintenance monitor cannot dispatch child")
         present = db.execute(
-            "SELECT task_id,automation_id FROM harness_monitor_receipts WHERE external_task_id=?",
+            "SELECT * FROM harness_monitor_receipts WHERE external_task_id=?",
             (task_id,)).fetchone()
         if present:
             if present["automation_id"] != ident:
                 raise HarnessError("receipt already bound to another monitor")
-            existing = store.get(present["task_id"])
-            if existing.child_goal != child_goal or existing.dod != dod:
+            row = db.execute("SELECT * FROM harness_tasks WHERE id=?", (present["task_id"],)).fetchone()
+            if row is None:
+                raise HarnessError("receipt binding missing task; reconcile existing owner")
+            existing = store._task(row)
+            if (existing.child_goal != child_goal or existing.dod != dod
+                    or existing.agent != agent or existing.node != node
+                    or existing.external_task_id != task_id
+                    or present["session_name"] != session_name or present["backend_node"] != node
+                    or present["provenance"] != provenance):
                 raise HarnessError("conflicting idempotency arguments")
             return {"task_id": existing.id, "state": existing.state, "idempotent": True}
-        task = store.create(
+        task = store.adopt_in_transaction(db,
             key=f"monitor-{goal_sha(ident + ':' + task_id)}",
             main_goal=binding["main_goal"], child_goal=child_goal,
-            dod=dod, agent=agent, node=node, created_at=now(),
-            ttl=timedelta(seconds=ttl_seconds))
-        task = store.dispatch(task.id, external_task_id=task_id, at=now())
+            dod=dod, agent=agent, node=node, at=now(),
+            ttl=timedelta(seconds=ttl_seconds), external_task_id=task_id)
         db.execute("""INSERT INTO harness_monitor_receipts
             (automation_id,task_id,external_task_id,session_name,backend_node,registered_at,provenance)
             VALUES (?,?,?,?,?,?,?)""",

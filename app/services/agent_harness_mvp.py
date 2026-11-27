@@ -140,43 +140,66 @@ class HarnessStore:
 
     def create(self, *, key: str, main_goal: str, child_goal: str, dod: str, agent: str,
                node: str, created_at: datetime, ttl: timedelta = MAX_TTL) -> Task:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            task_id = self._create_in_transaction(db, key=key, main_goal=main_goal,
+                child_goal=child_goal, dod=dod, agent=agent, node=node, created_at=created_at, ttl=ttl)
+        return self.get(task_id)
+
+    def _create_in_transaction(self, db: sqlite3.Connection, *, key: str, main_goal: str, child_goal: str, dod: str, agent: str, node: str, created_at: datetime, ttl: timedelta) -> int:
+        if not db.in_transaction:
+            raise HarnessError('active transaction required')
         start = _dt(created_at)
         if not (timedelta(0) < ttl <= MAX_TTL):
             raise HarnessError("child TTL must be >0 and <=24 hours")
         if not all(isinstance(v, str) and v.strip() for v in (key, main_goal, child_goal, dod, agent, node)):
             raise HarnessError("all task fields are required")
-        with self._connect() as db:
-            # Serialize capacity and duplicate checks across concurrent workers.
-            db.execute("BEGIN IMMEDIATE")
-            # One active task for exactly the same main/child goal; not a hidden
-            # way to spawn duplicates with new request keys.
-            dup = db.execute("""SELECT id,state,cleanup_state FROM harness_tasks
-                WHERE main_goal=? AND child_goal=? ORDER BY id DESC LIMIT 1""",
-                (main_goal, child_goal)).fetchone()
-            if dup is not None:
-                if dup["state"] not in TERMINAL or dup["cleanup_state"] != "CLEANED_VERIFIED":
-                    raise HarnessError(f"duplicate active child task {dup['id']}")
-                raise HarnessError(
-                    f"previously attempted child task {dup['id']}; rescope into a new atomic goal")
-            # A completed/expired child with unverified cleanup still owns
-            # resources. Do not create a third worker just because a previous
-            # agent reported DONE or hit its TTL.
-            outstanding = db.execute("""SELECT COUNT(*) FROM harness_tasks
-                WHERE main_goal=? AND
-                (state NOT IN ('DONE_VERIFIED','FAILED','EXPIRED')
-                 OR cleanup_state='CLEANUP_PENDING')""", (main_goal,)).fetchone()[0]
-            if outstanding >= MAX_ACTIVE_CHILDREN:
-                raise HarnessError("parent WIP limit: two outstanding child tasks")
-            try:
-                cur = db.execute("""INSERT INTO harness_tasks
-                    (task_key,main_goal,child_goal,dod,agent,node,state,created_at,expires_at)
-                    VALUES (?,?,?,?,?,?, 'NOT_DISPATCHED',?,?)""",
-                    (key, main_goal, child_goal, dod, agent, node, _iso(start), _iso(start + ttl)))
-            except sqlite3.IntegrityError as exc:
-                raise HarnessError("duplicate idempotency key") from exc
-            self._event(db, cur.lastrowid, start, "CREATED", {"expires_at": _iso(start + ttl)})
-            task_id = cur.lastrowid
-        return self.get(task_id)
+        # One active task for exactly the same main/child goal; not a hidden
+        # way to spawn duplicates with new request keys.
+        dup = db.execute("""SELECT id,state,cleanup_state FROM harness_tasks
+            WHERE main_goal=? AND child_goal=? ORDER BY id DESC LIMIT 1""",
+            (main_goal, child_goal)).fetchone()
+        if dup is not None:
+            if dup["state"] not in TERMINAL or dup["cleanup_state"] != "CLEANED_VERIFIED":
+                raise HarnessError(f"duplicate active child task {dup['id']}")
+            raise HarnessError(
+                f"previously attempted child task {dup['id']}; rescope into a new atomic goal")
+        # A completed/expired child with unverified cleanup still owns
+        # resources. Do not create a third worker just because a previous
+        # agent reported DONE or hit its TTL.
+        outstanding = db.execute("""SELECT COUNT(*) FROM harness_tasks
+            WHERE main_goal=? AND
+            (state NOT IN ('DONE_VERIFIED','FAILED','EXPIRED')
+             OR cleanup_state='CLEANUP_PENDING')""", (main_goal,)).fetchone()[0]
+        if outstanding >= MAX_ACTIVE_CHILDREN:
+            raise HarnessError("parent WIP limit: two outstanding child tasks")
+        try:
+            cur = db.execute("""INSERT INTO harness_tasks
+                (task_key,main_goal,child_goal,dod,agent,node,state,created_at,expires_at)
+                VALUES (?,?,?,?,?,?, 'NOT_DISPATCHED',?,?)""",
+                (key, main_goal, child_goal, dod, agent, node, _iso(start), _iso(start + ttl)))
+        except sqlite3.IntegrityError as exc:
+            raise HarnessError("duplicate idempotency key") from exc
+        self._event(db, cur.lastrowid, start, "CREATED", {"expires_at": _iso(start + ttl)})
+        task_id = cur.lastrowid
+        return task_id
+
+    def adopt_in_transaction(self, db: sqlite3.Connection, *, key: str,
+                             main_goal: str, child_goal: str, dod: str, agent: str,
+                             node: str, at: datetime, ttl: timedelta,
+                             external_task_id: str) -> Task:
+        """Bind an existing external execution, without launching anything.
+        Caller owns the same immediate transaction as the monitor receipt.
+        """
+        if not db.in_transaction or not external_task_id.strip():
+            raise HarnessError("adoption requires an active transaction and durable ID")
+        if db.execute("SELECT 1 FROM harness_tasks WHERE external_task_id=?",
+                      (external_task_id,)).fetchone():
+            raise HarnessError("external task already recorded; reconcile existing owner")
+        task_id = self._create_in_transaction(db, key=key, main_goal=main_goal,
+            child_goal=child_goal, dod=dod, agent=agent, node=node, created_at=at, ttl=ttl)
+        self._record_dispatch(db, task_id, external_task_id=external_task_id, at=at)
+        return self._task(db.execute("SELECT * FROM harness_tasks WHERE id=?", (task_id,)).fetchone())
 
     def list_tasks(self, *, main_goal: str | None = None) -> list[Task]:
         """Current durable task snapshot for a monitor parent, not live agent proof."""
@@ -239,13 +262,19 @@ class HarnessStore:
             raise HarnessError("durable task receipt id required")
         self._expire_if_due(task_id, now)
         with self._connect() as db:
-            row = self._guard(db, task_id)
-            if row["state"] != "NOT_DISPATCHED":
-                raise HarnessError("dispatch already recorded")
-            db.execute("UPDATE harness_tasks SET state='DISPATCHED', external_task_id=?, verified_at=? WHERE id=?",
-                       (external_task_id, _iso(now), task_id))
-            self._event(db, task_id, now, "DISPATCHED", {"external_task_id": external_task_id, "running": False})
+            db.execute("BEGIN IMMEDIATE")
+            self._record_dispatch(db, task_id, external_task_id=external_task_id, at=now)
         return self.get(task_id)
+
+    def _record_dispatch(self, db: sqlite3.Connection, task_id: int, *,
+                         external_task_id: str, at: datetime) -> None:
+        now = _dt(at)
+        row = self._guard(db, task_id)
+        if row["state"] != "NOT_DISPATCHED":
+            raise HarnessError("dispatch already recorded")
+        db.execute("UPDATE harness_tasks SET state='DISPATCHED', external_task_id=?, verified_at=? WHERE id=?",
+                   (external_task_id, _iso(now), task_id))
+        self._event(db, task_id, now, "DISPATCHED", {"external_task_id": external_task_id, "running": False})
 
     def observe(self, task_id: int, *, backend_state: str, process_alive: bool | None,
                 at: datetime, progress_at: datetime | None = None, evidence_ref: str | None = None) -> Task:
