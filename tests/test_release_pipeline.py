@@ -21,6 +21,7 @@ import pytest
 from tests.test_autonomous_execution import register as _register_repo, new_change, materialize_task
 from tests.test_worktree_manager import _select_and_create_workspace
 from tests.test_review_fix_loop import envelope, PASS
+from tests.test_visual_qa_evidence import png
 
 
 def run(path, *args):
@@ -179,6 +180,23 @@ def _reviewed_and_integrated_task(client, repo, cid, rid, title="Feature task", 
     return tid, integ
 
 
+def _prepare_reviewed_integration_task(client, repo, cid, rid, title="Feature task", scope_hints=None):
+    tid, _ = materialize_task(client, cid, title=title, scope_hints=scope_hints or ["src.py"])
+    w = _select_and_create_workspace(client, tid, rid, agent="claude")
+    worktree = client.app.state.git.validate_worktree(w["worktree_path"])
+    (worktree / "src.py").write_text("def feature():\n    return 2\n")
+    (worktree / "test_src.py").write_text(
+        "from src import feature\n\n\ndef test_feature():\n    assert feature() == 2\n"
+    )
+    subprocess.run(["git", "add", "src.py", "test_src.py"], cwd=worktree, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "reviewed feature"], cwd=worktree, check=True, capture_output=True)
+    client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+    set_fake(client, PASS)
+    review = client.post(f"/api/tasks/{tid}/review/code").json()
+    assert review["outcome"] == "REVIEWED" and review["verdict"] == "PASS", review
+    return tid, w
+
+
 # ================================================================ Integration (E10.1-E10.6/E10.31/E10.37)
 
 def test_integration_ready_and_real_merge(client, git_repo, tmp_path):
@@ -294,11 +312,162 @@ def test_integration_verify_failure_detected(client, git_repo, tmp_path):
     client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
     set_fake(client, PASS)
     client.post(f"/api/tasks/{tid}/review/code")
+    target_before = client.app.state.git.head(repo, "main")
     r = client.post(f"/api/tasks/{tid}/integrate").json()
     assert r["outcome"] == "INTEGRATION_VERIFY_FAILED", r
     assert not r["verification"]["passed"]
+    assert client.app.state.git.head(repo, "main") == target_before
     mr = client.app.state.db.one("SELECT * FROM merge_records WHERE task_id=?", (tid,))
-    assert mr["merge_status"] == "MERGE_VERIFY_FAILED"
+    assert mr["merge_status"] == "FAILED" and mr["merged_commit"] is None
+
+
+def test_required_visual_failure_keeps_target_ref_and_success_evidence_unchanged(client, git_repo, tmp_path):
+    """A candidate rejected by the required visual gate must never be published."""
+    root, _ = git_repo
+    repo = make_release_repo(root, name="visual-reject", port=19051)
+    project = (repo / "PROJECT.yaml").read_text(encoding="utf-8")
+    project = project.replace(
+        "ci: {required: [preflight, test]}",
+        "ci: {required: [preflight, test, visual_qa]}",
+    )
+    project += (
+        "  visual_qa: {command: 'true', working_directory: ., timeout_seconds: 30}\n"
+        "visual_qa:\n  enabled: true\n  route: http://127.0.0.1:8765/orders\n"
+        "  viewports: [{width: 320, height: 240}]\n  reference: reference.png\n"
+        "  threshold: 0.08\n"
+    )
+    (repo / "PROJECT.yaml").write_text(project, encoding="utf-8")
+    (repo / "reference.png").write_bytes(png(320, 240))
+    run(repo, "git", "add", "PROJECT.yaml", "reference.png")
+    run(repo, "git", "commit", "-m", "require visual integration evidence")
+
+    rid = _register_repo(client, repo, "demo")
+    cid = new_change(client, "Visual integration reject", project_id=rid)
+    tid, _ = materialize_task(client, cid, scope_hints=["src.py", "test_src.py"])
+    client.app.state.db.execute(
+        "UPDATE tasks SET implementation_prompt=? WHERE id=?",
+        ("VISUAL_QA_REQUIRED: true\nVerify the integrated interface.", tid),
+    )
+    w = _select_and_create_workspace(client, tid, rid, agent="claude")
+    worktree = client.app.state.git.validate_worktree(w["worktree_path"])
+    (worktree / "src.py").write_text("def feature():\n    return 2\n")
+    (worktree / "test_src.py").write_text(
+        "from src import feature\n\n\ndef test_feature():\n    assert feature() == 2\n"
+    )
+    subprocess.run(["git", "add", "src.py", "test_src.py"], cwd=worktree, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "reviewed visual candidate"], cwd=worktree, check=True, capture_output=True)
+    client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
+    set_fake(client, PASS)
+    review = client.post(f"/api/tasks/{tid}/review/code").json()
+    assert review["outcome"] == "REVIEWED" and review["verdict"] == "PASS", review
+
+    # The canonical checkout contains unrelated staged/untracked operator WIP.
+    staged = repo / "operator-staged.txt"
+    staged.write_text("keep staged operator content\n")
+    subprocess.run(["git", "add", "operator-staged.txt"], cwd=repo, check=True, capture_output=True)
+    untracked = repo / "operator-note.txt"
+    untracked.write_text("keep untracked operator content\n")
+    base_before = client.app.state.git.head(repo, "main")
+    status_before = client.app.state.git.status(repo)
+    staged_before = client.app.state.git.git(repo, "diff", "--cached", "--binary").stdout
+    staged_bytes = staged.read_bytes()
+    untracked_bytes = untracked.read_bytes()
+
+    result = client.post(f"/api/tasks/{tid}/integrate").json()
+
+    assert result["outcome"] == "INTEGRATION_VERIFY_FAILED", result
+    assert not result["verification"]["passed"]
+    assert all(item["ok"] for item in result["verification"]["results"] if item["stage"] != "visual_qa")
+    visual = next(item for item in result["verification"]["results"] if item["stage"] == "visual_qa")
+    assert not visual["ok"] and "evidence" in visual["stderr"].lower()
+    assert client.app.state.git.head(repo, "main") == base_before, "a rejected candidate advanced the target ref"
+    assert client.app.state.git.status(repo) == status_before
+    assert client.app.state.git.git(repo, "diff", "--cached", "--binary").stdout == staged_before
+    assert staged.read_bytes() == staged_bytes
+    assert untracked.read_bytes() == untracked_bytes
+    merge = client.app.state.db.one("SELECT * FROM merge_records WHERE task_id=?", (tid,))
+    assert merge["merge_status"] == "FAILED" and merge["merged_commit"] is None
+    product = client.app.state.work_products.get(result["work_product_id"])
+    assert product["status"] == "REJECTED"
+    assert client.app.state.db.one(
+        "SELECT COUNT(*) AS count FROM work_products WHERE task_id=? AND kind='INTEGRATED_CHANGE' AND status='APPROVED'",
+        (tid,),
+    )["count"] == 0
+    assert not client.app.state.db.one(
+        "SELECT id FROM workspace_events WHERE entity_type='task' AND entity_id=? AND action='TASK_INTEGRATED'",
+        (tid,),
+    )
+    assert client.app.state.db.one(
+        "SELECT id FROM workspace_events WHERE entity_type='task' AND entity_id=? AND action='INTEGRATION_VERIFY_FAILED'",
+        (tid,),
+    )
+
+
+def test_task_head_change_during_candidate_verification_prevents_promotion(client, git_repo, tmp_path, monkeypatch):
+    root, _ = git_repo
+    repo = make_release_repo(root, name="task-head-race", port=19052)
+    rid = _register_repo(client, repo, "demo")
+    cid = new_change(client, "Task head race", project_id=rid)
+    tid, w = _prepare_reviewed_integration_task(client, repo, cid, rid, scope_hints=["src.py", "test_src.py"])
+    before = client.app.state.git.head(repo, "main")
+    service = client.app.state.integration_service
+    verify = service.verify_integrated_state
+
+    def verify_then_commit_unreviewed_change(repo_path, commit, task_id=None):
+        result = verify(repo_path, commit, task_id=task_id)
+        worktree = client.app.state.git.validate_worktree(w["worktree_path"])
+        (worktree / "late-change.txt").write_text("not part of the reviewed candidate\n")
+        subprocess.run(["git", "add", "late-change.txt"], cwd=worktree, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "unreviewed concurrent change"], cwd=worktree, check=True, capture_output=True)
+        return result
+
+    monkeypatch.setattr(service, "verify_integrated_state", verify_then_commit_unreviewed_change)
+    result = client.post(f"/api/tasks/{tid}/integrate").json()
+
+    assert result["outcome"] == "INTEGRATION_SOURCE_CHANGED", result
+    assert result["verification"]["passed"]
+    assert client.app.state.git.head(repo, "main") == before
+    merge = client.app.state.db.one("SELECT * FROM merge_records WHERE task_id=?", (tid,))
+    assert merge["merge_status"] == "FAILED" and merge["merged_commit"] is None
+
+
+def test_target_ref_compare_and_swap_preserves_concurrent_writer(client, git_repo, tmp_path, monkeypatch):
+    root, _ = git_repo
+    repo = make_release_repo(root, name="target-ref-race", port=19053)
+    rid = _register_repo(client, repo, "demo")
+    cid = new_change(client, "Target ref race", project_id=rid)
+    tid, _ = _prepare_reviewed_integration_task(client, repo, cid, rid, scope_hints=["src.py", "test_src.py"])
+    base_before = client.app.state.git.head(repo, "main")
+    writer = tmp_path / "concurrent-writer"
+    run(repo, "git", "worktree", "add", "-b", "concurrent-writer", str(writer), base_before)
+    (writer / "independent.txt").write_text("concurrent writer commit\n")
+    run(writer, "git", "add", "independent.txt")
+    run(writer, "git", "commit", "-m", "independent target update")
+    concurrent_head = client.app.state.git.head(writer)
+    git_service = client.app.state.git
+    original_git = git_service.git
+    moved = False
+
+    def advance_target_before_cas(repo_path, *args, **kwargs):
+        nonlocal moved
+        if not moved and len(args) >= 2 and args[0] == "update-ref" and args[1] == "refs/heads/main":
+            run(repo, "git", "update-ref", "refs/heads/main", concurrent_head, base_before)
+            moved = True
+        return original_git(repo_path, *args, **kwargs)
+
+    monkeypatch.setattr(git_service, "git", advance_target_before_cas)
+    try:
+        result = client.post(f"/api/tasks/{tid}/integrate").json()
+    finally:
+        monkeypatch.setattr(git_service, "git", original_git)
+        run(repo, "git", "worktree", "remove", "--force", str(writer))
+
+    assert moved
+    assert result["outcome"] == "INTEGRATION_TARGET_CHANGED", result
+    assert result["verification"]["passed"]
+    assert client.app.state.git.head(repo, "main") == concurrent_head
+    merge = client.app.state.db.one("SELECT * FROM merge_records WHERE task_id=?", (tid,))
+    assert merge["merge_status"] == "FAILED" and merge["merged_commit"] is None
 
 
 # ================================================================ Release / versioning / immutable failed release (E10.7/E10.8/E10.26/E10.37)

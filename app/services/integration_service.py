@@ -152,6 +152,44 @@ class IntegrationService:
     def _unlock(self, repository_id: int) -> None:
         self.db.execute("DELETE FROM repository_integration_locks WHERE repository_id=?", (repository_id,))
 
+    def _record_rejected_candidate(self, *, task_id: int, ws: dict, candidate_commit: str,
+                                   reviewed_head: str, expected_target_head: str,
+                                   verification: dict, outcome: str) -> int:
+        """Persist a rejected candidate without representing it as merged."""
+        self.db.execute(
+            "INSERT INTO merge_records(task_id,repository_id,required,integration_branch,merge_status,merged_commit,merged_at) "
+            "VALUES(?,?,1,?,'FAILED',NULL,NULL) "
+            "ON CONFLICT(task_id,repository_id) DO UPDATE SET integration_branch=excluded.integration_branch,"
+            "merge_status='FAILED',merged_commit=NULL,merged_at=NULL,updated_at=CURRENT_TIMESTAMP",
+            (task_id, ws["repository_id"], ws["branch"]),
+        )
+        change = self.db.one("SELECT change_id FROM tasks WHERE id=?", (task_id,))
+        work_product_id = self.work_products.create(
+            kind="INTEGRATED_CHANGE",
+            title=f"Rejected integration candidate: task {task_id} ({candidate_commit[:8]})",
+            change_id=change["change_id"] if change else None,
+            task_id=task_id,
+            status="REJECTED",
+            content_ref=candidate_commit,
+            content_metadata={
+                "repository_id": ws["repository_id"],
+                "worktree_path": ws["worktree_path"],
+                "task_branch": ws["branch"],
+                "reviewed_head": reviewed_head,
+                "candidate_commit": candidate_commit,
+                "expected_target_head": expected_target_head,
+                "target_branch": ws["base_branch"],
+                "strategy": "verify-before-compare-and-swap",
+                "published": False,
+                "outcome": outcome,
+                "integration_verification": verification,
+            },
+        )
+        event_type = "INTEGRATION_VERIFY_FAILED" if outcome == "INTEGRATION_VERIFY_FAILED" else "INTEGRATION_PROMOTION_REJECTED"
+        self.db.event("task", task_id, event_type,
+                      f"candidate_commit={candidate_commit} work_product={work_product_id}")
+        return work_product_id
+
     # ---- E10.6: real verification of the INTEGRATED target, never just
     # trusting the Task worktree's own earlier PASS ------------------------
     def verify_integrated_state(self, repo_path: str, commit: str, task_id: int | None = None) -> dict:
@@ -208,72 +246,175 @@ class IntegrationService:
         if not readiness["ready"]:
             return {"outcome": "BLOCKED", "task_id": task_id, "reasons": readiness["blockers"]}
         governing_id = readiness["governing_task_id"]
-        ws = self.worktree_manager.get_task_worktree(governing_id)
-        if not ws:
+        initial_ws = self.worktree_manager.get_task_worktree(governing_id)
+        if not initial_ws:
             return {"outcome": "NO_MANAGED_WORKTREE", "task_id": task_id}
-        repo_row = self.db.one("SELECT * FROM repositories WHERE id=?", (ws["repository_id"],))
 
-        # E10.4: repository-scoped lock -- established now even though
-        # E13 concurrency isn't enabled yet.
-        if not self._lock(ws["repository_id"], f"task:{governing_id}"):
+        repository_id = initial_ws["repository_id"]
+        if not self._lock(repository_id, f"task:{governing_id}"):
             return {"outcome": "LOCKED", "task_id": task_id,
-                     "message": "Another integration is already in progress for this repository"}
+                    "message": "Another integration is already in progress for this repository"}
         try:
-            # Re-check CLEAN right before merging (avoid a TOCTOU window
-            # between the preflight above and the real merge below).
+            # The pre-lock decision admits this attempt only. Re-read the
+            # governing task and workspace identity under the repository lock.
+            locked_readiness = self.preflight_integration(task_id)
+            if not locked_readiness["ready"] or locked_readiness["governing_task_id"] != governing_id:
+                return {"outcome": "BLOCKED", "task_id": task_id,
+                        "reasons": locked_readiness.get("blockers", ["INTEGRATION_SOURCE_CHANGED"])}
+            ws = self.worktree_manager.get_task_worktree(governing_id)
+            if (not ws or ws["repository_id"] != repository_id
+                    or any(ws.get(key) != initial_ws.get(key)
+                           for key in ("id", "worktree_path", "branch", "base_branch"))):
+                return {"outcome": "INTEGRATION_SOURCE_CHANGED", "task_id": task_id}
+            repo_row = self.db.one("SELECT * FROM repositories WHERE id=?", (repository_id,))
+
             integ = self.worktree_manager.check_integration(governing_id)
             if integ["result"] == "BASE_STALE":
-                # E10.3 default conservative policy: a stale-but-clean
-                # base still requires an explicit re-verify decision,
-                # never a silent auto-rebase.
                 return {"outcome": "BASE_STALE_REQUIRES_REVERIFY", "task_id": task_id}
             if integ["result"] != "CLEAN":
-                return {"outcome": integ["result"], "task_id": task_id, "conflicting_files": integ.get("conflicting_files", [])}
+                return {"outcome": integ["result"], "task_id": task_id,
+                        "conflicting_files": integ.get("conflicting_files", [])}
 
-            current_base_head = self.git.head(repo_row["repo_path"], ws["base_branch"])
-            probe_path = self.git.create_baseline_probe(repo_row["repo_path"], current_base_head)
+            target_old = self.git.head(repo_row["repo_path"], ws["base_branch"])
+            if ws.get("base_commit") and target_old != ws["base_commit"]:
+                return {"outcome": "BASE_STALE_REQUIRES_REVERIFY", "task_id": task_id}
+            reviewed_head = self.git.head(ws["worktree_path"])
+            source_ref = f"refs/heads/{self.git.validate_branch(ws['branch'])}"
+            if self.git.head(repo_row["repo_path"], source_ref) != reviewed_head:
+                return {"outcome": "INTEGRATION_SOURCE_CHANGED", "task_id": task_id}
+
+            # Keep this disposable worktree at the candidate until verification
+            # and promotion finish so the exact candidate remains reachable.
+            probe_path = self.git.create_baseline_probe(repo_row["repo_path"], target_old)
             try:
-                result = self.git.merge(probe_path, ws["branch"])
-                if result.returncode != 0:
+                merge = self.git.merge(probe_path, ws["branch"])
+                if merge.returncode != 0:
                     conflicts = self.git.conflict_files(probe_path)
                     self.git.git(probe_path, "merge", "--abort", check=False)
-                    return {"outcome": "CONFLICT", "task_id": task_id, "conflicting_files": conflicts}
-                integrated_commit = self.git.head(probe_path)
+                    return {"outcome": "CONFLICT", "task_id": task_id,
+                            "conflicting_files": conflicts}
+                candidate = self.git.head(probe_path)
+                parents = self.git.git(
+                    probe_path, "rev-list", "--parents", "-n", "1", candidate,
+                ).stdout.split()[1:]
+                if candidate != target_old and parents != [target_old, reviewed_head]:
+                    return {"outcome": "INTEGRATION_SOURCE_CHANGED", "task_id": task_id,
+                            "candidate_commit": candidate}
+
+                try:
+                    verification = self.verify_integrated_state(
+                        repo_row["repo_path"], candidate, task_id=governing_id,
+                    )
+                except Exception as exc:
+                    verification = {"passed": False, "results": [{
+                        "stage": "integration", "ok": False, "stdout": "",
+                        "stderr": f"Verification raised {type(exc).__name__}.",
+                    }]}
+                if not verification.get("passed"):
+                    wp_id = self._record_rejected_candidate(
+                        task_id=governing_id, ws=ws, candidate_commit=candidate,
+                        reviewed_head=reviewed_head, expected_target_head=target_old,
+                        verification=verification, outcome="INTEGRATION_VERIFY_FAILED",
+                    )
+                    return {"outcome": "INTEGRATION_VERIFY_FAILED", "task_id": task_id,
+                            "integrated_commit": None, "candidate_commit": candidate,
+                            "work_product_id": wp_id, "verification": verification}
+
+                try:
+                    current_target = self.git.head(repo_row["repo_path"], ws["base_branch"])
+                except Exception:
+                    current_target = None
+                if current_target != target_old:
+                    verification = {**verification, "promotion_blocker": "target branch changed during verification"}
+                    wp_id = self._record_rejected_candidate(
+                        task_id=governing_id, ws=ws, candidate_commit=candidate,
+                        reviewed_head=reviewed_head, expected_target_head=target_old,
+                        verification=verification, outcome="INTEGRATION_TARGET_CHANGED",
+                    )
+                    return {"outcome": "INTEGRATION_TARGET_CHANGED", "task_id": task_id,
+                            "integrated_commit": None, "candidate_commit": candidate,
+                            "work_product_id": wp_id, "verification": verification}
+
+                latest_readiness = self.preflight_integration(task_id)
+                latest_ws = self.worktree_manager.get_task_worktree(governing_id)
+                source_unchanged = (
+                    latest_readiness["ready"]
+                    and latest_readiness["governing_task_id"] == governing_id
+                    and latest_ws is not None
+                    and latest_ws["repository_id"] == repository_id
+                    and all(latest_ws.get(key) == ws.get(key)
+                            for key in ("id", "worktree_path", "branch", "base_branch"))
+                    and self.git.head(ws["worktree_path"]) == reviewed_head
+                    and self.git.head(repo_row["repo_path"], source_ref) == reviewed_head
+                )
+                if not source_unchanged:
+                    verification = {**verification, "promotion_blocker": "reviewed task source or readiness changed during verification"}
+                    wp_id = self._record_rejected_candidate(
+                        task_id=governing_id, ws=ws, candidate_commit=candidate,
+                        reviewed_head=reviewed_head, expected_target_head=target_old,
+                        verification=verification, outcome="INTEGRATION_SOURCE_CHANGED",
+                    )
+                    return {"outcome": "INTEGRATION_SOURCE_CHANGED", "task_id": task_id,
+                            "integrated_commit": None, "candidate_commit": candidate,
+                            "work_product_id": wp_id, "verification": verification}
+
+                target_ref = f"refs/heads/{self.git.validate_branch(ws['base_branch'])}"
+                promoted = self.git.git(
+                    repo_row["repo_path"], "update-ref", target_ref,
+                    candidate, target_old, check=False,
+                )
+                if promoted.returncode != 0:
+                    try:
+                        current_target = self.git.head(repo_row["repo_path"], ws["base_branch"])
+                    except Exception:
+                        current_target = None
+                    outcome = "INTEGRATION_TARGET_CHANGED" if current_target != target_old else "INTEGRATION_PROMOTION_FAILED"
+                    verification = {**verification, "promotion_blocker": outcome}
+                    wp_id = self._record_rejected_candidate(
+                        task_id=governing_id, ws=ws, candidate_commit=candidate,
+                        reviewed_head=reviewed_head, expected_target_head=target_old,
+                        verification=verification, outcome=outcome,
+                    )
+                    return {"outcome": outcome, "task_id": task_id,
+                            "integrated_commit": None, "candidate_commit": candidate,
+                            "work_product_id": wp_id, "verification": verification}
+
+                # Git ref promotion and the following SQLite audit writes
+                # cannot share one transaction. If a DB write fails here,
+                # leave the ref intact for explicit reconciliation; never
+                # blindly roll it back over a later writer.
+                self.db.execute(
+                    "INSERT INTO merge_records(task_id,repository_id,required,integration_branch,merge_status,merged_commit,merged_at) "
+                    "VALUES(?,?,1,?,'MERGED',?,CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(task_id,repository_id) DO UPDATE SET integration_branch=excluded.integration_branch,"
+                    "merge_status='MERGED',merged_commit=excluded.merged_commit,merged_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP",
+                    (governing_id, ws["repository_id"], ws["branch"], candidate),
+                )
+                change_id = self.db.one("SELECT change_id FROM tasks WHERE id=?", (governing_id,))["change_id"]
+                wp_id = self.work_products.create(
+                    kind="INTEGRATED_CHANGE",
+                    title=f"Integrated: task {governing_id} -> {ws['base_branch']} ({candidate[:8]})",
+                    change_id=change_id, task_id=governing_id, status="APPROVED",
+                    content_ref=candidate,
+                    content_metadata={
+                        "repository_id": ws["repository_id"],
+                        "worktree_path": ws["worktree_path"],
+                        "task_branch": ws["branch"],
+                        "base_commit": ws["base_commit"],
+                        "reviewed_head": reviewed_head,
+                        "integrated_commit": candidate,
+                        "target_branch": ws["base_branch"],
+                        "strategy": "verify-before-compare-and-swap",
+                        "merge_result": "CLEAN",
+                        "integration_verification": verification,
+                    },
+                )
+                self.db.event("task", governing_id, "TASK_INTEGRATED",
+                              f"commit={candidate} work_product={wp_id}")
+                return {"outcome": "INTEGRATED", "task_id": task_id, "integrated_commit": candidate,
+                        "work_product_id": wp_id, "target_branch": ws["base_branch"],
+                        "repository_id": ws["repository_id"]}
             finally:
                 self.git.remove_baseline_probe(repo_row["repo_path"], probe_path)
-
-            # E10.3: move the real branch ref only -- never touches the
-            # canonical checkout's own working tree/index, so an
-            # unrelated uncommitted change sitting in that checkout
-            # (E8.5.6's own discovery: this is always survivable) is
-            # completely unaffected.
-            self.git.git(repo_row["repo_path"], "update-ref", f"refs/heads/{ws['base_branch']}", integrated_commit)
-
-            verify = self.verify_integrated_state(repo_row["repo_path"], integrated_commit, task_id=governing_id)
-
-            reviewed_head = self.git.head(ws["worktree_path"])
-            self.db.execute(
-                "INSERT INTO merge_records(task_id,repository_id,required,integration_branch,merge_status,merged_commit,merged_at) "
-                "VALUES(?,?,1,?,?,?,CURRENT_TIMESTAMP) "
-                "ON CONFLICT(task_id,repository_id) DO UPDATE SET merge_status=excluded.merge_status,merged_commit=excluded.merged_commit,merged_at=excluded.merged_at,updated_at=CURRENT_TIMESTAMP",
-                (governing_id, ws["repository_id"], ws["branch"], "MERGED" if verify["passed"] else "MERGE_VERIFY_FAILED", integrated_commit))
-
-            change_id = self.db.one("SELECT change_id FROM tasks WHERE id=?", (governing_id,))["change_id"]
-            wp_id = self.work_products.create(
-                kind="INTEGRATED_CHANGE", title=f"Integrated: task {governing_id} -> {ws['base_branch']} ({integrated_commit[:8]})",
-                change_id=change_id, task_id=governing_id, status="APPROVED" if verify["passed"] else "REJECTED",
-                content_ref=integrated_commit,
-                content_metadata={"repository_id": ws["repository_id"], "worktree_path": ws["worktree_path"],
-                                    "task_branch": ws["branch"], "base_commit": ws["base_commit"],
-                                    "reviewed_head": reviewed_head, "integrated_commit": integrated_commit,
-                                    "target_branch": ws["base_branch"], "strategy": "no-ff-probe-then-update-ref",
-                                    "merge_result": "CLEAN", "integration_verification": verify})
-            self.db.event("task", governing_id, "TASK_INTEGRATED" if verify["passed"] else "INTEGRATION_VERIFY_FAILED",
-                           f"commit={integrated_commit} work_product={wp_id}")
-            if not verify["passed"]:
-                return {"outcome": "INTEGRATION_VERIFY_FAILED", "task_id": task_id, "integrated_commit": integrated_commit,
-                         "work_product_id": wp_id, "verification": verify}
-            return {"outcome": "INTEGRATED", "task_id": task_id, "integrated_commit": integrated_commit,
-                     "work_product_id": wp_id, "target_branch": ws["base_branch"], "repository_id": ws["repository_id"]}
         finally:
-            self._unlock(ws["repository_id"])
+            self._unlock(repository_id)
