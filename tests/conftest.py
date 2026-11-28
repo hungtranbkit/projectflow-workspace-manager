@@ -5,6 +5,12 @@ import pytest
 from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
+from test_support.docker_test_safety import (
+    cleanup_registered_sandboxes,
+    load_verified_docker_test_owner,
+    register_test_sandbox,
+    verify_exact_compose_project_resources,
+)
 
 def run(path, *args): return subprocess.run(list(args),cwd=path,text=True,capture_output=True,check=True)
 
@@ -100,26 +106,45 @@ def sandboxable_repo_factory(tmp_path):
 
 @pytest.fixture(scope="session", autouse=True)
 def _docker_sandbox_safety_net():
-    """Session-end safety net for the real-Docker sandbox tests: even if an
-    individual test's own cleanup call fails to run (an assertion raised
-    before reaching its `finally`, etc.), never leave a `wm-*`-namespaced
-    container/network behind on this shared host. Narrowly scoped to the
-    exact `wm-` prefix this app always uses (docs section 15/66) -- never
-    touches any other container on the host, real or otherwise."""
+    """Clean only sandboxes provisioned by this test run on its owned daemon.
+
+    This is deliberately autouse so a test that tries to create a real
+    sandbox cannot bypass the ownership gate. Ordinary unit tests register no
+    resources and make no Docker calls during teardown. A Docker-backed test
+    must supply the dedicated endpoint manifest described by
+    ``test_support.docker_test_safety``; cleanup uses the exact sandbox row
+    and verified Compose project label, never a host-wide name-prefix scan.
+    """
+    from app.services.sandbox_manager import SandboxManager
+    from app.services.sandbox_runtime import SandboxRuntimeService
+
+    resources = {}
+    original_provision = SandboxManager.provision
+
+    def provision_owned(self, sandbox_id):
+        real_compose = (
+            isinstance(self.runtime, SandboxRuntimeService)
+            and getattr(self.runtime.compose_up, "__func__", None) is SandboxRuntimeService.compose_up
+        )
+        if not real_compose:
+            return original_provision(self, sandbox_id)
+
+        register_test_sandbox(
+            self,
+            sandbox_id,
+            resources,
+            current_owner=lambda: load_verified_docker_test_owner(docker_bin=self.runtime.docker_bin),
+        )
+        return original_provision(self, sandbox_id)
+
+    SandboxManager.provision = provision_owned
     yield
     try:
-        import subprocess as _sp
-        ids = _sp.run(
-            ["docker", "ps", "-aq", "--filter", "label=com.docker.compose.project"],
-            capture_output=True, text=True, timeout=15,
-        ).stdout.split()
-        for cid in ids:
-            name = _sp.run(["docker", "inspect", "-f", "{{.Name}}", cid], capture_output=True, text=True, timeout=5).stdout.strip().lstrip("/")
-            if name.startswith("wm-"):
-                _sp.run(["docker", "rm", "-f", cid], capture_output=True, timeout=15)
-        nets = _sp.run(["docker", "network", "ls", "--format", "{{.Name}}"], capture_output=True, text=True, timeout=15).stdout.split()
-        for net in nets:
-            if net.startswith("wm-"):
-                _sp.run(["docker", "network", "rm", net], capture_output=True, timeout=15)
-    except Exception:
-        pass  # best-effort safety net only -- never fail the test session over cleanup itself
+        cleanup_registered_sandboxes(
+            resources.values(),
+            current_owner=load_verified_docker_test_owner,
+            verify_project=verify_exact_compose_project_resources,
+            cleanup=lambda manager, sid: manager.cleanup(sid, force=True),
+        )
+    finally:
+        SandboxManager.provision = original_provision
