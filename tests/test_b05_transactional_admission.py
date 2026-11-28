@@ -96,3 +96,30 @@ def test_real_statvfs_snapshot_drives_low_capacity_rejection(client, tmp_path):
     assert snapshot["free_bytes"] > 0 and snapshot["free_inodes"] > 0
     manager.reserve_bytes = snapshot["free_bytes"] + 1
     assert manager._capacity_error(tmp_path).startswith("SANDBOX_DISK_HEADROOM")
+
+
+def test_superseded_worker_cannot_start_after_recovery(client, tmp_path, monkeypatch):
+    db = client.app.state.db
+    manager = SandboxManager(db, client.app.state.sandbox_runtime, client.app.state.ports, tmp_path)
+    sandbox_id = _sandbox(db, "b05-worker-fence")
+    first = manager._admit_provision(sandbox_id)
+    assert first is not None
+    db.execute("UPDATE sandbox_operations SET started_at=datetime('now','-2 hours') WHERE id=?", (first,))
+    replacement = manager._admit_provision(sandbox_id)
+    assert replacement is not None and replacement != first
+
+    def no_source_access(*args):
+        pytest.fail("superseded worker reached source or runtime preparation")
+
+    original_one = db.one
+
+    def guard_source(sql, params=()):
+        if "FROM sandbox_sources" in sql:
+            no_source_access()
+        return original_one(sql, params)
+
+    monkeypatch.setattr(db, "one", guard_source)
+    manager._provision_worker(sandbox_id, first)
+    assert db.one("SELECT status FROM sandboxes WHERE id=?", (sandbox_id,))["status"] == "PROVISIONING"
+    assert db.one("SELECT status FROM sandbox_operations WHERE id=?", (first,))["status"] == "FAILED"
+    assert db.one("SELECT status FROM sandbox_operations WHERE id=?", (replacement,))["status"] == "RUNNING"

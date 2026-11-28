@@ -304,7 +304,18 @@ class SandboxManager:
         return return_value
 
     def _provision_worker(self, sandbox_id: int, op_id: int) -> None:
-        sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
+        with self.db.connect() as db:
+            claimed = db.execute(
+                "UPDATE sandboxes SET status='STARTING', updated_at=CURRENT_TIMESTAMP, "
+                "started_at=CURRENT_TIMESTAMP WHERE id=? AND status='PROVISIONING' "
+                "AND ?=(SELECT id FROM sandbox_operations WHERE sandbox_id=? "
+                "AND operation_type='PROVISION' ORDER BY id DESC LIMIT 1) "
+                "AND EXISTS (SELECT 1 FROM sandbox_operations WHERE id=? AND status='RUNNING')",
+                (sandbox_id, op_id, sandbox_id, op_id),
+            )
+            if claimed.rowcount != 1:
+                return
+            sb = db.execute("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,)).fetchone()
         try:
             provider = self.db.one("SELECT * FROM sandbox_sources WHERE sandbox_id=? ORDER BY id LIMIT 1", (sandbox_id,))
             worktree_path = Path(provider["worktree_path"])
@@ -333,8 +344,6 @@ class SandboxManager:
             env_path = Path(sb["environment_path"]) / ".env"
             env_path.write_text("\n".join(env_lines) + "\n")
 
-            self._op_update(op_id, "RUNNING")
-            self.db.execute("UPDATE sandboxes SET status='STARTING',updated_at=CURRENT_TIMESTAMP,started_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
             compose_file = contract_root / contract["compose_file"]
             result = self.runtime.compose_up(sb["compose_project"], compose_file, env_path, worktree_path, services, sandbox_id, project_directory=worktree_path)
             self._op_finish(op_id, "SUCCESS", 0, result.stdout, result.stderr)

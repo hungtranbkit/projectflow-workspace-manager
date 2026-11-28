@@ -13,8 +13,8 @@ _runtime_primary="${PROJECTFLOW_RUNTIME_PRIMARY:-}"
 _runtime_fallback="${PROJECTFLOW_RUNTIME_FALLBACK:-}"
 _runtime_primary_ok=0
 _runtime_fallback_ok=0
-if [[ -n "$_runtime_primary" && -x "$_runtime_primary" ]]; then _runtime_primary_ok=1; fi
-if [[ -n "$_runtime_fallback" && -x "$_runtime_fallback" ]]; then _runtime_fallback_ok=1; fi
+if [[ -n "$_runtime_primary" && -f "$_runtime_primary" && -x "$_runtime_primary" ]]; then _runtime_primary_ok=1; fi
+if [[ -n "$_runtime_fallback" && -f "$_runtime_fallback" && -x "$_runtime_fallback" ]]; then _runtime_fallback_ok=1; fi
 if [[ -n "$_runtime_primary" && "$_runtime_primary_ok" -eq 0 && -z "$_runtime_fallback" ]]; then
   echo "runtime executable pin is not executable: $_runtime_primary" >&2
   exit 1

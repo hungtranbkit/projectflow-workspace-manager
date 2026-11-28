@@ -46,3 +46,12 @@ def test_script_rejects_when_both_pinned_runtimes_are_unavailable(tmp_path):
                             capture_output=True, text=True)
     assert result.returncode != 0
     assert "neither pinned runtime executable" in result.stderr
+
+
+def test_script_rejects_directory_as_runtime_pin(tmp_path):
+    env = os.environ.copy()
+    env.update(PROJECTFLOW_RUNTIME_PRIMARY=str(tmp_path), PROJECTFLOW_RUNTIME_FALLBACK="")
+    result = subprocess.run(["bash", "scripts/preflight.sh"], env=env,
+                            capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "runtime executable pin" in result.stderr

@@ -78,14 +78,19 @@ class TerminalMCPAdapter:
             raise TerminalAdapterError("agent type not allowed")
         if not node or not cwd.startswith("/") or cwd == "/":
             raise TerminalAdapterError("explicit node and constrained cwd required")
-        if self.node_snapshot is not None:
-            try:
-                selected = select_node(self.node_snapshot(), required_tool=required_tool,
-                                       min_free_bytes=min_free_bytes, requested_node=node)
-            except (NodeRoutingError, TypeError) as exc:
-                raise TerminalAdapterError(f"node admission rejected: {exc}") from exc
-            if str(selected.get("id") or selected.get("name")) != node:
-                raise TerminalAdapterError("node admission returned a different target")
+        # Creation is a scheduler side effect.  A caller must provide a
+        # controller-owned snapshot provider so the exact target is checked
+        # immediately before dispatch; accepting an unverified/default node
+        # here would bypass the B06 capability and capacity contract.
+        if not callable(self.node_snapshot):
+            raise TerminalAdapterError("node admission rejected: verified controller snapshot is required")
+        try:
+            selected = select_node(self.node_snapshot(), required_tool=required_tool,
+                                   min_free_bytes=min_free_bytes, requested_node=node)
+        except (NodeRoutingError, TypeError) as exc:
+            raise TerminalAdapterError(f"node admission rejected: {exc}") from exc
+        if str(selected.get("id") or selected.get("name")) != node:
+            raise TerminalAdapterError("node admission returned a different target")
         result = await self._turn("create_session", target=name,
                                   agent_type=agent_type, node=node, working_directory=cwd)
         body = result.get("result", {})

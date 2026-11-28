@@ -46,3 +46,18 @@ def test_routing_rejects_missing_or_stale_capability_evidence():
         select_node([node("stale", capacity_observed_at="2020-01-01T00:00:00+00:00")], required_tool="codex")
     with pytest.raises(NodeRoutingError):
         select_node([node("unverified", tools={"codex": False})], required_tool="codex")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        node("future", capacity_observed_at="2099-01-01T00:00:00+00:00"),
+        node("draining", draining=True),
+        node("unknown-free", free_bytes=None),
+        {k: v for k, v in node("omitted-free").items() if k != "free_bytes"},
+        node("non-integer-free", free_bytes=True),
+    ],
+)
+def test_routing_rejects_incomplete_or_unusable_capacity_even_without_explicit_floor(bad):
+    with pytest.raises(NodeRoutingError, match="no eligible node"):
+        select_node([bad], required_tool="codex")

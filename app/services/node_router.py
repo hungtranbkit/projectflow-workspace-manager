@@ -45,7 +45,7 @@ def select_node(
             seen = True
         if not node_id or (requested_node and node_id != requested_node):
             continue
-        if str(node.get("status", "")).lower() != "online":
+        if node.get("draining") or str(node.get("status", "")).lower() != "online":
             continue
         if str(node.get("capacity_status", "")).lower() not in {"healthy", "ready"}:
             continue
@@ -55,15 +55,14 @@ def select_node(
         try:
             stamp = datetime.fromisoformat(str(observed).replace("Z", "+00:00"))
             if stamp.tzinfo is None:
-                stamp = stamp.replace(tzinfo=timezone.utc)
-            if (datetime.now(timezone.utc) - stamp).total_seconds() > max_evidence_age_seconds:
+                continue
+            age = (datetime.now(timezone.utc) - stamp).total_seconds()
+            if not 0 <= age <= max_evidence_age_seconds:
                 continue
         except (TypeError, ValueError):
             continue
-        try:
-            if int(node.get("free_bytes", 0)) < min_free_bytes:
-                continue
-        except (TypeError, ValueError):
+        free_bytes = node.get("free_bytes")
+        if type(free_bytes) is not int or free_bytes < min_free_bytes:
             continue
         tools = node.get("tools", node.get("capabilities", ()))
         if isinstance(tools, Mapping):
