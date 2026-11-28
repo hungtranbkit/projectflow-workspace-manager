@@ -51,6 +51,10 @@ class SandboxManager:
         self.state_dir = Path(state_dir)
         self.max_running = max_running
         self.default_retention_hours = default_retention_hours
+        # Admission is a process-wide ceiling. Serialize the check and the
+        # state transition so two concurrent requests cannot both observe a
+        # free slot and over-admit a sandbox.
+        self._admission_lock = threading.Lock()
         # Injectable, real-by-default (matches the runner/launcher DI
         # pattern already used elsewhere in this codebase): provision/
         # reset_data/cleanup's slow docker work runs via self.spawn so a
@@ -220,16 +224,17 @@ class SandboxManager:
         refresh instead of freezing the tab for the whole docker call."""
         sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
         if not sb: raise SandboxError("SANDBOX_NOT_FOUND", "sandbox not found")
-        if not self.capacity_available() and sb["status"] not in ("RUNNING", "STARTING", "PROVISIONING", "CLEANUP_ELIGIBLE"):
-            self.db.execute(
-                "UPDATE sandboxes SET status='FAILED',error_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                ("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached", sandbox_id),
-            )
-            self.db.event("sandbox", sandbox_id, "SANDBOX_PROVISION_FAILED", "SANDBOX_CAPACITY_FULL")
-            raise SandboxError("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached")
+        with self._admission_lock:
+            if not self.capacity_available() and sb["status"] not in ("RUNNING", "STARTING", "PROVISIONING", "CLEANUP_ELIGIBLE"):
+                self.db.execute(
+                    "UPDATE sandboxes SET status='FAILED',error_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    ("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached", sandbox_id),
+                )
+                self.db.event("sandbox", sandbox_id, "SANDBOX_PROVISION_FAILED", "SANDBOX_CAPACITY_FULL")
+                raise SandboxError("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached")
 
-        op_id = self._op_start(sandbox_id, "PROVISION")
-        self.db.execute("UPDATE sandboxes SET status='PROVISIONING',updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
+            op_id = self._op_start(sandbox_id, "PROVISION")
+            self.db.execute("UPDATE sandboxes SET status='PROVISIONING',updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
         self.spawn(self._provision_worker, (sandbox_id, op_id))
 
     def _provision_worker(self, sandbox_id: int, op_id: int) -> None:

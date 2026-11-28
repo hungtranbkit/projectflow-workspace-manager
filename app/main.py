@@ -3995,6 +3995,14 @@ def create_app(settings=None):
     @app.get("/api/engineering/providers")
     def api_list_providers():
         return {p:roles_catalog.capabilities_for_provider(p) for p in roles_catalog.providers}
+    @app.get("/api/engineering/eligible-providers")
+    def api_eligible_providers(role_key:str, repository_id:str=""):
+        policy=None
+        if repository_id.strip().isdigit():
+            r=repo(int(repository_id))
+            try: policy=load_engineering_policy(Path(r["repo_path"]))
+            except ContractError as exc: raise GitSafetyError(str(exc))
+        return {"role": role_key.upper(), "providers": roles_catalog.eligible_providers_for_role(role_key, policy)}
     @app.post("/api/engineering/validate-assignment")
     def api_validate_assignment(request:Request,provider:str=Form(...),role_key:str=Form(...),repository_id:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
         # Diagnostic/advisory (see docstring below) -- VIEWER is enough

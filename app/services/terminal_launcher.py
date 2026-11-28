@@ -6,6 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from app.launchers import AGENT_LAUNCHERS, AgentLauncher
+from app.services.runtime_preflight import resolve_executable
 
 class LauncherError(RuntimeError):
     def __init__(self, code: str, message: str):
@@ -54,7 +55,7 @@ class TerminalLauncherService:
         if not (self.environ.get("DISPLAY") or self.environ.get("WAYLAND_DISPLAY")):
             raise LauncherError("DESKTOP_SESSION_UNAVAILABLE", "Service không chạy trong desktop session")
         for name in self.TERMINALS:
-            executable = self.which(name)
+            executable = resolve_executable(name, which=self.which, environ=self.environ)
             if executable: return TerminalAdapter(name, executable)
         raise LauncherError("TERMINAL_NOT_FOUND", "Không tìm thấy terminal emulator được hỗ trợ")
 
@@ -62,13 +63,13 @@ class TerminalLauncherService:
         terminal = None
         try: terminal = self.detect_terminal().name
         except LauncherError: pass
-        return [{"agent": key, "label": value.label, "executable": self.which(value.executable), "args": list(value.args), "available": bool(self.which(value.executable)), "source": value.source, "terminal": terminal} for key,value in self.launchers.items()]
+        return [{"agent": key, "label": value.label, "executable": resolve_executable(value.executable, which=self.which, environ=self.environ), "args": list(value.args), "available": bool(resolve_executable(value.executable, which=self.which, environ=self.environ)), "source": value.source, "terminal": terminal} for key,value in self.launchers.items()]
 
     def open_terminal(self, worktree): return self._launch(worktree, None, None)
 
     def launch_agent(self, worktree, agent: str):
         launcher = self.launcher_for(agent)
-        executable = self.which(launcher.executable)
+        executable = resolve_executable(launcher.executable, which=self.which, environ=self.environ)
         if not executable: raise LauncherError("AGENT_CLI_NOT_FOUND", f"{launcher.label} CLI chưa được cài hoặc không có trong PATH")
         return self._launch(worktree, launcher.label, [executable, *launcher.args])
 
