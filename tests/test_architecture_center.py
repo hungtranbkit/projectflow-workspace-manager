@@ -439,7 +439,18 @@ def test_carried_forward_ir_with_moved_citations_is_refused(tmp_path):
     assert architecture_rerun.cited_drift(ro, ir, ro.resolve("HEAD")) == ["a:app/a.js:2-2"]
 
 
-def test_archify_renderer_gets_only_bounded_filtered_git_objects(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "renderer_exit, gates, expected_ok, expected_status",
+    [
+        (1, {"validate": "pass", "deliver": "pass", "check": "pass", "browser-check": "pass"}, False, "FAIL"),
+        (0, {"validate": "pass", "deliver": "pass", "check": "pass"}, False, "FAIL"),
+        (0, {"validate": "pass", "deliver": "pass", "check": "pass", "browser-check": "fail"}, False, "FAIL"),
+        (0, {"validate": "pass", "deliver": "pass", "check": "pass", "browser-check": "pass"}, True, "PASS"),
+    ],
+)
+def test_archify_finalize_requires_zero_exit_and_all_gates_after_filtered_render(
+    tmp_path, monkeypatch, renderer_exit, gates, expected_ok, expected_status
+):
     from app.services.git_workspace import GitSafetyError
 
     code = "one\ntwo\nthree\n"
@@ -487,15 +498,23 @@ def test_archify_renderer_gets_only_bounded_filtered_git_objects(tmp_path, monke
         (work / "archify.html").write_bytes(ARCHIFY)
         receipt = dict(specification=dict(sha256=sha256(submitted), bytes=len(submitted)),
                        artifact=dict(sha256=sha256(ARCHIFY), bytes=len(ARCHIFY)),
-                       gates=dict(validate="pass", deliver="pass", check="pass"))
+                       gates=gates)
         (work / "archify.finalize-summary.json").write_text(json.dumps(receipt))
-        return dict(exit=1, seconds=0, tail="")
+        return dict(exit=renderer_exit, seconds=0, tail="")
 
     monkeypatch.setattr(architecture_rerun, "container", renderer)
     cfg = {"tools": {"archify": {"path": str(tmp_path)}}, "limits": limits}
     result = architecture_rerun.run_archify(cfg, d, ro, commit, source)
     assert source["inputCommit"] == commit
-    assert result["filtered_revision"] != commit and result["ok"] and result["status"] == "PARTIAL"
+    assert result["filtered_revision"] != commit
+    assert result["ok"] is expected_ok
+    assert result["status"] == expected_status
+    assert result["exit"] == renderer_exit
+    assert result["validation"][0]["step"] == "archify finalize"
+    assert result["validation"][0]["exit"] == renderer_exit
+    receipt = json.loads((d / "archify-validation.json").read_bytes())
+    assert receipt["exit"] == renderer_exit
+    assert receipt["gates"] == {**gates, "browser-check": gates.get("browser-check", "not-run")}
     with pytest.raises(GitSafetyError, match="repository exceeds its byte budget"):
         ro.pin_filtered(commit, d / "too-small", {"app/a.js": code.encode()}, len(code))
     git(src, "commit", "--allow-empty", "-qm", "same tree, different source commit")
