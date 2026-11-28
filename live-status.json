@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "kind": "terminal-mcp-public-aggregate",
-  "observed_at": "2026-11-28T09:28:26+00:00",
+  "observed_at": "2026-11-28T09:34:14+00:00",
   "expected_refresh_seconds": 300,
   "fresh_window_seconds": 300,
   "nodes": {
     "total": 9,
-    "online": 0,
-    "offline": 8,
-    "unknown": 1,
+    "online": 5,
+    "offline": 4,
+    "unknown": 0,
     "items": [
       {
         "label": "dell-5530",
@@ -18,13 +18,13 @@
       },
       {
         "label": "dell-linux",
-        "status": "offline",
+        "status": "online",
         "open_sessions": 0,
         "recent_activity_signals": 0
       },
       {
         "label": "hp-linux",
-        "status": "unknown",
+        "status": "online",
         "open_sessions": 9,
         "recent_activity_signals": 9
       },
@@ -36,7 +36,7 @@
       },
       {
         "label": "m910",
-        "status": "offline",
+        "status": "online",
         "open_sessions": 0,
         "recent_activity_signals": 0
       },
@@ -48,13 +48,13 @@
       },
       {
         "label": "macbook",
-        "status": "offline",
+        "status": "online",
         "open_sessions": 0,
         "recent_activity_signals": 0
       },
       {
         "label": "nec1",
-        "status": "offline",
+        "status": "online",
         "open_sessions": 0,
         "recent_activity_signals": 0
       },
