@@ -1,5 +1,12 @@
 # ProjectFlow Project Context
 
+## Latest handoff — B18 advisory prompt bounds, 2026-11-28
+
+- Exact PR #92 source was `15a94f48d37fdde4b0c5adebd488baefaa0f2439` on base `cbeaffe417765f2778eeb9ad96cd0db21a9acb69`. One real bounded Claude advisory call on that source returned `AI_PROPOSAL_INVALID`; deterministic `VERIFY` remained in force. This is not an accepted model receipt and does not complete B18.
+- Candidate fix in `app/services/recovery_decision_service.py` now includes exact validator-allowed `owner` and `target` values in the advisory prompt, while omitting redacted owner values. Validation remains unchanged. `tests/test_recovery_model_policy.py::test_advisory_prompt_discloses_exact_validator_owner_and_target_values` locks this behavior.
+- Candidate verification on an isolated checkout: focused B18/policy tests 38 passed, exit 0; preflight PASS, build PASS, smoke 1 passed, `git diff --check` PASS. These are local candidate results only. No new provider call, CI, review, merge or deployment was performed. Production deployment remains disabled.
+- Next: publish the scoped candidate only through the existing PR #92 branch if its head and exclusive ownership still match; then require exact-head CI and independent review. A valid real advisory receipt is still outstanding; do not infer it from the prompt test.
+
 ## Latest handoff — existing PR #92, 2026-11-27
 
 - Work only in the existing PR `https://github.com/hungtranbkit/projectflow-workspace-manager/pull/92`, branch `agent/codex/orch-std-20261123-release`, base `cbeaffe417765f2778eeb9ad96cd0db21a9acb69`. The existing exact-PR checkout is `/home/dell/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/sidebar-ci-exact-2ul9qtq4/repo`; before B20 edits it was clean at `15e8fed50f2058b8d976f74bd7ec618a7cd867fa`. `local-ci/verify` on that head was verified success (122 tests). B20 base source/test commit is `d73743490ba48ae4f5fce38843b860fcd1551c16`; the actual-merge-gate correction is commit `5b160b06f27517e186ccb6efa5e9e02280bf3285`, normally fast-forward pushed to PR #92. The native owner session reports a busy footer because this is the active continuation; there is no separate dispatch/task ID or competing process in the PR checkout. Preserve one writer and use normal fast-forward only.

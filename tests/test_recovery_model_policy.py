@@ -313,3 +313,28 @@ def test_codex_advisory_is_skipped_when_tools_cannot_be_disabled_and_opus_is_rec
         "('RECOVERY_AI_CANDIDATE_UNVERIFIED','RECOVERY_AI_PROPOSAL') ORDER BY id")
     assert len(audit) == 1
     assert "claude-opus-5-5" in audit[0]["details"]
+
+
+def test_advisory_prompt_discloses_exact_validator_owner_and_target_values(client, tmp_path):
+    captured = {}
+
+    class CapturingInvoker:
+        def invoke(self, provider, prompt, schema, cwd, **kwargs):
+            captured["prompt"] = prompt
+            raise PlannerAgentError("fixture stops before provider output")
+
+    incident = {"task_id": 91, "failure": "UNKNOWN", "epoch": "prompt-bounds", "owner": "named owner"}
+    refs = ["task:91", "session:17"]
+    advisor = RecoveryDecisionService(client.app.state.db, CapturingInvoker(), tmp_path,
+                                      provider_available=lambda provider: provider == "claude")
+    result = advisor.advise(incident, refs)
+
+    assert result["source"] == "DETERMINISTIC_FALLBACK"
+    prompt = captured["prompt"]
+    marker = "Proposal value constraints (JSON):"
+    assert marker in prompt, "prompt must disclose the validator's exact owner/target bounds"
+    constraints_text = prompt.split(marker + "\n", 1)[1].split("\n", 1)[0]
+    assert json.loads(constraints_text) == {
+        "owner": ["", "Change owner", "Release owner", "named owner"],
+        "target": ["", "current-task", "session:17", "task:91"],
+    }
