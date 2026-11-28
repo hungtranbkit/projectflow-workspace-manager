@@ -18,9 +18,10 @@
   and exited-session recovery suite exited 0 (35 tests; pytest double-quiet
   suppresses the count summary); PROJECT.yaml preflight PASS; git diff --check
   exit 0. No live dispatch or deployment.
-- Changes remain uncommitted in the existing PR #106 worktree at original
-  head bb3955b916d92960991f0b23dc0fbbce0efb7aa9, stacked on PR #105. No branch
-  head was moved. PR #106 still has no GitHub workflow/status result despite
+- Fix commit b2feff0efe010abb0454174c610a30653132145b was made on the existing
+  PR #106 branch at prior head bb3955b916d92960991f0b23dc0fbbce0efb7aa9,
+  stacked on PR #105. The branch has not been pushed. PR #106 still has no
+  GitHub workflow/status result despite
   the workflow's unfiltered pull_request trigger; the cause is unknown. Local
   tests do not substitute for required PR checks. Next: publish after review
   of the final diff and request the normal exact-head CI/review path.
