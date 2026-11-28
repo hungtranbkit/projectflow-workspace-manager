@@ -23,6 +23,7 @@ Four user-facing state classes (section 4) collapse ~20 internal
 ACTION_STATE_CLASS: dict[str, str] = {
     "CREATE_BUILDER_WORKSPACE": "ACTION_REQUIRED",
     "VIEW_BUILDER": "WORKING",
+    "CHECK_SESSION_LIVENESS": "WAITING",
     "START_BUILDER": "ACTION_REQUIRED",
     "REVIEW_BUILDER_RESULT": "ACTION_REQUIRED",
     "RETURN_TO_BUILDER": "ACTION_REQUIRED",
@@ -55,6 +56,7 @@ ACTION_STATE_CLASS: dict[str, str] = {
 _ACTION_COPY: dict[str, tuple[str, str]] = {
     "CREATE_BUILDER_WORKSPACE": ("Chưa có Builder", "Task này chưa có Agent Workspace nào."),
     "VIEW_BUILDER": ("{agent} đang làm việc", "Không cần thao tác gì lúc này."),
+    "CHECK_SESSION_LIVENESS": ("Không xác nhận được phiên agent", "Kiểm tra tiến trình thật trước khi thử lại; ProjectFlow không tự tạo phiên trùng."),
     "START_BUILDER": ("Sẵn sàng bắt đầu", "Builder Workspace đã sẵn sàng, agent chưa chạy."),
     "REVIEW_BUILDER_RESULT": ("{agent} đã dừng trước khi hoàn tất", "ProjectFlow chưa nhận được báo cáo hoàn thành."),
     "RETURN_TO_BUILDER": ("Cần sửa lại", "Reviewer yêu cầu chỉnh sửa."),

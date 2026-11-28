@@ -104,6 +104,25 @@
 
 <h2>{{t.title}}</h2>
 
+<section class="panel" id="task-contract" aria-label="Spec and executor contract">
+<h3>Spec → Plan → Agent → Verify → Accept</h3>
+<p><b>Feature:</b> {{t.spec_feature_id or 'Required before a coding executor can start'}}</p>
+<p><b>Requirements:</b> {{t.spec_requirement_ids or 'Not linked'}} · <b>Acceptance:</b> {{t.spec_acceptance_ids or 'Not linked'}}</p>
+{% if decision.dispatch_readiness %}
+<p><b>V2 prompt:</b> {{'Ready' if decision.dispatch_readiness.ready else 'Blocked'}}</p>
+{% for blocker in decision.dispatch_readiness.blockers %}<p class="alert">{{blocker.message}}{% if blocker.missing_sections %}<br>Missing or invalid sections: {{blocker.missing_sections|join(', ')}}{% endif %}</p>{% endfor %}
+{% endif %}
+{% set latest_session = (workspaces|selectattr('session')|list|last) %}
+{% if latest_session %}<p><b>Executor process:</b> {{latest_session.agent_status}} · {{latest_session.session.id and ('session #' ~ latest_session.session.id) or 'No session id'}}. Process exit and Task acceptance are separate.</p>{% endif %}
+<details><summary>Edit the seven-section ChatGPT task contract</summary>
+<p>Fill each section with this Task’s paths, ordered commands, expected test results, dependencies, boundaries, rollback, and proof. An incomplete draft can be saved; ProjectFlow will block dispatch until it passes.</p>
+<form method="post" action="/api/tasks/{{t.id}}/prompt">
+<textarea name="implementation_prompt" rows="24" aria-label="Seven-section task contract">{{t.implementation_prompt or '## OBJECTIVE\n\n## BASELINE\n\n## SCOPE\n\n## EXECUTION_PLAN\n\n## CONSTRAINTS\n\n## ACCEPTANCE_DOD\n\n## EVIDENCE\n'}}</textarea>
+<button>Save contract draft</button>
+</form>
+</details>
+</section>
+
 {% if current_step == 'TASK' %}
 <!-- STEP 1: TASK -->
 <section class="panel wizard-panel">

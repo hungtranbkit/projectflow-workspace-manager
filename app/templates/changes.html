@@ -7,6 +7,7 @@
 <section class="panel"><h3>New Change</h3>
 <form method="post" action="/changes">
 <label>What do you want to change or build?<textarea name="what" required placeholder="e.g. Add a CSV export button to the reports page"></textarea></label>
+<label>Goal owner<input name="owner_name" maxlength="120" placeholder="Name of the accountable person"></label>
 {% if mode=='advanced' %}
 <div class="grid">
 <label>Type<select name="change_type">{% for ct in change_types %}<option value="{{ct}}">{{ct.replace('_',' ').title()}}</option>{% endfor %}</select></label>

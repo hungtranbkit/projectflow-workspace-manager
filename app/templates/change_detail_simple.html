@@ -11,7 +11,7 @@
 
 <!-- A1.14: the ~6-step Simple lifecycle, mapped only from WorkflowService
      truth (see simple_view_service.py's SIMPLE_STEPS). -->
-<section class="panel">
+{% if not view.orchestration.tasks %}<section class="panel">
 <div class="simple-steps" aria-label="Progress">
 {% for s in view.lifecycle.steps %}
 <div class="simple-step step-{{s.state}}"><span class="simple-step-dot">{{ {'done':'✓','current':'●','future':'○'}[s.state] }}</span><span>{{s.label}}</span></div>
@@ -19,6 +19,18 @@
 {% endfor %}
 </div>
 <p><b>{{view.lifecycle.status_text}}</b> — {{view.lifecycle.headline}}</p>
+</section>{% endif %}
+
+<section class="panel" aria-label="Spec to acceptance orchestration">
+<h3>Spec → Plan → Agent → Verify → Accept</h3>
+<p><b>Goal:</b> {{view.orchestration.goal_state|replace('_',' ')|title}} · <b>Owner:</b> {{view.orchestration.owner}}</p>
+<details><summary>Set goal owner</summary><form method="post" action="/api/changes/{{cid}}/owner"><label>Accountable person<input name="owner_name" maxlength="120" value="{{view.orchestration.owner if view.orchestration.owner != 'Not recorded' else ''}}" required></label><button>Save owner</button></form></details>
+<p><b>Current next step:</b> {{view.orchestration.next_action}}</p>
+{% if view.orchestration.blocker_code %}<p class="alert"><b>{{view.orchestration.blocker_code}}</b> · {{view.orchestration.blocker_owner}}: {{view.orchestration.next_action}}</p>{% endif %}
+{% if view.orchestration.active_executor_count %}<p>One real executor process is active for this goal.</p>{% endif %}
+{% if view.orchestration.tasks %}<ul>
+{% for task in view.orchestration.tasks %}<li><a href="/tasks/{{task.id}}">Task #{{task.id}} · {{task.title}}</a> — {{task.status}} / {{task.stage}}; process {{task.session_status}}{% if task.session_live %} (live, last activity {{task.session_activity or 'unknown'}}){% endif %}. {{task.next_action or 'No next action'}}<br><small>Feature {{task.feature_id or 'not linked'}} · Requirements {{task.requirements or 'not linked'}} · Acceptance {{task.acceptance or 'not linked'}} · V2 prompt {{'ready' if task.dispatch_ready else 'blocked'}}</small>{% if task.blocker %}<br><small>{{task.blocker}}</small>{% endif %}</li>{% endfor %}
+</ul>{% else %}<p>No child Tasks yet. Create a Change Plan to add ordered work.</p>{% endif %}
 </section>
 
 <div class="grid">

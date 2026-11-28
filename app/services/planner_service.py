@@ -1,8 +1,11 @@
 from __future__ import annotations
 import hashlib
 import json
+import os
+import re
 import shutil
 import subprocess
+from pathlib import Path
 
 """Dynamic Planner (Phase E4): the first AI planning layer, added
 strictly ABOVE the existing Change/WorkProduct/Role/Workflow model.
@@ -154,7 +157,10 @@ class PlannerAgentInvoker:
         # retrying them would just mask a real prompt/schema problem.
         self.max_attempts = max(1, max_attempts)
 
-    def invoke(self, provider: str, prompt: str, schema: dict, cwd) -> str:
+    def invoke(self, provider: str, prompt: str, schema: dict, cwd, *, model: str | None = None,
+               effort: str | None = None, return_receipt: bool = False,
+               max_attempts: int | None = None, require_toolless: bool = False,
+               max_budget_usd: float | None = None):
         """Returns the raw JSON text the model produced (already
         json-schema-validated by the CLI itself where supported) --
         never parsed here. Raises PlannerAgentError for anything that
@@ -166,6 +172,10 @@ class PlannerAgentInvoker:
         REQUIREMENT_ANALYSIS_JSON_SCHEMA, SPEC_PROPOSAL_JSON_SCHEMA,
         SPEC_REVIEW_JSON_SCHEMA, ...), never a shared/global one."""
         provider = (provider or "").strip().lower()
+        if provider == "codex":
+            raise PlannerAgentError(
+                "Codex CLI has no supported per-call switch to disable command_execution; "
+                "read-only sandbox does not make recovery advice tool-less")
         if provider == "claude":
             executable = self.which("claude")
             if not executable:
@@ -173,8 +183,36 @@ class PlannerAgentInvoker:
             # Structured output can require a finalization turn; a one-turn cap
             # reproducibly returned error_max_turns for the requirements schema.
             # Keep the call bounded and tool-less, rather than removing limits.
-            argv = [executable, "-p", prompt, "--output-format", "json",
-                    "--json-schema", json.dumps(schema), "--tools", "", "--max-turns", "3"]
+            argv = [executable, "-p", prompt, "--output-format", "json"]
+            # Claude's structured-output mode may internally use a tool
+            # turn even when --tools "" is supplied. Recovery advice has a
+            # stricter contract: ask for JSON in the prompt and validate it
+            # locally, with no CLI schema tool enabled.
+            if not require_toolless:
+                argv += ["--json-schema", json.dumps(schema)]
+            if require_toolless:
+                # Per-invocation isolation only: disable built-in tools,
+                # ignore user/project/local settings and plugins, and
+                # ignore configured MCP servers. No global config changes.
+                argv += ["--restricted", "--strict-mcp-config", "--no-chrome",
+                         "--disable-slash-commands", "--no-session-persistence"]
+            argv += ["--tools", "", "--max-turns", "1" if require_toolless else "3"]
+            if max_budget_usd is not None:
+                try:
+                    bounded_budget = float(max_budget_usd)
+                except (TypeError, ValueError) as exc:
+                    raise PlannerAgentError("Planner invocation budget is invalid") from exc
+                if not 0 < bounded_budget <= 1.0:
+                    raise PlannerAgentError("Planner invocation budget is outside the allowed per-call ceiling")
+                argv += ["--max-budget-usd", f"{bounded_budget:.2f}"]
+            if model is not None:
+                if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", model):
+                    raise PlannerAgentError("Requested model identifier is invalid")
+                argv += ["--model", model]
+            if effort is not None:
+                if effort not in {"low", "medium", "high"}:
+                    raise PlannerAgentError("Requested Claude reasoning effort is unsupported")
+                argv += ["--effort", effort]
         else:
             # codex's non-interactive structured-output flags are not
             # wired for planning in this phase -- an honest
@@ -183,14 +221,15 @@ class PlannerAgentInvoker:
             raise PlannerAgentError(f"Planner provider '{provider}' has no non-interactive structured-output path wired yet")
 
         last_error: PlannerAgentError | None = None
-        for attempt in range(1, self.max_attempts + 1):
+        attempt_limit = max(1, int(max_attempts or self.max_attempts))
+        for attempt in range(1, attempt_limit + 1):
             try:
                 result = self.runner(argv, str(cwd), self.timeout)
             except subprocess.TimeoutExpired as exc:
-                last_error = PlannerAgentError(f"Planner invocation timed out after {self.timeout}s (attempt {attempt}/{self.max_attempts})")
+                last_error = PlannerAgentError(f"Planner invocation timed out after {self.timeout}s (attempt {attempt}/{attempt_limit})")
                 continue
             except Exception as exc:
-                last_error = PlannerAgentError(f"Planner invocation failed: {exc} (attempt {attempt}/{self.max_attempts})")
+                last_error = PlannerAgentError(f"Planner invocation failed: {exc} (attempt {attempt}/{attempt_limit})")
                 continue
             if result.returncode != 0:
                 # On modern Claude CLI, nonzero structured-output failures are
@@ -207,7 +246,7 @@ class PlannerAgentInvoker:
                 except (TypeError, ValueError):
                     pass
                 last_error = PlannerAgentError(
-                    f"Planner exited {result.returncode} (attempt {attempt}/{self.max_attempts}): subtype={subtype}")
+                    f"Planner exited {result.returncode} (attempt {attempt}/{attempt_limit}): subtype={subtype}")
                 continue
             try:
                 envelope = json.loads(result.stdout)
@@ -231,7 +270,7 @@ class PlannerAgentInvoker:
                 if not isinstance(stop_reason, str) or stop_reason not in {"tool_use", "end_turn", "max_tokens"}:
                     stop_reason = "unknown"
                 last_error = PlannerAgentError(
-                    f"Planner run reported an error (attempt {attempt}/{self.max_attempts}, "
+                    f"Planner run reported an error (attempt {attempt}/{attempt_limit}, "
                     f"subtype={subtype}, stop_reason={stop_reason!r})")
                 continue
             text = envelope.get("result")
@@ -240,8 +279,54 @@ class PlannerAgentInvoker:
                 # inner shape is a genuine invalid-structured-response
                 # defect, not a transient provider failure.
                 raise PlannerAgentError("Planner envelope had no text result")
+            if return_receipt:
+                model_usage = envelope.get("modelUsage") or {}
+                canonical = (model_usage.get(model) or {}).get("canonicalModel") if model else None
+                if model and canonical != model:
+                    raise PlannerAgentError("Planner response did not attest the requested model")
+                receipt = {"text": text, "provider": "claude", "resolved_model": canonical,
+                        "effort_requested": effort, "turns": envelope.get("num_turns"),
+                        "cost_estimate_usd": envelope.get("total_cost_usd")}
+                if require_toolless:
+                    usage = envelope.get("usage")
+                    tool_usage = usage.get("server_tool_use") if isinstance(usage, dict) else None
+                    tool_counts = list(tool_usage.values()) if isinstance(tool_usage, dict) else []
+                    tool_activity = any(envelope.get(k) for k in
+                                        ("tool_events", "tool_calls", "tool_activity", "tools_used"))
+                    if (envelope.get("stop_reason") != "end_turn"
+                            or not isinstance(envelope.get("permission_denials"), list)
+                            or envelope.get("permission_denials")
+                            or any(not isinstance(v, (int, float)) or isinstance(v, bool) or v != 0 for v in tool_counts)
+                            or tool_activity
+                            or not isinstance(tool_usage, dict)
+                            or envelope.get("num_turns") != 1):
+                        raise PlannerAgentError("Planner response includes tool activity or lacks a clean final receipt")
+                    receipt["toolless_verified"] = True
+                return receipt
             return text
         raise last_error
+
+    def model_supported(self, provider: str, model: str, effort: str) -> bool:
+        """Read local CLI capability metadata only; this is not an execution receipt."""
+        if provider != "codex":
+            return False
+        home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+        try:
+            cache = json.loads((home / "models_cache.json").read_text())
+        except (OSError, ValueError, TypeError):
+            return False
+        models = cache.get("models", []) if isinstance(cache, dict) else cache
+        for item in models if isinstance(models, list) else []:
+            if item.get("slug") == model:
+                return effort in {level.get("effort") for level in item.get("supported_reasoning_levels", [])}
+        return False
+
+    @staticmethod
+    def advisory_toolless_capable(provider: str) -> bool:
+        # Claude Code's `--tools ""` is the verified no-tool path. Codex
+        # CLI 0.171.0 has read-only sandboxing, but no per-call switch that
+        # prevents command_execution; read-only is not tool-less.
+        return provider == "claude"
 
 
 # ===================================================================

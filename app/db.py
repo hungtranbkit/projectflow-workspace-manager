@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -1600,6 +1601,50 @@ ALTER TABLE repositories ADD COLUMN git_fingerprint TEXT;
     (38, """
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_task ON agent_sessions(task_id, id);
 """),
+    # V39: ORCH-STD Task Contract V2 dispatch gate. Existing Tasks are
+    # explicitly retained as V1 history and must be upgraded before a new
+    # coding dispatch; new rows default to V2, including Planner materialized
+    # Tasks. Contract contents remain in implementation_prompt, the existing
+    # human-authored source of Task intent.
+    (39, """
+ALTER TABLE tasks ADD COLUMN task_contract_version TEXT NOT NULL DEFAULT 'V2';
+UPDATE tasks SET task_contract_version='V1';
+"""),
+    # V40: stable human owner label for Change-level orchestration and
+    # factual recovery blockers. Existing goals remain explicitly unassigned.
+    (40, """
+ALTER TABLE changes ADD COLUMN owner_name TEXT NOT NULL DEFAULT '';
+"""),
+    # V41: idempotent link from a persisted executor report to its real
+    # AgentSession; manual/historical reports remain NULL and unchanged.
+    (41, """
+ALTER TABLE verification_reports ADD COLUMN source_session_id INTEGER REFERENCES agent_sessions(id);
+ALTER TABLE verification_reports ADD COLUMN report_sha256 TEXT;
+CREATE UNIQUE INDEX idx_verification_report_source_session
+  ON verification_reports(source_session_id) WHERE source_session_id IS NOT NULL;
+"""),
+    # V42: an executor-authored final response captured through Codex CLI's
+    # supported --output-last-message file, separately identified from
+    # interactive PTY output (which may contain an echoed prompt).
+    (42, """
+ALTER TABLE agent_sessions ADD COLUMN completion_transport TEXT NOT NULL DEFAULT 'PTY_INTERACTIVE';
+ALTER TABLE agent_sessions ADD COLUMN final_output_path TEXT;
+ALTER TABLE agent_sessions ADD COLUMN final_output_sha256 TEXT;
+ALTER TABLE agent_sessions ADD COLUMN final_output_text TEXT;
+ALTER TABLE agent_sessions ADD COLUMN final_output_status TEXT NOT NULL DEFAULT 'NOT_CONFIGURED';
+"""),
+    # V43: one durable lease for the existing cleanup-worker-driven
+    # ProjectFlow supervisor tick. This is coordination metadata only;
+    # task/incident state and recovery evidence stay in their existing
+    # authoritative rows and workspace_events.
+    (43, """
+CREATE TABLE IF NOT EXISTS orchestration_leases(
+  lease_key TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  expires_at REAL NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""),
 ]
 
 
@@ -1688,5 +1733,22 @@ class Database:
         with self.connect() as db:
             cur = db.execute(sql, args)
             return cur.lastrowid
+    def acquire_lease(self, lease_key: str, owner_id: str, ttl_seconds: int) -> bool:
+        now = time.time()
+        self.execute(
+            "INSERT INTO orchestration_leases(lease_key,owner_id,expires_at,updated_at) "
+            "VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(lease_key) DO UPDATE SET "
+            "owner_id=excluded.owner_id,expires_at=excluded.expires_at,updated_at=CURRENT_TIMESTAMP "
+            "WHERE orchestration_leases.expires_at < ?",
+            (lease_key, owner_id, now + ttl_seconds, now),
+        )
+        row = self.one("SELECT owner_id,expires_at FROM orchestration_leases WHERE lease_key=?", (lease_key,))
+        return bool(row and row["owner_id"] == owner_id and row["expires_at"] > now)
+    def release_lease(self, lease_key: str, owner_id: str) -> bool:
+        row = self.one("SELECT owner_id FROM orchestration_leases WHERE lease_key=?", (lease_key,))
+        if not row or row["owner_id"] != owner_id:
+            return False
+        self.execute("DELETE FROM orchestration_leases WHERE lease_key=? AND owner_id=?", (lease_key, owner_id))
+        return True
     def event(self, kind, entity_id, action, details=""):
         self.execute("INSERT INTO workspace_events(entity_type,entity_id,action,details) VALUES(?,?,?,?)", (kind, entity_id, action, details))

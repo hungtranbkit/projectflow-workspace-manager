@@ -119,6 +119,20 @@ class GitWorkspaceService:
         Used by Scope Guard (E8.18) to detect out-of-scope modifications
         against a real diff, never a self-reported file list."""
         return [x for x in self.git(self.validate_worktree(path), "diff", "--name-only", base_commit, check=False).stdout.splitlines() if x]
+    def scope_changed_files(self, path: str | Path, base_commit: str | None) -> list[str]:
+        """Read strict scope evidence for the committed, staged and working states."""
+        path = self.validate_worktree(path)
+        if not base_commit or not re.fullmatch(r"[0-9a-fA-F]{40}", base_commit):
+            raise GitSafetyError("Invalid pinned base commit")
+        self.head(path, base_commit)
+        diff_flags = ("--name-only", "-z", "--no-renames")
+        committed = self.git(path, "diff", *diff_flags, base_commit, "HEAD", "--").stdout
+        staged = self.git(path, "diff", *diff_flags, "--cached", "--").stdout
+        unstaged = self.git(path, "diff", *diff_flags, "--").stdout
+        untracked = self.git(path, "ls-files", "--others", "--exclude-standard", "-z").stdout
+        return sorted({name for output in (committed, staged, unstaged, untracked)
+                       for name in output.split("\0") if name})
+
     def is_ancestor(self, path, commit): return self.git(self.validate_worktree(path), "merge-base", "--is-ancestor", commit, "HEAD", check=False).returncode == 0
     def create_baseline_probe(self, repo, commit):
         """A disposable, detached-HEAD worktree checked out at an exact

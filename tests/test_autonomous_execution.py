@@ -59,7 +59,7 @@ def materialize_task(client, cid, task_type="IMPLEMENTATION", key="T1", title=No
         plan_id = db.execute(
             "INSERT INTO plans(change_id,revision,status,planner_provider,input_context_digest) VALUES(?,?,?,?,?)",
             (cid, 1, "MATERIALIZED", "claude", "x"))
-    tid = db.execute("INSERT INTO tasks(slug,title,status,change_id,task_type) VALUES(?,?,?,?,?)",
+    tid = db.execute("INSERT INTO tasks(slug,title,status,change_id,task_type,task_contract_version) VALUES(?,?,?,?,?,'V1')",
                       (f"auto-{cid}-{key}-{tid_seq(db)}", title or f"Task {key}", "BACKLOG", cid, task_type))
     db.execute(
         "INSERT INTO plan_items(plan_id,item_key,title,task_type,depends_on_keys,requirement_ids,scope_hints,materialized_task_id) "
@@ -398,6 +398,7 @@ def test_builder_context_empty_for_legacy_task(client, git_repo):
     root, repo = git_repo
     r = client.post("/api/tasks", data={"title": "Legacy task", "risk_profile": "LOW"}, follow_redirects=False)
     tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == "Legacy task"][0]
+    client.app.state.db.execute("UPDATE tasks SET task_contract_version='V1' WHERE id=?",(tid,))
     lines = client.app.state.task_execution_context_builder.render_lines(tid, None)
     assert lines == []
 
@@ -454,6 +455,7 @@ def test_manual_builder_start_unaffected(client, git_repo):
     fake_launcher(client)
     r = client.post("/api/tasks", data={"title": "Manual task", "risk_profile": "LOW"}, follow_redirects=False)
     tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == "Manual task"][0]
+    client.app.state.db.execute("UPDATE tasks SET task_contract_version='V1' WHERE id=?",(tid,))
     client.post(f"/api/tasks/{tid}/select")
     w = client.post(f"/api/tasks/{tid}/workspaces", data={"repository_id": rid, "agent": "codex", "role": "Backend", "base_branch": "main", "sandbox_profile": "NONE"}, follow_redirects=False)
     w = [x for x in client.get(f"/api/tasks/{tid}").json()["workspaces"] if x["agent"] == "codex"][-1]
@@ -464,6 +466,7 @@ def test_manual_builder_start_unaffected(client, git_repo):
 def test_legacy_task_execution_readiness_never_crashes(client, git_repo):
     r = client.post("/api/tasks", data={"title": "Legacy", "risk_profile": "LOW"}, follow_redirects=False)
     tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == "Legacy"][0]
+    client.app.state.db.execute("UPDATE tasks SET task_contract_version='V1' WHERE id=?",(tid,))
     r = client.get(f"/api/tasks/{tid}/execution-readiness")
     assert r.status_code == 200
     assert r.json()["readiness"] == "NOT_AUTONOMOUS_TASK"
@@ -489,6 +492,7 @@ def test_all_eligible_task_types_are_the_documented_set():
 # ================================================================ WorkProduct/evidence capture (E8.12)
 
 def _select_and_create_workspace(client, tid, rid, agent="codex"):
+    client.app.state.db.execute("UPDATE tasks SET task_contract_version='V1' WHERE id=?",(tid,))
     client.post(f"/api/tasks/{tid}/select")
     client.post(f"/api/tasks/{tid}/workspaces",
                 data={"repository_id": rid, "agent": agent, "role": "BUILDER", "base_branch": "main", "sandbox_profile": "NONE"})
@@ -526,6 +530,7 @@ def test_code_change_work_product_not_created_for_legacy_task(client, git_repo):
     rid = register(client, repo, "demo")
     r = client.post("/api/tasks", data={"title": "No change task", "risk_profile": "LOW"}, follow_redirects=False)
     tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"] == "No change task"][0]
+    client.app.state.db.execute("UPDATE tasks SET task_contract_version='V1' WHERE id=?",(tid,))
     w = _select_and_create_workspace(client, tid, rid)
     r = client.post(f"/api/workspaces/{w['id']}/verification-report", data={"work_status": "READY"}, follow_redirects=False)
     assert r.status_code == 303, r.text

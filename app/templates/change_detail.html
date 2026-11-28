@@ -27,6 +27,16 @@
 {% endif %}
 </section>
 
+<section class="panel" aria-label="Spec to acceptance orchestration">
+<h3>Spec → Plan → Agent → Verify → Accept</h3>
+<p><b>Goal:</b> {{overview.orchestration.goal_state|replace('_',' ')|title}} · <b>Owner:</b> {{overview.orchestration.owner}}</p>
+<p><b>Current next step:</b> {{overview.orchestration.next_action}}</p>
+{% if overview.orchestration.blocker_code %}<p class="alert"><b>{{overview.orchestration.blocker_code}}</b> · {{overview.orchestration.blocker_owner}}: {{overview.orchestration.next_action}}</p>{% endif %}
+<details><summary>Set goal owner</summary><form method="post" action="/api/changes/{{cid}}/owner"><label>Accountable person<input name="owner_name" maxlength="120" value="{{overview.orchestration.owner if overview.orchestration.owner != 'Not recorded' else ''}}" required></label><button>Save owner</button></form></details>
+{% if overview.orchestration.active_executor_count %}<p>One real executor process is active for this goal.</p>{% endif %}
+{% if overview.orchestration.tasks %}<ul>{% for task in overview.orchestration.tasks %}<li><a href="/tasks/{{task.id}}">Task #{{task.id}} · {{task.title}}</a> — {{task.status}} / {{task.stage}}; process {{task.session_status}}{% if task.session_live %} (live, last activity {{task.session_activity or 'unknown'}}){% endif %}. {{task.next_action or 'No next action'}}<br><small>Feature {{task.feature_id or 'not linked'}} · Requirements {{task.requirements or 'not linked'}} · Acceptance {{task.acceptance or 'not linked'}} · V2 prompt {{'ready' if task.dispatch_ready else 'blocked'}}</small>{% if task.blocker %}<br><small>{{task.blocker}}</small>{% endif %}</li>{% endfor %}</ul>{% else %}<p>No child Tasks yet. Create a Change Plan to add ordered work.</p>{% endif %}
+</section>
+
 <!-- One card per pipeline phase -- Spec / Architecture / Design / Test
      Design / Implementation -- each a wf-checklist exactly like the
      Task status hero's own. auto-fit rather than a fixed 2-column

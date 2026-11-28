@@ -24,9 +24,13 @@ def register(client, repo, name):
 def create_task_with_workspace(client, root, repo, name="demo", agent="codex"):
     register(client, repo, name)
     rid = [x for x in client.get("/api/repositories").json() if x["repo_name"] == name][0]["id"]
-    r = client.post("/api/tasks/create", data={"title": "Fix giao dien qa", "repository_id": rid, "agent": agent, "sandbox_profile": "NONE", "risk_profile": "LOW"}, follow_redirects=False)
+    r = client.post("/api/tasks", data={"title": "Fix giao dien qa", "risk_profile": "LOW"}, follow_redirects=False)
     assert r.status_code == 303, r.text
-    tid = int(r.headers["location"].split("/")[-1])
+    tid = [t["id"] for t in client.get("/api/tasks").json() if t["title"]=="Fix giao dien qa"][0]
+    client.app.state.db.execute("UPDATE tasks SET task_contract_version='V1' WHERE id=?",(tid,))
+    client.post(f"/api/tasks/{tid}/select",follow_redirects=False)
+    created=client.post(f"/api/tasks/{tid}/workspaces",data={"repository_id":rid,"agent":agent,"role":"Backend","base_branch":"main","sandbox_profile":"NONE"},follow_redirects=False)
+    assert created.status_code==303,created.text
     w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
     return tid, w
 

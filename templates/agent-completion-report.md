@@ -8,6 +8,7 @@ becomes numbered steps, one per line; the rest map to their matching
 field).
 
 ```text
+----- PROJECTFLOW EXECUTOR REPORT START -----
 WORK_STATUS:
 READY / FIX_REQUIRED
 
@@ -32,6 +33,13 @@ NONE / BACKEND / FULL / HARDWARE
 
 RISKS:
 ...
+
+FILES_CHANGED:
+path/to/each/changed/file
+
+COMMIT_SHA:
+full 40-character Git commit SHA from `git rev-parse HEAD`
+----- PROJECTFLOW EXECUTOR REPORT END -----
 ```
 
 ## Field meaning

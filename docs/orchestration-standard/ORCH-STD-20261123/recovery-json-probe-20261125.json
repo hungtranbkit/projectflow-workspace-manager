@@ -1,0 +1,78 @@
+{
+  "probe_id": "PROBE-ORCH-JSON-01",
+  "incident_id": "0a5ced52d2d1b5188348d22dffff705bc18348b19f40d86a2ca949ca60328de4",
+  "started_at_utc": "2026-11-25T07:55:51.560593+00:00",
+  "finished_at_utc": "2026-11-25T07:55:59.445102+00:00",
+  "incident_packet": {
+    "id": "PROBE-ORCH-JSON-01",
+    "observation": "Single synthetic blocker: return one schema-conforming JSON proposal; no task, user, path, or credential data supplied."
+  },
+  "evidence_refs": [
+    "probe:single-json-response"
+  ],
+  "invocation_count": 1,
+  "attempt_events": [
+    {
+      "action": "RECOVERY_AI_ATTEMPT",
+      "details": {
+        "effort": "high",
+        "fingerprint": "0a5ced52d2d1b5188348d22dffff705bc18348b19f40d86a2ca949ca60328de4",
+        "provider": "claude",
+        "requested_model": "claude-opus-5-5",
+        "selection_reason": "PREFERRED_PROVIDER_UNAVAILABLE"
+      },
+      "created_at": "2026-11-25 07:55:51"
+    }
+  ],
+  "model_receipt": {
+    "cost_estimate_usd": 0.0322298,
+    "effort_requested": "high",
+    "provider": "claude",
+    "resolved_model": "claude-opus-5-5",
+    "toolless_verified": true,
+    "turns": 1
+  },
+  "validator_source": "DETERMINISTIC_FALLBACK",
+  "action_permitted_by_validator": "VERIFY",
+  "action_executed": false,
+  "fallback_reason": "AI_PROPOSAL_INVALID",
+  "event_actions": [
+    "RECOVERY_AI_ATTEMPT",
+    "RECOVERY_AI_FAILED",
+    "RECOVERY_AI_FALLBACK"
+  ],
+  "request_policy": {
+    "provider_available_only": [
+      "claude"
+    ],
+    "requested_model": "claude-opus-5-5",
+    "effort": "high",
+    "max_turns": 1,
+    "max_budget_usd": 0.1,
+    "cli_structured_schema_flag": false,
+    "tool_restrictions": "--restricted --strict-mcp-config --no-chrome --disable-slash-commands --no-session-persistence --tools ''",
+    "retry_limit": 1,
+    "codex_note": "Codex excluded from this one-shot allowlist because its per-call CLI cannot disable command_execution; this does not assert Codex auth/provider availability."
+  },
+  "secrets_or_raw_transcript_saved": false,
+  "blocker_code": "PROBE-ORCH-JSON-01",
+  "machine_json_syntax_status": "UNKNOWN_NOT_RETAINED",
+  "proposal_locally_accepted": false,
+  "validation_outcome": "AI_PROPOSAL_INVALID",
+  "zero_tool_verification": {
+    "verified": true,
+    "checks": "one turn; end_turn; empty permission_denials; server_tool_use present and every count zero; no reported command/tool events",
+    "exact_server_tool_keys": "not persisted in returned receipt",
+    "evidence_basis": "PlannerAgentInvoker sets toolless_verified only after every check passes"
+  },
+  "action_permitted_by_fallback": "VERIFY",
+  "raw_model_response_saved": false,
+  "transcript_or_secret_data_saved": false,
+  "fixture_test_result": {
+    "passed": 13,
+    "failed": 0,
+    "exit": 0,
+    "scope": "model receipt/schema/budget and blocker-preserving malformed/advisory fallback tests"
+  },
+  "selection_reason": "Probe allowlist deliberately permitted Claude only; production selector separately records CODEX_CLI_TOOL_EXECUTION_NOT_DISABLEABLE when Codex is present but not tool-less."
+}

@@ -26,9 +26,13 @@ def register(client, repo, name):
 def create_task_with_workspace(client, root, repo, name="demo", agent="codex"):
     register(client, repo, name)
     rid = [x for x in client.get("/api/repositories").json() if x["repo_name"] == name][0]["id"]
-    r = client.post("/api/tasks/create", data={"title": "Fix giao dien qa", "repository_id": rid, "agent": agent, "sandbox_profile": "NONE", "risk_profile": "LOW"}, follow_redirects=False)
+    r = client.post("/api/tasks", data={"title": "Fix giao dien qa", "risk_profile": "LOW"}, follow_redirects=False)
     assert r.status_code == 303, r.text
-    tid = int(r.headers["location"].split("/")[-1])
+    tid = client.get("/api/tasks").json()[0]["id"]
+    client.app.state.db.execute("UPDATE tasks SET task_contract_version='V1' WHERE id=?", (tid,))
+    client.post(f"/api/tasks/{tid}/select", follow_redirects=False)
+    created=client.post(f"/api/tasks/{tid}/workspaces",data={"repository_id":str(rid),"agent":agent,"role":"Backend","base_branch":"main","sandbox_profile":"NONE"},follow_redirects=False)
+    assert created.status_code==303,created.text
     w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
     return tid, w
 
@@ -160,15 +164,18 @@ def test_stop_after_confirm_preserves_ready_for_review(client, git_repo):
 def test_start_codex_blocked_while_session_running_even_after_ready(client, git_repo):
     root, repo = git_repo
     tid, w = create_task_with_workspace(client, root, repo)
-    start_session_with_output(client, w, REPORT_SCRIPT)
+    sid=start_session_with_output(client, w, REPORT_SCRIPT)
     html = client.get(f"/tasks/{tid}").text
     m = re.search(r'<form method="post" action="(/api/workspaces/\d+/verification-report)"[^>]*>(.*?)</form>', html, re.DOTALL)
     action, body = m.groups()
     fields = dict(re.findall(r'name="([\w]+)" value="([^"]*)"', body))
     client.post(action, data=fields, follow_redirects=False)
     r = client.post(f"/api/workspaces/{w['id']}/launch-agent")
-    assert r.status_code == 409
-    assert r.json()["code"] == "ACTIVE_SESSION_EXISTS"
+    # The tracked desktop-compatible route reuses an active AgentSession;
+    # assert identity and cardinality, not a particular refusal status.
+    assert r.status_code == 200
+    assert r.json()["session_id"] == sid
+    assert client.app.state.db.one("SELECT COUNT(*) n FROM agent_sessions WHERE workspace_id=?",(w["id"],))["n"] == 1
 
 
 # ------------------------------------------------------------- parser

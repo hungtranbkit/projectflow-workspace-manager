@@ -51,6 +51,8 @@ class LivePtySession:
         self.closed = False
         self.exit_code: int | None = None
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
+
+    def start_reader(self) -> None:
         self._thread.start()
 
     def _read_loop(self) -> None:
@@ -128,10 +130,11 @@ class AgentSessionManager:
     desktop launcher uses), never from client input. There is no code
     path that accepts a raw command or flags."""
 
-    def __init__(self, db, launchers=None, which=shutil.which):
+    def __init__(self, db, launchers=None, which=shutil.which, final_output_root: str | Path | None = None):
         self.db = db
         self.launchers = launchers if launchers is not None else AGENT_LAUNCHERS
         self.which = which
+        self.final_output_root = Path(final_output_root or (Path.home() / ".local" / "state" / "projectflow-workspace-manager" / "agent-final-messages")).resolve()
         self._live: dict[int, LivePtySession] = {}
         # Bounded CLI-readiness detection for deliver_prompt (section 3):
         # 'ready' means the PTY's output buffer has gone quiet for
@@ -144,33 +147,111 @@ class AgentSessionManager:
         self.prompt_ready_timeout = 8.0
         self.prompt_quiet_window = 0.4
 
-    def start(self, *, task_id: int | None, workspace_id: int, agent: str, worktree_path: str | Path, mode: str = "INTERACTIVE") -> int:
+    def supports_final_output(self, agent: str) -> bool:
+        launcher = self.launchers.get(agent.lower())
+        return bool(launcher and launcher.completion_mode == "CODEX_EXEC")
+
+    def is_process_live(self, session_id: int) -> bool:
+        """Return true only for a tracked PTY with a live PID and recent
+        output activity. A quiet/stale persisted RUNNING row is UNKNOWN to
+        orchestration and must not trigger a duplicate executor."""
+        session = self._live.get(int(session_id))
+        if session is None or session.closed:
+            return False
+        try:
+            os.kill(session.pid, 0)
+        except (ProcessLookupError, PermissionError):
+            return False
+        row=self.db.one("SELECT last_activity_at FROM agent_sessions WHERE id=?",(int(session_id),))
+        if not row or not row.get("last_activity_at"):
+            return False
+        try:
+            activity=datetime.fromisoformat(row["last_activity_at"].replace("Z","+00:00"))
+            if activity.tzinfo is None:
+                activity=activity.replace(tzinfo=timezone.utc)
+        except (TypeError,ValueError):
+            return False
+        return (datetime.now(timezone.utc)-activity).total_seconds() <= 120
+
+    def start(self, *, task_id: int | None, workspace_id: int, agent: str, worktree_path: str | Path, mode: str = "INTERACTIVE", initial_prompt: str | None = None, prompt_source: str | None = None, prompt_version: int | None = None) -> int:
         launcher = self.launchers.get(agent.lower())
         if not launcher:
             raise SessionError("AGENT_UNSUPPORTED", f"Agent not allowed: {agent}")
         executable = self.which(launcher.executable)
         if not executable:
             raise SessionError("AGENT_CLI_NOT_FOUND", f"{launcher.label} CLI chưa được cài hoặc không có trong PATH")
-        argv = [executable, *launcher.args]
+        use_final_output = initial_prompt is not None and launcher.completion_mode == "CODEX_EXEC"
+        if initial_prompt is not None and not use_final_output:
+            raise SessionError("EXECUTOR_TRANSPORT_UNSUPPORTED", "This trusted launcher does not support final-message capture")
+        effective_mode = "VIEW_ONLY" if use_final_output else mode
         cwd = str(worktree_path)
         if not Path(cwd).is_dir():
             raise SessionError("WORKTREE_NOT_FOUND", "Worktree không còn tồn tại")
 
+        if use_final_output:
+            self.final_output_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            try:
+                os.chmod(self.final_output_root, 0o700)
+            except OSError:
+                pass
+
         sid = self.db.execute(
-            "INSERT INTO agent_sessions(task_id,workspace_id,agent,command_profile,cwd,status,mode,last_activity_at) VALUES(?,?,?,?,?,?,?,?)",
-            (task_id, workspace_id, agent.lower(), launcher.label, cwd, "STARTING", mode, now()),
+            "INSERT INTO agent_sessions(task_id,workspace_id,agent,command_profile,cwd,status,mode,last_activity_at,completion_transport,final_output_status,prompt_status,prompt_version,prompt_sha256,prompt_source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (task_id, workspace_id, agent.lower(), launcher.label, cwd, "STARTING", effective_mode, now(),
+             "CODEX_EXEC" if use_final_output else "PTY_INTERACTIVE", "PENDING" if use_final_output else "NOT_CONFIGURED",
+             "PENDING" if use_final_output else "PENDING", prompt_version if use_final_output else None,
+             hashlib.sha256(initial_prompt.encode("utf-8")).hexdigest() if use_final_output else None,
+             prompt_source if use_final_output else None),
         )
+        final_output_path = None
+        argv = [executable, *launcher.args]
+        prompt_pipe = None
+        if use_final_output:
+            final_output_path = (self.final_output_root / f"session-{sid}-final-message.txt").resolve()
+            if final_output_path.exists() or final_output_path.is_symlink():
+                self.db.execute("UPDATE agent_sessions SET status='FAILED',exited_at=?,final_output_status='PATH_COLLISION' WHERE id=?", (now(), sid))
+                raise SessionError("FINAL_OUTPUT_PATH_COLLISION", "Final-message output path already exists")
+            self.db.execute("UPDATE agent_sessions SET completion_transport='CODEX_EXEC',final_output_path=? WHERE id=?", (str(final_output_path), sid))
+            argv = [executable, "exec", "--json", "--output-last-message", str(final_output_path), *launcher.args, "-"]
+            prompt_pipe = os.pipe()
         try:
             pid, master_fd = pty.fork()
         except OSError as exc:
+            if prompt_pipe:
+                os.close(prompt_pipe[0]); os.close(prompt_pipe[1])
             self.db.execute("UPDATE agent_sessions SET status='FAILED',exited_at=? WHERE id=?", (now(), sid))
             raise SessionError("PTY_SPAWN_FAILED", str(exc)) from exc
         if pid == 0:
             try:
+                if prompt_pipe:
+                    os.close(prompt_pipe[1])
+                    os.dup2(prompt_pipe[0], 0)
+                    if prompt_pipe[0] != 0:
+                        os.close(prompt_pipe[0])
                 os.chdir(cwd)
                 os.execvpe(argv[0], argv, os.environ.copy())
             finally:
                 os._exit(127)
+        if prompt_pipe:
+            os.close(prompt_pipe[0])
+            try:
+                payload = memoryview(initial_prompt.encode("utf-8"))
+                while payload:
+                    written = os.write(prompt_pipe[1], payload)
+                    payload = payload[written:]
+            except (BrokenPipeError, OSError) as exc:
+                try: os.close(prompt_pipe[1])
+                except OSError: pass
+                try: os.killpg(os.getpgid(pid), signal.SIGTERM)
+                except ProcessLookupError: pass
+                try: os.close(master_fd)
+                except OSError: pass
+                self.db.execute("UPDATE agent_sessions SET status='FAILED',exited_at=?,prompt_status='FAILED',final_output_status='INPUT_FAILED' WHERE id=?", (now(), sid))
+                raise SessionError("CODEX_PROMPT_PIPE_FAILED", "Could not deliver the trusted initial prompt") from exc
+            finally:
+                try: os.close(prompt_pipe[1])
+                except OSError: pass
+            self.db.execute("UPDATE agent_sessions SET prompt_status='DELIVERED',delivered_at=? WHERE id=?", (now(), sid))
 
         def on_exit(exit_code):
             # Persist the final transcript on every real process exit, not
@@ -179,6 +260,8 @@ class AgentSessionManager:
             # its completion report just because no one was connected
             # when it printed one.
             self.persist_tail(sid)
+            if use_final_output:
+                self.capture_final_output(sid, confirmed_exit=True)
             self.db.execute("UPDATE agent_sessions SET status='EXITED',exited_at=?,exit_code=? WHERE id=?", (now(), exit_code, sid))
             self._live.pop(sid, None)
 
@@ -186,10 +269,82 @@ class AgentSessionManager:
             self.db.execute("UPDATE agent_sessions SET last_activity_at=? WHERE id=?", (now(), sid))
 
         session = LivePtySession(sid, master_fd, pid, on_exit, on_activity)
-        session.mode = mode
+        session.mode = effective_mode
         self._live[sid] = session
         self.db.execute("UPDATE agent_sessions SET status='RUNNING',pid=? WHERE id=?", (pid, sid))
+        session.start_reader()
         return sid
+
+    @staticmethod
+    def _pid_alive(pid: int | None) -> bool:
+        if not pid:
+            return False
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except (PermissionError, OSError):
+            return True
+
+    def capture_final_output(self, sid: int, *, confirmed_exit: bool = False) -> bool:
+        """Capture Codex's own --output-last-message artifact only after
+        process exit. Never fall back to PTY text for CODEX_EXEC sessions,
+        because the PTY may contain the echoed input prompt."""
+        row = self.db.one("SELECT pid,completion_transport,final_output_path,final_output_status FROM agent_sessions WHERE id=?", (sid,))
+        if not row or row["completion_transport"] != "CODEX_EXEC":
+            return False
+        if row["final_output_status"] in ("CAPTURED", "REDACTED", "TOO_LARGE", "INVALID_UTF8", "MISSING", "PATH_INVALID"):
+            return row["final_output_status"] == "CAPTURED"
+        if not confirmed_exit and self._pid_alive(row.get("pid")):
+            return False
+        path_value = row.get("final_output_path")
+        if not path_value:
+            self.db.execute("UPDATE agent_sessions SET final_output_status='MISSING' WHERE id=?", (sid,))
+            return False
+        path = Path(path_value)
+        try:
+            resolved = path.resolve(strict=False)
+            resolved.relative_to(self.final_output_root.resolve())
+            if path.is_symlink():
+                raise ValueError("invalid output file")
+        except (OSError, ValueError):
+            self.db.execute("UPDATE agent_sessions SET final_output_status='PATH_INVALID' WHERE id=?", (sid,))
+            return False
+        if not resolved.exists():
+            self.db.execute("UPDATE agent_sessions SET final_output_status='MISSING' WHERE id=?", (sid,))
+            return False
+        if not resolved.is_file():
+            self.db.execute("UPDATE agent_sessions SET final_output_status='PATH_INVALID' WHERE id=?", (sid,))
+            return False
+        try:
+            payload = resolved.read_bytes()
+        except OSError:
+            self.db.execute("UPDATE agent_sessions SET final_output_status='MISSING' WHERE id=?", (sid,))
+            return False
+        if not payload:
+            status, text, digest = "MISSING", "", None
+        elif len(payload) > 512_000:
+            status, text, digest = "TOO_LARGE", "", hashlib.sha256(payload).hexdigest()
+        else:
+            digest = hashlib.sha256(payload).hexdigest()
+            try:
+                raw_text = payload.decode("utf-8")
+            except UnicodeDecodeError:
+                status, text = "INVALID_UTF8", ""
+            else:
+                text = redact(raw_text)
+                status = "CAPTURED" if text == raw_text else "REDACTED"
+        self.db.execute("UPDATE agent_sessions SET final_output_status=?,final_output_sha256=?,final_output_text=? WHERE id=?", (status, digest, text, sid))
+        if status == "CAPTURED":
+            owner = self.db.one("SELECT workspace_id FROM agent_sessions WHERE id=?", (sid,))
+            if owner:
+                self.db.event("agent", owner["workspace_id"], "EXECUTOR_FINAL_OUTPUT_CAPTURED", f"session={sid} sha256={digest}")
+        try:
+            resolved.unlink(missing_ok=True)
+        except (UnboundLocalError, OSError):
+            pass
+        return status == "CAPTURED"
 
     def _wait_ready(self, session: LivePtySession) -> bool:
         """Bounded readiness wait (section 3): true only once the PTY's
@@ -289,6 +444,14 @@ class AgentSessionManager:
         text = redact(tail.decode("utf-8", "replace"))
         self.db.execute("UPDATE agent_sessions SET transcript_tail=? WHERE id=?", (text, sid))
 
+    def persist_all_live_tails(self) -> int:
+        """Flush each owned PTY ring before graceful app shutdown so a
+        subsequent startup reconciliation can retain real completion output."""
+        session_ids = list(self._live)
+        for sid in session_ids:
+            self.persist_tail(sid)
+        return len(session_ids)
+
     def live_tail(self, sid: int, n: int = LivePtySession.BUFFER_CAP) -> str | None:
         """The session's current transcript, read straight from the live
         in-process PTY buffer when the session is still running --
@@ -311,6 +474,13 @@ class AgentSessionManager:
         process and never has a live session in this one. Mark it FAILED
         rather than let the UI claim a session is running when it is not
         (section 20: detect the loss, never falsely report RUNNING)."""
+        # Codex exec writes its final assistant message to a durable file
+        # before process exit. If the app stopped after that child exited
+        # but before its callback persisted the file, recover it now. A
+        # still-live/unknown PID is never accepted as an exited executor.
+        pending = self.db.all("SELECT id FROM agent_sessions WHERE status IN ('RUNNING','STARTING','WAITING_FOR_INPUT') AND completion_transport='CODEX_EXEC' AND final_output_status='PENDING'")
+        for row in pending:
+            self.capture_final_output(row["id"])
         self.db.execute(
             "UPDATE agent_sessions SET status='FAILED',exited_at=? WHERE status IN ('RUNNING','STARTING','WAITING_FOR_INPUT')",
             (now(),),

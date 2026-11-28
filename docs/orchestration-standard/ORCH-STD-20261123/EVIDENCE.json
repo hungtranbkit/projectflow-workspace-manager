@@ -1,0 +1,1286 @@
+{
+  "change_id": "ORCH-STD-20261123",
+  "state": "FAILED_SAFE",
+  "captured_at_utc": "2026-11-25T08:03:00Z",
+  "repository": {
+    "path": "/home/dell/workspace/projectflow-orchestrator-release-v1-20261123",
+    "branch": "integration/orchestrator-v1-20261123",
+    "starting_sha": "26c1d3c45322818d30ddff1948684e6be3d095fd",
+    "live_strict_sha_reported": "26c1d3c45322818d30ddff1948684e6be3d095fd",
+    "integration_base_sha": "26c1d3c45322818d30ddff1948684e6be3d095fd",
+    "pre_implementation_head": "3965781",
+    "final_commit": "5335cbecc06b740148621d7f30faf437aa9f3f5e",
+    "strict_live_sha": "26c1d3c45322818d30ddff1948684e6be3d095fd",
+    "final_commit_subject": "feat: add bounded spec-gated goal orchestration",
+    "pre_completion_ingestion_head": "dad4524f8df63105626577c3ddca049c8f0a4a69",
+    "feature_commit": "a6f1420b4d5b6a5766d7e10e1d09bb0ac29d6e2d",
+    "working_tree_scope": [
+      "PROJECT_CONTEXT.md",
+      "app/db.py",
+      "app/main.py",
+      "app/services/agent_session_manager.py",
+      "app/services/completion_report_parser.py",
+      "templates/agent-completion-report.md",
+      "tests/test_builder_completion_vs_session.py",
+      "tests/test_transcript_tail_persistence.py",
+      "tests/test_executor_report_ingestion.py",
+      "docs/orchestration-standard/ORCH-STD-20261123/RESULT.md",
+      "docs/orchestration-standard/ORCH-STD-20261123/EVIDENCE.json"
+    ],
+    "head": "8581caacb18eca395d353b283dd408a4c4430849"
+  },
+  "documentation_commit": "0bdf15a",
+  "planning_hashes_sha256": {
+    "docs/orchestration-standard/ORCH-STD-20261123/SPEC.md": "ae81e9b4f97bb4b3d8dd909e28f2b78cb8cc9f3887363fd4c7ba44502a8e5ef1",
+    "docs/orchestration-standard/ORCH-STD-20261123/PLAN.md": "f6ff1542d436b4e0b250c9f53068dc861d3530558a366080e3f11a5b060bb20f"
+  },
+  "preflight_capture": {
+    "at_utc": "2026-11-23T06:26:13Z",
+    "runner": "/home/dell/workspace/projectflow-workspace-manager/.venv/bin/python",
+    "commands": [
+      {
+        "argv": [
+          "git",
+          "status",
+          "--short",
+          "--branch"
+        ],
+        "exit": 0,
+        "observed": "integration/orchestrator-v1-20261123; only this task's untracked documents and draft proposal"
+      },
+      {
+        "argv": [
+          "git",
+          "rev-parse",
+          "HEAD"
+        ],
+        "exit": 0,
+        "observed": "26c1d3c45322818d30ddff1948684e6be3d095fd"
+      },
+      {
+        "argv": [
+          "systemctl",
+          "--user",
+          "is-active",
+          "workspace-manager.service"
+        ],
+        "exit": 0,
+        "observed": "active"
+      },
+      {
+        "argv": [
+          "systemctl",
+          "--user",
+          "show",
+          "workspace-manager.service",
+          "-p",
+          "WorkingDirectory",
+          "-p",
+          "MainPID",
+          "-p",
+          "FragmentPath",
+          "--no-pager"
+        ],
+        "exit": 0,
+        "observed": "PID 1638834; CWD /home/dell/workspace/projectflow-qualitygate-release-20261122-strict; unit /home/dell/.config/systemd/user/workspace-manager.service"
+      },
+      {
+        "argv": [
+          "ss",
+          "-ltnp",
+          "( sport = :8765 )"
+        ],
+        "exit": 0,
+        "observed": "uvicorn PID 1638834 listening only at 127.0.0.1:8765"
+      },
+      {
+        "argv": [
+          "curl",
+          "-sS",
+          "-o",
+          "/dev/null",
+          "-w",
+          "localhost /: %{http_code}\\n",
+          "http://127.0.0.1:8765/"
+        ],
+        "exit": 0,
+        "observed": "200"
+      },
+      {
+        "argv": [
+          "curl",
+          "-sS",
+          "-o",
+          "/dev/null",
+          "-w",
+          "public /: %{http_code}\\n",
+          "https://workspace.mesflow.net/"
+        ],
+        "exit": 0,
+        "observed": "200"
+      },
+      {
+        "argv": [
+          "df",
+          "-h",
+          "/home/dell/workspace",
+          "/home/dell"
+        ],
+        "exit": 0,
+        "observed": "134G available"
+      },
+      {
+        "command": "venv Python sqlite3 read-only connect using WORKSPACE_MANAGER_DB from /proc/1638834/environ; do not emit environment values",
+        "exit": 0,
+        "observed": "DB /home/dell/workspace/projectflow-workspace-manager/data/workspace-manager.db; 1372160 bytes; integrity_check ok; agent_sessions 6 EXITED, 1 FAILED; tasks 7; workspaces 13; reviews 3; QA 3"
+      },
+      {
+        "command": "sqlite3.Connection.backup from read-only live DB to unique /tmp file; verify copy; unlink own temp file",
+        "exit": 0,
+        "observed": "copy 1372160 bytes; integrity_check ok; SQLite 3.46.1; backup API available"
+      }
+    ],
+    "runner_observation": "No independent pytest/unittest/playwright test runner was found in initial process inspection; active services in unrelated projects were not touched."
+  },
+  "approved_features_consulted": [
+    "FEAT-AGENT-EXECUTION: approved; lifecycle and acceptance gates, no autonomous post-exit recovery approval",
+    "FEAT-AGENT-OBSERVABILITY: approved; explicitly excludes write routes, retries, recovery and scheduler",
+    "FEAT-SPEC-LAYER: approved; requires valid approved feature trace and preserves unclassified legacy behavior"
+  ],
+  "draft_feature": {
+    "id": "FEAT-ORCHESTRATION-STANDARD",
+    "path": "specs/features/orchestration-standard.yaml",
+    "status": "approved",
+    "original_draft_sha256": "473dec993cbfbec81ec37c862ea3801b290bea6740aa7158d4a6f9a0e615221b",
+    "approved_sha256": "fb99357e910a39267aaf774a4e674a10ca6fc5e4fa18e955c46a78f563b639d4",
+    "approval": "Owner-approved; exact reply “thống nhất đi”; requirements and acceptance IDs unchanged"
+  },
+  "staging": {
+    "started": true,
+    "base_url": "http://127.0.0.1:48717",
+    "port": 48717,
+    "isolated_root": "/tmp/pf-orch-p0-stage-o4_7cjw1/managed",
+    "database": "/tmp/pf-orch-p0-stage-o4_7cjw1/staging.db",
+    "state_dir": "/tmp/pf-orch-p0-stage-o4_7cjw1/state",
+    "production_enabled": false,
+    "health_http": 200,
+    "root_http": 200,
+    "change_id": 1,
+    "task_id": 1,
+    "canary_commit": "48eb7fd",
+    "feature_id": "FEAT-ORCHESTRATION-STANDARD",
+    "requirement_ids": [
+      "REQ-OS-001",
+      "REQ-OS-003"
+    ],
+    "acceptance_ids": [
+      "AC-OS-001",
+      "AC-OS-006"
+    ],
+    "contract_version": "V2",
+    "contract_gate": "PASS",
+    "provider": "Codex CLI; authenticated before launch; real provider, not mocked",
+    "sessions": [
+      {
+        "id": 1,
+        "status": "EXITED",
+        "prompt_status": "DELIVERED"
+      },
+      {
+        "id": 2,
+        "status": "FAILED after server restart",
+        "prompt_status": "DELIVERED"
+      },
+      {
+        "id": 3,
+        "status": "EXITED",
+        "prompt_status": "DELIVERED"
+      }
+    ],
+    "recovery_attempts": 2,
+    "recovery_outcome": "BLOCKED / RETRY_BUDGET_EXHAUSTED",
+    "active_sessions_final": 0,
+    "projectflow_tests": [
+      {
+        "run_id": 1,
+        "command": "python -m compileall -q .",
+        "stage": "preflight",
+        "status": "PASS",
+        "exit": 0,
+        "commit": "48eb7fd"
+      },
+      {
+        "run_id": 2,
+        "command": "pytest -q tests/test_calculator.py",
+        "stage": "test",
+        "status": "PASS",
+        "exit": 0,
+        "result": "3 passed",
+        "commit": "48eb7fd"
+      }
+    ],
+    "task_decision": {
+      "persisted_status": "ACTIVE",
+      "next_action": "REVIEW_BUILDER_RESULT",
+      "agent_completion_report": false,
+      "tests_pass_at_head": true,
+      "qa": "NOT_REQUIRED (LOW risk)",
+      "review_rows": 0,
+      "merge_status": "NOT_STARTED"
+    },
+    "canary_accepted": false,
+    "blocker_owner": "ORCH P0 test owner",
+    "next_action": "Owner must review the existing branch and evidence; no further automatic retry is allowed.",
+    "mobile_ui_screenshot": "/tmp/orch-final-change-mobile.png",
+    "mobile_css_width_px": 400,
+    "horizontal_overflow": false,
+    "browser_errors": [],
+    "log": "/tmp/pf-orch-p0-stage-o4_7cjw1/uvicorn.log",
+    "report_ingestion_canary": {
+      "at_utc": "2026-11-23T13:19:12Z",
+      "base_url": "http://127.0.0.1:48718",
+      "port": 48718,
+      "health_http": 200,
+      "root_http": 200,
+      "task_detail_http": 200,
+      "database": "/tmp/pf-orch-report-ingest-20261123/staging.db",
+      "managed_root": "/tmp/pf-orch-report-ingest-20261123/managed",
+      "production_data_used": false,
+      "change_id": 1,
+      "task_id": 1,
+      "session_id": 1,
+      "feature_id": "FEAT-ORCHESTRATION-STANDARD",
+      "requirement_ids": [
+        "REQ-OS-001"
+      ],
+      "acceptance_ids": [
+        "AC-OS-001"
+      ],
+      "invariant_ids": [
+        "INV-OS-001"
+      ],
+      "task_contract": "V2 complete; dispatch PASS",
+      "provider": "real authenticated Codex CLI through ProjectFlow PTY; one launched session, same-session prompt redelivery only; no mocks",
+      "actual_commit": "15f9347621691478e8347e2dad22ca7548136017",
+      "projectflow_test_runs": [
+        {
+          "id": 1,
+          "command": "python -m compileall -q .",
+          "status": "PASS",
+          "exit": 0,
+          "tested_commit": "15f9347621691478e8347e2dad22ca7548136017"
+        },
+        {
+          "id": 2,
+          "command": "python -m pytest -q",
+          "status": "PASS",
+          "exit": 0,
+          "summary": "5 passed",
+          "tested_commit": "15f9347621691478e8347e2dad22ca7548136017"
+        }
+      ],
+      "session_exit": {
+        "status": "EXITED",
+        "exit_code": 0,
+        "at_utc": "2026-11-23T13:19:12Z",
+        "last_activity_at": "2026-11-23T13:15:28Z",
+        "process_stopped_via": "POST /api/sessions/1/stop"
+      },
+      "report_ingest": "BLOCKED: transcript had no valid delimited ten-field completion block; one sanitized COMPLETION_REPORT_MISSING_OR_INVALID event; zero verification_reports; zero Review rows",
+      "task_state": "ACTIVE; not DONE; not Review-ready; no self-approval",
+      "live_untouched": true
+    }
+  },
+  "tests": [
+    {
+      "name": "combined focused security/dispatch/recovery/UI suite",
+      "argv": [
+        "python",
+        "-m",
+        "pytest",
+        "-o",
+        "addopts=",
+        "-q",
+        "tests/test_orchestration_v2_dispatch.py",
+        "tests/test_spec_gate.py",
+        "tests/test_spec_supervisor_gate.py",
+        "tests/test_exited_no_report_recovery.py",
+        "tests/test_autonomous_execution.py",
+        "tests/test_b01_authn.py",
+        "tests/test_b05_ratelimit.py",
+        "tests/test_b07_secrets.py",
+        "tests/test_quality_isolated_runner.py",
+        "tests/test_simple_mode.py"
+      ],
+      "runner": "/home/dell/workspace/projectflow-workspace-manager/.venv/bin/python; PYTHONPATH=.; VIRTUAL_ENV set; Docker stub reports unavailable",
+      "exit": 0,
+      "result": "172 passed",
+      "notes": "Docker-dependent tests safely skipped; not claimed as PASS."
+    },
+    {
+      "name": "post-suite recovery-focused tests",
+      "result": "3 passed, exit 0",
+      "tests": [
+        "test_recovery_blocks_when_provider_is_unknown_and_stops_after_two_attempts",
+        "test_change_ui_shows_owner_and_blocker_after_retry_budget_exhaustion",
+        "test_recovery_resumes_same_task_after_confirmed_restart_failure"
+      ]
+    },
+    {
+      "name": "post-suite Change UI/XSS tests",
+      "result": "2 passed, exit 0",
+      "tests": [
+        "test_change_ui_shows_owner_and_blocker_after_retry_budget_exhaustion",
+        "test_change_view_escapes_owner_and_task_content_and_shows_honest_empty_state"
+      ]
+    },
+    {
+      "name": "initial corrected assertion run",
+      "exit": 1,
+      "result": "1 failed, 2 passed; assertion incorrectly counted distinct provider and retry-cap blocker events",
+      "disposition": "assertion narrowed to RETRY_BUDGET_EXHAUSTED event and rerun passed; no application failure."
+    },
+    {
+      "name": "scripts/preflight.sh",
+      "exit": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "scripts/build.sh",
+      "exit": 0,
+      "result": "PASS (source distribution app)"
+    },
+    {
+      "name": "scripts/smoke.sh",
+      "exit": 0,
+      "result": "1 passed"
+    },
+    {
+      "name": "python -m compileall -q app tests",
+      "exit": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "git diff --check",
+      "exit": 0,
+      "result": "PASS"
+    },
+    {
+      "name": "ProjectFlow canary preflight/test",
+      "exit": 0,
+      "result": "both PASS and pinned to 48eb7fd; 3 calculator tests passed"
+    },
+    {
+      "name": "final staged commit verification",
+      "command": "git diff --cached --check before commit; git status --porcelain after commit",
+      "exit": 0,
+      "result": "commit 5335cbecc06b740148621d7f30faf437aa9f3f5e; worktree clean"
+    },
+    {
+      "name": "completion report ingestion final focused suite",
+      "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q tests/test_executor_report_ingestion.py tests/test_transcript_tail_persistence.py tests/test_orchestration_v2_dispatch.py tests/test_exited_no_report_recovery.py tests/test_builder_completion_vs_session.py",
+      "exit": 0,
+      "result": "54 passed; includes seven strict ingestion cases and actual committed-code/pass-test/no-report must not reach Review"
+    },
+    {
+      "name": "strict security and QualityGate focused suite",
+      "command": "pytest -q tests/test_b01_authn.py tests/test_b03_authz.py tests/test_agent_observability_security.py tests/test_smoke.py tests/test_quality_isolated_runner.py tests/test_quality_isolated_runtime.py tests/test_agent_quality_task_gate.py",
+      "exit": 0,
+      "result": "183 passed, 1 pre-existing skipped; project venv"
+    },
+    {
+      "name": "compileall",
+      "command": "python -m compileall -q app tests",
+      "exit": 0,
+      "result": "PASS",
+      "run_log": "/tmp/orch-report-ingestion-verification-final-20261123.log"
+    },
+    {
+      "name": "preflight",
+      "command": "scripts/preflight.sh",
+      "exit": 0,
+      "result": "PASS",
+      "run_log": "/tmp/orch-report-ingestion-verification-final-20261123.log"
+    },
+    {
+      "name": "build",
+      "command": "scripts/build.sh",
+      "exit": 0,
+      "result": "PASS source distribution app",
+      "run_log": "/tmp/orch-report-ingestion-verification-final-20261123.log"
+    },
+    {
+      "name": "smoke",
+      "command": "scripts/smoke.sh",
+      "exit": 0,
+      "result": "PASS, 1 passed; project venv on PATH",
+      "run_log": "/tmp/orch-report-ingestion-verification-final-20261123.log"
+    },
+    {
+      "name": "git diff check",
+      "command": "git diff --check",
+      "exit": 0,
+      "result": "PASS",
+      "run_log": "/tmp/orch-report-ingestion-verification-final-20261123.log"
+    }
+  ],
+  "deployment": {
+    "attempted": false,
+    "live_unit_cwd_before": "/home/dell/workspace/projectflow-qualitygate-release-20261122-strict",
+    "live_sha": "26c1d3c45322818d30ddff1948684e6be3d095fd",
+    "local_health_http": 200,
+    "local_root_http": 200,
+    "public_https_url": "https://workspace.mesflow.net/",
+    "public_https_status": 200,
+    "live_touched": false,
+    "cloudflare_touched": false,
+    "backup_or_rollback_during_T08": "not needed; no deployment attempted because canary gate failed"
+  },
+  "gate_table": {
+    "T01": "PASS",
+    "T02": "PASS: human approval and immutable planning hashes recorded",
+    "T03": "PASS: SpecGate + substantive seven-section V2 dispatch gates tested before side effects",
+    "T04": "PASS: single executor, restart recovery, two retries and idempotent blocker tested and observed",
+    "T05": "PASS: mobile Change/Task evidence UI, fresh liveness and explicit blocker visible",
+    "T06": "PASS: evidence gates independent; canary remains ACTIVE, no self-acceptance; QA NOT_REQUIRED by LOW risk",
+    "T07": "FAIL: real canary code and ProjectFlow tests pass, but no completion report/review; blocked after retry cap",
+    "T08": "BLOCKED / NOT ATTEMPTED: staging acceptance not complete; live untouched",
+    "T09": "PASS: scoped source/tests/result/evidence committed as 5335cbecc06b740148621d7f30faf437aa9f3f5e; owner approval is separately committed as 3965781"
+  },
+  "diff_check": "git diff --check reported extra blank lines at EOF in newly added Markdown files; SPEC and PLAN were preserved to maintain their locked hashes",
+  "next_three_actions": [
+    "Feature owner reviews and approves or revises FEAT-ORCHESTRATION-STANDARD; do not self-approve.",
+    "After approval, resume implementation at T03 in the existing integration worktree and run required focused tests.",
+    "Complete isolated staging canary and only then evaluate the conditional T08 live switch."
+  ],
+  "historical_pre_approval": {
+    "state": "FAILED_SAFE",
+    "feature_status": "draft",
+    "gate_table": {
+      "T01": "PASS",
+      "T02": "PASS",
+      "T03": "BLOCKED: draft FeatureSpec approval missing",
+      "T04": "BLOCKED: draft FeatureSpec approval missing",
+      "T05": "BLOCKED: draft FeatureSpec approval missing",
+      "T06": "BLOCKED: draft FeatureSpec approval missing",
+      "T07": "BLOCKED: implementation/staging not authorized",
+      "T08": "BLOCKED: staging and safety gates not passed; live untouched",
+      "T09": "PARTIAL: evidence and handoff included in docs-only commit 0bdf15a; implementation gates remain blocked"
+    },
+    "tests": [],
+    "note": "Historical approval-blocked snapshot retained; this was superseded only by the human approval recorded in APPROVAL.md."
+  },
+  "owner_approval": {
+    "date": "2026-11-23",
+    "decision": "Approve FEAT-ORCHESTRATION-STANDARD scope for implementation",
+    "exact_reply": "thống nhất đi",
+    "approval_commit": "3965781",
+    "original_feature_sha256": "473dec993cbfbec81ec37c862ea3801b290bea6740aa7158d4a6f9a0e615221b",
+    "approved_feature_sha256": "fb99357e910a39267aaf774a4e674a10ca6fc5e4fa18e955c46a78f563b639d4",
+    "plan_sha256": "f6ff1542d436b4e0b250c9f53068dc861d3530558a366080e3f11a5b060bb20f",
+    "spec_sha256_pre_approval": "ae81e9b4f97bb4b3d8dd909e28f2b78cb8cc9f3887363fd4c7ba44502a8e5ef1",
+    "spec_sha256_owner_approved_header": "2370e35ca555a0c0aef792066c549ecc2b78cc6000d18af121145153cc17fa54"
+  },
+  "acceptance_gates": {
+    "A1": "PASS",
+    "A2": "PASS",
+    "A3": "PASS",
+    "A4": "PASS",
+    "A5": "PASS",
+    "A6": "PASS",
+    "A7": "PASS with Playwright at 400 CSS px; Chrome Harness timed out and chrome-devtools MCP unavailable",
+    "A8": "FAIL: canary completion/report/review criterion missing",
+    "A9": "BLOCKED: live switch withheld; current strict public/local HTTP 200",
+    "A10": "PASS: scoped evidence/commit, no duplicate active session, no live change and no rollback needed"
+  },
+  "three_next_priorities": [
+    "Owner/reviewer inspects canary commit 48eb7fd and resolves the missing completion report/review through existing gates.",
+    "Diagnose why the real Codex canary exhausted the two automatic retries before reporting; repeat only within the existing cap.",
+    "Re-run isolated acceptance and live DB migration/backup checks; reconsider T08 only when all staging prerequisites pass."
+  ],
+  "incidents": [
+    {
+      "item": "Read-only pytest command accidentally invoked from strict live checkout; process handle expired before exact exit capture. Integration-only test file was absent there; strict HEAD remained 26c1d3c and no tracked diff observed. Existing untracked .venv/ and rollback-before-strict-20261122/ were preserved."
+    },
+    {
+      "item": "Foreground staging Uvicorn tool sessions were terminated; staging was restarted detached on the same isolated port/DB/state. Current detached PID is checked separately and production was unaffected."
+    }
+  ],
+  "planning_hashes_current_sha256": {
+    "docs/orchestration-standard/ORCH-STD-20261123/SPEC.md": "2370e35ca555a0c0aef792066c549ecc2b78cc6000d18af121145153cc17fa54",
+    "docs/orchestration-standard/ORCH-STD-20261123/PLAN.md": "f6ff1542d436b4e0b250c9f53068dc861d3530558a366080e3f11a5b060bb20f"
+  },
+  "followups": [
+    {
+      "date": "2026-11-23",
+      "state": "FAILED_SAFE",
+      "historical_canary_read_only_trace": {
+        "session_1": {
+          "delivered_at_utc": "2026-11-23T08:49:21Z",
+          "exited_at_utc": "2026-11-23T09:03:19Z",
+          "finding": "idle transcript; no code execution"
+        },
+        "session_2": {
+          "delivered_at_utc": "2026-11-23T09:03:31Z",
+          "commit": "48eb7fdd0990d7e0b2f3318b1eb830ba2b8f6d59",
+          "commit_at_local": "2026-11-23T16:04:20+07:00",
+          "finding": "real Codex execution proven by commit; transcript tail absent after server restart"
+        },
+        "session_3": {
+          "delivered_at_utc": "2026-11-23T09:12:06Z",
+          "exited_at_utc": "2026-11-23T09:15:24Z",
+          "finding": "Codex state=done marker; no report fields in archived transcript"
+        },
+        "test_evidence": {
+          "commit": "48eb7fd",
+          "compileall": "PASS exit 0",
+          "calculator_pytest": "PASS 3 tests exit 0"
+        },
+        "reports": 0,
+        "review_rows": 0,
+        "task_done": false,
+        "boundary": "Session 3 did not emit report; session 2 output was lost at restart. Prompt DELIVERED is receipt only, not execution or report acknowledgement."
+      },
+      "patch": {
+        "files": [
+          "app/main.py",
+          "app/services/agent_session_manager.py",
+          "app/services/completion_report_parser.py",
+          "templates/agent-completion-report.md",
+          "tests/test_transcript_tail_persistence.py"
+        ],
+        "status": "uncommitted; exact prompt/template, strict executor parser, graceful-shutdown transcript flush, additive V41 report-session linkage/hash, idempotent verifier-backed report ingestion in existing cleanup reconciliation; no review is created"
+      },
+      "verification": [
+        {
+          "command": "pytest -q tests/test_transcript_tail_persistence.py -k executor_report",
+          "exit": 0,
+          "result": "2 passed"
+        },
+        {
+          "command": "pytest -q tests/test_transcript_tail_persistence.py tests/test_builder_completion_vs_session.py tests/test_exited_no_report_recovery.py",
+          "exit": 1,
+          "result": "legacy title-only task fixtures refused before assertions by V2 TASK_CONTRACT_INCOMPLETE gate"
+        },
+        {
+          "command": "python -m compileall -q app tests (project venv)",
+          "exit": 0
+        },
+        {
+          "command": "scripts/preflight.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "scripts/build.sh",
+          "exit": 0,
+          "result": "PASS source distribution app"
+        },
+        {
+          "command": "scripts/smoke.sh",
+          "exit": 4,
+          "result": "script interpreter could not import fastapi; smoke not verified in project venv"
+        },
+        {
+          "command": "git diff --check",
+          "exit": 0
+        },
+        {
+          "command": "pytest -q tests/test_b01_authn.py tests/test_b03_authz.py tests/test_agent_observability_security.py tests/test_smoke.py",
+          "exit": 0,
+          "result": "170 collected, all passed; project venv"
+        },
+        {
+          "command": "python -m compileall -q app tests (project venv)",
+          "exit": 0
+        },
+        {
+          "command": "scripts/preflight.sh; scripts/build.sh",
+          "exit": 0,
+          "result": "preflight PASS; source distribution build PASS"
+        },
+        {
+          "command": "git diff --check",
+          "exit": 0
+        },
+        {
+          "command": "pytest -q tests/test_orchestration_v2_dispatch.py tests/test_spec_gate.py tests/test_spec_supervisor_gate.py",
+          "exit": 0,
+          "result": "PASS; full quiet test run exited 0; captured output lacked a final count"
+        }
+      ],
+      "fresh_canary": "NOT RUN; no targeted positive/negative test yet exercises automatic session-report ingestion and idempotency",
+      "live": {
+        "changed": false,
+        "local_http": 200,
+        "public_http": 200
+      },
+      "commit": null,
+      "canary_reason": "No targeted test currently exercises the new auto-ingestion path; avoid executing a real provider against unverified acceptance logic."
+    },
+    {
+      "date": "2026-11-23",
+      "state": "FAILED_SAFE",
+      "root_cause": "The real Codex session made commit 15f9347621691478e8347e2dad22ca7548136017 and ProjectFlow recorded compileall and 5 passing tests at that exact SHA, but the exited PTY transcript contained no valid final ten-field report. The ingestion boundary correctly recorded COMPLETION_REPORT_MISSING_OR_INVALID; no report row or Review was fabricated.",
+      "implementation": "V41 adds nullable source_session_id/report_sha256 with a unique source-session index. Existing cleanup reconciliation ingests only a final delimited report after task/workspace/session and delivered-prompt binding, V2+SpecGate PASS, clean exact HEAD, exact changed-file list and exact-scope paths, and PASS ProjectFlow test evidence at that SHA. Insert, workspace readiness transition, and events are atomic; repeat reconciliation is idempotent. Report evidence is READY_FOR_REVIEW only and never creates Review/QA/merge/acceptance.",
+      "verification": "54 focused tests passed; 183 security/QualityGate tests passed and one existing skip; compileall, preflight, build, venv smoke, and diff-check exit 0. Full outputs in /tmp/orch-report-ingestion-verification-final-20261123.log.",
+      "canary": {
+        "change_id": 1,
+        "task_id": 1,
+        "session_id": 1,
+        "commit": "15f9347621691478e8347e2dad22ca7548136017",
+        "tests": "2 ProjectFlow rows PASS at exact SHA; pytest 5 passed",
+        "report": "absent",
+        "review": "absent",
+        "final_task_status": "ACTIVE, not DONE",
+        "real_provider": true
+      },
+      "live": {
+        "changed": false,
+        "systemd": "active, WorkingDirectory /home/dell/workspace/projectflow-qualitygate-release-20261122-strict",
+        "local_health_http": 200,
+        "public_http": 200,
+        "verified_at_utc": "2026-11-23T13:36:47Z"
+      },
+      "next": "Investigate why authenticated real Codex completed code/tests but omitted the mandated delimited report. Then execute a fresh single-session staging canary that emits and ingests a valid report, confirm REVIEW_REQUIRED, and require independent Review before any deployment gate.",
+      "commit": "a6f1420b4d5b6a5766d7e10e1d09bb0ac29d6e2d",
+      "commit_subject": "fix: ingest verified executor completion reports",
+      "commit_scope": "11 scoped code/test/evidence/handoff files; no live files",
+      "worktree_after_commit": "clean at implementation commit before evidence-only finalization"
+    },
+    {
+      "date": "2026-11-23",
+      "state": "FAILED_SAFE",
+      "root_cause": "The previous interactive PTY canary did not emit a machine report. A supported Codex exec --output-last-message path captured the real final model response in the third canary, but its closing delimiter omitted one required space: \"----- PROJECTFLOW EXECUTOR REPORT END-----\". Strict parsing rejected the malformed artifact; code/test evidence existed, but completion report evidence did not.",
+      "implementation": {
+        "codex_transport": "V2 Codex uses allowlisted codex exec --json --output-last-message <state-scoped artifact> --yolo - with the pinned trusted prompt on stdin. Final output is captured only after confirmed exit, bounded, UTF-8 checked, redaction checked, stored with SHA256, and never falls back to PTY echo. Existing exact task/workspace/session, V2/SpecGate, Git HEAD/scope and ProjectFlow test checks remain. Accepted report is idempotent and unreviewed.",
+        "compatibility": "V1 and manual report path retained. Legacy UI parser skips an echoed placeholder template and selects the last valid report candidate.",
+        "migration": "V42 adds final-output transport/artifact metadata columns to agent_sessions; additive only.",
+        "files": [
+          "app/db.py",
+          "app/launchers.py",
+          "app/main.py",
+          "app/services/agent_session_manager.py",
+          "app/services/completion_report_parser.py",
+          "tests/test_executor_report_ingestion.py",
+          "tests/test_orchestration_v2_dispatch.py"
+        ],
+        "prompt_hardening": "app/main.py:1793 requires byte-for-byte delimiter copying and calls out the exact space before the final dashes; regression assertion passed."
+      },
+      "verification": [
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_executor_report_ingestion.py tests/test_transcript_tail_persistence.py tests/test_orchestration_v2_dispatch.py tests/test_exited_no_report_recovery.py tests/test_builder_completion_vs_session.py",
+          "exit": 0,
+          "result": "60 passed"
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_b01_authn.py tests/test_b03_authz.py tests/test_agent_observability_security.py tests/test_smoke.py tests/test_quality_isolated_runner.py tests/test_quality_isolated_runtime.py tests/test_agent_quality_task_gate.py",
+          "exit": 0,
+          "result": "183 passed, 1 existing skip"
+        },
+        {
+          "command": "bash scripts/preflight.sh",
+          "exit": 0,
+          "result": "preflight PASS"
+        },
+        {
+          "command": "bash scripts/build.sh",
+          "exit": 0,
+          "result": "build PASS (source distribution app)"
+        },
+        {
+          "command": "PATH=/home/dell/workspace/projectflow-workspace-manager/.venv/bin:$PATH VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv bash scripts/smoke.sh",
+          "exit": 0,
+          "result": "1 passed"
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m compileall -q app tests",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "git diff --check",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "Initial incorrectly wrapped pytest invocation used PYTHONPATH=. as executable; corrected and rerun.",
+          "exit": 127,
+          "result": "Command construction error; not a test result. Corrected commands above passed."
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_executor_report_ingestion.py::test_v2_codex_prompt_contains_literal_machine_report_delimiters tests/test_executor_report_ingestion.py::test_parser_requires_final_delimited_ten_field_block_and_handles_ansi_crlf tests/test_executor_report_ingestion.py::test_v1_report_survives_projectflow_echoed_placeholder_template",
+          "exit": 0,
+          "result": "3 passed after final delimiter instruction change"
+        }
+      ],
+      "canary": {
+        "staging_url": "http://127.0.0.1:48719",
+        "staging_http_while_running": 200,
+        "staging_stopped": true,
+        "change_id": 1,
+        "task_id": 1,
+        "workspace_id": 1,
+        "session_id": 1,
+        "session_count_for_task": 1,
+        "feature": "FEAT-ORCHESTRATION-STANDARD",
+        "prompt_sha256": "a17b7477a97023f652207777fd8a97a21bb45e711fb779af1f3519e6ee23472d",
+        "real_provider": true,
+        "completion_transport": "CODEX_EXEC",
+        "process_exit": 0,
+        "commit": "5f2839fa3cfc30e1bd51dc6b70ae9ed719b3a31b",
+        "projectflow_test_rows": [
+          {
+            "command": "python -m compileall -q .",
+            "status": "PASS",
+            "tested_commit": "5f2839fa3cfc30e1bd51dc6b70ae9ed719b3a31b"
+          },
+          {
+            "command": "python -m pytest -q",
+            "status": "PASS",
+            "result": "2 passed",
+            "tested_commit": "5f2839fa3cfc30e1bd51dc6b70ae9ed719b3a31b"
+          }
+        ],
+        "session_exited_at_utc": "2026-11-23T15:24:26.561036Z",
+        "final_output_status": "CAPTURED",
+        "final_output_sha256": "04c41934f8368db9a78c17caba4f7e257375f6a2fd6ea04141553a8fb8ca6153",
+        "actual_report_outcome": "Rejected: closing delimiter lacked the required space before final dashes. Parser reason COMPLETION_REPORT_MISSING_OR_INVALID.",
+        "capture_event_utc": "2026-11-23T15:24:26Z",
+        "rejection_event_utc": "2026-11-23T15:24:27Z",
+        "verification_report_rows": 0,
+        "review_rows": 0,
+        "task_status": "ACTIVE",
+        "task_done": false,
+        "retry_or_second_session": false
+      },
+      "live": {
+        "changed": false,
+        "cwd": "/home/dell/workspace/projectflow-qualitygate-release-20261122-strict",
+        "local_health_http": 200,
+        "local_root_http": 200,
+        "public_url": "https://workspace.mesflow.net/",
+        "public_http": 200,
+        "verified_at_utc": "2026-11-23T15:44:52Z",
+        "rollback": "Not needed; no live change."
+      },
+      "commit": "8581caacb18eca395d353b283dd408a4c4430849",
+      "next": "Preserve fail-safe outcome. Tighten exact literal report-format instruction and tests; obtain independent Review only after a valid exact-SHA report is ingested; then separately pass production DB backup/migration/rollback gates before any release change.",
+      "commit_subject": "fix: capture Codex final executor report artifacts"
+    }
+  ],
+  "next_three_priorities": [
+    "Tighten the task-authored report instruction around the exact literal closing delimiter and retain strict parser refusal for malformed output.",
+    "Obtain independent Review evidence only after a complete exact-SHA/scope/test report is ingested; no agent self-review.",
+    "Run production DB backup, migration dry-run and rollback readiness checks only after the canary and independent Review pass; keep live unchanged meanwhile."
+  ],
+  "continuations": [
+    {
+      "date_utc": "2026-11-25T07:27:54Z",
+      "state": "FAILED_SAFE_LOCAL_CHECKPOINT",
+      "local_branch": "integration/orchestrator-v1-20261123",
+      "pre_change_sha": "f072aa50c8b1c083280746db8015dbee587d0833",
+      "shared_pr": {
+        "number": 92,
+        "url": "https://github.com/hungtranbkit/projectflow-workspace-manager/pull/92",
+        "head_ref": "agent/codex/orch-std-20261123-release",
+        "head_sha": "a827bb955f8b3d23b765b770ca6754cb79b01ce3",
+        "base_ref": "main",
+        "base_sha": "7e8b54a904a4451b6d4b00fd30befa4b438ab3b2",
+        "owner_reported_exact_head_results": {
+          "tests": "38/38 PASS",
+          "native_callback_canaries": "2 PASS",
+          "independently_run_by": "owner; not rerun in this integration worktree"
+        },
+        "duplicate_pr_created": false,
+        "dell_github_api_state": "gh credential invalid; API returned 401; ls-remote verified exact branch and main refs"
+      },
+      "implementation": {
+        "migration": "V43 orchestration_leases coordination metadata only",
+        "entrypoint": "existing CleanupWorker.reconcile callback -> exited report ingestion -> AutonomousExecutionService.scheduled_reconcile_tick",
+        "coordination": "durable global supervisor lease plus per-goal dispatch lease; recovery first; at most one new DAG task only when recovery has no action; recheck owner before side effects",
+        "model_policy": "Codex advisor disabled because blind CLI output included command_execution and no trusted model receipt; Claude tool-less path uses --restricted --strict-mcp-config --no-chrome --disable-slash-commands --no-session-persistence --tools \"\" --max-turns 1 and omits --json-schema; strict local JSON validation; deterministic fallback",
+        "no_live_changes": true
+      },
+      "blind_eval": {
+        "case_source": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/takeover-20261125T0635Z/decision-cases.json",
+        "prompt_sha256": "2323b22a8da5d1535ef0a06eec1068917503994963312afaf4084bc38014ac29",
+        "input_fields": "case id and observation only; QA allowed_actions and max_new_starts excluded",
+        "prior_claimed_scores": "Opus 12/12 and Codex 12/12; not accepted as tool-less current model evidence because prior Opus schema run reported tool_use and Codex emitted command_execution; Codex model receipt absent",
+        "fresh_actual_cli_call": {
+          "cli_version": "Claude Code 2.1.332",
+          "requested_model": "claude-opus-5-5",
+          "canonical_model_receipt": "claude-opus-5-5",
+          "provider_receipt": "firstParty",
+          "effort_requested": "high",
+          "num_turns": 1,
+          "stop_reason": "end_turn",
+          "permission_denials": [],
+          "server_tool_use": {
+            "web_fetch_requests": 0,
+            "web_search_requests": 0
+          },
+          "cost_estimate_usd": 0.0519978,
+          "decision_body": "invalid JSON; no action/proposal accepted; no decision score assigned",
+          "evidence_file": "/tmp/orch-tool-less-opus-blind-eval.json"
+        }
+      },
+      "verification": [
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_recovery_model_policy.py tests/test_orchestrator_supervisor_tick.py tests/test_lease_takeover_external.py tests/test_native_callback_recovery.py tests/test_orchestration_v2_dispatch.py::test_change_goal_refuses_second_active_executor_for_another_task tests/test_orchestration_v2_dispatch.py::test_recovery_resumes_same_task_after_confirmed_restart_failure",
+          "exit": 0,
+          "result": "19 passed"
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_recovery_model_policy.py",
+          "exit": 0,
+          "result": "8 passed; includes command_execution receipt rejection"
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_executor_report_ingestion.py tests/test_transcript_tail_persistence.py tests/test_orchestration_v2_dispatch.py tests/test_exited_no_report_recovery.py tests/test_builder_completion_vs_session.py tests/test_recovery_model_policy.py tests/test_orchestrator_supervisor_tick.py tests/test_lease_takeover_external.py tests/test_native_callback_recovery.py tests/test_cleanup_and_restart.py",
+          "exit": 1,
+          "result": "78 passed, 3 failed. All three failures are title-only cleanup fixtures receiving HTTP 409 at workspace creation under the V2 task-contract gate; assertions unchanged, fixture edits reverted, regression classification pending strict-base comparison."
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_b01_authn.py tests/test_b03_authz.py tests/test_agent_observability_security.py tests/test_smoke.py tests/test_quality_isolated_runner.py tests/test_quality_isolated_runtime.py tests/test_agent_quality_task_gate.py",
+          "exit": 0,
+          "result": "183 passed, 1 existing skip"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/preflight.sh",
+          "exit": 0,
+          "result": "preflight PASS"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/build.sh",
+          "exit": 0,
+          "result": "source distribution build PASS"
+        },
+        {
+          "command": "env PATH=/home/dell/workspace/projectflow-workspace-manager/.venv/bin:$PATH VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/smoke.sh",
+          "exit": 0,
+          "result": "1 passed"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m compileall -q app tests",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "git diff --check",
+          "exit": 0,
+          "result": "PASS before evidence append; rerun before commit"
+        },
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_spec_registry.py tests/test_spec_gate.py tests/test_spec_supervisor_gate.py",
+          "exit": 0,
+          "result": "35 passed"
+        },
+        {
+          "command": "git diff --check; /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m json.tool docs/orchestration-standard/ORCH-STD-20261123/EVIDENCE.json >/dev/null; project venv compileall app tests",
+          "exit": 0,
+          "result": "final pre-commit check PASS"
+        }
+      ],
+      "live_readonly_check": {
+        "systemd_state": "active/running",
+        "working_directory": "/home/dell/workspace/.worktrees/projectflow-steward-90-7b74",
+        "git_sha": "e16862c75f696800c4c3d56eaa12903c1c7bbdd2",
+        "local_health_http": 200,
+        "public_https_http": 200,
+        "checked_utc": "2026-11-25T07:27:54Z",
+        "changed": false,
+        "rollback": "not attempted; old 26c1d3c is not the live rollback baseline"
+      },
+      "local_commit": {
+        "sha": "42fc8b1b92605255f4c4d933f23239f0ddca9257",
+        "subject": "feat: add leased orchestration recovery supervisor",
+        "branch": "integration/orchestrator-v1-20261123",
+        "pushed": false
+      },
+      "remaining_gates": [
+        "commit scoped local integration changes",
+        "apply this exact delta to shared PR #92 and rerun its required CI/review",
+        "classify three cleanup-fixture failures against same-environment baseline",
+        "isolated end-to-end canary and independent Review",
+        "release owner validates current live SHA, backup/migration, lock and rollback before any deployment",
+        "resolve architecture visual-check environment failure or obtain authorized browser evidence; diagram render itself passed"
+      ],
+      "planning_hashes_sha256": {
+        "feature_spec": "3adcbe0864f2a509a5f808074b2db114bfdb899a45de3c8202e76fe758cb4130",
+        "spec": "9193f41dc935ab0110a67d45d2604723228894fbc2a91f56a085d48775642825",
+        "plan": "f6ff1542d436b4e0b250c9f53068dc861d3530558a366080e3f11a5b060bb20f",
+        "approval": "5be8b286fd6b7f7d4daa7ed305cd913499517241d985bf260e6f62a401626708"
+      },
+      "repository_checkpoint": "Source/test/evidence checkpoint committed locally; PR #92 still requires this delta and required CI/review. No deployment.",
+      "architecture_artifact": {
+        "spec_path": "docs/architecture/projectflow-runtime.architecture.json",
+        "html_path": "docs/architecture/projectflow-runtime.architecture.html",
+        "source_revision": "42fc8b1b92605255f4c4d933f23239f0ddca9257",
+        "validation": "showcase PASS, 9/9 checks, zero warnings/errors",
+        "spec_sha256": "e8794483cdeb8b4c88138b005e22b0446e48b7baa57b51541a5f7b6c00bc06fd",
+        "html_sha256": "66bf0e66e040dd75fd0cfe3182bd82dc429be1bb4bfc06a4d707c581b89d96de",
+        "html_bytes": 728427,
+        "visual_check": "FAILED_ENVIRONMENT; Chrome process SIGABRT, zygote Permission denied (13), no viewports/screenshots; visual review pending",
+        "visual_check_sidecar": "docs/architecture/projectflow-runtime.architecture.visual-check.json",
+        "visual_check_sidecar_sha256": "3a4dcd0291037e1eb42a0f6e936545d9936a390a3a03b442bbd008acb427ae50"
+      }
+    },
+    {
+      "date_utc": "2026-11-25",
+      "state": "ONE_SHOT_ADVISORY_FALLBACK",
+      "base_checkpoint": "d546e48a0a624bd822fd947e47c866787b043aab",
+      "probe_path": "docs/orchestration-standard/ORCH-STD-20261123/recovery-json-probe-20261125.json",
+      "probe_id": "PROBE-ORCH-JSON-01",
+      "incident_id": "0a5ced52d2d1b5188348d22dffff705bc18348b19f40d86a2ca949ca60328de4",
+      "real_invocations": 1,
+      "model_receipt": {
+        "requested": "claude-opus-5-5",
+        "canonical": "claude-opus-5-5",
+        "provider": "claude",
+        "effort_requested": "high",
+        "turns": 1,
+        "toolless_verified": true,
+        "cost_estimate_usd": 0.0322298,
+        "per_call_budget_usd": 0.1
+      },
+      "model_json": {
+        "syntax_status": "UNKNOWN_NOT_RETAINED",
+        "proposal_locally_accepted": false,
+        "service_outcome": "AI_PROPOSAL_INVALID",
+        "raw_response_saved": false
+      },
+      "fallback": {
+        "action": "VERIFY",
+        "action_executed": false,
+        "real_task_or_production_data": false
+      },
+      "tests": {
+        "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_recovery_model_policy.py tests/test_orchestration_v2_dispatch.py::test_malformed_advisor_json_fallback_preserves_original_blocker tests/test_orchestration_v2_dispatch.py::test_recovery_advisor_error_keeps_factual_blocker_and_does_not_abort_tick",
+        "exit": 0,
+        "result": "13 passed"
+      },
+      "blocker_preservation": "A malformed fake model result remains deterministic fallback VERIFY; _recovery_block retains original PROVIDER_UNKNOWN code/action and session count. No validation was relaxed.",
+      "global_settings_changed": false,
+      "production_touched": false,
+      "commit": {
+        "sha": "0c10690c622f23abe0ee24c40760507fb8f423b5",
+        "subject": "fix: bound and receipt recovery JSON advice",
+        "branch": "integration/orchestrator-v1-20261123",
+        "pushed": false
+      },
+      "auth_and_budget_failures": {
+        "cases": [
+          "AI_BUDGET_LIMIT_REACHED",
+          "AI_AUTH_UNAVAILABLE"
+        ],
+        "result": "one attempt each; event records reason; repeat advise within cooldown does not invoke provider again"
+      },
+      "verification": [
+        {
+          "command": "PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -q -o addopts= tests/test_recovery_model_policy.py tests/test_orchestration_v2_dispatch.py::test_malformed_advisor_json_fallback_preserves_original_blocker tests/test_orchestration_v2_dispatch.py::test_recovery_advisor_error_keeps_factual_blocker_and_does_not_abort_tick",
+          "exit": 0,
+          "result": "13 passed"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/preflight.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/build.sh",
+          "exit": 0,
+          "result": "source distribution PASS"
+        },
+        {
+          "command": "env PATH=/home/dell/workspace/projectflow-workspace-manager/.venv/bin:$PATH VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. bash scripts/smoke.sh",
+          "exit": 0,
+          "result": "1 passed"
+        },
+        {
+          "command": "env VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m compileall -q app tests",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "git diff --check; python -m json.tool EVIDENCE.json and probe evidence",
+          "exit": 0,
+          "result": "PASS"
+        }
+      ],
+      "selection_reason": "Claude was the only provider allowed for this one-shot probe because Codex command_execution cannot be disabled per invocation; this does not assert Codex account availability.",
+      "repository_checkpoint": "JSON prompt/schema and per-call budget refinement committed locally; no PR push or production change."
+    },
+    {
+      "timestamp_local": "2026-11-27",
+      "task": "PR #92 B17 finite lease and B18 recovery proposal/receipt integration checkpoint",
+      "checkout": {
+        "path": "/home/dell/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/sidebar-ci-exact-2ul9qtq4/repo",
+        "base_head": "b49a217fe6018c9d897201c3b951682145da917f",
+        "branch": "agent/codex/orch-std-20261123-release",
+        "remote_head_before_change": "b49a217fe6018c9d897201c3b951682145da917f"
+      },
+      "changes": [
+        "B18 strict proposal scope revalidation and provider/model/requested-effort/tool-less receipt validation in RecoveryDecisionService; deterministic fallback preserved",
+        "B17 scheduled supervisor owner must be nonempty string; expiry must be numeric, finite, future; explicit manual None compatibility preserved"
+      ],
+      "artifact_hashes": {
+        "b18_patch_sha256": "77d7ecc204fd08ac37f97e6bdb4c29e4917e6ee22b8f665fa3b9298cc22f37ad",
+        "b18_test_sha256": "51f3bd7348445c15e459258008befaef2c5197badac02f98d10226344be506d1",
+        "b17_test_sha256": "a92d239c8bc9c05ed9a4b098ed2e0dac8d4aea74b0d24f73e6490f77553aa1cb",
+        "green_junit_sha256": "2cf8fa8e5ee6ff58324f288d310b2f862927e94d788748595cabc2d36aac568b"
+      },
+      "verification": [
+        {
+          "command": "HOME=/tmp/pf92-green-home-20261127 XDG_CONFIG_HOME=/tmp/pf92-green-home-20261127/.config PYTHONPATH=. VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b18_actual_db.py tests/test_b17_finite_lease.py --junitxml=/tmp/pf92-b17-b18-green-20261127.xml",
+          "exit": 0,
+          "result": "39 passed in 18.56s"
+        },
+        {
+          "command": "./scripts/preflight.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "./scripts/build.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "./scripts/smoke.sh",
+          "exit": 0,
+          "result": "1 passed"
+        },
+        {
+          "command": "focused recovery/security/dispatch/supervisor pytest command covering tests/test_b18_actual_db.py, tests/test_b17_finite_lease.py, tests/test_autonomous_execution_real.py, tests/test_exited_no_report_recovery.py, tests/test_orchestration_v2_dispatch.py, tests/test_orchestrator_supervisor_tick.py, tests/test_recovery_model_policy.py, tests/test_native_callback_recovery.py, tests/test_lease_takeover_external.py, tests/test_spec_supervisor_gate.py, tests/test_agent_observability_security.py",
+          "exit": 1,
+          "result": "233 passed, 1 failed in 137.22s; sole failure was the real-provider fixture needing isolated HOME .claude.json. No provider invocation was made."
+        },
+        {
+          "command": "git diff --check",
+          "exit": 0,
+          "result": "PASS"
+        }
+      ],
+      "gates": {
+        "b17_b18_local_regressions": "PASS",
+        "broader_focused_suite": "BLOCKED_EXTERNAL_FIXTURE_HOME",
+        "official_ci_new_head": "PENDING",
+        "independent_review": "PENDING",
+        "b20_exact_packet": "NOT_AVAILABLE_LOCALLY",
+        "merge": "NOT_DONE",
+        "deployment": "NOT_AUTHORIZED_OR_PERFORMED"
+      },
+      "production_touched": false,
+      "provider_invoked": false,
+      "next_action": "Commit scoped changes after diff review, recheck remote PR head and push normally to existing PR ref only if still expected; verify exact-head CI/review. Obtain exact B20 packet from its owner if still required.",
+      "source_commit": "76aaa6cd6a2cc89c0abd58a0b00a41f419a19e19",
+      "push": {
+        "method": "normal fast-forward",
+        "previous_remote_head": "b49a217fe6018c9d897201c3b951682145da917f",
+        "remote_readback": "76aaa6cd6a2cc89c0abd58a0b00a41f419a19e19"
+      },
+      "official_ci": {
+        "context": "local-ci/verify",
+        "commit": "76aaa6cd6a2cc89c0abd58a0b00a41f419a19e19",
+        "state": "PENDING",
+        "observed_at_utc": "2026-11-27T02:41:36Z"
+      },
+      "independent_reviews": 0,
+      "docs_checkpoint_commit": "2445fdb1444eb558a66a75535aea7ecf932e7857",
+      "official_ci_latest_head": {
+        "commit": "2445fdb1444eb558a66a75535aea7ecf932e7857",
+        "status_state": "pending",
+        "total_status_contexts": 0,
+        "observed_at_utc": "2026-11-27"
+      }
+    },
+    {
+      "timestamp_local": "2026-11-27 Asia/Bangkok",
+      "task": "B20 integration plus B18 single provider receipt attempt on existing PR #92",
+      "repository": {
+        "repo": "hungtranbkit/projectflow-workspace-manager",
+        "branch": "agent/codex/orch-std-20261123-release",
+        "base": "cbeaffe417765f2778eeb9ad96cd0db21a9acb69",
+        "remote_head_before": "15e8fed50f2058b8d976f74bd7ec618a7cd867fa",
+        "status_before": "clean",
+        "local_ci_before": "success, 122 tests"
+      },
+      "ownership": {
+        "route": "existing active P0 owner and existing exact-head PR checkout; no new task/session/branch/worktree",
+        "native_task_id": null,
+        "competing_writer_process_in_pr_checkout": false
+      },
+      "b20_delivery": {
+        "delivery_receipt_sha256": "3a0d467536d987028b90239f1cb49cd52526933a540901f6be5f5c6df11c5fd0",
+        "patch_sha256": "9b5a351bfd3470011666680d3410dd53c8e1adcbcab488fefa7dd5ca7c24ee2d",
+        "original_test_sha256": "44d39b2a58194f94fd58d4463fb8f3dff3caa85fa1f1f8018d1769d2bdcfc039",
+        "original_receipt_sha256": "97014af4a23ccb24a305e322741cd811c7f59d95505367a9eaf9e23828bcd839",
+        "bounded_green_receipt_sha256": "b7642183eddf49815e093cd814271707afd705da3241cc5556115ff3dd7fc1a9",
+        "apply_receipt_sha256": "5e381d718ff1e9ae35ed81d45157c9a8d5ba1b03200e846411ec3add605164b2",
+        "source_blob_at_original_head": "4627c162e307b78e5fc2623b215c853d2b9d430b",
+        "git_apply_check": "PASS on exact current PR checkout",
+        "final_combined_autonomous_blob": "3c7fedb39100e7575a7595a335cb272b58fe82cd",
+        "integrated_test_sha256": "05f3452c3ca3d7bd75a522b6ae68a2e4710602d13e262356f60042f255c9f0dd"
+      },
+      "change_summary": [
+        "Classify CI_FAIL as a Change-local observation during bounded supervisor reconciliation",
+        "Preserve B17 finite lease guard",
+        "Add B20 real-DB starvation matrix with CI_FAIL actual merge-gate check, independent eligible tasks, blocked dependency descendant, repeated-tick quiescence and no-new-session assertion"
+      ],
+      "test_receipts": [
+        {
+          "command": "PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b20_actual_db_starvation.py tests/test_orchestrator_supervisor_tick.py --junitxml=/tmp/pf92-b20-supervisor-20261127.xml",
+          "exit": 0,
+          "result": "12 passed in 21.03s",
+          "junit_sha256": "bbc122e7c88dcc9ac357e10bdd0bedcca40c46e0cfa4b48dded2b217eecec620"
+        },
+        {
+          "command": "PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b17_finite_lease.py tests/test_b18_actual_db.py tests/test_b20_actual_db_starvation.py tests/test_autonomous_execution.py tests/test_orchestration_v2_dispatch.py tests/test_exited_no_report_recovery.py tests/test_orchestrator_supervisor_tick.py tests/test_recovery_model_policy.py tests/test_native_callback_recovery.py tests/test_lease_takeover_external.py tests/test_spec_supervisor_gate.py tests/test_agent_observability_security.py tests/test_real_merge.py --junitxml=/tmp/pf92-b17-b18-b20-focused-20261127.xml",
+          "exit": 0,
+          "result": "288 passed in 248.14s",
+          "junit_sha256": "f25ffa5fe82e8bd6837a185bbc3e9bcd22b428b7c0e429faff155df30d8f4395"
+        },
+        {
+          "command": "scripts/preflight.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "scripts/build.sh",
+          "exit": 0,
+          "result": "PASS"
+        },
+        {
+          "command": "scripts/smoke.sh",
+          "exit": 0,
+          "result": "1 passed"
+        },
+        {
+          "command": "PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q -s tests/test_native_callback_recovery.py --junitxml=/tmp/pf92-native-canary-20261127.xml",
+          "exit": 0,
+          "result": "2 passed in 9.99s; one exhausted-budget blocker/UI 200 and one actual local shell marker start; disposable TestClient/SQLite, not deployed staging",
+          "junit_sha256": "135759c4420afc1e7bc8e37493d3390c8ea4f681efb303847da43fde24f09d79"
+        },
+        {
+          "command": "env HOME=/tmp/pf92-full-test-home-20261127 XDG_CONFIG_HOME=/tmp/pf92-full-test-home-20261127/.config VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=. timeout 900s ./scripts/test.sh",
+          "exit": 1,
+          "result": "11 test collection import errors (top-level conftest/test_b03_authz imports)"
+        },
+        {
+          "command": "env HOME=/tmp/pf92-full-test-home-20261127 XDG_CONFIG_HOME=/tmp/pf92-full-test-home-20261127/.config VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv PYTHONPATH=.:tests PYTEST_ADDOPTS=--junitxml=/tmp/pf92-full-test-rerun-20261127.xml timeout 900s ./scripts/test.sh",
+          "exit": 124,
+          "result": "bounded at 900s, streamed progress ~47%, repeated failures observed, no final summary; nested pytest overwrote JUnit path, not a valid suite report",
+          "log_sha256": "fb1c30e9e6dec70d252f184a6f26f4885127c36ba2ffd2e490f7e88caa346b87"
+        }
+      ],
+      "b18_real_probe": {
+        "evidence_path": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-macbook-handoff-20261127/integrated-pr92-20261127/b18-real-probe-receipt.json",
+        "receipt_sha256": "b3c2b96cf6783cea5cea9159abc46e28367974c457aa9219e43a1fc7c980a023",
+        "incident_fingerprint": "f3c8c66ac871ffe8a5d05ad936e5a9d4f139fa712f77586ca25b64b11de2ebcb",
+        "observed_at_utc": "2026-11-27T04:14:45.483290+00:00",
+        "provider": "claude",
+        "requested_model": "claude-opus-5-5",
+        "requested_effort": "high",
+        "max_attempts": 1,
+        "provider_invocations": 1,
+        "budget_cap_usd": 0.1,
+        "outcome": "PlannerAgentError; deterministic VERIFY fallback; no accepted receipt; no action executed; no retry",
+        "effective_model_effort_tool_attestation": "UNKNOWN",
+        "usage_cost": "UNKNOWN"
+      },
+      "remote_and_release": {
+        "current_remote_before_new_push": "15e8fed50f2058b8d976f74bd7ec618a7cd867fa",
+        "local_ci_on_that_head": "success, 122 tests",
+        "independent_review": "none found",
+        "current_change_push": "pending",
+        "merge": "not performed",
+        "deployment": "not performed",
+        "production_db_or_service_touched": false,
+        "production_enabled_in_PROJECT_yaml": false
+      },
+      "private_checkpoint_dir": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-macbook-handoff-20261127/integrated-pr92-20261127",
+      "source_test_commit": "d73743490ba48ae4f5fce38843b860fcd1551c16",
+      "push_status": "normal fast-forward verified; PR remains open",
+      "push": {
+        "method": "normal fast-forward",
+        "expected_remote_before": "15e8fed50f2058b8d976f74bd7ec618a7cd867fa",
+        "remote_readback": "b6dc80ca884a5c6df4a49200ee2ceded3c6dc705",
+        "result": "PASS"
+      },
+      "current_pr_head": "b6dc80ca884a5c6df4a49200ee2ceded3c6dc705",
+      "current_exact_head_ci": {
+        "context": "local-ci/verify",
+        "state": "pending",
+        "status_contexts": 0,
+        "observed_at_utc": "2026-11-27"
+      },
+      "independent_reviews": 0
+    },
+    {
+      "date_utc": "2026-11-27T05:24:38Z",
+      "scope": "B20 actual CI-failure reconciliation; existing PR #92 only",
+      "owner": {
+        "terminal_session": "pf-orchestration-closure-p0-20261123",
+        "node": "dell-linux",
+        "native_task_id": null,
+        "dispatch_issued": false,
+        "exclusive_pr_checkout": "clean at 0c773f7 before edits"
+      },
+      "base_readback": {
+        "pr_head": "0c773f7e2610d0686674bb76dee183c70a87fc03",
+        "pr_base": "cbeaffe417765f2778eeb9ad96cd0db21a9acb69",
+        "pr_state": "open",
+        "remote_ref_match": true,
+        "ci": "local-ci/verify success on baseline head only"
+      },
+      "implementation": {
+        "files": [
+          "app/services/autonomous_execution_service.py",
+          "tests/test_b20_actual_db_starvation.py"
+        ],
+        "uses_authoritative": "TaskDecisionService.merge_gate_status required merge records",
+        "behavior": "CI_FAIL blocks only the failed task in scheduled recovery selection; same-Change corrective FIX and other eligible Changes remain schedulable; dependent descendants remain governed by TaskDependencyService",
+        "reconcile_change_monkeypatched": false,
+        "external_launch_boundary_stubbed": true
+      },
+      "red": {
+        "source_pin": "0c773f7e2610d0686674bb76dee183c70a87fc03 service blob restored temporarily for regression proof",
+        "command": "PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b20_actual_db_starvation.py -k ci_failure",
+        "exit": 1,
+        "result": "1 failed: actual CI_FAIL recovery classification absent on prior source; no reconcile_change mock",
+        "log_sha256": "84b023fb631fbe5c1286f2b5cd60e83c6de167615bc48670c6e31627bcfe07e6",
+        "junit_sha256": "df4b9f2d73b187d9b257359fed6c3de660c47e3dd070090b3222fa4200c9a728"
+      },
+      "green": {
+        "command": "PYTHONPATH=.:tests VIRTUAL_ENV=/home/dell/workspace/projectflow-workspace-manager/.venv /home/dell/workspace/projectflow-workspace-manager/.venv/bin/python -m pytest -o addopts= -q tests/test_b20_actual_db_starvation.py tests/test_orchestrator_supervisor_tick.py tests/test_autonomous_execution.py --junitxml=/tmp/orch-b20-real-ci-20261127.xml",
+        "exit": 0,
+        "result": "49 passed in 70.99s",
+        "junit_sha256": "ace0b970e9a4877c4236ecb8219493518ae94260bfed29d15139672bcc95372c"
+      },
+      "diff_check": "PASS",
+      "private_artifacts": "~/.local/state/projectflow-workspace-manager/qa/ORCH-STD-20261123/b20-real-reconcile-20261127/",
+      "release_state": "No new-head CI/review inferred yet; no merge/deploy/production mutation; B18 receipt and full-suite gates remain outstanding",
+      "source_commit": "5b160b06f27517e186ccb6efa5e9e02280bf3285",
+      "push_readback": {
+        "method": "normal fast-forward",
+        "expected_parent": "0c773f7e2610d0686674bb76dee183c70a87fc03",
+        "remote_ref": "agent/codex/orch-std-20261123-release",
+        "remote_sha": "5b160b06f27517e186ccb6efa5e9e02280bf3285",
+        "result": "PASS"
+      },
+      "github_readback": {
+        "pr": "https://github.com/hungtranbkit/projectflow-workspace-manager/pull/92",
+        "state": "open",
+        "merged": false,
+        "head_sha": "5b160b06f27517e186ccb6efa5e9e02280bf3285",
+        "base_sha": "cbeaffe417765f2778eeb9ad96cd0db21a9acb69",
+        "combined_status_contexts": [],
+        "pull_request_workflow_runs": [],
+        "independent_reviews": [],
+        "observed_at_utc": "2026-11-27T05:26:59Z"
+      },
+      "acceptance_state": "B20 implementation/test candidate ready for independent acceptance; exact-head CI, independent review and broader release gates remain pending"
+    }
+  ]
+}

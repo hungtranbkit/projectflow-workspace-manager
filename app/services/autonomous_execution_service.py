@@ -1,6 +1,11 @@
 from __future__ import annotations
 import json
+import sqlite3
+import threading
+import time
+import uuid
 from pathlib import Path
+from contextvars import ContextVar
 
 """Autonomous Implementation Orchestration (Phase E8): Validated Plan ->
 Materialized Task DAG -> Ready Task Detection -> Builder Assignment ->
@@ -42,6 +47,7 @@ AUTO_ELIGIBLE_TASK_TYPES = ("IMPLEMENTATION", "TEST_IMPLEMENTATION", "FIX")
 
 READINESS_STATES = (
     "AUTO_READY", "WAITING_DEPENDENCY", "WAITING_SPEC", "WAITING_DESIGN", "WAITING_TEST_DESIGN",
+    "WAITING_CONTRACT",
     "WAITING_HUMAN", "STALE_PLAN", "ROLE_ASSIGNMENT_INVALID", "SCOPE_BLOCKED", "ALREADY_RUNNING",
     "REPEATED_FAILURE_STOP", "NOT_AUTONOMOUS_TASK", "COMPLETE",
     # Named explicitly by E8.19 (not in E8.4's own list, but given its
@@ -70,7 +76,26 @@ TICK_OUTCOMES = (
 # execution stops retrying it -- never an infinite retry loop (E8.15).
 REPEATED_FAILURE_THRESHOLD = 3
 
-_DEFAULT_POLICY = {"enabled": False, "max_concurrent_builders": 1, "auto_start_ready_tasks": True}
+_DEFAULT_POLICY = {"enabled": False, "max_concurrent_builders": 1, "auto_start_ready_tasks": True,
+                   "goal_reconciliation_enabled": False}
+
+_SUPERVISOR_LEASE_OWNER: ContextVar[str | None] = ContextVar("projectflow_supervisor_lease_owner", default=None)
+_RECOVERY_SKIPPED_CHANGES: ContextVar[frozenset[int]] = ContextVar("projectflow_recovery_skipped_changes", default=frozenset())
+_RECOVERY_SKIPPED_TASKS: ContextVar[frozenset[int]] = ContextVar("projectflow_recovery_skipped_tasks", default=frozenset())
+
+def _recovery_is_observation(item: dict) -> bool:
+    outcome = item.get("outcome")
+    if outcome in ("NO_RECOVERY_REQUIRED", "DISABLED", "ALREADY_RUNNING", "BACKOFF"):
+        return True
+    if outcome == "UNKNOWN":
+        return item.get("code") == "SESSION_LIVENESS_UNKNOWN"
+    if outcome == "BLOCKED":
+        return "advisory" not in item and item.get("code") in {
+            "OWNER_UNASSIGNED", "V2_UPGRADE_REQUIRED", "CONTRACT_BLOCKED",
+            "WORKSPACE_UNSAFE", "PROVIDER_QUOTA_OR_AUTH", "PROVIDER_UNKNOWN",
+            "RETRY_BUDGET_EXHAUSTED", "CI_FAIL",
+        }
+    return False
 
 
 class AutonomousExecutionError(ValueError):
@@ -206,7 +231,7 @@ class AutonomousExecutionService:
     def __init__(self, db, changes, work_products, decision, task_dependencies, workflow_service,
                  human_decisions, spec_gate, roles_catalog, planner_service, git,
                  add_task_workspace, start_builder_session, project_policy_resolver, settings,
-                 test_case_specs=None, worktree_manager=None):
+                 test_case_specs=None, worktree_manager=None, dispatch_gate=None):
         self.db = db
         self.changes = changes
         self.work_products = work_products
@@ -215,6 +240,7 @@ class AutonomousExecutionService:
         self.workflow_service = workflow_service
         self.human_decisions = human_decisions
         self.spec_gate = spec_gate
+        self.dispatch_gate = dispatch_gate
         self.roles_catalog = roles_catalog
         self.planner_service = planner_service
         self.git = git
@@ -238,6 +264,11 @@ class AutonomousExecutionService:
         self._start_builder_session = start_builder_session
         self._project_policy_resolver = project_policy_resolver
         self.settings = settings
+        self._reconcile_lock = threading.RLock()
+        self.provider_available = None
+        self.session_liveness = None
+        self.recovery_advisor = None
+        self._supervisor_lease_seconds = 180
 
     # ---- policy (E8.1) --------------------------------------------------
     def get_policy(self, change: dict) -> dict:
@@ -273,6 +304,263 @@ class AutonomousExecutionService:
             "SELECT COUNT(*) c FROM agent_sessions WHERE task_id IN (SELECT id FROM tasks WHERE change_id=?) AND status IN (%s)" %
             ",".join("?" * len(LIVE_SESSION_STATUSES)), (change_id, *LIVE_SESSION_STATUSES))
         return row["c"] if row else 0
+
+    def reconcile_exited_goals(self) -> list[dict]:
+        """Inspect and safely continue one already-started Task at most.
+
+        Fresh DAG selection is performed by the same supervisor tick only
+        after this pass has no recovery action. The durable lease around
+        scheduled_reconcile_tick() prevents concurrent service processes
+        from taking different actions for the same poll.
+        """
+        outcomes=[]
+        for change in self.changes.list():
+            policy=self.get_policy(change)
+            if not policy.get("goal_reconciliation_enabled"):
+                continue
+            owner=(change.get("owner_name") or "").strip()
+            if not owner:
+                outcomes.append({"change_id":change["id"],"outcome":"BLOCKED","code":"OWNER_UNASSIGNED",
+                                 "owner":"Change owner","next_action":"Assign a named Change owner before automatic continuation."})
+                continue
+            if not self._supervisor_lease_is_current():
+                outcomes.append({"change_id":change["id"],"outcome":"LEASE_LOST"})
+                return outcomes
+            result=self.reconcile_change(change["id"])
+            if not result:
+                outcomes.append({"change_id":change["id"],"outcome":"UNKNOWN","code":"RECOVERY_RESULT_MISSING"})
+                return outcomes
+            outcomes.extend(result)
+            if any(not _recovery_is_observation(item) for item in result):
+                return outcomes
+        return outcomes
+
+    def _acquire_supervisor_lease(self, owner_id: str) -> bool:
+        """Atomically acquire the single durable supervisor lease.
+
+        SQLite serializes the conditional UPSERT across independent app
+        processes. An expired lease is recoverable after a crashed owner.
+        """
+        return self.db.acquire_lease("projectflow-supervisor", owner_id, self._supervisor_lease_seconds)
+
+    def _release_supervisor_lease(self, owner_id: str) -> bool:
+        return self.db.release_lease("projectflow-supervisor", owner_id)
+
+    def _supervisor_lease_is_current(self, owner_id: str | None = None) -> bool:
+        owner_id = _SUPERVISOR_LEASE_OWNER.get() if owner_id is None else owner_id
+        if owner_id is None:
+            return True  # Explicit, human-directed legacy start remains compatible.
+        if not isinstance(owner_id, str) or not owner_id:
+            return False
+        try:
+            # The request memo is not authoritative for fencing across processes.
+            with self.db.connect() as conn:
+                row = conn.execute(
+                    "SELECT owner_id,expires_at FROM orchestration_leases WHERE lease_key='projectflow-supervisor'").fetchone()
+                expires_at = row["expires_at"] if row else None
+                return bool(
+                    row
+                    and row["owner_id"] == owner_id
+                    and isinstance(expires_at, (int, float))
+                    and time.time() < expires_at < float("inf")
+                )
+        except (sqlite3.Error, TypeError, ValueError, KeyError, IndexError):
+            return False
+
+    def scheduled_reconcile_tick(self) -> dict:
+        """Single action entrypoint shared by the existing periodic worker.
+
+        It first reconciles confirmed exits, then invokes the existing
+        TaskDecision/SpecGate-backed DAG tick only when recovery found no
+        action. At most one Builder is launched by tick() per invocation.
+        """
+        owner_id = uuid.uuid4().hex
+        if not self._acquire_supervisor_lease(owner_id):
+            self.db.event("system", 0, "SUPERVISOR_TICK_SKIPPED", "reason=LEASE_HELD")
+            return {"outcome": "LEASE_HELD"}
+        lease_token = _SUPERVISOR_LEASE_OWNER.set(owner_id)
+        self.db.event("system", 0, "SUPERVISOR_TICK_STARTED", "source=cleanup_worker")
+        try:
+            recovery = self.reconcile_exited_goals()
+            action_required = any(
+                not _recovery_is_observation(item) for item in recovery
+            )
+            action = recovery
+            if not action_required:
+                # Recovery may outlive the TTL. A successor can take over;
+                # the expired owner must stop before DAG dispatch.
+                if not self._supervisor_lease_is_current(owner_id):
+                    return {"outcome": "LEASE_LOST", "recovery": recovery, "action": []}
+                skipped = frozenset(item["change_id"] for item in recovery
+                                    if item.get("outcome") not in ("NO_RECOVERY_REQUIRED", "DISABLED")
+                                    and not (item.get("code") == "CI_FAIL" and item.get("task_id")))
+                skipped_tasks = frozenset(item["task_id"] for item in recovery
+                                          if item.get("code") == "CI_FAIL" and item.get("task_id"))
+                skip_token = _RECOVERY_SKIPPED_CHANGES.set(skipped)
+                task_skip_token = _RECOVERY_SKIPPED_TASKS.set(skipped_tasks)
+                try:
+                    action = self.tick()
+                finally:
+                    _RECOVERY_SKIPPED_TASKS.reset(task_skip_token)
+                    _RECOVERY_SKIPPED_CHANGES.reset(skip_token)
+            result = {"outcome": "RECOVERY_ACTION" if action_required else "TICKED",
+                      "recovery": recovery, "action": action}
+            self.db.event("system", 0, "SUPERVISOR_TICK_FINISHED",
+                          "outcome=" + result["outcome"])
+            return result
+        except Exception as exc:
+            self.db.event("system", 0, "SUPERVISOR_TICK_FAILED", "error=" + type(exc).__name__)
+            return {"outcome": "FAILED", "reason": type(exc).__name__}
+        finally:
+            self._release_supervisor_lease(owner_id)
+            _SUPERVISOR_LEASE_OWNER.reset(lease_token)
+
+    def reconcile_change(self, change_id: int) -> list[dict]:
+        change=self.changes.get(change_id)
+        if not change or not self.get_policy(change).get("goal_reconciliation_enabled"):
+            return [{"change_id":change_id,"outcome":"DISABLED"}]
+        with self._reconcile_lock:
+            active=self.db.one(
+                "SELECT s.id,s.task_id FROM agent_sessions s JOIN tasks t ON t.id=s.task_id "
+                "WHERE t.change_id=? AND s.status IN ('STARTING','RUNNING','WAITING_FOR_INPUT') ORDER BY s.id DESC LIMIT 1",
+                (change_id,))
+            if active:
+                live=bool(self.session_liveness and self.session_liveness(active["id"]))
+                if live:
+                    return [{"change_id":change_id,"task_id":active["task_id"],"outcome":"ALREADY_RUNNING","session_id":active["id"]}]
+                return [{"change_id":change_id,"task_id":active["task_id"],"outcome":"UNKNOWN","code":"SESSION_LIVENESS_UNKNOWN",
+                         "owner":change.get("owner_name") or "Unassigned","next_action":"Verify the saved session process and confirm its exit before any retry."}]
+            for task in self.changes.list_tasks_for_change(change_id):
+                d=self.decision.evaluate(task["id"])
+                if d["status"] in ("DONE","CANCELLED"):
+                    continue
+                # The Change's merge gate is already the authoritative
+                # source for CI state. Isolate the blocked Task, rather
+                # than suppressing this whole Change, so an explicit
+                # corrective Task and unrelated eligible work can still
+                # run through the normal scheduler.
+                for merge_record in d.get("merge_records", []):
+                    if not merge_record.get("required"):
+                        continue
+                    gate = self.decision.merge_gate_status(d, merge_record["repository_id"], merge_record)
+                    if "CI_FAIL" in gate.get("blockers", []):
+                        return self._recovery_block(
+                            change_id, task["id"], "CI_FAIL",
+                            "Review the failed CI on this Task; create or select a scoped corrective Task before retrying it.",
+                        )
+                last=self.db.one("SELECT * FROM agent_sessions WHERE task_id=? ORDER BY id DESC LIMIT 1",(task["id"],))
+                # AgentSessionManager marks any in-process PTY as FAILED
+                # during startup reconciliation because the owning process
+                # is gone after a server restart. Treat that confirmed
+                # restart exit like EXITED so the same Task can continue
+                # under the existing bounded retry policy.
+                if not last or last["status"] not in ("EXITED", "FAILED"):
+                    continue
+                builder=next((b for b in d["builders"] if b["id"]==last["workspace_id"]),None)
+                if not builder or builder.get("ready") or (builder.get("report") and self.decision.builder_tests_status(builder)=="PASS"):
+                    continue
+                owner=(change.get("owner_name") or "").strip()
+                if not owner:
+                    return self._recovery_block(change_id,task["id"],"OWNER_UNASSIGNED","Assign a named Change owner before recovery.")
+                if str(task.get("task_contract_version") or "V1").upper()!="V2":
+                    return self._recovery_block(change_id,task["id"],"V2_UPGRADE_REQUIRED","Upgrade this historical Task to a complete V2 contract before automated continuation.")
+                dispatch=(d.get("dispatch_readiness") or {})
+                if not dispatch.get("ready"):
+                    return self._recovery_block(change_id,task["id"],"CONTRACT_BLOCKED","Complete the approved Spec and pinned V2 contract before recovery.")
+                workspace=self.db.one("SELECT * FROM agent_workspaces WHERE id=?",(last["workspace_id"],))
+                if not workspace or workspace["status"]=="CLOSED" or not Path(workspace["worktree_path"]).is_dir():
+                    return self._recovery_block(change_id,task["id"],"WORKSPACE_UNSAFE","Restore the same owned worktree or assign an owner to resolve it.")
+                scope_check = self.check_scope_violation(workspace, task)
+                if scope_check.get("violation"):
+                    return self._recovery_block(
+                        change_id, task["id"], scope_check["reason"],
+                        "Owner must reconcile the pinned Git evidence and declared scope before recovery; preserve the existing worktree.",
+                    )
+                transcript=(last.get("transcript_tail") or "").lower()
+                provider_faults=("rate limit","quota","out of credits","billing","unauthorized","not authenticated","authentication required")
+                if any(marker in transcript for marker in provider_faults):
+                    return self._recovery_block(change_id,task["id"],"PROVIDER_QUOTA_OR_AUTH","Resolve provider quota/authentication, then resume this same Task explicitly.")
+                if not self.provider_available or not self.provider_available(last["agent"]):
+                    return self._recovery_block(change_id,task["id"],"PROVIDER_UNKNOWN","Verify provider authentication, quota, and CLI availability before retrying.")
+                attempts=self.db.all("SELECT created_at FROM workspace_events WHERE entity_type='task' AND entity_id=? AND action='GOAL_RESUME_ATTEMPT' ORDER BY id",(task["id"],))
+                if len(attempts)>=2:
+                    return self._recovery_block(change_id,task["id"],"RETRY_BUDGET_EXHAUSTED","Owner must review the existing branch and evidence; no further automatic retry is allowed.")
+                if attempts:
+                    delay=60 * (2 ** (len(attempts)-1))
+                    from datetime import datetime, timezone
+                    stamp=datetime.fromisoformat(attempts[-1]["created_at"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
+                    if time.time() < stamp.timestamp()+delay:
+                        return [{"change_id":change_id,"task_id":task["id"],"outcome":"BACKOFF","retry_after_seconds":max(1,int(stamp.timestamp()+delay-time.time()))}]
+                if not self._supervisor_lease_is_current():
+                    return [{"change_id":change_id,"task_id":task["id"],"outcome":"LEASE_LOST",
+                             "code":"SUPERVISOR_LEASE_LOST","next_action":"Successor owns reconciliation; do not dispatch from this expired owner."}]
+                detail=f"attempt={len(attempts)+1} session={last['id']} owner={owner}"
+                self.db.event("task",task["id"],"GOAL_RESUME_ATTEMPT",detail)
+                try:
+                    if not self._supervisor_lease_is_current():
+                        return [{"change_id":change_id,"task_id":task["id"],"outcome":"LEASE_LOST",
+                                 "code":"SUPERVISOR_LEASE_LOST","next_action":"Successor owns reconciliation; no retry was dispatched."}]
+                    sid=self._start_builder_session(workspace,note_exited_without_report=True)
+                except Exception as exc:
+                    self.db.event("task",task["id"],"GOAL_RESUME_FAILED",f"attempt={len(attempts)+1} error={type(exc).__name__}")
+                    return self._recovery_block(change_id,task["id"],"RESUME_FAILED","Owner must inspect the provider error and current worktree before another attempt.")
+                return [{"change_id":change_id,"task_id":task["id"],"outcome":"RESUMED","session_id":sid,"attempt":len(attempts)+1}]
+        return [{"change_id":change_id,"outcome":"NO_RECOVERY_REQUIRED"}]
+
+    def _recovery_block(self,change_id:int,task_id:int,code:str,action:str)->list[dict]:
+        lease_owner = _SUPERVISOR_LEASE_OWNER.get()
+        def lease_lost():
+            return [{"change_id":change_id,"task_id":task_id,"outcome":"LEASE_LOST",
+                     "code":"SUPERVISOR_LEASE_LOST","next_action":"Successor owns reconciliation; no advice requested."}]
+        if not self._supervisor_lease_is_current(lease_owner):
+            return lease_lost()
+        detail=f"code={code} owner=Change owner next_action={action}"
+        latest=self.db.one(
+            "SELECT action,details FROM workspace_events WHERE entity_type='task' AND entity_id=? "
+            "AND action IN ('GOAL_RESUME_ATTEMPT','GOAL_RESUME_BLOCKED') ORDER BY id DESC LIMIT 1",
+            (task_id,))
+        if not latest or latest["action"]!="GOAL_RESUME_BLOCKED" or latest["details"]!=detail:
+            self.db.event("task",task_id,"GOAL_RESUME_BLOCKED",detail)
+        result={"change_id":change_id,"task_id":task_id,"outcome":"BLOCKED","code":code,
+                "owner":"Change owner","next_action":action}
+        if self.recovery_advisor and code in {"SESSION_LIVENESS_UNKNOWN", "PROVIDER_UNKNOWN",
+                                               "PROVIDER_QUOTA_OR_AUTH", "WORKSPACE_UNSAFE", "RESUME_FAILED"}:
+            task=self._task(task_id) or {}
+            change=self.changes.get(change_id) or {}
+            session=self.db.one("SELECT id,status,agent,started_at,exited_at AS finished_at,completion_transport,final_output_status "
+                                "FROM agent_sessions WHERE task_id=? ORDER BY id DESC LIMIT 1",(task_id,)) or {}
+            refs=[f"change:{change_id}",f"task:{task_id}"]
+            if session.get("id"):
+                refs.append(f"session:{session['id']}")
+            deps=self.db.all("SELECT depends_on_task_id FROM task_dependencies WHERE task_id=? ORDER BY depends_on_task_id",(task_id,))
+            tests=self.db.one("SELECT status,tested_commit,finished_at FROM test_runs WHERE workspace_type='agent' "
+                              "AND workspace_id=(SELECT id FROM agent_workspaces WHERE task_id=? ORDER BY id DESC LIMIT 1) "
+                              "ORDER BY id DESC LIMIT 1",(task_id,)) or {}
+            if not self._supervisor_lease_is_current(lease_owner):
+                return lease_lost()
+            try:
+                result["advisory"]=self.recovery_advisor.advise({
+                    "task_id":task_id,"change_id":change_id,"failure":code,
+                    "epoch":session.get("id") or "no-session",
+                    "task_goal":(task.get("title") or "")+"\n"+(task.get("implementation_prompt") or ""),
+                    "session_state":session.get("status","UNKNOWN"),"process_liveness":"UNKNOWN",
+                    "receipt_state":session.get("final_output_status","UNKNOWN"),
+                    "owner":change.get("owner_name") or "Unassigned",
+                    "dependencies":[r["depends_on_task_id"] for r in deps],
+                    "authorization":"existing ProjectFlow policy and dispatch gates only",
+                    "prior_attempts":len(self.db.all("SELECT id FROM workspace_events WHERE entity_type='task' "
+                        "AND entity_id=? AND action='GOAL_RESUME_ATTEMPT'",(task_id,))),
+                    "test_state":tests.get("status","UNKNOWN"),"last_progress_at":session.get("finished_at") or session.get("started_at")
+                },refs,lease_owner=lease_owner)
+                # An adviser may take longer than the lease TTL; never expose its
+                # proposal to this stale supervisor as a usable recommendation.
+                if not self._supervisor_lease_is_current(lease_owner):
+                    return lease_lost()
+            except Exception as exc:
+                self.db.event("system",0,"RECOVERY_AI_FAILED",f"failure={code} error={type(exc).__name__}")
+                result["advisory"]={"source":"DETERMINISTIC_FALLBACK","allowed_action":"VERIFY",
+                                    "reason":"AI_ADVISOR_ERROR"}
+        return [result]
 
     def _repeated_failures(self, task_id: int) -> int:
         """Consecutive AUTO_EXECUTION_FAILED audit events for this Task,
@@ -328,9 +616,18 @@ class AutonomousExecutionService:
         if self.human_decisions.pending_for_change(change_id):
             return _item("WAITING_HUMAN", "This Change has an unresolved human decision", task_id=task_id)
 
-        gate = self.spec_gate.evaluate(t)
-        if gate["outcome"] not in ("PASS", "NOT_APPLICABLE"):
-            return _item("WAITING_SPEC", f"SpecGate {gate['outcome']}: {gate['reason']}", task_id=task_id)
+        if self.dispatch_gate is not None:
+            dispatch = self.dispatch_gate.evaluate(t)
+            if not dispatch["ready"]:
+                first=(dispatch.get("blockers") or [{}])[0]
+                if str(first.get("code","")).startswith("SPEC_") or first.get("code") in ("SPEC_NOT_APPROVED","TRACEABILITY_MISSING","SPEC_REFERENCE_INVALID"):
+                    return _item("WAITING_SPEC", first.get("message","Approved FeatureSpec trace is required."),task_id=task_id,dispatch_readiness=dispatch)
+                return _item("WAITING_CONTRACT", "Executor contract is incomplete or its approved Spec trace is not ready.",
+                             task_id=task_id, dispatch_readiness=dispatch)
+        else:
+            gate = self.spec_gate.evaluate(t)
+            if gate["outcome"] not in ("PASS", "NOT_APPLICABLE"):
+                return _item("WAITING_SPEC", f"SpecGate {gate['outcome']}: {gate['reason']}", task_id=task_id)
 
         run = self.workflow_service.get_workflow(change_id)
         if run:
@@ -421,7 +718,10 @@ class AutonomousExecutionService:
         tasks = [t for t in self.changes.list_tasks_for_change(change_id)
                  if (t.get("task_type") or "").strip().upper() in AUTO_ELIGIBLE_TASK_TYPES]
         ready = []
+        recovery_skipped = _RECOVERY_SKIPPED_TASKS.get()
         for t in tasks:
+            if t["id"] in recovery_skipped:
+                continue
             result = self.evaluate_task(t["id"])
             if result["readiness"] == "AUTO_READY":
                 plan_item = self.db.one("SELECT * FROM plan_items WHERE materialized_task_id=?", (t["id"],))
@@ -469,13 +769,31 @@ class AutonomousExecutionService:
         return self.run_change(change_id)
 
     def tick(self, change_id: int | None = None) -> dict:
-        """The scheduler entry point (E8.6). Never a background daemon --
-        only ever invoked by an explicit API call or test (E8.6/E8.27).
+        """Leased operator tick; the existing cleanup worker uses the same
+        underlying action through scheduled_reconcile_tick()."""
+        inherited_owner = _SUPERVISOR_LEASE_OWNER.get()
+        if inherited_owner:
+            if not self._supervisor_lease_is_current(inherited_owner):
+                return {"outcome": "LEASE_LOST", "launched": False}
+            return self._tick_actions(change_id)
+        owner_id = uuid.uuid4().hex
+        if not self._acquire_supervisor_lease(owner_id):
+            return {"outcome": "LEASE_HELD", "launched": False}
+        lease_token = _SUPERVISOR_LEASE_OWNER.set(owner_id)
+        try:
+            return self._tick_actions(change_id)
+        finally:
+            self._release_supervisor_lease(owner_id)
+            _SUPERVISOR_LEASE_OWNER.reset(lease_token)
+
+    def _tick_actions(self, change_id: int | None = None) -> dict:
+        """Existing TaskDecision/SpecGate-backed DAG action.
+
         At most ONE Builder is actually launched per call, globally,
         even when change_id is omitted and multiple Changes are eligible
         -- every other eligible Change is still evaluated (so the
         caller/UI gets a full picture) but never launched into the same
-        tick once capacity is spent."""
+        tick once capacity is spent. Caller must own supervisor lease."""
         if change_id is not None:
             result = self.run_change(change_id)
             return {"results": [result], "launched": result["outcome"] == "LAUNCHED"}
@@ -485,6 +803,9 @@ class AutonomousExecutionService:
         results = []
         launched = False
         for change in changes:
+            if change["id"] in _RECOVERY_SKIPPED_CHANGES.get():
+                results.append({"change_id":change["id"],"outcome":"SKIPPED_RECOVERY_PENDING"})
+                continue
             if launched:
                 results.append({"change_id": change["id"], "outcome": "SKIPPED_CAPACITY_REACHED"})
                 continue
@@ -539,7 +860,15 @@ class AutonomousExecutionService:
 
     # ---- E8.10/E8.10-adjacent: launch (Supervisor stays the only path) --
     def _launch(self, task_id: int, repository_id: int, provider: str) -> dict:
+        if not self._supervisor_lease_is_current():
+            return {"outcome": "BLOCKED", "task_id": task_id, "code": "SUPERVISOR_LEASE_LOST",
+                    "message": "Supervisor ownership expired before dispatch; no new workspace or session was started."}
         t = self._task(task_id)
+        if self.dispatch_gate is not None:
+            dispatch = self.dispatch_gate.evaluate(t)
+            if not dispatch["ready"]:
+                return {"outcome": "BLOCKED", "task_id": task_id, "code": dispatch["code"],
+                        "dispatch_readiness": dispatch, "message": "Spec and V2 task contract must pass before workspace or session creation."}
         change = self.changes.get(t["change_id"])
         # add_task_workspace() refuses BACKLOG ("Task must be Selected for
         # Development..."), the same rule the manual [Select for
@@ -551,6 +880,9 @@ class AutonomousExecutionService:
         # human to do it first, since evaluate_task() has already
         # confirmed this Task is genuinely AUTO_READY.
         if t["status"] == "BACKLOG":
+            if not self._supervisor_lease_is_current():
+                return {"outcome": "BLOCKED", "task_id": task_id, "code": "SUPERVISOR_LEASE_LOST",
+                        "message": "Supervisor ownership expired before task selection; no dispatch was started."}
             self.db.execute("UPDATE tasks SET status='ACTIVE',updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,))
             self.db.event("task", task_id, "TASK_SELECTED", "auto (E8)")
             t = self._task(task_id)
@@ -577,6 +909,10 @@ class AutonomousExecutionService:
         # is real, checked evidence, never an assumption.
         if self.worktree_manager is not None and repo_row:
             self.worktree_manager.snapshot_canonical_status(ws["id"], repo_row["repo_path"])
+        if not self._supervisor_lease_is_current():
+            return {"outcome": "BLOCKED", "task_id": task_id, "workspace_id": ws["id"],
+                    "code": "SUPERVISOR_LEASE_LOST",
+                    "message": "Supervisor ownership expired before session start; existing workspace was retained."}
         try:
             sid = self._start_builder_session(ws)
         except Exception as exc:
@@ -603,9 +939,10 @@ class AutonomousExecutionService:
         if not scope:
             return {"violation": False, "reason": "no scope_hints declared"}
         try:
-            changed = self.git.changed_files(w["worktree_path"], w["base_commit"])
-        except Exception as exc:
-            return {"violation": False, "reason": f"could not determine changed files: {exc}"}
+            changed = self.git.scope_changed_files(w["worktree_path"], w.get("base_commit"))
+        except Exception:
+            return {"violation": True, "reason": "SCOPE_EVIDENCE_UNAVAILABLE",
+                    "out_of_scope_files": [], "changed_files": [], "declared_scope": scope}
 
         def _in_scope(path):
             return any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)
@@ -714,4 +1051,11 @@ class AutonomousExecutionService:
                         review_pending += 1
         return {"change_id": change_id, "policy": policy, "ready_tasks": ready, "running_builders": running,
                 "last_orchestration_event": last_event,
+                "supervisor_event": self.db.one("SELECT action,details,created_at FROM workspace_events "
+                    "WHERE entity_type='system' AND action LIKE 'SUPERVISOR_TICK_%' ORDER BY id DESC LIMIT 1"),
+                "supervisor_lease_active": bool(self.db.one("SELECT 1 AS active FROM orchestration_leases "
+                    "WHERE lease_key='projectflow-supervisor' AND expires_at>?",(time.time(),))),
+                "last_recovery_advisor_event": self.db.one("SELECT action,details,created_at FROM workspace_events "
+                    "WHERE entity_type='task' AND entity_id IN (SELECT id FROM tasks WHERE change_id=?) "
+                    "AND action LIKE 'RECOVERY_AI_%' ORDER BY id DESC LIMIT 1",(change_id,)),
                 "managed_worktrees": managed_worktrees, "review_pending_worktrees": review_pending}

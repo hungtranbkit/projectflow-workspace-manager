@@ -12,10 +12,17 @@ def register(client, repo, name):
     assert r.status_code in (200, 303), r.text
 
 
-def new_task(client, title, risk="LOW"):
-    r = client.post("/api/tasks", data={"title": title, "risk_profile": risk}, follow_redirects=False)
-    assert r.status_code == 303
-    return [t["id"] for t in client.get("/api/tasks").json() if t["title"] == title][0]
+def historical_task(client, title, risk="LOW"):
+    # The contract migration marks pre-existing tasks V1. These compliance
+    # cases exercise that historical state, including unlinked workspaces.
+    db = client.app.state.db
+    slug = title.lower().replace(" ", "-")
+    db.execute(
+        "INSERT INTO tasks (slug,title,status,risk_profile,task_contract_version) "
+        "VALUES (?,?,?,?,?)", (slug, title, "BACKLOG", risk, "V1"),
+    )
+    return db.one("SELECT id FROM tasks WHERE slug=?", (slug,))["id"]
+
 
 
 def add_workspace(client, tid, rid, agent="codex", role="Backend"):
@@ -54,7 +61,7 @@ def setup(client, git_repo, title, risk="LOW"):
     root, repo = git_repo
     register(client, repo, "demo")
     rid = client.get("/api/repositories").json()[0]["id"]
-    tid = new_task(client, title, risk=risk)
+    tid = historical_task(client, title, risk=risk)
     client.post(f"/api/tasks/{tid}/select")
     w = add_workspace(client, tid, rid)
     return tid, w

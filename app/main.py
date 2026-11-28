@@ -4,11 +4,15 @@ import hashlib
 import hmac
 import json
 import logging
+import os
+import re
 import secrets
 import sqlite3
+import subprocess
+import threading
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlencode
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse
@@ -41,9 +45,11 @@ from app.services.deployment_service import DeploymentService, DeploymentError
 from app.services.deployment_decision import deployment_view
 from app.services.repository_contract_editor import RepositoryContractEditor, ContractEditError
 from app.services.project_contract import ContractError
-from app.services.completion_report_parser import parse_completion_report, strip_ansi
+from app.services.completion_report_parser import parse_completion_report, parse_executor_completion_report, strip_ansi
 from app.services.spec_registry import SpecRegistry, SpecError
 from app.services.spec_gate import SpecGate, spec_id_list, ALL_CLASSIFICATIONS
+from app.services.task_dispatch_gate import TaskDispatchGate, TaskDispatchBlocked
+from app.services.task_contract import validate_task_contract
 from app.services.spec_compliance import SpecComplianceVerifier
 from app.services.evidence_store import EvidenceStore
 from app.services.change_service import ChangeService, ChangeError, CHANGE_TYPES, RISK_LEVELS as CHANGE_RISK_LEVELS, LIFECYCLE_STATES
@@ -69,6 +75,7 @@ from app.services.workflow_engine import (
 from app.services.planner_service import (
     PlannerAgentInvoker, PlannerContextBuilder, PlanValidator, PlannerService, PlannerError,
 )
+from app.services.recovery_decision_service import RecoveryDecisionService
 from app.services.human_decisions import HumanDecisionService
 from app.services.spec_lifecycle_service import (
     RequirementAnalysisService, SpecAuthorService, SpecProposalValidator, SpecReviewService,
@@ -105,6 +112,10 @@ from app.services.execution_wave_service import ExecutionWaveService, ExecutionW
 
 def create_app(settings=None):
     settings = settings or load_settings(); db = Database(settings.db_path); db.init()
+    # Serialize goal-level executor admission in this service process.
+    # SQLite remains the durable source of active-session truth; the lock
+    # closes the check/start race between concurrent request threads.
+    goal_dispatch_lock = threading.RLock()
     # ---- B0.7: Secrets boundary -----------------------------------------
     # docs/B0_HOSTED_PLATFORM_SECURITY_FOUNDATION.md -- constructed early
     # (github_merge below is B0.7's first real consumer -- ADR-001 --
@@ -156,8 +167,9 @@ def create_app(settings=None):
     runner = TestRunner(db, git, sandboxed_exec)
     sandboxes = SandboxManager(db, sandbox_runtime, ports, settings.state_dir, settings.max_running_sandboxes, settings.sandbox_retention_hours)
     cleanup_worker = CleanupWorker(db, sandboxes, settings.cleanup_poll_seconds)
-    agent_sessions = AgentSessionManager(db)
+    agent_sessions = AgentSessionManager(db, final_output_root=settings.state_dir / "agent-final-messages")
     decision = TaskDecisionService(db, git)
+    decision.session_liveness=agent_sessions.is_process_live
     gate_waivers = GateWaiverService(db, git, sandboxed_exec)
     # B0.7's first real consumer (ADR-001, simplified per-org-token
     # variant -- see github_merge_service.py's own module docstring):
@@ -190,6 +202,8 @@ def create_app(settings=None):
     # resolution.
     specs_root = Path(__file__).resolve().parent.parent / "specs"
     spec_gate = SpecGate(specs_root)
+    task_dispatch_gate = TaskDispatchGate(spec_gate)
+    decision.dispatch_gate = task_dispatch_gate
     spec_compliance = SpecComplianceVerifier(db, decision, specs_root)
     evidence_store = EvidenceStore(db)
     # Engineering Domain Foundation (Phase E1): additive layer above the
@@ -1774,8 +1788,23 @@ def create_app(settings=None):
             if rules: parts+=["",rules]
             parts+=["","## COMPLETION",
                     "- implement task","- run appropriate tests","- review diff","- commit changes",
-                    "- report WHAT_CHANGED","- report TESTS_RUN","- report HOW_TO_VERIFY","- report EXPECTED_RESULT","- report RISKS",
-                    "- Submit for Review (use the format in templates/agent-completion-report.md)."]
+                    "- At completion, print one final machine-readable report with these exact headings, once each and in this order:",
+                    "  WORK_STATUS, WHAT_CHANGED, AUTOMATED_TESTS, HOW_TO_VERIFY, EXPECTED_RESULT, TEST_DATA, RUNTIME_REQUIREMENTS, RISKS, FILES_CHANGED, COMMIT_SHA.",
+                    "- Use these literal delimiter lines; the managed repository may not contain ProjectFlow's report template:",
+                    "- Copy these delimiter lines byte-for-byte; do not retype, alter, or add/remove spaces. The final line must be exactly the line below, including the single space before the last five dashes:",
+                    "----- PROJECTFLOW EXECUTOR REPORT START -----",
+                    "WORK_STATUS:","READY", "", "WHAT_CHANGED:","Replace this with your actual change...", "",
+                    "AUTOMATED_TESTS:","Replace this with actual commands and results...", "",
+                    "HOW_TO_VERIFY:","Replace this with concrete steps...", "",
+                    "EXPECTED_RESULT:","Replace this with the observed expected behavior...", "",
+                    "TEST_DATA:","Replace this with actual fixtures or NONE...", "",
+                    "RUNTIME_REQUIREMENTS:","NONE or the actual required runtime...", "",
+                    "RISKS:","Replace this with actual review risks...", "",
+                    "FILES_CHANGED:","List every changed repository-relative path...", "",
+                    "COMMIT_SHA:","Replace this with the full 40-character `git rev-parse HEAD` value...",
+                    "----- PROJECTFLOW EXECUTOR REPORT END -----",
+                    "- Replace every illustrative value above with actual evidence. COMMIT_SHA must equal `git rev-parse HEAD`; FILES_CHANGED must list every changed path. Report only tests actually run.",
+                    "- Do not claim review, QA, merge, or acceptance; an independent reviewer decides that."]
             return "\n".join(parts)
         parts=[f"# Task: {t['title']}",""]
         if t["brief_goal"]: parts+=["## GOAL",t["brief_goal"],""]
@@ -1860,6 +1889,34 @@ def create_app(settings=None):
     @app.exception_handler(GitSafetyError)
     @app.exception_handler(GitCommandError)
     async def git_error(request, exc): return HTMLResponse(f"<h1>Action blocked</h1><pre>{str(exc)}</pre><a href='javascript:history.back()'>Back</a>", status_code=409)
+
+    @app.exception_handler(TaskDispatchBlocked)
+    async def task_dispatch_blocked(request, exc):
+        readiness = exc.readiness
+        return JSONResponse({
+            "ok": False,
+            "code": readiness.get("code") or "TASK_DISPATCH_BLOCKED",
+            "message": str(exc),
+            "blockers": readiness.get("blockers", []),
+            "spec_gate": readiness.get("spec_gate"),
+            "contract": readiness.get("contract"),
+        }, status_code=409)
+
+    def dispatch_blocked_response(readiness):
+        return JSONResponse({
+            "ok": False,
+            "code": readiness.get("code") or "TASK_DISPATCH_BLOCKED",
+            "message": "Spec and V2 task contract must pass before executor dispatch.",
+            "blockers": readiness.get("blockers", []),
+            "spec_gate": readiness.get("spec_gate"),
+            "contract": readiness.get("contract"),
+        }, status_code=409)
+
+    def require_task_dispatch(task):
+        readiness = task_dispatch_gate.evaluate(task)
+        if not readiness["ready"]:
+            raise TaskDispatchBlocked(readiness)
+        return readiness
 
     @app.exception_handler(sqlite3.OperationalError)
     async def db_busy_error(request, exc):
@@ -2249,7 +2306,7 @@ def create_app(settings=None):
         sid=auto_create_sandbox(w["task_id"],w["repository_id"],w["repo_path"],"AGENT_WORKSPACE",wid,w["role"] or w["agent"],w["branch"],w["last_commit"],w["worktree_path"],profile.strip().upper() or None,task_default)
         if sid: db.execute("UPDATE agent_workspaces SET sandbox_profile=(SELECT profile FROM sandboxes WHERE id=?) WHERE id=?",(sid,wid))
         return RedirectResponse(f"/workspaces/{wid}",303)
-    def _insert_verification_report(w,t,status_upper,head,*,what_changed="",files_changed="",tests_run="",automated_tests="",how_to_verify="",expected_result="",test_data="",runtime_requirements="NONE",risks="",ready_source="AGENT_SUBMITTED",operator=None):
+    def _insert_verification_report(w,t,status_upper,head,*,what_changed="",files_changed="",tests_run="",automated_tests="",how_to_verify="",expected_result="",test_data="",runtime_requirements="NONE",risks="",ready_source="AGENT_SUBMITTED",operator=None,source_session_id=None,report_sha256=None):
         """Shared by the normal Submit-for-Review path and the manual
         EXITED-without-report recovery fallback -- one insert, one
         status-transition, one audit shape, regardless of which UI action
@@ -2264,13 +2321,28 @@ def create_app(settings=None):
         A Task with no linkage (spec_feature_id NULL) stamps NULL/empty
         here too -- this is never required for the insert to succeed."""
         wid=w["id"]
-        db.execute("INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,files_changed,tests_run,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks,commit_sha,brief_version,ready_source,operator,spec_feature_id,spec_version,spec_requirement_ids,spec_acceptance_ids,spec_invariant_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                   (w["task_id"],wid,status_upper,what_changed.strip(),files_changed.strip(),tests_run.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip(),head,t["brief_version"] if t else None,ready_source,operator,
-                    (t or {}).get("spec_feature_id"),(t or {}).get("spec_version"),(t or {}).get("spec_requirement_ids") or "[]",(t or {}).get("spec_acceptance_ids") or "[]",(t or {}).get("spec_invariant_ids") or "[]"))
-        db.event("agent",wid,"VERIFICATION_REPORT_ADDED",f"{status_upper} source={ready_source}")
+        insert_sql="INSERT INTO verification_reports(task_id,workspace_id,work_status,what_changed,files_changed,tests_run,automated_tests,how_to_verify,expected_result,test_data,runtime_requirements,risks,commit_sha,brief_version,ready_source,operator,spec_feature_id,spec_version,spec_requirement_ids,spec_acceptance_ids,spec_invariant_ids,source_session_id,report_sha256) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        insert_values=(w["task_id"],wid,status_upper,what_changed.strip(),files_changed.strip(),tests_run.strip(),automated_tests.strip(),how_to_verify.strip(),expected_result.strip(),test_data.strip(),runtime_requirements.strip().upper() or "NONE",risks.strip(),head,t["brief_version"] if t else None,ready_source,operator,
+                       (t or {}).get("spec_feature_id"),(t or {}).get("spec_version"),(t or {}).get("spec_requirement_ids") or "[]",(t or {}).get("spec_acceptance_ids") or "[]",(t or {}).get("spec_invariant_ids") or "[]",source_session_id,report_sha256)
+        if source_session_id is not None:
+            # The machine report row and the workspace's READY_FOR_REVIEW
+            # transition share one SQLite transaction. A crash cannot leave
+            # a consumed session report with a CREATED workspace.
+            with db.connect() as conn:
+                conn.execute(insert_sql,insert_values)
+                if status_upper=="READY":
+                    conn.execute("UPDATE agent_workspaces SET status='READY',ready_for_integration=1,last_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,wid))
+                conn.execute("INSERT INTO workspace_events(entity_type,entity_id,action,details) VALUES('agent',?,?,?)",(wid,"VERIFICATION_REPORT_ADDED",f"{status_upper} source={ready_source}"))
+                if status_upper=="READY":
+                    conn.execute("INSERT INTO workspace_events(entity_type,entity_id,action,details) VALUES('agent',?,?,?)",(wid,"SUBMITTED_FOR_REVIEW",f"{head} source={ready_source}"))
+        else:
+            db.execute(insert_sql,insert_values)
+            db.event("agent",wid,"VERIFICATION_REPORT_ADDED",f"{status_upper} source={ready_source}")
         if status_upper=="READY" and w["status"]!="READY":
-            db.execute("UPDATE agent_workspaces SET status='READY',ready_for_integration=1,last_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,wid))
-            db.event("agent",wid,"SUBMITTED_FOR_REVIEW",f"{head} source={ready_source}"); recompute_task_status(w.get("task_id"))
+            if source_session_id is None:
+                db.execute("UPDATE agent_workspaces SET status='READY',ready_for_integration=1,last_commit=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(head,wid))
+                db.event("agent",wid,"SUBMITTED_FOR_REVIEW",f"{head} source={ready_source}")
+            recompute_task_status(w.get("task_id"))
             # E8.12: capture a durable CODE_CHANGE WorkProduct at the exact
             # moment a Builder Workspace becomes READY -- same hook for a
             # manual Submit-for-Review and an eventual autonomous one
@@ -2486,6 +2558,18 @@ def create_app(settings=None):
         row=db.one("SELECT s.*,w.worktree_path,w.agent workspace_agent FROM agent_sessions s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.id=?",(sid,))
         if not row: raise HTTPException(404,"Session not found")
         return row
+    def _builder_prompt_payload(w,note_exited_without_report=False):
+        if not w.get("task_id"):
+            return None
+        require_task_dispatch(task_row(w["task_id"]))
+        t=task_row(w["task_id"]); repo_row=repo(w["repository_id"])
+        prompt=workspace_agent_prompt(w,t,repo_row,note_exited_without_report=note_exited_without_report)
+        review=decision.latest_review(w["id"])
+        source="REPAIR" if review and review["status"]=="FIX_REQUIRED" else "TASK"
+        return t,prompt,source
+    def _save_builder_prompt_snapshot(w,t,prompt):
+        db.execute("INSERT INTO prompts(task_id,workspace_id,prompt_type,brief_version,content) VALUES(?,?,?,?,?)",
+                   (w["task_id"],w["id"],"BUILDER",t["brief_version"],prompt))
     def _deliver_to_session(w,sid,note_exited_without_report=False):
         """Compute the current effective Builder prompt -- the Task's
         intent as usual, or, if the latest review for this workspace is
@@ -2501,13 +2585,10 @@ def create_app(settings=None):
         time this prompt is being computed the new session already is
         the latest one."""
         if not w.get("task_id"): return False
+        require_task_dispatch(task_row(w["task_id"]))
         try:
-            t=task_row(w["task_id"]); repo_row=repo(w["repository_id"])
-            prompt=workspace_agent_prompt(w,t,repo_row,note_exited_without_report=note_exited_without_report)
-            review=decision.latest_review(w["id"])
-            source="REPAIR" if review and review["status"]=="FIX_REQUIRED" else "TASK"
-            db.execute("INSERT INTO prompts(task_id,workspace_id,prompt_type,brief_version,content) VALUES(?,?,?,?,?)",
-                       (w["task_id"],w["id"],"BUILDER",t["brief_version"],prompt))
+            t,prompt,source=_builder_prompt_payload(w,note_exited_without_report)
+            _save_builder_prompt_snapshot(w,t,prompt)
             return agent_sessions.deliver_prompt(sid,prompt,source,t["brief_version"])
         except Exception:
             return False  # snapshot/delivery is best-effort audit, never raises into the caller
@@ -2545,6 +2626,52 @@ def create_app(settings=None):
         earlier, clearer message. Never blocks on a catalog/policy
         lookup failure itself (fail-open) -- a broken PROJECT.yaml
         engineering: block or catalog bug must never take down Start."""
+        if w.get("task_id"):
+            task = task_row(w["task_id"])
+            require_task_dispatch(task)
+            change_id = task.get("change_id")
+            if change_id:
+                with goal_dispatch_lock:
+                    lease_owner=f"{os.getpid()}-{threading.get_ident()}-{secrets.token_hex(8)}"
+                    lease_key=f"goal-dispatch:{change_id}"
+                    if not db.acquire_lease(lease_key,lease_owner,120):
+                        readiness=dict(task_dispatch_gate.evaluate(task)); readiness["ready"]=False
+                        readiness["code"]="GOAL_DISPATCH_LEASE_HELD"
+                        readiness["blockers"]=[{"code":"GOAL_DISPATCH_LEASE_HELD",
+                            "message":f"Change goal #{change_id} is being reconciled by another ProjectFlow worker; retry after its lease expires or releases.",
+                            "change_id":change_id}]
+                        raise TaskDispatchBlocked(readiness)
+                    try:
+                        active = db.one(
+                            "SELECT s.id,s.task_id,s.workspace_id,s.status FROM agent_sessions s "
+                            "JOIN tasks t ON t.id=s.task_id WHERE t.change_id=? "
+                            "AND s.status IN ('STARTING','RUNNING','WAITING_FOR_INPUT') ORDER BY s.id DESC LIMIT 1",
+                            (change_id,),
+                        )
+                        if active:
+                            process_live=agent_sessions.is_process_live(active["id"])
+                            if active["task_id"] == task["id"] and active["workspace_id"] == w["id"] and process_live:
+                                return active["id"]
+                            readiness = task_dispatch_gate.evaluate(task)
+                            readiness = dict(readiness)
+                            readiness["ready"] = False
+                            code="GOAL_EXECUTOR_ACTIVE" if process_live else "SESSION_LIVENESS_UNKNOWN"
+                            readiness["code"] = code
+                            readiness["blockers"] = [{
+                                "code": code,
+                                "message": (f"Change goal #{change_id} already has live executor session #{active['id']} for Task #{active['task_id']}; finish or resolve it before starting another Task." if process_live else
+                                            f"Change goal #{change_id} has an unverified stored session #{active['id']} for Task #{active['task_id']}; confirm its process exit before any retry."),
+                                "active_session_id": active["id"], "active_task_id": active["task_id"],
+                            }]
+                            raise TaskDispatchBlocked(readiness)
+                        return _start_builder_session_unlocked(w, mode, note_exited_without_report)
+                    finally:
+                        db.release_lease(lease_key,lease_owner)
+        return _start_builder_session_unlocked(w, mode, note_exited_without_report)
+
+    def _start_builder_session_unlocked(w,mode="INTERACTIVE",note_exited_without_report=False):
+        """Perform the existing trusted launcher/session path after the
+        task contract and per-goal admission checks have passed."""
         if w["agent"] not in settings.agents: raise GitSafetyError("Agent is not allowed")
         try:
             policy=load_engineering_policy(Path(w["repo_path"])) if w.get("repo_path") else None
@@ -2559,12 +2686,19 @@ def create_app(settings=None):
             raise GitSafetyError(f"Cannot assign provider '{w['agent']}' as BUILDER -- {reason}")
         elif assignment is not None:
             db.event("agent",w["id"],"ROLE_ASSIGNMENT_VALIDATED",f"provider={w['agent']} role=BUILDER")
-        if w.get("task_id"):
-            t=task_row(w["task_id"])
-            gate=spec_gate.evaluate(t)
-            if gate["outcome"] not in ("PASS","NOT_APPLICABLE"):
-                raise GitSafetyError(f"SpecGate {gate['outcome']}: {gate['reason']}")
         mode="VIEW_ONLY" if mode=="VIEW_ONLY" else "INTERACTIVE"
+        task=task_row(w["task_id"]) if w.get("task_id") else None
+        if task and task.get("task_contract_version")=="V2" and agent_sessions.supports_final_output(w["agent"]):
+            payload=_builder_prompt_payload(w,note_exited_without_report)
+            if not payload:
+                raise GitSafetyError("Trusted executor prompt is unavailable")
+            t,prompt,source=payload
+            _save_builder_prompt_snapshot(w,t,prompt)
+            sid=agent_sessions.start(task_id=w["task_id"],workspace_id=w["id"],agent=w["agent"],worktree_path=w["worktree_path"],mode=mode,
+                                     initial_prompt=prompt,prompt_source=source,prompt_version=t["brief_version"])
+            db.event("agent",w["id"],"SESSION_STARTED",f"session={sid} mode=VIEW_ONLY transport=CODEX_EXEC")
+            db.event("agent",w["id"],"PROMPT_DELIVERED",f"session={sid} transport=CODEX_EXEC_STDIN")
+            return sid
         sid=agent_sessions.start(task_id=w["task_id"],workspace_id=w["id"],agent=w["agent"],worktree_path=w["worktree_path"],mode=mode)
         db.event("agent",w["id"],"SESSION_STARTED",f"session={sid} mode={mode}")
         delivered=_deliver_to_session(w,sid,note_exited_without_report=note_exited_without_report)
@@ -2626,14 +2760,21 @@ def create_app(settings=None):
         start its AgentSession -- a missing Implementation Prompt never
         blocks any of them (Task Title fallback), and an already-running
         one is skipped, never restarted."""
-        task_row(tid)
+        task=task_row(tid)
         d=decision.evaluate(tid)
+        candidates=[b for b in d["builders"] if b["agent_status"] not in ("STARTING","RUNNING","WAITING_FOR_INPUT")
+                    and b["agent"] in settings.agents and b["status"]!="CLOSED"]
+        if candidates:
+            require_task_dispatch(task)
         for b in d["builders"]:
             if b["agent_status"] in ("STARTING","RUNNING","WAITING_FOR_INPUT"): continue
             if b["agent"] not in settings.agents: continue
             w=agent_row(b["id"])
             if w["status"]=="CLOSED": continue
-            try: _start_builder_session(w)
+            try:
+                _start_builder_session(w)
+                # One Change/Task goal owns one live coding executor.
+                break
             except SessionError as exc: db.event("agent",b["id"],"SESSION_START_FAILED",str(exc))
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/sessions/{sid}/stop")
@@ -2723,15 +2864,15 @@ def create_app(settings=None):
         guard applies: never spawn a second, untracked agent process on
         top of one already doing real, tracked work."""
         w=agent_row(wid)
-        live=latest_session_for_workspace(wid)
-        if live and live["status"] in LIVE_SESSION_STATUSES:
-            return JSONResponse({"ok":False,"code":"ACTIVE_SESSION_EXISTS","message":f"An AgentSession is already {live['status']} for this workspace -- open it instead of starting a second, untracked agent process.","session_id":live["id"]},status_code=409)
+        if not w.get("task_id"):
+            raise GitSafetyError("Agent launch requires a Task-bound Workspace")
+        require_task_dispatch(task_row(w["task_id"]))
         try:
-            result=launcher.launch_agent(w["worktree_path"],w["agent"]); db.event("agent",wid,"AGENT_LAUNCHED",f"agent={w['agent']} path={result['worktree']} terminal={result['terminal']} result=requested")
-            return {"ok":True,"message":f"{result['agent']} terminal đã được yêu cầu mở.",**result}
-        except LauncherError as exc:
-            db.event("agent",wid,"AGENT_LAUNCH_FAILED",f"agent={w['agent']} path={w['worktree_path']} result={exc.code}")
-            return JSONResponse({"ok":False,"code":exc.code,"message":str(exc),"fallback":f"cd {w['worktree_path']}"},status_code=409)
+            sid=_resume_builder_session(w)
+            return {"ok":True,"session_id":sid,"session_url":f"/workspaces/{wid}/sessions/{sid}",
+                    "message":"Tracked ProjectFlow AgentSession is ready."}
+        except SessionError as exc:
+            return JSONResponse({"ok":False,"code":exc.code,"message":str(exc)},status_code=409)
 
     @app.get("/integrations",response_class=HTMLResponse)
     def integrations(request:Request):
@@ -3252,6 +3393,9 @@ def create_app(settings=None):
         changed=(t.get("implementation_prompt") or "")!=new_prompt
         sets=["implementation_prompt=?","updated_at=CURRENT_TIMESTAMP"]
         params=[new_prompt]
+        contract=validate_task_contract({**t,"implementation_prompt":new_prompt})
+        if contract["ready"]:
+            sets.insert(-1,"task_contract_version='V2'")
         if changed: sets.insert(-1,"brief_version=brief_version+1")
         db.execute(f"UPDATE tasks SET {','.join(sets)} WHERE id=?",(*params,tid))
         db.event("task",tid,"PROMPT_SAVED",f"brief_version+1={changed}")
@@ -3269,6 +3413,19 @@ def create_app(settings=None):
         return RedirectResponse(f"/tasks/{tid}",303)
     def latest_prompt(tid,prompt_type="BUILDER"):
         return db.one("SELECT * FROM prompts WHERE task_id=? AND prompt_type=? ORDER BY id DESC LIMIT 1",(tid,prompt_type))
+    def spec_values_from_form(form):
+        def ids(field, fallback):
+            raw=str(form.get(field, form.get(fallback, "")))
+            return [item.strip() for item in raw.replace(",", "\n").splitlines() if item.strip()]
+        version=str(form.get("spec_version", "")).strip()
+        return {
+            "spec_change_classification":str(form.get("spec_change_classification", form.get("classification", ""))).strip().upper() or None,
+            "spec_feature_id":str(form.get("spec_feature_id", form.get("feature_id", ""))).strip() or None,
+            "spec_version":int(version) if version.isdigit() else None,
+            "spec_requirement_ids":ids("spec_requirement_ids", "requirement_ids"),
+            "spec_acceptance_ids":ids("spec_acceptance_ids", "acceptance_ids"),
+            "spec_invariant_ids":ids("spec_invariant_ids", "invariant_ids"),
+        }
     @app.post("/api/tasks/new-with-workspace")
     async def create_task_with_workspace(request:Request, _csrf: None = Depends(_mutating_csrf)):
         """Advanced/quick-start shortcut: Task + at least one Agent
@@ -3284,13 +3441,26 @@ def create_app(settings=None):
         description=str(form.get("description",""))
         repo_ids=form.getlist("ws_repository_id"); agents=form.getlist("ws_agent"); roles=form.getlist("ws_role")
         bases=form.getlist("ws_base_branch"); profiles=form.getlist("ws_sandbox_profile")
+        prompt=str(form.get("implementation_prompt", "")).strip()
+        spec_values=spec_values_from_form(form)
         # B0.3: role required in every listed repository's org before any
         # Task/Workspace is actually created (fail before the INSERT, not
         # after -- a partially-created cross-repo Task is a worse failure
         # mode than refusing up front).
         _require_org_role_for_repos(
             request, [int(r) for r in repo_ids if str(r).strip().isdigit()], "MEMBER")
-        slug=slugify(title); tid=db.execute("INSERT INTO tasks(slug,title,description,status) VALUES(?,?,?,?)",(slug,title,description,"ACTIVE"))
+        if any(str(r).strip() for r in repo_ids):
+            preview={"title":title,"implementation_prompt":prompt,"task_contract_version":"V2",
+                     **spec_values, "spec_requirement_ids":json.dumps(spec_values["spec_requirement_ids"]),
+                     "spec_acceptance_ids":json.dumps(spec_values["spec_acceptance_ids"]),
+                     "spec_invariant_ids":json.dumps(spec_values["spec_invariant_ids"])}
+            readiness=task_dispatch_gate.evaluate(preview)
+            if not readiness["ready"]: return dispatch_blocked_response(readiness)
+        slug=slugify(title); tid=db.execute(
+            "INSERT INTO tasks(slug,title,description,status,implementation_prompt,spec_change_classification,spec_feature_id,spec_version,"
+            "spec_requirement_ids,spec_acceptance_ids,spec_invariant_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (slug,title,description,"ACTIVE",prompt,spec_values["spec_change_classification"],spec_values["spec_feature_id"],spec_values["spec_version"],
+             json.dumps(spec_values["spec_requirement_ids"]),json.dumps(spec_values["spec_acceptance_ids"]),json.dumps(spec_values["spec_invariant_ids"])))
         db.event("task",tid,"TASK_CREATED",slug)
         for i,rid_raw in enumerate(repo_ids):
             if not str(rid_raw).strip(): continue
@@ -3339,14 +3509,25 @@ def create_app(settings=None):
             rows.append((rid_raw,a,extra_role[i] if i<len(extra_role) else "",
                          (extra_base[i] if i<len(extra_base) else "main") or "main",
                          extra_profile[i] if i<len(extra_profile) else ""))
+        spec_values=spec_values_from_form(form)
 
         # B0.3: same rule as /api/tasks/new-with-workspace -- role required
         # in every listed repository's org before creating anything.
         _require_org_role_for_repos(
             request, [int(r[0]) for r in rows if str(r[0]).strip().isdigit()], "MEMBER")
+        if rows:
+            preview={"title":title,"implementation_prompt":prompt,"task_contract_version":"V2",
+                     **spec_values, "spec_requirement_ids":json.dumps(spec_values["spec_requirement_ids"]),
+                     "spec_acceptance_ids":json.dumps(spec_values["spec_acceptance_ids"]),
+                     "spec_invariant_ids":json.dumps(spec_values["spec_invariant_ids"])}
+            readiness=task_dispatch_gate.evaluate(preview)
+            if not readiness["ready"]: return dispatch_blocked_response(readiness)
         slug=slugify(title); status="ACTIVE" if rows else "BACKLOG"
-        tid=db.execute("INSERT INTO tasks(slug,title,status,risk_profile,implementation_prompt) VALUES(?,?,?,?,?)",
-                        (slug,title,status,risk_profile,prompt))
+        tid=db.execute("INSERT INTO tasks(slug,title,status,risk_profile,implementation_prompt,spec_change_classification,spec_feature_id,spec_version,"
+                        "spec_requirement_ids,spec_acceptance_ids,spec_invariant_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (slug,title,status,risk_profile,prompt,spec_values["spec_change_classification"],spec_values["spec_feature_id"],
+                         spec_values["spec_version"],json.dumps(spec_values["spec_requirement_ids"]),
+                         json.dumps(spec_values["spec_acceptance_ids"]),json.dumps(spec_values["spec_invariant_ids"])))
         db.event("task",tid,"TASK_CREATED",slug)
 
         primary_repo_row=None
@@ -3710,6 +3891,68 @@ def create_app(settings=None):
                       page=summary["page"],page_size=summary["page_size"],
                       total=summary["total"],total_pages=summary["total_pages"],
                       repos=_filter_rows(db.all("SELECT id,repo_name FROM repositories WHERE enabled=1 ORDER BY repo_name"),repo_ids))
+    def change_orchestration_view(cid):
+        """Presentation join over Change, TaskDecisionService and real
+        session/evidence records; it stores no lifecycle status of its own."""
+        result=[]
+        for task in changes.list_tasks_for_change(cid):
+            d=decision.evaluate(task["id"])
+            sessions=db.all("SELECT * FROM agent_sessions WHERE task_id=? ORDER BY id DESC",(task["id"],))
+            actual_live=next((s for s in sessions if s["status"] in LIVE_SESSION_STATUSES and agent_sessions.is_process_live(s["id"])),None)
+            latest=actual_live or (sessions[0] if sessions else None)
+            is_live=actual_live is not None
+            shown_session_status=(latest["status"] if latest and latest["status"] not in LIVE_SESSION_STATUSES else
+                                  ("RUNNING" if is_live else "UNKNOWN")) if latest else "NOT_STARTED"
+            dispatch=d.get("dispatch_readiness") or {}
+            blocker=(dispatch.get("blockers") or [{}])[0].get("message") if not dispatch.get("ready",False) else None
+            result.append({
+                "id":task["id"],"title":task["title"],"status":d["status"],"stage":d["stage"],
+                "next_action":d["next_action"].get("label"),"dispatch_ready":dispatch.get("ready",False),
+                "feature_id":task.get("spec_feature_id"),"requirements":task.get("spec_requirement_ids"),
+                "acceptance":task.get("spec_acceptance_ids"),"session_id":latest["id"] if latest else None,
+                "session_status":shown_session_status,"session_live":is_live,
+                "session_activity":latest.get("last_activity_at") if latest else None,
+                "tests":d.get("test_readiness"),"qa":d.get("qa"),"blocker":blocker,
+            })
+        active=[task for task in result if task["session_live"]]
+        current=active[0] if active else next((task for task in result if task["status"]!="DONE"),None)
+        all_tasks_done=bool(result) and all(t["status"]=="DONE" for t in result)
+        recovery_event=None
+        if current:
+            recovery_event=db.one(
+                "SELECT action,details FROM workspace_events WHERE entity_type='task' AND entity_id=? "
+                "AND action IN ('GOAL_RESUME_ATTEMPT','GOAL_RESUME_BLOCKED') ORDER BY id DESC LIMIT 1",
+                (current["id"],))
+        blocked_detail=(recovery_event.get("details") or "") if recovery_event and recovery_event.get("action")=="GOAL_RESUME_BLOCKED" else ""
+        recovery_code=next((part[5:] for part in blocked_detail.split() if part.startswith("code=")),None)
+        recovery_action=blocked_detail.split(" next_action=",1)[1] if " next_action=" in blocked_detail else None
+        recovery_owner=changes.get(cid).get("owner_name") or "Change owner"
+        if current and blocked_detail:
+            current["blocker"]=recovery_action or "Automatic continuation is blocked; owner review is required."
+            current["next_action"]=recovery_action or "Owner review is required before continuing."
+        goal_state=("RUNNING" if active else ("BLOCKED" if blocked_detail else ("READY_FOR_ACCEPTANCE" if all_tasks_done else
+                    ("UNKNOWN" if current and current["session_status"]=="UNKNOWN" else
+                     ("VERIFY_OR_RESUME" if current and current["session_status"] in ("EXITED","FAILED") else "WAITING")))))
+        next_action=recovery_action if blocked_detail else (
+            current["next_action"] if current else
+            ("Review the Change acceptance evidence and record the human decision." if all_tasks_done else "Create the first child Task."))
+        if goal_state=="BLOCKED":
+            attention={"needs_you":True,"headline":"Goal blocked — owner action required.","detail":next_action,"link":f"/tasks/{current['id']}" if current else f"/changes/{cid}"}
+        elif goal_state in ("UNKNOWN","VERIFY_OR_RESUME"):
+            attention={"needs_you":True,"headline":"Task verification or safe recovery needs attention.","detail":next_action,"link":f"/tasks/{current['id']}" if current else f"/changes/{cid}"}
+        elif goal_state=="RUNNING":
+            attention={"needs_you":False,"headline":"The verified executor is working.","detail":None,"link":None}
+        elif goal_state=="READY_FOR_ACCEPTANCE":
+            attention={"needs_you":True,"headline":"Review the Change acceptance evidence.","detail":next_action,"link":f"/changes/{cid}/acceptance"}
+        else:
+            attention={"needs_you":True,"headline":"The goal needs its next workflow action.","detail":next_action,"link":f"/tasks/{current['id']}" if current else f"/changes/{cid}"}
+        return {"tasks":result,"current_task_id":current["id"] if current else None,
+                "active_executor_count":len(active),"goal_state":goal_state,
+                "next_action":next_action,"blocker_code":recovery_code,
+                "blocker_owner":recovery_owner if blocked_detail else None,
+                "attention":attention,
+                "owner":(changes.get(cid).get("owner_name") or "Not recorded")}
+
     @app.get("/changes/{cid}",response_class=HTMLResponse)
     def change_detail(request:Request,cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
         change_row(cid)
@@ -3720,8 +3963,11 @@ def create_app(settings=None):
         # and stays one click away (A1.12/A1.27), reached via this same
         # page's Advanced link or directly by URL.
         if _ui_mode(request)=="simple":
+            simple_view=simple_view_service.build(cid)
+            simple_view["orchestration"]=change_orchestration_view(cid)
+            simple_view["human_attention"]=simple_view["orchestration"]["attention"]
             return render(request,"change_detail_simple.html",cid=cid,
-                          view=simple_view_service.build(cid))
+                          view=simple_view)
         header=change_control_surface.header(cid)
         overview=change_control_surface.overview(cid)
         # E8.23: AUTONOMOUS EXECUTION card. Composed here at the route,
@@ -3730,6 +3976,7 @@ def create_app(settings=None):
         # _start_builder_session) -- both names resolve fine at request
         # time regardless of definition order within this same closure.
         overview["autonomous_execution"]=autonomous_execution_service.status(cid)
+        overview["orchestration"]=change_orchestration_view(cid)
         # E13.38: PARALLEL section on the same card -- composed here for
         # the same construction-order reason as above (execution_wave_service
         # needs release_service/integration_service, built later).
@@ -3888,13 +4135,13 @@ def create_app(settings=None):
         return _filter_rows(changes.list(project_id=project_id),_visible_repo_ids(request),"project_id")
     @app.post("/api/changes")
     def api_create_change(request:Request,title:str=Form(...),description:str=Form(""),change_type:str=Form("FEATURE"),
-                           risk_level:str=Form("NORMAL"),project_id:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
+                           risk_level:str=Form("NORMAL"),project_id:str=Form(""),owner_name:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
         pid=int(project_id) if project_id.strip().isdigit() else None
         _require_org_role_for_repo(request, pid, "MEMBER")
-        cid=changes.create(title=title,description=description,change_type=change_type,risk_level=risk_level,project_id=pid)
+        cid=changes.create(title=title,description=description,change_type=change_type,risk_level=risk_level,project_id=pid,owner_name=owner_name)
         return change_row(cid)
     @app.post("/changes")
-    def create_change_simple(request:Request,what:str=Form(...),change_type:str=Form("FEATURE"),project_id:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
+    def create_change_simple(request:Request,what:str=Form(...),change_type:str=Form("FEATURE"),project_id:str=Form(""),owner_name:str=Form(""), _csrf: None = Depends(_mutating_csrf)):
         """A1.19: the Simple Create Change entry -- one big "what do you
         want to change or build?" box, no Spec/Plan/Task vocabulary
         required. Reuses ChangeService.create() exactly (never a second
@@ -3912,7 +4159,14 @@ def create_app(settings=None):
         title=what.splitlines()[0].strip()[:120] or what[:120]
         pid=int(project_id) if project_id.strip().isdigit() else None
         _require_org_role_for_repo(request, pid, "MEMBER")
-        cid=changes.create(title=title,description=what,change_type=change_type,project_id=pid)
+        cid=changes.create(title=title,description=what,change_type=change_type,project_id=pid,owner_name=owner_name)
+        return RedirectResponse(f"/changes/{cid}",303)
+    @app.post("/api/changes/{cid}/owner")
+    def update_change_owner(cid:int,owner_name:str=Form(...),_authz: None = Depends(require_role("change","cid","MEMBER"))):
+        change_row(cid)
+        owner=(owner_name or "").strip()[:120]
+        db.execute("UPDATE changes SET owner_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(owner,cid))
+        db.event("change",cid,"GOAL_OWNER_UPDATED",f"owner={owner or 'UNASSIGNED'}")
         return RedirectResponse(f"/changes/{cid}",303)
     @app.get("/api/changes/{cid}")
     def api_get_change(cid:int, _authz: None = Depends(require_read_role("change", "cid"))):
@@ -4475,6 +4729,10 @@ def create_app(settings=None):
         and any already-created workspace stay, nothing is silently rolled
         back) as adding a workspace later."""
         t=task_row(tid)
+        readiness=task_dispatch_gate.evaluate(t)
+        if not readiness["ready"]:
+            return {"ok":False,"error":"Spec and V2 task contract must pass before workspace creation.",
+                    "code":readiness["code"],"dispatch_readiness":readiness}
         if t["status"]=="BACKLOG": return {"ok":False,"error":"Task must be Selected for Development before creating an Agent Workspace"}
         try: r=repo(repository_id)
         except HTTPException as exc: return {"ok":False,"error":str(exc.detail)}
@@ -4514,17 +4772,149 @@ def create_app(settings=None):
     # these are the EXACT closures the manual "Start Builder"/"New
     # Workspace" actions already use (E8.10: no second Supervisor, no
     # second shell-execution mechanism). tick()/run_change() are never
-    # called by anything in this file automatically -- only the explicit
-    # API routes below, matching E8.6/E8.27's own "opt-in, manual-tick
-    # only, no background daemon" requirement.
+    # invoked by the existing CleanupWorker callback below under a durable
+    # supervisor lease; no additional daemon or task runner is introduced.
+    # The explicit API routes share the same tick lease and action path.
     worktree_manager=WorktreeManager(db,git,add_task_workspace)
     app.state.worktree_manager=worktree_manager
     autonomous_execution_service=AutonomousExecutionService(
         db,changes,work_products,decision,task_dependencies,workflow_service,human_decisions,spec_gate,
         roles_catalog,planner_service,git,add_task_workspace,_start_builder_session,
         _resolve_project_policy_for_change,settings,test_case_specs=test_case_specs_store,
-        worktree_manager=worktree_manager)
+        worktree_manager=worktree_manager,dispatch_gate=task_dispatch_gate)
     app.state.autonomous_execution_service=autonomous_execution_service
+    def _provider_available_for_recovery(agent):
+        launcher=agent_sessions.launchers.get(agent)
+        executable=agent_sessions.which(launcher.executable) if launcher else None
+        if not executable:
+            return False
+        # Check authentication without surfacing CLI output (which may
+        # contain account identifiers or other private provider details).
+        try:
+            if agent=="codex":
+                check=subprocess.run([executable,"login","status"],capture_output=True,text=True,timeout=8)
+                return check.returncode==0 and "logged in" in (check.stdout+check.stderr).lower()
+            if agent=="claude":
+                check=subprocess.run([executable,"auth","status"],capture_output=True,text=True,timeout=8)
+                text=(check.stdout+check.stderr).lower()
+                return check.returncode==0 and ("authenticated" in text or '"loggedin":true' in text)
+        except Exception:
+            return False
+        return False
+    autonomous_execution_service.provider_available=_provider_available_for_recovery
+    autonomous_execution_service.session_liveness=agent_sessions.is_process_live
+    recovery_decision_invoker=PlannerAgentInvoker(runner=planner_invoker.runner,
+        timeout=45,which=planner_invoker.which,max_attempts=1)
+    autonomous_execution_service.recovery_advisor=RecoveryDecisionService(
+        db,recovery_decision_invoker,settings.root,
+        provider_available=_provider_available_for_recovery,
+        preferred_model=os.environ.get("PROJECTFLOW_RECOVERY_PREFERRED_MODEL","gpt-6.2-astra"),
+        preferred_effort=os.environ.get("PROJECTFLOW_RECOVERY_PREFERRED_EFFORT","high"),
+        fallback_model=os.environ.get("PROJECTFLOW_RECOVERY_FALLBACK_MODEL","claude-opus-5-5"),
+        fallback_effort=os.environ.get("PROJECTFLOW_RECOVERY_FALLBACK_EFFORT","high"),
+        cooldown_seconds=900,daily_call_limit=3,
+    )
+    def _ingest_exited_executor_reports():
+        """Accept only a complete report emitted by its own ended PTY and
+        independently pinned to real Git and test evidence. This creates
+        verification evidence, never a Review or acceptance decision."""
+        from app.services.task_contract import validate_task_contract
+        rows=db.all("SELECT s.*,w.task_id AS workspace_task_id,w.worktree_path,w.base_commit,w.status AS workspace_status,w.repository_id FROM agent_sessions s JOIN agent_workspaces w ON w.id=s.workspace_id WHERE s.status IN ('EXITED','FAILED') AND s.prompt_status='DELIVERED' AND s.exited_at IS NOT NULL ORDER BY s.id")
+        def reject(sid,wid,code):
+            # Store only a fixed reason code; never copy transcript/report
+            # bodies, paths supplied by the agent, or provider output here.
+            detail=f"session={sid} reason={code}"
+            if not db.one("SELECT id FROM workspace_events WHERE entity_type='agent' AND entity_id=? AND action='EXECUTOR_REPORT_INGEST_REJECTED' AND details=? LIMIT 1",(wid,detail)):
+                db.event("agent",wid,"EXECUTOR_REPORT_INGEST_REJECTED",detail)
+        for session in rows:
+            try:
+                if db.one("SELECT id FROM verification_reports WHERE source_session_id=?",(session["id"],)):
+                    continue
+                if not session["task_id"] or session["task_id"] != session["workspace_task_id"]:
+                    reject(session["id"],session["workspace_id"],"TASK_WORKSPACE_LINK_MISMATCH")
+                    continue
+                if session.get("completion_transport")=="CODEX_EXEC":
+                    if session.get("final_output_status")=="PENDING":
+                        agent_sessions.capture_final_output(session["id"])
+                        session=db.one("SELECT * FROM agent_sessions WHERE id=?",(session["id"],))
+                    if session.get("final_output_status")!="CAPTURED" or not session.get("final_output_text"):
+                        # A one-shot Codex task may echo its input through
+                        # terminal output. That text is never a fallback
+                        # completion source for this transport.
+                        if session.get("final_output_status")=="PENDING":
+                            continue  # process exit is not yet confirmed
+                        reject(session["id"],session["workspace_id"],"FINAL_OUTPUT_"+(session.get("final_output_status") or "MISSING"))
+                        continue
+                    final_text=session["final_output_text"]
+                    actual_hash=hashlib.sha256(final_text.encode("utf-8")).hexdigest()
+                    if actual_hash!=session.get("final_output_sha256"):
+                        reject(session["id"],session["workspace_id"],"FINAL_OUTPUT_HASH_MISMATCH")
+                        continue
+                    report_transcript=final_text
+                else:
+                    report_transcript=session["transcript_tail"]
+                report=parse_executor_completion_report(report_transcript)
+                if not report:
+                    reject(session["id"],session["workspace_id"],"COMPLETION_REPORT_MISSING_OR_INVALID")
+                    continue
+                t=task_row(session["task_id"]); w=agent_row(session["workspace_id"])
+                if not t or not w or not session["prompt_sha256"]:
+                    reject(session["id"],session["workspace_id"],"SESSION_PROMPT_PROOF_MISSING")
+                    continue
+                if not validate_task_contract(t)["ready"]:
+                    reject(session["id"],session["workspace_id"],"TASK_CONTRACT_NOT_READY")
+                    continue
+                prompt=db.one("SELECT content FROM prompts WHERE task_id=? AND workspace_id=? AND prompt_type='BUILDER' ORDER BY id DESC LIMIT 1",(t["id"],w["id"]))
+                if not prompt or hashlib.sha256(prompt["content"].encode("utf-8")).hexdigest()!=session["prompt_sha256"]:
+                    reject(session["id"],session["workspace_id"],"DELIVERED_PROMPT_MISMATCH")
+                    continue
+                if spec_gate.evaluate(t).get("outcome") not in ("PASS","NOT_APPLICABLE"):
+                    reject(session["id"],session["workspace_id"],"SPEC_GATE_NOT_PASS")
+                    continue
+                head=git.head(w["worktree_path"])
+                if head.lower()!=report["COMMIT_SHA"]:
+                    reject(session["id"],session["workspace_id"],"COMMIT_SHA_MISMATCH")
+                    continue
+                if git.status(w["worktree_path"]).strip():
+                    reject(session["id"],session["workspace_id"],"WORKTREE_NOT_CLEAN")
+                    continue
+                if not session.get("base_commit"):
+                    reject(session["id"],session["workspace_id"],"BASE_COMMIT_MISSING")
+                    continue
+                changed=sorted(git.changed_files(w["worktree_path"],session["base_commit"]))
+                claimed=sorted({p.strip().strip("`*- ") for line in report["FILES_CHANGED"].splitlines() for p in line.split(",") if p.strip()})
+                scope_match=re.search(r"(?ms)^##\s*SCOPE\s*\n(.*?)(?=^##\s|\Z)",t.get("implementation_prompt") or "")
+                scope=scope_match.group(1) if scope_match else ""
+                # Scope is an explicit path allowlist. Substring matching
+                # would accidentally allow e.g. `docs/README.md.evil` when
+                # only `docs/README.md` was named in the contract.
+                scoped_paths=set(re.findall(r"(?<![\w.-])(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9_.-]+)?/?",scope))
+                def is_in_scope(path):
+                    pure=PurePosixPath(path)
+                    if pure.is_absolute() or ".." in pure.parts or path.startswith("/"):
+                        return False
+                    return path in scoped_paths or any(item.endswith("/") and path.startswith(item) for item in scoped_paths)
+                if not changed or changed!=claimed or any(not is_in_scope(path) for path in changed):
+                    reject(session["id"],session["workspace_id"],"CHANGED_PATH_SCOPE_MISMATCH")
+                    continue
+                tests=db.one("SELECT id FROM test_runs WHERE workspace_type='agent' AND workspace_id=? AND tested_commit=? AND status='PASS' AND exit_code=0 ORDER BY id DESC LIMIT 1",(w["id"],head))
+                if not tests:
+                    reject(session["id"],session["workspace_id"],"PASS_TEST_EVIDENCE_MISSING")
+                    continue
+                report_hash=hashlib.sha256(json.dumps(report,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+                existing=db.one("SELECT id,report_sha256 FROM verification_reports WHERE source_session_id=?",(session["id"],))
+                if existing:
+                    continue
+                _insert_verification_report(w,t,"READY",head,what_changed=report["WHAT_CHANGED"],files_changed="\n".join(changed),tests_run=report["AUTOMATED_TESTS"],automated_tests=report["AUTOMATED_TESTS"],how_to_verify=report["HOW_TO_VERIFY"],expected_result=report["EXPECTED_RESULT"],test_data=report["TEST_DATA"],runtime_requirements=report["RUNTIME_REQUIREMENTS"],risks=report["RISKS"],ready_source="AGENT_SESSION_REPORT",operator=f"agent-session:{session['id']}",source_session_id=session["id"],report_sha256=report_hash)
+            except Exception as exc:
+                # The periodic worker must remain available for the other
+                # goals; invalid evidence stays unaccepted and observable.
+                reject(session["id"],session["workspace_id"],"INGESTION_ERROR_"+type(exc).__name__.upper())
+    def _reconcile_projectflow():
+        _ingest_exited_executor_reports()
+        return autonomous_execution_service.scheduled_reconcile_tick()
+    app.state.ingest_exited_executor_reports=_ingest_exited_executor_reports
+    cleanup_worker.on_reconcile=_reconcile_projectflow
 
     # ---- E9: Independent Code Review, Security Review & Fix Loop -----
     findings_store=FindingsStore(db)
@@ -4925,6 +5315,8 @@ def create_app(settings=None):
     @app.post("/api/tasks/{tid}/workspaces")
     def create_task_workspace(tid:int,repository_id:int=Form(...),agent:str=Form(...),role:str=Form(""),base_branch:str=Form("main"),sandbox_profile:str=Form(""), _authz: None = Depends(require_role("task", "tid", "MEMBER"))):
         result=add_task_workspace(tid,repository_id,agent,role,base_branch,sandbox_profile)
+        if result.get("dispatch_readiness"):
+            return dispatch_blocked_response(result["dispatch_readiness"])
         if not result["ok"]: raise GitSafetyError(result["error"])
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/setup-and-start")
@@ -4939,6 +5331,7 @@ def create_app(settings=None):
         NOT_STARTED existing Builder Workspace instead (covers 'workspace
         already exists, just press Start' and the multi-Builder case)."""
         t=task_row(tid)
+        require_task_dispatch(t)
         if t["status"]=="BACKLOG":
             db.execute("UPDATE tasks SET status='ACTIVE',updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,)); db.event("task",tid,"TASK_SELECTED")
         w=None
@@ -4949,6 +5342,8 @@ def create_app(settings=None):
                 w=existing[0]
             else:
                 result=add_task_workspace(tid,rid,agent,role,base_branch or "main",sandbox_profile)
+                if result.get("dispatch_readiness"):
+                    return dispatch_blocked_response(result["dispatch_readiness"])
                 if not result["ok"]: raise GitSafetyError(result["error"])
                 w=[x for x in task_workspaces(tid) if x["repository_id"]==rid and x["agent"]==agent_s][-1]
         if w is not None:
@@ -4957,7 +5352,9 @@ def create_app(settings=None):
         else:
             for b in decision.evaluate(tid)["builders"]:
                 if b["agent_status"]=="NOT_STARTED":
-                    try: _start_builder_session(agent_row(b["id"]))
+                    try:
+                        _start_builder_session(agent_row(b["id"]))
+                        break
                     except SessionError as exc: db.event("agent",b["id"],"SESSION_START_FAILED",str(exc))
         return RedirectResponse(f"/tasks/{tid}",303)
     @app.post("/api/tasks/{tid}/integrations")
@@ -5615,6 +6012,10 @@ def create_app(settings=None):
 
     from app.steward_routes import register as register_steward
     register_steward(app, render, current_user, db, decision)
+    # PTYs are process-local. Persist their bounded, redacted output before
+    # graceful shutdown so startup reconciliation can mark them FAILED
+    # without also losing completion evidence emitted before the restart.
+    app.router.on_shutdown.append(agent_sessions.persist_all_live_tails)
     return app
 
 app=create_app()

@@ -21,6 +21,7 @@ import time
 
 from app.launchers import AgentLauncher
 from app.services.completion_report_parser import parse_completion_report
+from app.services.completion_report_parser import parse_executor_completion_report
 
 
 def register(client, repo, name):
@@ -31,9 +32,13 @@ def register(client, repo, name):
 def create_task_with_workspace(client, root, repo, name="demo", agent="codex"):
     register(client, repo, name)
     rid = [x for x in client.get("/api/repositories").json() if x["repo_name"] == name][0]["id"]
-    r = client.post("/api/tasks/create", data={"title": "Long report", "repository_id": rid, "agent": agent, "sandbox_profile": "NONE", "risk_profile": "LOW"}, follow_redirects=False)
+    r = client.post("/api/tasks", data={"title": "Long report", "risk_profile": "LOW"}, follow_redirects=False)
     assert r.status_code == 303, r.text
-    tid = int(r.headers["location"].split("/")[-1])
+    tid = client.get("/api/tasks").json()[0]["id"]
+    client.app.state.db.execute("UPDATE tasks SET task_contract_version='V1' WHERE id=?", (tid,))
+    client.post(f"/api/tasks/{tid}/select", follow_redirects=False)
+    r=client.post(f"/api/tasks/{tid}/workspaces",data={"repository_id":str(rid),"agent":agent,"role":"Backend","base_branch":"main","sandbox_profile":"NONE"},follow_redirects=False)
+    assert r.status_code==303,r.text
     w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
     return tid, w
 
@@ -101,3 +106,25 @@ def test_persist_tail_keeps_full_live_buffer_not_a_smaller_window(client, git_re
     row = client.app.state.db.one("SELECT transcript_tail FROM agent_sessions WHERE id=?", (sid,))
     assert len(row["transcript_tail"]) > 25000, "persist_tail re-truncated the buffer to a smaller window"
     client.app.state.agent_sessions.stop(sid)
+
+
+def test_executor_report_requires_complete_unique_commit_pinned_contract():
+    sha = "a" * 40
+    fields = [
+        ("WORK_STATUS", "READY"), ("WHAT_CHANGED", "Added integer addition."),
+        ("AUTOMATED_TESTS", "pytest -q: 3 passed."), ("HOW_TO_VERIFY", "1. Run the test."),
+        ("EXPECTED_RESULT", "All tests pass."), ("TEST_DATA", "Inputs 1 and 2."),
+        ("RUNTIME_REQUIREMENTS", "NONE"), ("RISKS", "None known."),
+        ("FILES_CHANGED", "calculator.py, tests/test_calculator.py"), ("COMMIT_SHA", sha),
+    ]
+    valid = "----- PROJECTFLOW EXECUTOR REPORT START -----\n" + "\n\n".join(f"{name}:\n{value}" for name, value in fields) + "\n----- PROJECTFLOW EXECUTOR REPORT END -----"
+    assert parse_executor_completion_report(valid)["COMMIT_SHA"] == sha
+    assert parse_executor_completion_report(valid.rsplit("\n\nCOMMIT_SHA:", 1)[0]) is None
+    assert parse_executor_completion_report(valid.replace("3 passed", "TODO")) is None
+    assert parse_executor_completion_report(valid.replace(sha, "not-a-sha")) is None
+    assert parse_executor_completion_report(valid.replace("RISKS:\nNone known.", "RISKS:\nNone known.\n\nRISKS:\nsecond draft")) is None
+
+
+def test_executor_report_rejects_partial_tail_and_wrong_sha():
+    from app.services.completion_report_parser import parse_executor_completion_report
+    assert parse_executor_completion_report("WORK_STATUS:\nREADY\nWHAT_CHANGED:\npartial") is None

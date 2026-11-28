@@ -228,4 +228,7 @@ def load_engineering_policy(repo: Path) -> dict | None:
         auto_start = autonomous.get("auto_start_ready_tasks")
         if auto_start is not None and not isinstance(auto_start, bool):
             raise ContractError("engineering.autonomous_execution.auto_start_ready_tasks must be a boolean")
+        reconcile = autonomous.get("goal_reconciliation_enabled")
+        if reconcile is not None and not isinstance(reconcile, bool):
+            raise ContractError("engineering.autonomous_execution.goal_reconciliation_enabled must be a boolean")
     return block
