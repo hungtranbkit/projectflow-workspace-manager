@@ -16,6 +16,11 @@ case "$tier" in
       tests/test_harness_monitor_report.py \
       tests/test_harness_trajectory.py \
       tests/test_harness_monitor_service.py \
+      tests/test_b05_transactional_admission.py \
+      tests/test_b06_node_routing.py \
+      tests/test_runtime_preflight.py \
+      tests/test_engineering_catalog.py \
+      tests/test_pr100_followup_boundaries.py \
       "$@"
     ;;
   remaining)

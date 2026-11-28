@@ -14,6 +14,7 @@ from pathlib import Path
 
 from app.launchers import AGENT_LAUNCHERS
 from app.services.secret_redaction import redact
+from app.services.runtime_preflight import resolve_executable
 
 
 def now() -> str:
@@ -148,7 +149,7 @@ class AgentSessionManager:
         launcher = self.launchers.get(agent.lower())
         if not launcher:
             raise SessionError("AGENT_UNSUPPORTED", f"Agent not allowed: {agent}")
-        executable = self.which(launcher.executable)
+        executable = resolve_executable(launcher.executable, which=self.which)
         if not executable:
             raise SessionError("AGENT_CLI_NOT_FOUND", f"{launcher.label} CLI chưa được cài hoặc không có trong PATH")
         argv = [executable, *launcher.args]

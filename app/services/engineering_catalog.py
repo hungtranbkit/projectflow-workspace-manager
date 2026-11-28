@@ -410,6 +410,18 @@ class RoleCapabilityService:
     def provider_supports_role(self, provider: str, role_key: str, project_policy: dict | None = None) -> bool:
         return self.validate_assignment(provider, role_key, project_policy)["valid"]
 
+    def eligible_providers_for_role(self, role_key: str, project_policy: dict | None = None) -> list[dict]:
+        """Return only providers that pass the complete role/policy gate.
+
+        This is a read-only routing decision; callers still perform the
+        normal assignment and launch checks before starting work.
+        """
+        return [
+            {"provider": provider, **self.validate_assignment(provider, role_key, project_policy)}
+            for provider in sorted(self.providers)
+            if self.validate_assignment(provider, role_key, project_policy)["valid"]
+        ]
+
     def validate_assignment(self, provider: str, role_key: str, project_policy: dict | None = None) -> dict:
         """Never silently accepts an impossible assignment (E2 section
         10): checks every REQUIRED capability the role needs against

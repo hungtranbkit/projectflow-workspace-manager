@@ -101,6 +101,16 @@ def test_supported_role_assignment(client):
     assert body["valid"] is True
     assert body["missing_required_capabilities"] == []
 
+def test_eligible_provider_route_is_fail_closed(client):
+    body = client.get("/api/engineering/eligible-providers", params={"role_key": "BUILDER"}).json()
+    providers = {row["provider"] for row in body["providers"]}
+    assert {"codex", "claude"} <= providers
+    assert "gemini" not in providers
+
+def test_eligible_provider_route_rejects_malformed_repository_id(client):
+    r = client.get("/api/engineering/eligible-providers", params={"role_key": "BUILDER", "repository_id": "abc"})
+    assert r.status_code == 400
+
 
 def test_unsupported_role_assignment_is_never_silently_accepted(client):
     r = client.post("/api/engineering/validate-assignment", data={"provider": "gemini", "role_key": "BUILDER"})

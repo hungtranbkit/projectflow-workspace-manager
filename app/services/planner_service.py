@@ -40,6 +40,7 @@ decide whether real work is actually done."""
 
 from app.services.workflow_engine import GATES_BY_STAGE, TASK_TYPES
 from app.services.human_decisions import HumanDecisionService
+from app.services.runtime_preflight import resolve_executable
 
 
 # ===================================================================
@@ -167,7 +168,7 @@ class PlannerAgentInvoker:
         SPEC_REVIEW_JSON_SCHEMA, ...), never a shared/global one."""
         provider = (provider or "").strip().lower()
         if provider == "claude":
-            executable = self.which("claude")
+            executable = resolve_executable("claude", which=self.which)
             if not executable:
                 raise PlannerAgentError("claude CLI not found in PATH")
             # Structured output can require a finalization turn; a one-turn cap

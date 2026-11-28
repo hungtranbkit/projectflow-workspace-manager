@@ -8,6 +8,7 @@ import urllib.error
 from pathlib import Path
 
 from app.services import ssrf_guard
+from app.services.runtime_preflight import resolve_executable
 
 
 class SandboxRuntimeError(RuntimeError):
@@ -25,7 +26,7 @@ class SandboxRuntimeService:
     project name string alone."""
 
     def __init__(self, docker_bin: str | None = None, timeout: int = 300, enforce_ssrf_guard: bool = False):
-        self.docker_bin = docker_bin or shutil.which("docker") or "docker"
+        self.docker_bin = docker_bin or resolve_executable("docker") or "docker"
         self.timeout = timeout
         # B1.2: only ever True when the caller (app/main.py) already
         # knows AUTH_MODE=='required' -- see health_check() and this

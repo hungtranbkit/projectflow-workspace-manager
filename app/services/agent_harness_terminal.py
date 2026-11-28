@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.services.node_router import NodeRoutingError, select_node
+
 OWNED_NAME = re.compile(r"^harness-[a-z0-9][a-z0-9-]{3,60}$")
 
 
@@ -56,8 +58,9 @@ class Observation:
 class TerminalMCPAdapter:
     """MCP API wrapper; only sessions created by this instance may be deleted."""
 
-    def __init__(self, client: Any):
+    def __init__(self, client: Any, *, node_snapshot: Any = None):
         self.client = client
+        self.node_snapshot = node_snapshot
         self._owned: set[str] = set()
 
     async def _turn(self, action: str, **kwargs: Any) -> dict[str, Any]:
@@ -68,13 +71,30 @@ class TerminalMCPAdapter:
             raise TerminalAdapterError(f"{action} failed: {reason}")
         return response
 
-    async def create(self, name: str, *, agent_type: str, node: str, cwd: str) -> dict[str, Any]:
+    async def create(self, name: str, *, agent_type: str, node: str, cwd: str, required_tool: str | None = None, min_free_bytes: int = 0) -> dict[str, Any]:
         if not OWNED_NAME.fullmatch(name):
             raise TerminalAdapterError("owned session must have harness-* name")
         if agent_type not in ("codex", "claude", "shell"):
             raise TerminalAdapterError("agent type not allowed")
         if not node or not cwd.startswith("/") or cwd == "/":
             raise TerminalAdapterError("explicit node and constrained cwd required")
+        # Creation is a scheduler side effect.  A caller must provide a
+        # controller-owned snapshot provider so the exact target is checked
+        # immediately before dispatch; accepting an unverified/default node
+        # here would bypass the B06 capability and capacity contract.
+        if not callable(self.node_snapshot):
+            raise TerminalAdapterError("node admission rejected: verified controller snapshot is required")
+        try:
+            snapshot = tuple(self.node_snapshot())
+            selected = select_node(snapshot, required_tool=agent_type,
+                                   min_free_bytes=min_free_bytes, requested_node=node)
+            if required_tool is not None and required_tool != agent_type:
+                select_node(snapshot, required_tool=required_tool,
+                            min_free_bytes=min_free_bytes, requested_node=node)
+        except (NodeRoutingError, TypeError) as exc:
+            raise TerminalAdapterError(f"node admission rejected: {exc}") from exc
+        if str(selected.get("id") or selected.get("name")) != node:
+            raise TerminalAdapterError("node admission returned a different target")
         result = await self._turn("create_session", target=name,
                                   agent_type=agent_type, node=node, working_directory=cwd)
         body = result.get("result", {})
