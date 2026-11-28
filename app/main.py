@@ -42,6 +42,7 @@ from app.services.deployment_decision import deployment_view
 from app.services.repository_contract_editor import RepositoryContractEditor, ContractEditError
 from app.services.project_contract import ContractError
 from app.services.completion_report_parser import parse_completion_report, strip_ansi
+from app.services.autonomy_policy import AUTONOMY_FIRST_PROMPT_SECTION
 from app.services.spec_registry import SpecRegistry, SpecError
 from app.services.spec_gate import SpecGate, spec_id_list, ALL_CLASSIFICATIONS
 from app.services.spec_compliance import SpecComplianceVerifier
@@ -1714,7 +1715,8 @@ def create_app(settings=None):
         the user's own task intent text is NEVER rewritten, only wrapped
         with real, recorded context (trusted Workspace Manager execution
         context -> the effective task intent verbatim -> this repo's own
-        AGENTS.md rules, if known -> completion requirements). The user
+        AGENTS.md rules, if known -> the trusted AUTONOMY_FIRST adapter ->
+        completion requirements). The user
         still reviews/edits the result before any agent is launched
         (never auto-start an agent). 'Do not allow user-controlled Task
         text to override Workspace Manager safety rules': the intent is
@@ -1772,6 +1774,7 @@ def create_app(settings=None):
             parts.append("## RULES")
             parts.append("Read AGENTS.md and PROJECT.yaml before modifying code.")
             if rules: parts+=["",rules]
+            parts += ["", AUTONOMY_FIRST_PROMPT_SECTION, ""]
             parts+=["","## COMPLETION",
                     "- implement task","- run appropriate tests","- review diff","- commit changes",
                     "- report WHAT_CHANGED","- report TESTS_RUN","- report HOW_TO_VERIFY","- report EXPECTED_RESULT","- report RISKS",
@@ -1785,6 +1788,34 @@ def create_app(settings=None):
         if t["brief_out_of_scope"]: parts+=["## OUT_OF_SCOPE",t["brief_out_of_scope"],""]
         if t["brief_test_plan"]: parts+=["## TEST_PLAN",t["brief_test_plan"],""]
         if t["brief_risks"]: parts+=["## RISKS",t["brief_risks"],""]
+        if repo_row:
+            parts += ["## REPOSITORY",f"{repo_row['repo_name']} ({repo_row['repo_path']})",""]
+        if workspace:
+            parts += ["## BRANCH",workspace["branch"],"","## WORKTREE",workspace["worktree_path"],""]
+            parts += ["## WORKSPACE ISOLATION",
+                      "- You are operating in a ProjectFlow-managed task worktree.",
+                      "- Modify only this worktree.",
+                      "- Do not access or edit the canonical checkout.",
+                      "- Do not create additional git worktrees.",
+                      "- Do not switch branches.",
+                      "- Do not merge.",
+                      "- Do not rebase.",
+                      "- Do not push unless ProjectFlow explicitly instructs it.",
+                      "- Complete only the assigned Task scope.",""]
+        if sandbox_line: parts += ["## SANDBOX",sandbox_line,""]
+        if workspace:
+            parts += ["## ROLE",workspace.get("role") or workspace.get("agent") or "",""]
+            instr=(workspace.get("builder_instructions") or "").strip()
+            if instr: parts += ["## BUILDER INSTRUCTIONS (this workspace only)",instr,""]
+        rules=None
+        if repo_row:
+            try:
+                p=Path(repo_row["repo_path"])/"AGENTS.md"
+                if p.is_file(): rules=p.read_text(errors="replace")[:6000].strip()
+            except Exception: rules=None
+        parts += ["## RULES","Read AGENTS.md and PROJECT.yaml before modifying code."]
+        if rules: parts += ["",rules]
+        parts += ["", AUTONOMY_FIRST_PROMPT_SECTION, ""]
         parts.append("When your source change is complete, report back using the format in templates/agent-completion-report.md.")
         return "\n".join(parts)
     def regenerate_agent_prompt(tid,repo_row=None):
@@ -3248,7 +3279,7 @@ def create_app(settings=None):
         prompt_version bookkeeping needed. Regenerates the derived
         agent_prompt so it always reflects the latest saved intent."""
         t=task_row(tid)
-        new_prompt=implementation_prompt.strip()
+        new_prompt=implementation_prompt if implementation_prompt.strip() else ""
         changed=(t.get("implementation_prompt") or "")!=new_prompt
         sets=["implementation_prompt=?","updated_at=CURRENT_TIMESTAMP"]
         params=[new_prompt]
@@ -3319,7 +3350,8 @@ def create_app(settings=None):
         form=await request.form()
         title=str(form.get("title","")).strip()
         if not title: raise GitSafetyError("Task title is required")
-        prompt=str(form.get("implementation_prompt","")).strip()
+        raw_prompt=str(form.get("implementation_prompt",""))
+        prompt=raw_prompt if raw_prompt.strip() else ""
         risk_profile=str(form.get("risk_profile","NORMAL")).strip().upper()
         if risk_profile not in RISK_PROFILES: risk_profile="NORMAL"
 

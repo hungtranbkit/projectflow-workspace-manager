@@ -471,3 +471,25 @@ fix:
   now stale evidence the moment a later B0 sub-phase, or any other
   structural change, ships -- regenerate it then, don't leave it
   describing a superseded HEAD.
+
+## AUTONOMY_FIRST runtime propagation (V1)
+
+- Terminal MCP's `terminal_mcp/orchestration_policy.py` is the canonical
+  shared AUTONOMY_FIRST v1 policy. ProjectFlow's
+  `app/services/autonomy_policy.py` is a compact, version-pinned prompt
+  adapter only; it is not a second dispatcher, status authority, or
+  approval policy.
+- `render_agent_prompt()` injects the trusted adapter after the user's
+  task content and managed repository `AGENTS.md` rules. Keep the user's
+  prompt byte-for-byte intact and uninterrupted, and keep project rules
+  and stricter repository constraints effective. The shared renderer is
+  also used for legacy briefs and resumed Builder sessions.
+- A durable dispatch receipt is distinct from execution and acceptance.
+  A CANCELLED/PERSISTED task with zero dispatches remains cancelled;
+  never resurrect it, reuse a deleted session name/stale grant, or replay
+  duplicate work. Reconcile ambiguous delivery before retry and use only
+  the existing bounded/idempotent recovery contracts.
+- AUTONOMY_FIRST authorizes routine technical decisions within the
+  assigned scope. It does not widen permissions, auto-approve access or
+  change independent Review/QA/CI, merge, or explicit production release
+  gates.

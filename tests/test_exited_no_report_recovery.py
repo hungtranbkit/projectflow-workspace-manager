@@ -9,6 +9,7 @@ force-pass), plus a focused resume prompt so Resume stays the preferred
 path when the user wants the agent to write the report itself."""
 from __future__ import annotations
 import re
+import subprocess
 import time
 
 import pytest
@@ -29,6 +30,24 @@ def create_task_with_workspace(client, root, repo, name="demo", agent="codex"):
     tid = int(r.headers["location"].split("/")[-1])
     w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
     return tid, w
+
+
+def create_legacy_task_with_workspace(client, repo, name="legacy-demo", agent="codex"):
+    register(client, repo, name)
+    rid = [x for x in client.get("/api/repositories").json() if x["repo_name"] == name][0]["id"]
+    created = client.post("/api/tasks", data={"title": "Legacy structured resume"}, follow_redirects=False)
+    assert created.status_code == 303, created.text
+    tid = int(created.headers["location"].split("/")[-1])
+    client.post(f"/api/tasks/{tid}/select")
+    client.post(f"/api/tasks/{tid}/brief", data={
+        "goal": "Continue the existing legacy task.",
+        "acceptance_criteria": "Keep the repository instruction in the executor prompt.",
+    })
+    added = client.post(f"/api/tasks/{tid}/workspaces", data={
+        "repository_id": rid, "agent": agent, "base_branch": "main", "sandbox_profile": "NONE",
+    }, follow_redirects=False)
+    assert added.status_code == 303, added.text
+    return tid, client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
 
 
 # No sleep -- these scripts must actually exit so the session reaches EXITED.
@@ -178,6 +197,60 @@ def test_resume_sends_focused_prompt_about_missing_report(client, git_repo):
     prompt_row = client.app.state.db.one("SELECT content FROM prompts WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
     assert "previous session exited without a persisted completion report" in prompt_row["content"]
     assert "Do not redo completed work unnecessarily" in prompt_row["content"]
+    assert "## AUTONOMY_FIRST v1" in prompt_row["content"]
+
+
+def test_legacy_resume_retains_strict_repo_and_workspace_rules_before_adapter(client, git_repo):
+    _root, repo = git_repo
+    strict_rule = "STRICT_RESUME_RULE: Never edit the generated protocol file."
+    (repo / "AGENTS.md").write_text(strict_rule + "\n")
+    subprocess.run(["git", "add", "AGENTS.md"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "Add strict resume fixture rule"], cwd=repo,
+                   capture_output=True, text=True, check=True)
+    tid, w = create_legacy_task_with_workspace(client, repo)
+    run_session_to_exit(client, w, NO_CHANGE_SCRIPT)
+
+    client.app.state.agent_sessions.launchers = {
+        w["agent"]: AgentLauncher(w["agent"].capitalize(), "bash", ("-c", "sleep 100"))
+    }
+    response = client.post(f"/api/tasks/{tid}/setup-and-start", data={
+        "repository_id": str(w["repository_id"]), "agent": w["agent"],
+    }, follow_redirects=False)
+    assert response.status_code == 303, response.text
+    prompt = client.app.state.db.one(
+        "SELECT content FROM prompts WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))["content"]
+
+    assert strict_rule in prompt
+    assert "Read AGENTS.md and PROJECT.yaml before modifying code." in prompt
+    assert "## WORKSPACE ISOLATION" in prompt
+    assert "Do not access or edit the canonical checkout." in prompt
+    assert prompt.index(strict_rule) < prompt.index("## AUTONOMY_FIRST v1")
+    assert prompt.index("## WORKSPACE ISOLATION") < prompt.index("## AUTONOMY_FIRST v1")
+
+
+def test_resume_preserves_nonblank_owner_whitespace_in_task_prompt(client, git_repo):
+    root, repo = git_repo
+    register(client, repo, "whitespace-resume")
+    rid = [x for x in client.get("/api/repositories").json() if x["repo_name"] == "whitespace-resume"][0]["id"]
+    owner_text = "\n  Resume with this indentation.  \n\tAnd this tab.\n"
+    created = client.post("/api/tasks/create", data={
+        "title": "Whitespace resume", "implementation_prompt": owner_text,
+        "repository_id": rid, "agent": "codex", "sandbox_profile": "NONE",
+    }, follow_redirects=False)
+    tid = int(created.headers["location"].split("/")[-1])
+    w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
+    run_session_to_exit(client, w, NO_CHANGE_SCRIPT)
+
+    client.app.state.agent_sessions.launchers = {
+        w["agent"]: AgentLauncher(w["agent"].capitalize(), "bash", ("-c", "sleep 100"))
+    }
+    response = client.post(f"/api/tasks/{tid}/setup-and-start", data={
+        "repository_id": str(w["repository_id"]), "agent": w["agent"],
+    }, follow_redirects=False)
+    assert response.status_code == 303, response.text
+    prompt = client.app.state.db.one(
+        "SELECT content FROM prompts WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))["content"]
+    assert f"## TASK\n{owner_text}\n" in prompt
 
 
 def test_resume_does_not_start_a_duplicate_concurrent_session(client, git_repo):

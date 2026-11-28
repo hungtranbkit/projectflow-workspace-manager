@@ -115,6 +115,7 @@ def test_prompt_preparation_from_structured_brief(client, git_repo):
     assert r.status_code == 303
     t2 = client.get(f"/api/tasks/{tid}").json()
     assert "GOAL" in t2["agent_prompt"] and "Verify the new default password behavior." in t2["agent_prompt"]
+    assert "## AUTONOMY_FIRST v1" in t2["agent_prompt"]
 
     # user can edit the generated prompt before it's ever used to launch an agent
     client.post(f"/api/tasks/{tid}/agent-prompt", data={"agent_prompt": "edited by human"})

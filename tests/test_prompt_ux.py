@@ -150,6 +150,9 @@ def test_agent_prompt_wraps_users_prompt_verbatim_with_repo_context(client, git_
     assert SAMPLE_PROMPT in t["agent_prompt"]  # verbatim, not reworded
     assert "demo" in t["agent_prompt"]
     assert "never touch main directly" in t["agent_prompt"]
+    assert "## AUTONOMY_FIRST v1" in t["agent_prompt"]
+    assert t["agent_prompt"].index("## AUTONOMY_FIRST v1") > t["agent_prompt"].index(SAMPLE_PROMPT)
+    assert t["agent_prompt"].index("## AUTONOMY_FIRST v1") > t["agent_prompt"].index("never touch main directly")
 
 
 def test_prompt_edit_increments_version_no_op_save_does_not(client, git_repo):
@@ -164,6 +167,26 @@ def test_prompt_edit_increments_version_no_op_save_does_not(client, git_repo):
     v2 = task(client, tid)["brief_version"]
     assert v2 == v1 + 1
     assert task(client, tid)["implementation_prompt"] == "v2 -- a materially different prompt"
+
+
+def test_nonblank_owner_prompt_whitespace_survives_create_edit_and_render(client, git_repo):
+    initial = "\n  Preserve exact whitespace.  \nSecond line stays indented.\n"
+    r = client.post("/api/tasks/create", data={
+        "title": "Whitespace fidelity", "implementation_prompt": initial,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    tid = int(r.headers["location"].split("/")[-1])
+    created = task(client, tid)
+    assert created["implementation_prompt"] == initial
+    assert f"## TASK\n{initial}\n" in created["agent_prompt"]
+    assert decision(client, tid)["effective_task_prompt"] == initial
+
+    edited = "\tUpdated prompt.  \n  Keep this margin.\n"
+    client.post(f"/api/tasks/{tid}/prompt", data={"implementation_prompt": edited})
+    current = task(client, tid)
+    assert current["implementation_prompt"] == edited
+    assert f"## TASK\n{edited}\n" in current["agent_prompt"]
+    assert decision(client, tid)["effective_task_prompt"] == edited
 
 
 def test_review_becomes_stale_after_prompt_version_changes(client, git_repo):
