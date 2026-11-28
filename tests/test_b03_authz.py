@@ -399,3 +399,46 @@ def test_create_repository_requires_login_only_no_org_yet(two_org_fixture, git_r
     fresh = TestClient(two_org_fixture["owner"].app)
     r2 = fresh.post("/api/repositories", data={"repo_path": str(extra), "repo_name": "extra"})
     assert r2.status_code == 403, r2.text
+
+
+def test_production_approval_records_authenticated_identity(two_org_fixture):
+    fixture = two_org_fixture
+    db = fixture["db"]
+    release_id = db.execute(
+        "INSERT INTO releases(repository_id,version,source_commit,status,artifact_digest) VALUES(?,?,?,?,?)",
+        (fixture["rid_a"], "v1", "a" * 40, "TEST_VERIFIED", "sha256:fixture"),
+    )
+    route = f"/api/releases/{release_id}/approve-production"
+    for role, status in (("member", 403), ("outsider", 404)):
+        caller = fixture[role]
+        response = caller.post(route, data={"approved_by": "untrusted form value"},
+                               headers={"X-CSRF-Token": _bind_csrf(caller)})
+        assert response.status_code == status
+    pending = db.one("SELECT production_approved_by FROM releases WHERE id=?", (release_id,))
+    assert pending["production_approved_by"] is None
+
+    owner = fixture["owner"]
+    response = owner.post(route, data={"approved_by": "untrusted form value"},
+                          headers={"X-CSRF-Token": _bind_csrf(owner)})
+    assert response.status_code == 200 and response.json()["outcome"] == "APPROVED"
+    approved = db.one("SELECT production_approved_by,production_approval_digest FROM releases WHERE id=?", (release_id,))
+    assert approved == {"production_approved_by": "owner@example.com",
+                        "production_approval_digest": "sha256:fixture"}
+
+
+def test_production_approval_preserves_local_operator_label(client, git_repo):
+    _, repo = git_repo
+    response = client.post("/api/repositories", data={"repo_path": str(repo), "repo_name": "demo"})
+    assert response.status_code < 400
+    db = client.app.state.db
+    repository = db.one("SELECT id FROM repositories WHERE repo_path=?", (str(repo),))
+    release_id = db.execute(
+        "INSERT INTO releases(repository_id,version,source_commit,status) VALUES(?,?,?,?)",
+        (repository["id"], "v1", "a" * 40, "TEST_VERIFIED"),
+    )
+    response = client.post(f"/api/releases/{release_id}/approve-production",
+                           data={"approved_by": "local-operator"})
+    assert response.status_code == 200 and response.json()["outcome"] == "APPROVED"
+    assert db.one("SELECT production_approved_by FROM releases WHERE id=?", (release_id,)) == {
+        "production_approved_by": "local-operator",
+    }

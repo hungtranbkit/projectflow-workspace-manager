@@ -5134,8 +5134,18 @@ def create_app(settings=None):
     def api_release_deploy_production(rid:int, _authz: None = Depends(require_role("release", "rid", "ADMIN"))):
         return release_service.deploy_production(rid)
     @app.post("/api/releases/{rid}/approve-production")
-    def api_release_approve_production(rid:int,approved_by:str=Form(...), _authz: None = Depends(require_role("release", "rid", "ADMIN"))):
-        return release_service.approve_production(rid,approved_by)
+    def api_release_approve_production(
+        rid: int,
+        request: Request,
+        approved_by: str = Form(...),
+        _authz: None = Depends(require_role("release", "rid", "ADMIN")),
+    ):
+        if settings.auth_mode == "required":
+            user = current_user(request)
+            if user is None:
+                raise HTTPException(401, "AUTHENTICATION_REQUIRED")
+            approved_by = user["email"]
+        return release_service.approve_production(rid, approved_by)
     @app.post("/api/releases/{rid}/tick")
     def api_release_tick(rid:int, _authz: None = Depends(require_role("release", "rid", "MEMBER"))):
         return release_service.release_tick(rid,review_fix_orchestrator)
