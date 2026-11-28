@@ -21,7 +21,7 @@ import pytest
 from app.db import Database
 from app.services import agent_observability as obs
 from app.services.agent_harness_mvp import HarnessStore
-from test_b03_authz import (  # noqa: F401  (pytest fixtures)
+from tests.test_b03_authz import (  # noqa: F401  (pytest fixtures)
     auth_client, captured_logs, two_org_fixture,
 )
 
