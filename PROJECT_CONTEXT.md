@@ -6,6 +6,14 @@
   `3a363bc7ceb6af95fd6a843719df0ebf8b47039a`; it does not modify ProjectFlow
   `main` or the PR #105 branch. The canonical ProjectFlow checkout has unrelated
   dirty `PROJECT.yaml` and downloaded package files; leave them untouched.
+- Published as ProjectFlow PR #106 at implementation commit
+  `13d586b1674fff5562e644771e8503ffa13f80ea`, based on PR #105's branch.
+  It consumes Terminal MCP policy PR #144 (source commit
+  `2b6b977d568e02f8c72aece9835d02d06a3755b4`); merge order must keep the
+  canonical source ahead of or coordinated with this adapter.
+- Current supervised task ID: `dt_80d21c9312414e22`. Prior
+  `dt_6bf695d228eb4c6b` remains CANCELLED/PERSISTED with zero dispatches and
+  SESSION_DELETED; no old work was relaunched.
 - Terminal MCP owns the canonical shared policy in
   `terminal_mcp/orchestration_policy.py`. ProjectFlow's
   `app/services/autonomy_policy.py` is a compact, version-pinned trusted prompt
