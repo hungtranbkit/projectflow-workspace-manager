@@ -72,11 +72,29 @@ class CleanupWorker:
         # Exactly app/main.py's own SANDBOX_BUSY_STATUSES -- the single
         # source of truth for "no action route will touch this row".
         for stuck in self.db.all("SELECT id, status FROM sandboxes WHERE status IN ('PROVISIONING','STARTING','RESETTING','CLEANING')"):
-            self.db.execute(
-                "UPDATE sandboxes SET status='UNHEALTHY',health_status='UNHEALTHY',error_code='INTERRUPTED_BY_RESTART',"
-                "error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (f"Operation ({stuck['status']}) was interrupted by a server restart. Use Rebuild or Cleanup to recover.", stuck["id"]))
-            self.db.event("sandbox", stuck["id"], "RECONCILE_STALE_OPERATION_STATE", f"was {stuck['status']}, left running after a prior process restart -- marked UNHEALTHY, recoverable again")
+            # Reconcile also runs in live processes. Leave a recent provision
+            # reservation/claim intact and check its freshness in the UPDATE.
+            with self.db.connect() as db:
+                changed = db.execute(
+                    "UPDATE sandboxes SET status='UNHEALTHY',health_status='UNHEALTHY',"
+                    "error_code='INTERRUPTED_BY_RESTART',error_message=?,"
+                    "updated_at=CURRENT_TIMESTAMP WHERE id=? AND status=? AND NOT ("
+                    "status IN ('PROVISIONING','STARTING') AND EXISTS ("
+                    "SELECT 1 FROM sandbox_operations op WHERE op.id=("
+                    "SELECT id FROM sandbox_operations WHERE sandbox_id=sandboxes.id "
+                    "AND operation_type='PROVISION' ORDER BY id DESC LIMIT 1) "
+                    "AND (op.status='RUNNING' OR (sandboxes.status='STARTING' AND op.status='SUCCESS')) "
+                    "AND (julianday('now') - julianday(CASE WHEN sandboxes.status='STARTING' "
+                    "THEN sandboxes.started_at ELSE op.started_at END))*86400 <= ?))",
+                    (f"Operation ({stuck['status']}) is no longer current. Use Rebuild or Cleanup to recover.",
+                     stuck["id"], stuck["status"], self.manager.provision_timeout_seconds),
+                )
+                if changed.rowcount:
+                    db.execute(
+                        "INSERT INTO workspace_events(entity_type,entity_id,action,details) VALUES(?,?,?,?)",
+                        ("sandbox", stuck["id"], "RECONCILE_STALE_OPERATION_STATE",
+                         f"was {stuck['status']}; marked UNHEALTHY, recoverable again"),
+                    )
         for running in self.db.all("SELECT id FROM sandboxes WHERE status='RUNNING'"):
             try:
                 self.manager.health_check(running["id"])

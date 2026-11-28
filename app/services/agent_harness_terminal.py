@@ -71,7 +71,7 @@ class TerminalMCPAdapter:
             raise TerminalAdapterError(f"{action} failed: {reason}")
         return response
 
-    async def create(self, name: str, *, agent_type: str, node: str, cwd: str, required_tool: str = "codex", min_free_bytes: int = 0) -> dict[str, Any]:
+    async def create(self, name: str, *, agent_type: str, node: str, cwd: str, required_tool: str | None = None, min_free_bytes: int = 0) -> dict[str, Any]:
         if not OWNED_NAME.fullmatch(name):
             raise TerminalAdapterError("owned session must have harness-* name")
         if agent_type not in ("codex", "claude", "shell"):
@@ -85,8 +85,12 @@ class TerminalMCPAdapter:
         if not callable(self.node_snapshot):
             raise TerminalAdapterError("node admission rejected: verified controller snapshot is required")
         try:
-            selected = select_node(self.node_snapshot(), required_tool=required_tool,
+            snapshot = tuple(self.node_snapshot())
+            selected = select_node(snapshot, required_tool=agent_type,
                                    min_free_bytes=min_free_bytes, requested_node=node)
+            if required_tool is not None and required_tool != agent_type:
+                select_node(snapshot, required_tool=required_tool,
+                            min_free_bytes=min_free_bytes, requested_node=node)
         except (NodeRoutingError, TypeError) as exc:
             raise TerminalAdapterError(f"node admission rejected: {exc}") from exc
         if str(selected.get("id") or selected.get("name")) != node:
