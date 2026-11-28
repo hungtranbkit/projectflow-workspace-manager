@@ -470,6 +470,12 @@ class AutonomousExecutionService:
                 workspace=self.db.one("SELECT * FROM agent_workspaces WHERE id=?",(last["workspace_id"],))
                 if not workspace or workspace["status"]=="CLOSED" or not Path(workspace["worktree_path"]).is_dir():
                     return self._recovery_block(change_id,task["id"],"WORKSPACE_UNSAFE","Restore the same owned worktree or assign an owner to resolve it.")
+                scope_check = self.check_scope_violation(workspace, task)
+                if scope_check.get("violation"):
+                    return self._recovery_block(
+                        change_id, task["id"], scope_check["reason"],
+                        "Owner must reconcile the pinned Git evidence and declared scope before recovery; preserve the existing worktree.",
+                    )
                 transcript=(last.get("transcript_tail") or "").lower()
                 provider_faults=("rate limit","quota","out of credits","billing","unauthorized","not authenticated","authentication required")
                 if any(marker in transcript for marker in provider_faults):
@@ -933,9 +939,10 @@ class AutonomousExecutionService:
         if not scope:
             return {"violation": False, "reason": "no scope_hints declared"}
         try:
-            changed = self.git.changed_files(w["worktree_path"], w["base_commit"])
-        except Exception as exc:
-            return {"violation": False, "reason": f"could not determine changed files: {exc}"}
+            changed = self.git.scope_changed_files(w["worktree_path"], w.get("base_commit"))
+        except Exception:
+            return {"violation": True, "reason": "SCOPE_EVIDENCE_UNAVAILABLE",
+                    "out_of_scope_files": [], "changed_files": [], "declared_scope": scope}
 
         def _in_scope(path):
             return any(path == s or path.startswith(s.rstrip("/") + "/") for s in scope)
