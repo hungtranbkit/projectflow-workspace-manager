@@ -2,18 +2,17 @@
 # Owner-operated aggregate snapshot publisher; never controls any agent.
 set -euo pipefail
 repo="hungtranbkit/projectflow-workspace-manager"
-root="$HOME/.local/state/terminal-mcp"
 out_dir="$HOME/.local/state/projectflow-live-view"
-src="$HOME/workspace/projectflow-live-view-export-20261121/demo/observability-view"
+src="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 mkdir -p "$out_dir"
 chmod 700 "$out_dir"
 
-python3 "$src/export_live_snapshot.py" \
-  --nodes-db "$root/nodes.db" \
-  --sessions-db "$root/session_registry.db" \
-  --output "$out_dir/live-status.json"
+# Fail closed: no fresh archive commit when LIVE is stale, incomplete or unavailable.
+curl --fail --silent --show-error --proto "=https" --connect-timeout 5 --max-time 25 --max-filesize 1048576 \
+  "https://terminal-bootstrap.mesflow.net/projectflow-live/snapshot" | \
+  python3 "$src/archive_live_snapshot.py" --output "$out_dir/live-status.json"
 
-# Only the redacted JSON is sent; the SQLite databases remain local.
+# Only the validated aggregate projection is sent; no per-session details.
 sha="$(gh api "repos/$repo/contents/live-status.json?ref=live-data" --jq '.sha')"
 test -n "$sha"
 payload="$(base64 -w0 "$out_dir/live-status.json")"
