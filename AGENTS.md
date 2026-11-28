@@ -2,6 +2,17 @@
 
 This file and `PROJECT.yaml` are the standalone repository contract.
 
+## AUTONOMY_FIRST v1 — technical decisions and owner escalation
+
+Shared policy: [ProjectFlow issue #104](https://github.com/hungtranbkit/projectflow-workspace-manager/issues/104). Applies to the coordinating assistant, ProjectFlow, Terminal MCP, and delegated agents within authorized task scope.
+
+- Default to completing authorized engineering work: inspect, decide, execute, verify, and record evidence. Do not ask the owner to approve ordinary design choices, files, commits, tests, or technical review decisions. Arrange required independent review, CI, and release gates through existing processes.
+- When blocked, classify the affected dependency and authority, attempt bounded, materially different authorized remedies, and use a capable alternate model, node, or reviewer where appropriate. Continue independent work. Avoid repeated identical retry/report cycles; preserve checkpoints and unrelated WIP. Idle waiting is not execution.
+- Escalate to the owner only when a genuinely required credential/login, new permission, consent, irreversible/high-risk or out-of-scope action, or material unresolved business/feature decision remains. State the exact blocker, remedies attempted, what can continue, and the minimum required owner action. Never bypass denials, trust prompts, permissions, mandatory reviews, data protection, or safety gates; never fabricate approval.
+- Prepare builds and release evidence without waiting for unrelated feature acceptance. Live changes, installation, merge, and publication remain subject to applicable authorization and established safeguards. Owner feature acceptance and agent technical verification are distinct.
+- Report actual execution receipts and verified results. Distinguish persisted/dispatched/running, technical PASS, built, merged, deployed, and owner accepted. Each work cycle should produce a useful verified action where feasible, otherwise a concrete blocked dependency and its next eligible action. Use existing task truth and recovery machinery; no second scheduler or fabricated status.
+
+
 - ONE AGENT, ONE BRANCH, ONE WORKTREE.
 - INTEGRATION SEPARATELY.
 - MAIN ONLY THROUGH PR + CI.
