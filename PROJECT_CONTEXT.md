@@ -1,6 +1,6 @@
 # ProjectFlow Workspace Manager context
 
-## 2026-11-28 — PR #106 review corrections (local, not yet published)
+## 2026-11-28 — PR #106 review corrections (published; CI pending)
 
 - Reconciled independent review comment 7240692767. The legacy structured
   brief renderer previously omitted managed repository/workspace rules, and
@@ -18,13 +18,14 @@
   and exited-session recovery suite exited 0 (35 tests; pytest double-quiet
   suppresses the count summary); PROJECT.yaml preflight PASS; git diff --check
   exit 0. No live dispatch or deployment.
-- Fix commit b2feff0efe010abb0454174c610a30653132145b was made on the existing
-  PR #106 branch at prior head bb3955b916d92960991f0b23dc0fbbce0efb7aa9,
-  stacked on PR #105. The branch has not been pushed. PR #106 still has no
-  GitHub workflow/status result despite
-  the workflow's unfiltered pull_request trigger; the cause is unknown. Local
-  tests do not substitute for required PR checks. Next: publish after review
-  of the final diff and request the normal exact-head CI/review path.
+- Fix commit b2feff0efe010abb0454174c610a30653132145b was made and pushed on
+  the existing PR #106 branch at prior head bb3955b916d92960991f0b23dc0fbbce0efb7aa9,
+  stacked on PR #105. Current exact head is
+  b523fcde641f69b81c6bcfda834e9ec99510e803. PR #106 still has no GitHub
+  workflow/status result despite the workflow's unfiltered pull_request
+  trigger; the cause is unknown. Local tests do not substitute for required
+  PR checks. No formal review submission is visible after the head update;
+  request independent review and normal exact-head CI before merge.
 
 ## 2026-11-28 — AUTONOMY_FIRST v1 prompt propagation (#104 follow-up to #105)
 
