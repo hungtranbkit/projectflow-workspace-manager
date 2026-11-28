@@ -3996,10 +3996,15 @@ def create_app(settings=None):
     def api_list_providers():
         return {p:roles_catalog.capabilities_for_provider(p) for p in roles_catalog.providers}
     @app.get("/api/engineering/eligible-providers")
-    def api_eligible_providers(role_key:str, repository_id:str=""):
+    def api_eligible_providers(request:Request, role_key:str, repository_id:str=""):
         policy=None
-        if repository_id.strip().isdigit():
-            r=repo(int(repository_id))
+        repository_id = repository_id.strip()
+        if repository_id and not repository_id.isdigit():
+            raise HTTPException(400, "repository_id must be an integer")
+        if repository_id:
+            rid = int(repository_id)
+            _require_org_role_for_repo(request, rid, "VIEWER")
+            r=repo(rid)
             try: policy=load_engineering_policy(Path(r["repo_path"]))
             except ContractError as exc: raise GitSafetyError(str(exc))
         return {"role": role_key.upper(), "providers": roles_catalog.eligible_providers_for_role(role_key, policy)}

@@ -51,10 +51,6 @@ class SandboxManager:
         self.state_dir = Path(state_dir)
         self.max_running = max_running
         self.default_retention_hours = default_retention_hours
-        # Admission is a process-wide ceiling. Serialize the check and the
-        # state transition so two concurrent requests cannot both observe a
-        # free slot and over-admit a sandbox.
-        self._admission_lock = threading.Lock()
         # Injectable, real-by-default (matches the runner/launcher DI
         # pattern already used elsewhere in this codebase): provision/
         # reset_data/cleanup's slow docker work runs via self.spawn so a
@@ -222,20 +218,31 @@ class SandboxManager:
         actual `docker compose up` + health check in a background thread.
         Button-feedback: this is what makes 'Provisioning...' survive a
         refresh instead of freezing the tab for the whole docker call."""
-        sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))
-        if not sb: raise SandboxError("SANDBOX_NOT_FOUND", "sandbox not found")
-        with self._admission_lock:
-            if not self.capacity_available() and sb["status"] not in ("RUNNING", "STARTING", "PROVISIONING", "CLEANUP_ELIGIBLE"):
-                self.db.execute(
-                    "UPDATE sandboxes SET status='FAILED',error_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    ("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached", sandbox_id),
-                )
-                self.db.event("sandbox", sandbox_id, "SANDBOX_PROVISION_FAILED", "SANDBOX_CAPACITY_FULL")
-                raise SandboxError("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached")
-
-            op_id = self._op_start(sandbox_id, "PROVISION")
-            self.db.execute("UPDATE sandboxes SET status='PROVISIONING',updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
+        op_id = self._admit_provision(sandbox_id)
+        if op_id is None:
+            return  # idempotent retry for an already admitted sandbox
         self.spawn(self._provision_worker, (sandbox_id, op_id))
+
+    def _admit_provision(self, sandbox_id: int) -> int | None:
+        """Atomically reserve a capacity slot in the shared SQLite DB.
+
+        BEGIN IMMEDIATE makes this safe across service instances/processes;
+        the active operation and state transition are committed together.
+        """
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            sb = db.execute("SELECT status FROM sandboxes WHERE id=?", (sandbox_id,)).fetchone()
+            if not sb:
+                raise SandboxError("SANDBOX_NOT_FOUND", "sandbox not found")
+            if sb["status"] in ("RUNNING", "STARTING", "PROVISIONING", "CLEANUP_ELIGIBLE"):
+                return None
+            active = db.execute("SELECT COUNT(*) FROM sandboxes WHERE status IN ('RUNNING','STARTING','PROVISIONING','CLEANUP_ELIGIBLE')").fetchone()[0]
+            if active >= self.max_running:
+                db.execute("UPDATE sandboxes SET status='FAILED',error_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", ("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached", sandbox_id))
+                raise SandboxError("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached")
+            op_id = db.execute("INSERT INTO sandbox_operations(sandbox_id,operation_type,status) VALUES(?,?,?)", (sandbox_id, "PROVISION", "RUNNING")).lastrowid
+            db.execute("UPDATE sandboxes SET status='PROVISIONING',updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
+            return op_id
 
     def _provision_worker(self, sandbox_id: int, op_id: int) -> None:
         sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))

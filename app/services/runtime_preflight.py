@@ -14,6 +14,12 @@ def resolve_executable(name: str, *, which: Callable[..., str | None] = shutil.w
         path = Path(value).expanduser()
         return str(path) if path.is_file() and os.access(path, os.X_OK) else None
     env = environ if environ is not None else os.environ
+    for pinned_key in ("PROJECTFLOW_RUNTIME_PRIMARY", "PROJECTFLOW_RUNTIME_FALLBACK"):
+        pinned = env.get(pinned_key, "").strip()
+        if pinned:
+            path = Path(pinned).expanduser()
+            if path.name == value and path.is_file() and os.access(path, os.X_OK):
+                return str(path)
     explicit = env.get("PROJECTFLOW_RUNTIME_PATH", "")
     if explicit:
         path = shutil.which(value, path=explicit)
