@@ -88,3 +88,11 @@ def test_stale_provision_lease_is_fenced_before_single_recovery_reservation(clie
     assert op is not None
     assert db.one("SELECT COUNT(*) n FROM sandbox_operations WHERE sandbox_id=?", (sandbox_id,))["n"] == 2
     assert db.one("SELECT status FROM sandbox_operations WHERE sandbox_id=? ORDER BY id LIMIT 1", (sandbox_id,))["status"] == "FAILED"
+
+
+def test_real_statvfs_snapshot_drives_low_capacity_rejection(client, tmp_path):
+    manager = SandboxManager(client.app.state.db, client.app.state.sandbox_runtime, client.app.state.ports, tmp_path)
+    snapshot = manager.volume_capacity(tmp_path)
+    assert snapshot["free_bytes"] > 0 and snapshot["free_inodes"] > 0
+    manager.reserve_bytes = snapshot["free_bytes"] + 1
+    assert manager._capacity_error(tmp_path).startswith("SANDBOX_DISK_HEADROOM")
