@@ -80,6 +80,7 @@ def test_title_fallback_prompt_is_delivered_when_no_implementation_prompt(client
     assert session["prompt_status"] == "DELIVERED"
     prompt_row = client.app.state.db.one("SELECT content FROM prompts WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
     assert "Create demo marker file" in prompt_row["content"]
+    assert "## AUTONOMY_FIRST v1" in prompt_row["content"]
 
 
 def test_delivery_failure_then_manual_retry_succeeds(client, git_repo):

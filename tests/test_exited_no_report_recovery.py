@@ -178,6 +178,7 @@ def test_resume_sends_focused_prompt_about_missing_report(client, git_repo):
     prompt_row = client.app.state.db.one("SELECT content FROM prompts WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
     assert "previous session exited without a persisted completion report" in prompt_row["content"]
     assert "Do not redo completed work unnecessarily" in prompt_row["content"]
+    assert "## AUTONOMY_FIRST v1" in prompt_row["content"]
 
 
 def test_resume_does_not_start_a_duplicate_concurrent_session(client, git_repo):

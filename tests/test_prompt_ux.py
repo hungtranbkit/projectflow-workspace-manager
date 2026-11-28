@@ -150,6 +150,9 @@ def test_agent_prompt_wraps_users_prompt_verbatim_with_repo_context(client, git_
     assert SAMPLE_PROMPT in t["agent_prompt"]  # verbatim, not reworded
     assert "demo" in t["agent_prompt"]
     assert "never touch main directly" in t["agent_prompt"]
+    assert "## AUTONOMY_FIRST v1" in t["agent_prompt"]
+    assert t["agent_prompt"].index("## AUTONOMY_FIRST v1") > t["agent_prompt"].index(SAMPLE_PROMPT)
+    assert t["agent_prompt"].index("## AUTONOMY_FIRST v1") > t["agent_prompt"].index("never touch main directly")
 
 
 def test_prompt_edit_increments_version_no_op_save_does_not(client, git_repo):

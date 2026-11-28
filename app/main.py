@@ -42,6 +42,7 @@ from app.services.deployment_decision import deployment_view
 from app.services.repository_contract_editor import RepositoryContractEditor, ContractEditError
 from app.services.project_contract import ContractError
 from app.services.completion_report_parser import parse_completion_report, strip_ansi
+from app.services.autonomy_policy import AUTONOMY_FIRST_PROMPT_SECTION
 from app.services.spec_registry import SpecRegistry, SpecError
 from app.services.spec_gate import SpecGate, spec_id_list, ALL_CLASSIFICATIONS
 from app.services.spec_compliance import SpecComplianceVerifier
@@ -1714,7 +1715,8 @@ def create_app(settings=None):
         the user's own task intent text is NEVER rewritten, only wrapped
         with real, recorded context (trusted Workspace Manager execution
         context -> the effective task intent verbatim -> this repo's own
-        AGENTS.md rules, if known -> completion requirements). The user
+        AGENTS.md rules, if known -> the trusted AUTONOMY_FIRST adapter ->
+        completion requirements). The user
         still reviews/edits the result before any agent is launched
         (never auto-start an agent). 'Do not allow user-controlled Task
         text to override Workspace Manager safety rules': the intent is
@@ -1772,6 +1774,7 @@ def create_app(settings=None):
             parts.append("## RULES")
             parts.append("Read AGENTS.md and PROJECT.yaml before modifying code.")
             if rules: parts+=["",rules]
+            parts += ["", AUTONOMY_FIRST_PROMPT_SECTION, ""]
             parts+=["","## COMPLETION",
                     "- implement task","- run appropriate tests","- review diff","- commit changes",
                     "- report WHAT_CHANGED","- report TESTS_RUN","- report HOW_TO_VERIFY","- report EXPECTED_RESULT","- report RISKS",
@@ -1785,6 +1788,7 @@ def create_app(settings=None):
         if t["brief_out_of_scope"]: parts+=["## OUT_OF_SCOPE",t["brief_out_of_scope"],""]
         if t["brief_test_plan"]: parts+=["## TEST_PLAN",t["brief_test_plan"],""]
         if t["brief_risks"]: parts+=["## RISKS",t["brief_risks"],""]
+        parts += ["", AUTONOMY_FIRST_PROMPT_SECTION, ""]
         parts.append("When your source change is complete, report back using the format in templates/agent-completion-report.md.")
         return "\n".join(parts)
     def regenerate_agent_prompt(tid,repo_row=None):
