@@ -5,6 +5,7 @@ codex/claude so these tests never need a real agent CLI, while still
 exercising the REAL bracketed-paste delivery, the REAL bounded
 readiness wait, and the REAL agent_sessions DB columns."""
 from __future__ import annotations
+import subprocess
 import time
 
 from app.launchers import AgentLauncher
@@ -22,6 +23,19 @@ def create_task(client, title, rid, agent="claude", prompt=""):
     r = client.post("/api/tasks/create", data=data, follow_redirects=False)
     assert r.status_code == 303, r.text
     return int(r.headers["location"].split("/")[-1])
+
+
+def create_legacy_task(client, title):
+    r = client.post("/api/tasks", data={"title": title}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    tid = int(r.headers["location"].split("/")[-1])
+    client.post(f"/api/tasks/{tid}/select")
+    client.post(f"/api/tasks/{tid}/brief", data={
+        "goal": "Preserve the legacy task scope.",
+        "requirements": "Follow the repository-specific rule.",
+        "acceptance_criteria": "The task context is present in the delivered prompt.",
+    })
+    return tid
 
 
 def wait_prompt_status(client, sid, statuses, timeout=5):
@@ -62,6 +76,59 @@ def test_start_builder_delivers_prompt_automatically(client, git_repo):
     import hashlib
     prompt_row = client.app.state.db.one("SELECT content FROM prompts WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
     assert session["prompt_sha256"] == hashlib.sha256(prompt_row["content"].encode()).hexdigest()
+
+
+def test_nonblank_owner_whitespace_is_preserved_in_delivered_prompt(client, git_repo):
+    _root, repo = git_repo
+    register(client, repo, "demo")
+    rid = client.get("/api/repositories").json()[0]["id"]
+    setup_fast_ready_launcher(client)
+    owner_text = "\n  Keep this leading space.  \n\tPreserve this line too.\n"
+    tid = create_task(client, "Whitespace delivery", rid, prompt=owner_text)
+    w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
+
+    client.post(f"/api/tasks/{tid}/setup-and-start", data={
+        "repository_id": w["repository_id"], "agent": "claude",
+    }, follow_redirects=False)
+    session = client.app.state.db.one(
+        "SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
+    session = wait_prompt_status(client, session["id"], ("DELIVERED", "FAILED"))
+    prompt_row = client.app.state.db.one(
+        "SELECT content FROM prompts WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
+    assert session["prompt_status"] == "DELIVERED"
+    assert client.app.state.db.one("SELECT implementation_prompt FROM tasks WHERE id=?", (tid,))["implementation_prompt"] == owner_text
+    assert f"## TASK\n{owner_text}\n" in prompt_row["content"]
+
+
+def test_legacy_brief_launch_delivers_repo_and_workspace_rules_before_adapter(client, git_repo):
+    _root, repo = git_repo
+    strict_rule = "STRICT_TEST_RULE: Edit only the fixture-approved file; preserve the signed API contract."
+    (repo / "AGENTS.md").write_text(strict_rule + "\n")
+    subprocess.run(["git", "add", "AGENTS.md"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "Add strict fixture rule"], cwd=repo,
+                   capture_output=True, text=True, check=True)
+    register(client, repo, "legacy-demo")
+    rid = client.get("/api/repositories").json()[0]["id"]
+    setup_fast_ready_launcher(client)
+    tid = create_legacy_task(client, "Legacy structured task")
+
+    client.post(f"/api/tasks/{tid}/setup-and-start", data={
+        "repository_id": str(rid), "agent": "claude", "base_branch": "main",
+    }, follow_redirects=False)
+    w = client.get(f"/api/tasks/{tid}").json()["workspaces"][0]
+    session = client.app.state.db.one(
+        "SELECT * FROM agent_sessions WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))
+    session = wait_prompt_status(client, session["id"], ("DELIVERED", "FAILED"))
+    prompt = client.app.state.db.one(
+        "SELECT content FROM prompts WHERE workspace_id=? ORDER BY id DESC LIMIT 1", (w["id"],))["content"]
+
+    assert session["prompt_status"] == "DELIVERED"
+    assert "Read AGENTS.md and PROJECT.yaml before modifying code." in prompt
+    assert strict_rule in prompt
+    assert "## WORKSPACE ISOLATION" in prompt
+    assert "Do not switch branches." in prompt
+    assert prompt.index(strict_rule) < prompt.index("## AUTONOMY_FIRST v1")
+    assert prompt.index("## WORKSPACE ISOLATION") < prompt.index("## AUTONOMY_FIRST v1")
 
 
 def test_title_fallback_prompt_is_delivered_when_no_implementation_prompt(client, git_repo):

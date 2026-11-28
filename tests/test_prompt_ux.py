@@ -169,6 +169,26 @@ def test_prompt_edit_increments_version_no_op_save_does_not(client, git_repo):
     assert task(client, tid)["implementation_prompt"] == "v2 -- a materially different prompt"
 
 
+def test_nonblank_owner_prompt_whitespace_survives_create_edit_and_render(client, git_repo):
+    initial = "\n  Preserve exact whitespace.  \nSecond line stays indented.\n"
+    r = client.post("/api/tasks/create", data={
+        "title": "Whitespace fidelity", "implementation_prompt": initial,
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    tid = int(r.headers["location"].split("/")[-1])
+    created = task(client, tid)
+    assert created["implementation_prompt"] == initial
+    assert f"## TASK\n{initial}\n" in created["agent_prompt"]
+    assert decision(client, tid)["effective_task_prompt"] == initial
+
+    edited = "\tUpdated prompt.  \n  Keep this margin.\n"
+    client.post(f"/api/tasks/{tid}/prompt", data={"implementation_prompt": edited})
+    current = task(client, tid)
+    assert current["implementation_prompt"] == edited
+    assert f"## TASK\n{edited}\n" in current["agent_prompt"]
+    assert decision(client, tid)["effective_task_prompt"] == edited
+
+
 def test_review_becomes_stale_after_prompt_version_changes(client, git_repo):
     root, repo = git_repo
     register(client, repo, "demo")

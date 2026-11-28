@@ -143,8 +143,8 @@ def effective_task_prompt(t) -> str:
     itself is sufficient intent -- Start Builder is never blocked on an
     empty Implementation Prompt, since a title is mandatory at Task
     creation and therefore always resolvable."""
-    p = (t.get("implementation_prompt") or "").strip()
-    return p if p else (t.get("title") or "").strip()
+    p = t.get("implementation_prompt") or ""
+    return p if p.strip() else (t.get("title") or "").strip()
 
 
 def prompt_source(t) -> str:

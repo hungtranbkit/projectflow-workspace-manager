@@ -1,5 +1,30 @@
 # ProjectFlow Workspace Manager context
 
+## 2026-11-28 — PR #106 review corrections (local, not yet published)
+
+- Reconciled independent review comment 7240692767. The legacy structured
+  brief renderer previously omitted managed repository/workspace rules, and
+  prompt create/edit/effective-prompt paths stripped nonblank owner text.
+- app/main.py now appends repository identity, branch/worktree, sandbox,
+  workspace isolation and role/instructions, plus the repository AGENTS.md
+  excerpt and instruction to read AGENTS.md/PROJECT.yaml to the legacy path
+  before the trusted AUTONOMY_FIRST adapter. Resume uses the same renderer.
+- app/main.py create/edit persistence and
+  app/services/task_decision_service.py effective prompt now preserve raw
+  nonblank prompt content; whitespace-only values retain blank/title-fallback
+  behavior. Tests exercise create/edit/render/delivery and legacy launch/resume
+  with a strict repo rule.
+- Verification after these source changes: focused prompt UX, prompt delivery,
+  and exited-session recovery suite exited 0 (35 tests; pytest double-quiet
+  suppresses the count summary); PROJECT.yaml preflight PASS; git diff --check
+  exit 0. No live dispatch or deployment.
+- Changes remain uncommitted in the existing PR #106 worktree at original
+  head bb3955b916d92960991f0b23dc0fbbce0efb7aa9, stacked on PR #105. No branch
+  head was moved. PR #106 still has no GitHub workflow/status result despite
+  the workflow's unfiltered pull_request trigger; the cause is unknown. Local
+  tests do not substitute for required PR checks. Next: publish after review
+  of the final diff and request the normal exact-head CI/review path.
+
 ## 2026-11-28 — AUTONOMY_FIRST v1 prompt propagation (#104 follow-up to #105)
 
 - This isolated follow-up is based on docs-only PR #105 head
