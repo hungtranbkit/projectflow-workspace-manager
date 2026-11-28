@@ -161,13 +161,31 @@ def run_archify(cfg, d: Path, src: ReadOnlySource, commit: str, source_manifest:
                   run=d, step="archify-finalize")
     (d / "archify-finalize.log").write_text(r["tail"])
     gates = finalize_gates(work, ir_bytes)
-    steps = [dict(step=k, result={"pass": "PASS", "fail": "FAIL"}.get(v, "NOT_RUN"), detail=v) for k, v in gates.items()]
-    core = all(gates.get(k) == "pass" for k in ("validate", "deliver", "check"))
+    exit_code = r.get("exit")
     html = work / "archify.html"
-    status = "PASS" if core and gates.get("browser-check") == "pass" else "PARTIAL" if core else "FAIL"
-    return dict(ok=core and html.is_file(), status=status, exit=r["exit"], seconds=r["seconds"], steps=steps, html=html, ir=ir,
+    all_gates_pass = all(gates.get(k) == "pass" for k in ("validate", "deliver", "check", "browser-check"))
+    exit_pass = type(exit_code) is int and exit_code == 0
+    artifact_present = html.is_file()
+    ok = exit_pass and all_gates_pass and artifact_present
+    status = "PASS" if ok else "FAIL"
+    if not exit_pass:
+        reason = f"Archify finalize exited with code {exit_code!r}."
+    elif not all_gates_pass:
+        reason = "Archify finalize gates did not all pass: " + json.dumps(gates)[:200]
+    elif not artifact_present:
+        reason = "Archify finalize reported success but did not produce the HTML artifact."
+    else:
+        reason = ""
+    validation = [dict(step="archify finalize", result=status,
+                       detail=reason or "exit 0 and all required gates passed", exit=exit_code)]
+    validation.extend(dict(step="archify " + k, result={"pass": "PASS", "fail": "FAIL"}.get(v, "NOT_RUN"), detail=v)
+                       for k, v in gates.items())
+    validation_receipt = dict(command="finalize", exit=exit_code, status=status, ok=ok, gates=gates, reason=reason)
+    write_receipt(d / "archify-validation.json", validation_receipt)
+    return dict(ok=ok, status=status, exit=exit_code, seconds=r["seconds"], html=html, ir=ir,
+                validation=validation, receipt=validation_receipt,
                 filtered_revision=repo["revision"],
-                reason="" if core else "finalize gates: " + json.dumps(gates)[:200])
+                reason=reason)
 
 
 def finalize_gates(work: Path, ir_bytes: bytes) -> dict:
@@ -278,7 +296,7 @@ def _execute_run(task_id, h, d, req) -> int:
             limitations.append("Floorplan không hoàn tất: " + ", ".join(f"{s['step']} exit {s['exit']}" for s in fp["steps"]))
         if ar["ok"]:
             data = read_regular_file(ar["html"], MAX_HTML)
-            val = [dict(step="archify " + s["step"], result=s["result"], detail=s["detail"]) for s in ar["steps"]]
+            val = ar["validation"]
             lim = archify_limitations(ar["status"])
             lim.append("Archify xác minh dòng trên Git commit lọc cục bộ "
                        + ar["filtered_revision"] + ". SHA nguồn đầy đủ nằm trong bằng chứng snapshot.")
