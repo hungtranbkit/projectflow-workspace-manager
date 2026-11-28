@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import pytest
+from datetime import datetime, timezone
 
 from app.services.node_router import NodeRoutingError, select_node
 
 
 def node(name, **overrides):
-    value = {"id": name, "status": "online", "capacity_status": "healthy", "free_bytes": 10_000, "tools": ["codex"]}
+    value = {"id": name, "status": "online", "capacity_status": "healthy", "capacity_observed_at": datetime.now(timezone.utc).isoformat(), "free_bytes": 10_000, "tools": ["codex"]}
     value.update(overrides)
     return value
 
@@ -36,3 +37,12 @@ def test_routing_selects_healthy_alternate_deterministically():
         min_free_bytes=100,
     )
     assert chosen["id"] == "beta"
+
+
+def test_routing_rejects_missing_or_stale_capability_evidence():
+    with pytest.raises(NodeRoutingError):
+        select_node([node("missing", capacity_observed_at=None)], required_tool="codex")
+    with pytest.raises(NodeRoutingError):
+        select_node([node("stale", capacity_observed_at="2020-01-01T00:00:00+00:00")], required_tool="codex")
+    with pytest.raises(NodeRoutingError):
+        select_node([node("unverified", tools={"codex": False})], required_tool="codex")

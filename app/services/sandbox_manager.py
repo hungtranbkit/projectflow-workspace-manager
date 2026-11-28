@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import os
 import threading
 import time
 import uuid
@@ -44,13 +45,16 @@ class SourceSpec:
 
 
 class SandboxManager:
-    def __init__(self, db, runtime: SandboxRuntimeService, ports: PortAllocatorService, state_dir: Path, max_running: int = 3, default_retention_hours: int = 24):
+    def __init__(self, db, runtime: SandboxRuntimeService, ports: PortAllocatorService, state_dir: Path, max_running: int = 3, default_retention_hours: int = 24, reserve_bytes: int = 64 * 1024 * 1024, reserve_inodes: int = 1024, provision_timeout_seconds: int = 900):
         self.db = db
         self.runtime = runtime
         self.ports = ports
         self.state_dir = Path(state_dir)
         self.max_running = max_running
         self.default_retention_hours = default_retention_hours
+        self.reserve_bytes = max(0, int(reserve_bytes))
+        self.reserve_inodes = max(0, int(reserve_inodes))
+        self.provision_timeout_seconds = max(1, int(provision_timeout_seconds))
         # Injectable, real-by-default (matches the runner/launcher DI
         # pattern already used elsewhere in this codebase): provision/
         # reset_data/cleanup's slow docker work runs via self.spawn so a
@@ -134,6 +138,29 @@ class SandboxManager:
 
     def capacity_available(self) -> bool:
         return self.running_count() < self.max_running
+
+    @staticmethod
+    def volume_capacity(path: Path) -> dict[str, int]:
+        """Read the actual task-volume byte/inode budget without mutation."""
+        probe = Path(path)
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        stat = os.statvfs(probe)
+        return {
+            "path": str(probe),
+            "free_bytes": int(stat.f_bavail) * int(stat.f_frsize),
+            "free_inodes": int(stat.f_favail),
+        }
+
+    def _capacity_error(self, path: Path) -> str | None:
+        snapshot = self.volume_capacity(path)
+        if snapshot["free_bytes"] < self.reserve_bytes:
+            return (f"SANDBOX_DISK_HEADROOM: {snapshot['free_bytes']} free bytes "
+                    f"below reserve {self.reserve_bytes} on {path}")
+        if snapshot["free_inodes"] < self.reserve_inodes:
+            return (f"SANDBOX_INODE_HEADROOM: {snapshot['free_inodes']} free inodes "
+                    f"below reserve {self.reserve_inodes} on {path}")
+        return None
 
     # ---- creation ---------------------------------------------------
     def create(self, *, task_id: int | None, owner_type: str, owner_id: int, profile: str, provider: SourceSpec, extra_sources: list[SourceSpec] | None = None) -> int | None:
@@ -229,20 +256,52 @@ class SandboxManager:
         BEGIN IMMEDIATE makes this safe across service instances/processes;
         the active operation and state transition are committed together.
         """
+        rejection: str | None = None
         with self.db.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            sb = db.execute("SELECT status FROM sandboxes WHERE id=?", (sandbox_id,)).fetchone()
+            sb = db.execute("SELECT status,worktree_path,environment_path FROM sandboxes WHERE id=?", (sandbox_id,)).fetchone()
             if not sb:
                 raise SandboxError("SANDBOX_NOT_FOUND", "sandbox not found")
             if sb["status"] in ("RUNNING", "STARTING", "PROVISIONING", "CLEANUP_ELIGIBLE"):
-                return None
-            active = db.execute("SELECT COUNT(*) FROM sandboxes WHERE status IN ('RUNNING','STARTING','PROVISIONING','CLEANUP_ELIGIBLE')").fetchone()[0]
-            if active >= self.max_running:
-                db.execute("UPDATE sandboxes SET status='FAILED',error_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", ("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached", sandbox_id))
-                raise SandboxError("SANDBOX_CAPACITY_FULL", f"Max {self.max_running} running sandboxes reached")
-            op_id = db.execute("INSERT INTO sandbox_operations(sandbox_id,operation_type,status) VALUES(?,?,?)", (sandbox_id, "PROVISION", "RUNNING")).lastrowid
-            db.execute("UPDATE sandboxes SET status='PROVISIONING',updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
-            return op_id
+                if sb["status"] == "PROVISIONING":
+                    op = db.execute("SELECT id,status,started_at FROM sandbox_operations WHERE sandbox_id=? AND operation_type='PROVISION' ORDER BY id DESC LIMIT 1", (sandbox_id,)).fetchone()
+                    # A live operation remains idempotent.  A stale operation is
+                    # fenced and recovered before a single replacement reserve.
+                    stale = bool(op and op["status"] == "RUNNING" and db.execute(
+                        "SELECT (julianday('now')-julianday(?))*86400 > ?", (op["started_at"], self.provision_timeout_seconds)
+                    ).fetchone()[0])
+                    if not stale:
+                        return None
+                    db.execute("UPDATE sandbox_operations SET status='FAILED',finished_at=CURRENT_TIMESTAMP,exit_code=75,stderr_tail=? WHERE id=?", ("stale provision lease recovered", op["id"]))
+                    db.execute("UPDATE sandboxes SET status='FAILED',error_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", ("SANDBOX_PROVISION_STALE", "stale provision lease recovered", sandbox_id))
+                    db.execute("INSERT INTO workspace_events(entity_type,entity_id,action,details) VALUES(?,?,?,?)", ("sandbox", sandbox_id, "SANDBOX_PROVISION_RECOVERED", "stale operation fenced before retry"))
+                else:
+                    return None
+            capacity_path = Path(sb["worktree_path"] or sb["environment_path"] or self.state_dir)
+            rejection = self._capacity_error(capacity_path)
+            if rejection:
+                code = "SANDBOX_DISK_HEADROOM" if "free bytes" in rejection else "SANDBOX_INODE_HEADROOM"
+                db.execute("UPDATE sandboxes SET status='FAILED',error_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (code, rejection, sandbox_id))
+                db.execute("INSERT INTO workspace_events(entity_type,entity_id,action,details) VALUES(?,?,?,?)", ("sandbox", sandbox_id, "SANDBOX_ADMISSION_REJECTED", rejection))
+                # Commit the durable rejection before raising; callers must not
+                # retry a failed admission as if it had never been observed.
+                return_value = None
+            else:
+                return_value = None
+            if not rejection:
+                active = db.execute("SELECT COUNT(*) FROM sandboxes WHERE status IN ('RUNNING','STARTING','PROVISIONING','CLEANUP_ELIGIBLE')").fetchone()[0]
+                if active >= self.max_running:
+                    rejection = f"Max {self.max_running} running sandboxes reached"
+                    db.execute("UPDATE sandboxes SET status='FAILED',error_code=?,error_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", ("SANDBOX_CAPACITY_FULL", rejection, sandbox_id))
+                    db.execute("INSERT INTO workspace_events(entity_type,entity_id,action,details) VALUES(?,?,?,?)", ("sandbox", sandbox_id, "SANDBOX_ADMISSION_REJECTED", rejection))
+                else:
+                    op_id = db.execute("INSERT INTO sandbox_operations(sandbox_id,operation_type,status) VALUES(?,?,?)", (sandbox_id, "PROVISION", "RUNNING")).lastrowid
+                    db.execute("UPDATE sandboxes SET status='PROVISIONING',updated_at=CURRENT_TIMESTAMP WHERE id=?", (sandbox_id,))
+                    return_value = op_id
+        if rejection:
+            code = "SANDBOX_CAPACITY_FULL" if rejection.startswith("Max ") else ("SANDBOX_DISK_HEADROOM" if "free bytes" in rejection else "SANDBOX_INODE_HEADROOM")
+            raise SandboxError(code, rejection)
+        return return_value
 
     def _provision_worker(self, sandbox_id: int, op_id: int) -> None:
         sb = self.db.one("SELECT * FROM sandboxes WHERE id=?", (sandbox_id,))

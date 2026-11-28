@@ -3,6 +3,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 import pytest
+from datetime import datetime, timezone
 from app.services.agent_harness_terminal import (
     TerminalMCPAdapter, TerminalAdapterError, decode_tool_response,
 )
@@ -99,3 +100,28 @@ def test_decode_rejects_unstructured_result():
     with pytest.raises(TerminalAdapterError):
         decode_tool_response(SimpleNamespace(is_error=False, structured_content=None,
                                              content=[SimpleNamespace(text="not-json")]))
+
+
+def test_create_uses_evidence_backed_node_admission_before_dispatch():
+    asyncio.run(_test_create_uses_evidence_backed_node_admission_before_dispatch())
+
+
+async def _test_create_uses_evidence_backed_node_admission_before_dispatch():
+    name = "harness-route-1234"
+    now = datetime.now(timezone.utc).isoformat()
+    nodes = lambda: [{"id": "dell-linux", "status": "online", "capacity_status": "healthy",
+                      "capacity_observed_at": now, "free_bytes": 1000, "tools": {"codex": True}}]
+    backend = FakeMCP([{"status": "OK", "result": {"session": name, "state": "READY"}}])
+    adapter = TerminalMCPAdapter(backend, node_snapshot=nodes)
+    await adapter.create(name, agent_type="codex", node="dell-linux", cwd="/home/dell/workspace", min_free_bytes=100)
+    assert backend.calls[0][1]["node"] == "dell-linux"
+
+
+def test_create_fails_closed_for_unverified_node_snapshot():
+    asyncio.run(_test_create_fails_closed_for_unverified_node_snapshot())
+
+
+async def _test_create_fails_closed_for_unverified_node_snapshot():
+    adapter = TerminalMCPAdapter(FakeMCP([]), node_snapshot=lambda: [{"id": "dell-linux", "status": "online", "capacity_status": "healthy", "tools": {"codex": False}}])
+    with pytest.raises(TerminalAdapterError, match="node admission rejected"):
+        await adapter.create("harness-route-1234", agent_type="codex", node="dell-linux", cwd="/home/dell/workspace")

@@ -8,6 +8,7 @@ and capability failures deterministic and auditable.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from datetime import datetime, timezone
 
 
 class NodeRoutingError(ValueError):
@@ -20,6 +21,7 @@ def select_node(
     required_tool: str,
     min_free_bytes: int = 0,
     requested_node: str | None = None,
+    max_evidence_age_seconds: int = 300,
 ) -> Mapping[str, object]:
     """Return the deterministic healthy node for a bounded task.
 
@@ -33,7 +35,7 @@ def select_node(
     tool = str(required_tool or "").strip().lower()
     if not tool:
         raise NodeRoutingError("required tool is missing")
-    if min_free_bytes < 0:
+    if min_free_bytes < 0 or max_evidence_age_seconds <= 0:
         raise NodeRoutingError("minimum free space must be non-negative")
     candidates: list[Mapping[str, object]] = []
     seen = False
@@ -47,6 +49,17 @@ def select_node(
             continue
         if str(node.get("capacity_status", "")).lower() not in {"healthy", "ready"}:
             continue
+        observed = node.get("capacity_observed_at")
+        if not observed:
+            continue
+        try:
+            stamp = datetime.fromisoformat(str(observed).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - stamp).total_seconds() > max_evidence_age_seconds:
+                continue
+        except (TypeError, ValueError):
+            continue
         try:
             if int(node.get("free_bytes", 0)) < min_free_bytes:
                 continue
@@ -54,7 +67,7 @@ def select_node(
             continue
         tools = node.get("tools", node.get("capabilities", ()))
         if isinstance(tools, Mapping):
-            tools = tools.keys()
+            tools = [name for name, evidence in tools.items() if evidence is True or str(evidence).lower() in {"ready", "verified", "healthy"}]
         if tool not in {str(item).strip().lower() for item in (tools or ())}:
             continue
         candidates.append(node)

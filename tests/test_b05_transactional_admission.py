@@ -61,3 +61,30 @@ def test_missing_sandbox_is_rejected_inside_admission_transaction(client, tmp_pa
     with pytest.raises(SandboxError, match="sandbox not found") as exc:
         manager._admit_provision(999999)
     assert exc.value.code == "SANDBOX_NOT_FOUND"
+
+
+def test_actual_volume_headroom_rejection_is_durable_and_non_mutating(client, tmp_path):
+    db = client.app.state.db
+    sandbox_id = _sandbox(db, "b05-low-volume")
+    manager = SandboxManager(db, client.app.state.sandbox_runtime, client.app.state.ports, tmp_path, max_running=1, reserve_bytes=100, reserve_inodes=10)
+    manager.volume_capacity = lambda path: {"path": str(path), "free_bytes": 99, "free_inodes": 1000}
+    with pytest.raises(SandboxError, match="free bytes") as exc:
+        manager._admit_provision(sandbox_id)
+    assert exc.value.code == "SANDBOX_DISK_HEADROOM"
+    row = db.one("SELECT status,error_code FROM sandboxes WHERE id=?", (sandbox_id,))
+    assert row == {"status": "FAILED", "error_code": "SANDBOX_DISK_HEADROOM"}
+    event = db.one("SELECT action,details FROM workspace_events WHERE entity_id=? ORDER BY id DESC LIMIT 1", (sandbox_id,))
+    assert event["action"] == "SANDBOX_ADMISSION_REJECTED"
+    assert db.one("SELECT COUNT(*) n FROM sandbox_operations WHERE sandbox_id=?", (sandbox_id,))["n"] == 0
+
+
+def test_stale_provision_lease_is_fenced_before_single_recovery_reservation(client, tmp_path):
+    db = client.app.state.db
+    sandbox_id = _sandbox(db, "b05-stale")
+    db.execute("UPDATE sandboxes SET status='PROVISIONING' WHERE id=?", (sandbox_id,))
+    db.execute("INSERT INTO sandbox_operations(sandbox_id,operation_type,status,started_at) VALUES(?,?,?,datetime('now','-2 hours'))", (sandbox_id, "PROVISION", "RUNNING"))
+    manager = SandboxManager(db, client.app.state.sandbox_runtime, client.app.state.ports, tmp_path, max_running=1)
+    op = manager._admit_provision(sandbox_id)
+    assert op is not None
+    assert db.one("SELECT COUNT(*) n FROM sandbox_operations WHERE sandbox_id=?", (sandbox_id,))["n"] == 2
+    assert db.one("SELECT status FROM sandbox_operations WHERE sandbox_id=? ORDER BY id LIMIT 1", (sandbox_id,))["status"] == "FAILED"
